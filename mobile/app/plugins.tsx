@@ -1,7 +1,13 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
 import { Switch, Text, View } from "react-native";
-import { api, type GrantedPlugins, type SkillSummary } from "../src/api";
+import { ApiError, everyPage, ORGANIZATION_ID } from "../src/api";
+import {
+  deleteBotGrant,
+  listBotGrants,
+  replaceBotGrant,
+} from "../src/api/generated/bot-grants/bot-grants";
+import { listSkills } from "../src/api/generated/skills/skills";
 import { authClient } from "../src/auth";
 import {
   card,
@@ -19,13 +25,31 @@ export default function PluginsScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
-  const loadGranted = useCallback(
-    () => api<GrantedPlugins>(`/api/plugins/for/${encodeURIComponent(botId)}`),
-    [botId],
-  );
+  const loadGranted = useCallback(async () => {
+    const grants = await everyPage(
+      (page) => listBotGrants(ORGANIZATION_ID, botId, page),
+      (page) => page.grants,
+    );
+    return {
+      tools: grants.flatMap((grant) =>
+        grant.kind === "action" && grant.action
+          ? [{ ref: grant.ref, description: grant.action.description }]
+          : [],
+      ),
+      skills: grants.flatMap((grant) =>
+        grant.kind === "skill" && grant.skill ? [grant.skill] : [],
+      ),
+    };
+  }, [botId]);
   const granted = useLoad(loadGranted, Boolean(session && botId));
+  // Every skill this person can see, page after page.
   const loadCatalogue = useCallback(
-    () => api<{ skills: SkillSummary[] }>("/api/plugins"),
+    async () => ({
+      skills: await everyPage(
+        (page) => listSkills(ORGANIZATION_ID, page),
+        (page) => page.skills,
+      ),
+    }),
     [],
   );
   const catalogue = useLoad(loadCatalogue, Boolean(session));
@@ -34,16 +58,18 @@ export default function PluginsScreen() {
 
   const setSkill = (slug: string, enabled: boolean) =>
     action.run(slug, async () => {
-      if (enabled)
-        await api("/api/plugins/grants", {
-          method: "POST",
-          body: { kind: "skill", ref: slug, agentId: botId },
-        });
+      const grantId = `skill:${slug}`;
+      if (enabled) await replaceBotGrant(ORGANIZATION_ID, botId, grantId, {});
       else
-        await api(
-          `/api/plugins/grants?kind=skill&ref=${encodeURIComponent(slug)}&agentId=${encodeURIComponent(botId)}`,
-          { method: "DELETE" },
-        );
+        try {
+          await deleteBotGrant(ORGANIZATION_ID, botId, grantId);
+        } catch (error) {
+          // A Bot that doesn't have the skill is already without it.
+          if (
+            !(error instanceof ApiError && error.code === "BOT_GRANT_NOT_FOUND")
+          )
+            throw error;
+        }
       await granted.refresh();
     });
 

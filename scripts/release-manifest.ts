@@ -15,11 +15,23 @@ import {
   type ReleaseManifest,
 } from "../shared/release-manifest";
 
+type ChartArtifact = NonNullable<ReleaseManifest["artifacts"]["chart"]>;
+
 /** The reviewed upgrade policy, committed at the repository root and read from the release commit. */
 export const RELEASE_POLICY_FILE = "release-policy.json";
 /** Re-signed on every run, so it is compared by what it attests rather than by its bytes. */
 export const PROVENANCE_BUNDLE = "release-provenance.sigstore.json";
 export type ReleasePolicy = Pick<ReleaseManifest, "compatibility" | "upgrade">;
+/** A chart as `helm package` wrote it: the archive and the chart's own version. */
+export interface ChartPackage {
+  path: string;
+  version: string;
+}
+/** The charts a release attaches, by the manifest field each is recorded in. */
+const CHARTS = { chart: "openbot", bundleChart: "openbot-bundle" } as const;
+type ChartField = keyof typeof CHARTS;
+const chartFields = Object.keys(CHARTS) as ChartField[];
+const chartVersion = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
 export interface ReleaseBuildOptions extends ReleasePolicy {
   repositoryRoot: string;
   outputDirectory: string;
@@ -31,7 +43,10 @@ export interface ReleaseBuildOptions extends ReleasePolicy {
   upstreamRepository: string;
   upstreamCommit: string;
   images: ReleaseManifest["artifacts"]["images"];
-  chart?: { path: string; version: string };
+  /** The packaged `openbot` chart. */
+  chart?: ChartPackage;
+  /** The packaged `openbot-bundle` chart. */
+  bundleChart?: ChartPackage;
   /**
    * Assets an earlier attempt at this release already published. Each one this run would also
    * produce must have the same content, and its published bytes are kept, so a rerun can complete
@@ -81,6 +96,45 @@ function validateSource(
     options.commit,
   );
 }
+/** Each chart the release attaches: its own version, its address on the release, and its bytes. */
+function chartArtifacts(
+  options: Pick<
+    ReleaseBuildOptions,
+    "repository" | "version" | "chart" | "bundleChart"
+  >,
+): Partial<Record<ChartField, ChartArtifact>> {
+  const charts: Partial<Record<ChartField, ChartArtifact>> = {};
+  for (const field of chartFields) {
+    const packaged = options[field];
+    if (!packaged) continue;
+    const { path, version } = packaged;
+    if (
+      !chartVersion.test(version) ||
+      basename(path) !== `${CHARTS[field]}-${version}.tgz`
+    )
+      throw new Error(
+        `Chart artifact filename must match its exact ${CHARTS[field]} chart version`,
+      );
+    charts[field] = {
+      version,
+      url: `https://github.com/${options.repository}/releases/download/${options.version}/${basename(path)}`,
+      sha256: sha256(readFileSync(path)),
+    };
+  }
+  return charts;
+}
+
+/**
+ * release-charts.json: every Helm chart a release attaches, by chart name. It sits beside
+ * release-manifest.json, which names only the `openbot` chart and whose shape does not change, so
+ * the manifest readers of earlier releases read a new release exactly as they read their own.
+ */
+export const RELEASE_CHARTS = "release-charts.json";
+export interface ReleaseCharts {
+  version: string;
+  charts: Record<string, ChartArtifact>;
+}
+
 function manifest(
   options: Omit<ReleaseBuildOptions, "publishedDirectory">,
   sourceSha256: string,
@@ -107,22 +161,10 @@ function manifest(
       "rev-parse",
       `${options.upstreamCommit}^{tree}`,
     );
-  let chart: ReleaseManifest["artifacts"]["chart"];
-  if (options.chart) {
-    const { path, version } = options.chart;
-    if (
-      !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version) ||
-      basename(path) !== `openbot-${version}.tgz`
-    )
-      throw new Error(
-        "Chart artifact filename must match its exact openbot chart version",
-      );
-    chart = {
-      version,
-      url: `https://github.com/${options.repository}/releases/download/${options.version}/${basename(path)}`,
-      sha256: sha256(readFileSync(path)),
-    };
-  }
+  // The manifest keeps the shape every released reader accepts: it names the `openbot` chart, the
+  // one a Kubernetes promotion installs, and nothing new. A reader from an earlier release refuses
+  // a field it does not know, so the bundle chart is listed in release-charts.json instead.
+  const { chart } = chartArtifacts(options);
   return parseReleaseManifest({
     schemaVersion: 1,
     distribution: {
@@ -177,9 +219,38 @@ function paxRecords(body: Buffer, archive: string): Record<string, string> {
  * one commit differs.
  */
 export function archiveContent(path: string): string[] {
+  const entries: string[] = [];
+  for (const entry of archiveEntries(path))
+    entries.push(
+      "global" in entry
+        ? JSON.stringify(["global", entry.global])
+        : JSON.stringify([
+            entry.type,
+            entry.mode,
+            entry.name,
+            entry.body ? sha256(entry.body) : entry.link,
+          ]),
+    );
+  return entries.sort();
+}
+
+/** One regular file's bytes out of a .tar.gz, or undefined when the archive has no such file. */
+export function archiveFile(path: string, name: string): Buffer | undefined {
+  for (const entry of archiveEntries(path))
+    if (!("global" in entry) && entry.name === name && entry.body)
+      return entry.body;
+  return undefined;
+}
+
+type ArchiveEntry =
+  | { global: [string, string][] }
+  | { type: string; mode: string; name: string; body?: Buffer; link: string };
+
+/** Every entry of a .tar.gz, in archive order. A regular file carries its bytes. */
+function archiveEntries(path: string): ArchiveEntry[] {
   const archive = basename(path);
   const tar = gunzipSync(readFileSync(path));
-  const entries: string[] = [];
+  const entries: ArchiveEntry[] = [];
   let pax: Record<string, string> = {};
   let longName: string | undefined;
   let longLink: string | undefined;
@@ -207,7 +278,7 @@ export function archiveContent(path: string): string[] {
       const records = Object.entries(paxRecords(body, archive))
         .filter(([key]) => !["mtime", "atime", "ctime"].includes(key))
         .sort();
-      entries.push(JSON.stringify(["global", records]));
+      entries.push({ global: records });
       continue;
     }
     if (type === "L" || type === "K") {
@@ -222,19 +293,20 @@ export function archiveContent(path: string): string[] {
       longName ??
       (prefix ? `${prefix}/${text(0, 100)}` : text(0, 100));
     const regular = type === "0" || type === "7";
-    entries.push(
-      JSON.stringify([
-        regular ? "0" : type,
-        (Number.parseInt(text(100, 8).trim() || "0", 8) & 0o7777).toString(8),
-        name,
-        regular ? sha256(body) : (pax.linkpath ?? longLink ?? text(157, 100)),
-      ]),
-    );
+    entries.push({
+      type: regular ? "0" : type,
+      mode: (Number.parseInt(text(100, 8).trim() || "0", 8) & 0o7777).toString(
+        8,
+      ),
+      name,
+      ...(regular ? { body } : {}),
+      link: regular ? "" : (pax.linkpath ?? longLink ?? text(157, 100)),
+    });
     pax = {};
     longName = undefined;
     longLink = undefined;
   }
-  return entries.sort();
+  return entries;
 }
 
 /** The artifacts a Sigstore bundle attests, by name and digest. */
@@ -343,16 +415,21 @@ export function createReleaseArtifacts(
     options.commit,
   );
   adoptPublished(archive, published, sameArchive);
-  let chart = options.chart;
-  if (chart) {
-    const destination = resolve(options.outputDirectory, basename(chart.path));
-    if (resolve(chart.path) !== destination)
-      copyFileSync(chart.path, destination);
+  const charts: Partial<Record<ChartField, ChartPackage>> = {};
+  for (const field of chartFields) {
+    const packaged = options[field];
+    if (!packaged) continue;
+    const destination = resolve(
+      options.outputDirectory,
+      basename(packaged.path),
+    );
+    if (resolve(packaged.path) !== destination)
+      copyFileSync(packaged.path, destination);
     adoptPublished(destination, published, sameArchive);
-    chart = { ...chart, path: destination };
+    charts[field] = { ...packaged, path: destination };
   }
   const release = manifest(
-    { ...options, ...(chart ? { chart } : {}) },
+    { ...options, ...charts },
     sha256(readFileSync(archive)),
   );
   const manifestPath = resolve(
@@ -366,6 +443,22 @@ export function createReleaseArtifacts(
       parseReleaseManifest(JSON.parse(readFileSync(other, "utf8"))),
     ),
   );
+  // Written when the release has the bundle chart, which the manifest has no place for.
+  if (charts.bundleChart) {
+    const listed = chartArtifacts({ ...options, ...charts });
+    const releaseCharts: ReleaseCharts = {
+      version: options.version,
+      charts: Object.fromEntries(
+        chartFields.flatMap((field) => {
+          const artifact = listed[field];
+          return artifact ? [[CHARTS[field], artifact]] : [];
+        }),
+      ),
+    };
+    const chartsPath = resolve(options.outputDirectory, RELEASE_CHARTS);
+    writeFileSync(chartsPath, `${JSON.stringify(releaseCharts, null, 2)}\n`);
+    adoptPublished(chartsPath, published, sameJson);
+  }
   return release;
 }
 
@@ -473,15 +566,121 @@ export function readReleasePolicy(
   return parseReleasePolicy(JSON.parse(text), version);
 }
 
-/** Drizzle's migration journal; its last entry's tag is the database a commit migrates to. */
+/**
+ * What the OpenBot images of one version publish beside them, in a folder: the two packaged charts
+ * and this file, which names them and the last migration the server of that version applies.
+ * `scripts/release-files.sh` fetches the folder and checks its signature.
+ */
+export const RELEASE_FILES = "openbot-release.json";
+export interface ReleaseFiles {
+  /** The last migration the server of this version applies: the database it migrates to. */
+  database: string;
+  chart: ChartPackage;
+  bundleChart: ChartPackage;
+}
+
+/**
+ * Reads a folder of published release files and refuses anything that is not this release's: the
+ * version it names, each chart's checksum, and what each packaged chart says of itself (its name,
+ * its version, and an `appVersion` that is this release, which is the image tag it installs).
+ */
+export function readReleaseFiles(
+  directory: string,
+  version: string,
+): ReleaseFiles {
+  const file = resolve(directory, RELEASE_FILES);
+  if (!existsSync(file))
+    throw new Error(
+      `${directory} has no ${RELEASE_FILES}. Fetch the release files published with the OpenBot images of ${version} (scripts/release-files.sh).`,
+    );
+  const input: unknown = JSON.parse(readFileSync(file, "utf8"));
+  if (typeof input !== "object" || input === null || Array.isArray(input))
+    throw new Error(`${RELEASE_FILES} must be a JSON object`);
+  const record = input as Record<string, unknown>;
+  if (record.version !== version)
+    throw new Error(
+      `${RELEASE_FILES} is for ${JSON.stringify(record.version ?? null)}, but this release is ${version}. backend-images.env must name the OpenBot images of ${version}, published before this release.`,
+    );
+  if (typeof record.database !== "string" || !/^\S+$/.test(record.database))
+    throw new Error(
+      `${RELEASE_FILES} does not name the database ${version} migrates to`,
+    );
+  const listed =
+    typeof record.charts === "object" && record.charts !== null
+      ? (record.charts as Record<string, unknown>)
+      : {};
+  const packaged = (field: ChartField): ChartPackage => {
+    const name = CHARTS[field];
+    const entry = listed[name];
+    if (typeof entry !== "object" || entry === null)
+      throw new Error(`${RELEASE_FILES} lists no ${name} chart`);
+    const { version: own, sha256: digest } = entry as Record<string, unknown>;
+    if (typeof own !== "string" || !chartVersion.test(own))
+      throw new Error(`${RELEASE_FILES} gives the ${name} chart no version`);
+    const path = resolve(directory, `${name}-${own}.tgz`);
+    if (!existsSync(path))
+      throw new Error(
+        `${basename(path)} is listed in ${RELEASE_FILES} but is not beside it`,
+      );
+    if (sha256(readFileSync(path)) !== digest)
+      throw new Error(
+        `${basename(path)} is not the file ${RELEASE_FILES} lists: its SHA-256 differs`,
+      );
+    const metadata = archiveFile(path, `${name}/Chart.yaml`);
+    const chart: unknown = metadata
+      ? Bun.YAML.parse(metadata.toString("utf8"))
+      : undefined;
+    const said =
+      typeof chart === "object" && chart !== null
+        ? (chart as Record<string, unknown>)
+        : {};
+    if (said.name !== name || said.version !== own)
+      throw new Error(
+        `${basename(path)} is not the ${name} chart at ${own}: its Chart.yaml says ${JSON.stringify(said.name ?? null)} at ${JSON.stringify(said.version ?? null)}`,
+      );
+    if (`v${String(said.appVersion)}` !== version)
+      throw new Error(
+        `${basename(path)} installs OpenBot ${JSON.stringify(said.appVersion ?? null)} (its appVersion), but this release is ${version}`,
+      );
+    return { path, version: own };
+  };
+  return {
+    database: record.database,
+    chart: packaged("chart"),
+    bundleChart: packaged("bundleChart"),
+  };
+}
+
+/**
+ * Drizzle's migration journal, in a tree that carries the server's migrations; its last entry's tag
+ * is the database a commit migrates to. A tree without it takes the same name from what the release
+ * published: this release's `openbot-release.json`, and an earlier release's `release-manifest.json`.
+ */
 export const MIGRATION_JOURNAL = "server/drizzle/meta/_journal.json";
-function lastMigration(repositoryRoot: string, revision: string): string {
-  let text: string;
-  try {
-    text = git(repositoryRoot, "show", `${revision}:${MIGRATION_JOURNAL}`);
-  } catch {
-    throw new Error(`${revision} has no ${MIGRATION_JOURNAL}.`);
-  }
+/** Where the transition check reads a database identity that is not in the tree. */
+export interface PublishedDatabases {
+  /** The database this release's published images migrate to (`openbot-release.json`). */
+  release?: string;
+  /** A folder of earlier releases' manifests, each saved as `<version>.json`. */
+  manifests?: string;
+}
+/** The last migration in the journal at a revision, or undefined when that tree has no journal. */
+function lastMigration(
+  repositoryRoot: string,
+  revision: string,
+): string | undefined {
+  if (
+    !git(
+      repositoryRoot,
+      "ls-tree",
+      "--name-only",
+      revision,
+      "--",
+      MIGRATION_JOURNAL,
+    )
+  )
+    return undefined;
+  const text = git(repositoryRoot, "show", `${revision}:${MIGRATION_JOURNAL}`);
   const journal: unknown = JSON.parse(text);
   const entries =
     typeof journal === "object" && journal !== null && "entries" in journal
@@ -493,22 +692,49 @@ function lastMigration(repositoryRoot: string, revision: string): string {
   return tag;
 }
 
+/** The database an earlier release migrated to, from the `release-manifest.json` it published. */
+function publishedDatabase(
+  manifests: string | undefined,
+  version: string,
+): string | undefined {
+  if (!manifests) return undefined;
+  const file = resolve(manifests, `${version}.json`);
+  if (!existsSync(file)) return undefined;
+  const release = parseReleaseManifest(JSON.parse(readFileSync(file, "utf8")));
+  if (release.version !== version)
+    throw new Error(
+      `${file} is the release manifest of ${release.version}, not ${version}`,
+    );
+  return release.compatibility.database.to;
+}
+
 /**
  * The policy's database transition, checked against the migrations themselves rather than taken on
- * trust: `to` is the last migration in the release commit, and `from` is the last migration of each
- * starting release, read at that release's tag. A migration that lands after the policy was written
- * therefore stops the release instead of shipping a stale transition.
+ * trust: `to` is the last migration this release applies, and `from` is the last migration of each
+ * starting release. A migration that lands after the policy was written therefore stops the release
+ * instead of shipping a stale transition.
+ *
+ * Each is read from the tree when the tree carries the server's migrations: the journal in the
+ * release commit, and at each starting release's tag. Otherwise it is read from what was published:
+ * `to` from the release files of the OpenBot images this release runs, and `from` from the release
+ * manifest each starting release attached, which this same check held to its own migrations.
  */
 export function checkDatabaseTransition(
   repositoryRoot: string,
   commit: string,
   policy: ReleasePolicy,
+  published: PublishedDatabases = {},
 ): void {
   const { database } = policy.compatibility;
-  const to = lastMigration(repositoryRoot, commit);
+  const inTree = lastMigration(repositoryRoot, commit);
+  const to = inTree ?? published.release;
+  if (!to)
+    throw new Error(
+      `Nothing says which database this release migrates to: ${commit} has no ${MIGRATION_JOURNAL}, and no published release files were given. Fetch them with scripts/release-files.sh and name the folder in OPENBOT_RELEASE_FILES.`,
+    );
   if (database.to !== to)
     throw new Error(
-      `${RELEASE_POLICY_FILE} says this release migrates the database to ${JSON.stringify(database.to)}, but the last migration in ${MIGRATION_JOURNAL} at ${commit} is ${JSON.stringify(to)}. Set compatibility.database.to to ${JSON.stringify(to)}.`,
+      `${RELEASE_POLICY_FILE} says this release migrates the database to ${JSON.stringify(database.to)}, but the last migration ${inTree ? `in ${MIGRATION_JOURNAL} at ${commit}` : `the published OpenBot images of this release apply`} is ${JSON.stringify(to)}. Set compatibility.database.to to ${JSON.stringify(to)}.`,
     );
   const from = [
     ...new Set(
@@ -525,7 +751,14 @@ export function checkDatabaseTransition(
             `${RELEASE_POLICY_FILE} upgrades from ${version}, but this repository has no ${version} tag to read its database from. Fetch tags, or remove ${version} from upgrade.fromVersions.`,
           );
         }
-        return lastMigration(repositoryRoot, `refs/tags/${version}`);
+        const last =
+          lastMigration(repositoryRoot, `refs/tags/${version}`) ??
+          publishedDatabase(published.manifests, version);
+        if (!last)
+          throw new Error(
+            `${RELEASE_POLICY_FILE} upgrades from ${version}, but nothing says which database ${version} left: its tag has no ${MIGRATION_JOURNAL}, and its release-manifest.json was not given. Download it from the ${version} release as ${version}.json into the folder OPENBOT_RELEASE_MANIFESTS names.`,
+          );
+        return last;
       }),
     ),
   ];
@@ -534,7 +767,7 @@ export function checkDatabaseTransition(
     database.from.some((migration) => !from.includes(migration))
   )
     throw new Error(
-      `${RELEASE_POLICY_FILE} says this release upgrades databases from ${JSON.stringify(database.from)}, but the starting releases ${JSON.stringify(policy.upgrade.fromVersions)} end at ${JSON.stringify(from)} in their ${MIGRATION_JOURNAL}. Set compatibility.database.from to ${JSON.stringify(from)}.`,
+      `${RELEASE_POLICY_FILE} says this release upgrades databases from ${JSON.stringify(database.from)}, but the starting releases ${JSON.stringify(policy.upgrade.fromVersions)} end at ${JSON.stringify(from)}. Set compatibility.database.from to ${JSON.stringify(from)}.`,
     );
 }
 
@@ -660,11 +893,25 @@ if (import.meta.main) {
       configuration.version,
     );
     parseReleaseManifest(placeholderManifest(configuration, policy));
+    // What the OpenBot images of this version published beside them: the charts this release
+    // attaches, and the database its server migrates to.
+    const files = process.env.OPENBOT_RELEASE_FILES
+      ? readReleaseFiles(
+          resolve(process.env.OPENBOT_RELEASE_FILES),
+          configuration.version,
+        )
+      : undefined;
     if (process.argv.includes("--validate-policy")) {
       checkDatabaseTransition(
         configuration.repositoryRoot,
         configuration.commit,
         policy,
+        {
+          ...(files ? { release: files.database } : {}),
+          ...(process.env.OPENBOT_RELEASE_MANIFESTS
+            ? { manifests: resolve(process.env.OPENBOT_RELEASE_MANIFESTS) }
+            : {}),
+        },
       );
       console.log(
         `${RELEASE_POLICY_FILE} at ${configuration.commit} describes ${configuration.version}.`,
@@ -687,6 +934,9 @@ if (import.meta.main) {
       createReleaseArtifacts({
         ...configuration,
         ...policy,
+        ...(files
+          ? { chart: files.chart, bundleChart: files.bundleChart }
+          : {}),
         images,
         publishedDirectory: published,
       });

@@ -3,6 +3,7 @@
  */
 import type { TaskOrigin } from "./taskOrigin";
 import type { TaskStatus } from "./taskStatus";
+import type { TaskSteer } from "./taskSteer";
 
 /**
  * A piece of work a Bot does for a person in a conversation of its own.
@@ -60,6 +61,23 @@ export interface Task {
    */
   failedAt: string | null;
   /**
+   * When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.
+   * @nullable
+   */
+  stoppedAt?: string | null;
+  /**
+   * When the work it is doing now began. Null or absent unless it is working.
+   * @nullable
+   */
+  workingSince?: string | null;
+  /**
+   * When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.
+   * @nullable
+   */
+  tryingAgainAt?: string | null;
+  /** When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it. */
+  lastActivityAt?: string;
+  /**
    * One line on what comes next.
    * @nullable
    */
@@ -69,6 +87,8 @@ export interface Task {
    * @nullable
    */
   resolvedAt: string | null;
+  /** The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not. */
+  steer?: TaskSteer | null;
   /** When it was started. */
   createdAt: string;
   /** When it last changed. */

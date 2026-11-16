@@ -12,6 +12,7 @@ import {
   createMemoryHistory,
   createRootRoute,
   createRouter,
+  isRedirect,
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
@@ -22,11 +23,13 @@ import { CommandMenu } from "@/components/navigation/command-menu";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { isNavigationLink, NAVIGATION, navigationFor } from "@/lib/navigation";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { Route as AdminRoute } from "@/routes/_authed/admin/route";
 import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -268,8 +271,85 @@ test("Admin is in the list for admins only", () => {
     "memory",
     "skills",
     "connections",
+    "teams",
     "settings",
   ]);
+});
+
+test("Teams is in the menu under the person's name for everybody in a team edition, admin or not, and never in the personal edition", async () => {
+  const teams = (role: string | undefined, edition?: "team" | "personal") =>
+    navigationFor(role, edition).find((item) => item.id === "teams");
+  for (const role of ["user", "member", "admin", "owner"])
+    expect(teams(role)).toMatchObject({
+      label: "Teams",
+      to: "/teams",
+      section: "account",
+    });
+  expect(teams("user", "personal")).toBeUndefined();
+  expect(teams("admin", "personal")).toBeUndefined();
+
+  // As the sidebar draws it: before Admin for a member who has none, and absent for one person.
+  const member = renderSidebar("user");
+  await member.user.click(
+    await member.view.findByRole("button", { name: /Maya Chen/ }),
+  );
+  const menu = await member.view.findByRole("menu");
+  expect(
+    within(menu).getByRole("menuitem", { name: "Teams" }).getAttribute("href"),
+  ).toBe("/teams");
+  expect(within(menu).queryByRole("menuitem", { name: "Admin" })).toBeNull();
+  cleanup();
+
+  const alone = renderSidebar("admin", "personal");
+  await alone.user.click(
+    await alone.view.findByRole("button", { name: /Maya Chen/ }),
+  );
+  const personal = await alone.view.findByRole("menu");
+  expect(
+    within(personal).getByRole("menuitem", { name: "Admin" }),
+  ).toBeTruthy();
+  expect(
+    within(personal).queryByRole("menuitem", { name: "Teams" }),
+  ).toBeNull();
+});
+
+test("the owner of an organization is offered Admin and let into it, as an admin is", async () => {
+  const ids = (role: string | undefined) =>
+    navigationFor(role).map((item) => item.id);
+  expect(ids("owner")).toEqual(ids("admin"));
+  expect(isOrganizationAdmin("owner")).toBe(true);
+  expect(isOrganizationAdmin("admin")).toBe(true);
+  expect(isOrganizationAdmin("member")).toBe(false);
+  expect(isOrganizationAdmin(undefined)).toBe(false);
+
+  // The gate in front of every Admin screen.
+  const gate = AdminRoute.options.beforeLoad as unknown as (input: {
+    context: { queryClient: QueryClient };
+  }) => Promise<unknown>;
+  const meets = async (role: "owner" | "admin" | "member") => {
+    const client = new QueryClient();
+    client.setQueryData(deploymentKeys.capabilities(), {
+      generativeUi: true,
+      selfHostBanner: false,
+      localEvaluation: false,
+      edition: "team",
+    });
+    client.setQueryData(authKeys.currentUser(), {
+      id: "u1",
+      email: "dana@acme.com",
+      role,
+      onboarding: null,
+    });
+    try {
+      await gate({ context: { queryClient: client } });
+      return "open";
+    } catch (thrown) {
+      return isRedirect(thrown) ? thrown.options.to : thrown;
+    }
+  };
+  expect(await meets("owner")).toBe("open");
+  expect(await meets("admin")).toBe("open");
+  expect(await meets("member")).toBe("/");
 });
 
 test("the personal edition has Admin, and the feature list beside it", () => {

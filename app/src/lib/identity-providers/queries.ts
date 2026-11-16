@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { listIdentityProviders } from "@/lib/api/generated/identity-providers/identity-providers";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 /**
  * An identity provider a company registered, rather than one this deployment was configured with.
@@ -25,6 +26,18 @@ export type IdentityProvider = {
   registeredBy: string | null;
 };
 
+/**
+ * The registered providers, or that they are not this organization's to see or change.
+ *
+ * Signing in is to OpenBot as a whole, before any organization is known, so which providers exist
+ * is the deployment's, kept by the admins of its first organization. The server refuses an admin of
+ * any other organization (`PERMISSION_DENIED`), and that refusal is the answer: `managedHere` false,
+ * which the page shows as a plain explanation, with nothing to press that would be refused.
+ */
+export type IdentityProviders =
+  | { managedHere: true; providers: IdentityProvider[] }
+  | { managedHere: false };
+
 export const identityProviderKeys = {
   all: ["identity-providers"] as const,
   list: () => ["identity-providers", "list"] as const,
@@ -44,16 +57,27 @@ export const identityProviderKeys = {
 export function identityProviderListQueryOptions() {
   return queryOptions({
     queryKey: identityProviderKeys.list(),
-    queryFn: async ({ signal }): Promise<IdentityProvider[]> => {
+    queryFn: async ({ signal }): Promise<IdentityProviders> => {
       const providers: IdentityProvider[] = [];
       let cursor: string | undefined;
       // Every page: an organization registers a handful, and the screen lists them all.
       do {
-        const page = await listIdentityProviders(
-          ORGANIZATION_ID,
-          { limit: 100, ...(cursor ? { cursor } : {}) },
-          { signal, fallback: "Could not load identity providers" },
-        );
+        let page: Awaited<ReturnType<typeof listIdentityProviders>>;
+        try {
+          page = await listIdentityProviders(
+            organizationId(),
+            { limit: 100, ...(cursor ? { cursor } : {}) },
+            { signal, fallback: "Could not load identity providers" },
+          );
+        } catch (error) {
+          if (
+            error instanceof ClientError &&
+            error.status === 403 &&
+            error.code === "PERMISSION_DENIED"
+          )
+            return { managedHere: false };
+          throw error;
+        }
         providers.push(
           ...page.identityProviders.map(({ id, ...provider }) => ({
             providerId: id,
@@ -62,7 +86,7 @@ export function identityProviderListQueryOptions() {
         );
         cursor = page.nextCursor ?? undefined;
       } while (cursor);
-      return providers;
+      return { managedHere: true, providers };
     },
   });
 }

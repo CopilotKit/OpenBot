@@ -1056,6 +1056,9 @@ pub enum Step {
     Model,
     Connect,
     Ask,
+    /// Connecting to an OpenBot that runs elsewhere: the address and the sign-in. The step's name
+    /// only; the address is never part of any event.
+    ConnectOpenbot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1392,7 +1395,14 @@ pub const APP_VERSION_PATTERN: &str =
 
 pub fn schema_json() -> serde_json::Value {
     let steps = [
-        "welcome", "harness", "install", "account", "model", "connect", "ask",
+        "welcome",
+        "harness",
+        "install",
+        "account",
+        "model",
+        "connect",
+        "ask",
+        "connect_openbot",
     ];
     serde_json::json!({
         "schema_version": STATE_SCHEMA_VERSION,
@@ -2023,6 +2033,41 @@ mod tests {
                 stalled_seconds: 42,
             },
         ]
+    }
+
+    /// The setup window's step for connecting to an OpenBot that runs elsewhere is one the shell
+    /// knows, so its events are sent. They say the step and nothing about where: an event with an
+    /// address, or any other property, is refused.
+    #[test]
+    fn the_connect_to_an_openbot_step_is_known_and_never_carries_the_address() {
+        let listed = &schema_json()["events"]["step_viewed"]["step"];
+        assert!(
+            listed
+                .as_array()
+                .is_some_and(|steps| steps.iter().any(|step| step == "connect_openbot")),
+            "{listed}"
+        );
+        for kind in ["step_viewed", "setup_abandoned"] {
+            let sent = serde_json::json!({ "kind": kind, "step": "connect_openbot" });
+            let event = serde_json::from_value::<EventData>(sent.clone()).unwrap();
+            assert_eq!(serde_json::to_value(event).unwrap(), sent);
+            for (property, value) in [
+                ("address", "https://openbot.example.com"),
+                ("host", "openbot.example.com"),
+                ("url", "https://openbot.example.com/api/me"),
+            ] {
+                let mut open = sent.clone();
+                open[property] = serde_json::json!(value);
+                assert!(
+                    serde_json::from_value::<EventData>(open).is_err(),
+                    "{kind} took {property}"
+                );
+            }
+        }
+        // A step's name is one of the closed list, so an address cannot stand in for one.
+        let named =
+            serde_json::json!({ "kind": "step_viewed", "step": "https://openbot.example.com" });
+        assert!(serde_json::from_value::<EventData>(named).is_err());
     }
 
     /// The two stall events carry closed values and numbers only: a step that is not one of the

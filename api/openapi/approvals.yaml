@@ -3005,6 +3005,7 @@ components:
             where every change asks first whatever the person's rules say.
     ComputerStepConversation:
       type: object
+      additionalProperties: false
       description: >-
         The conversation a computer step was called in, as the client holds
         it: an AG-UI run input, with the call the step answers. The messages
@@ -3969,7 +3970,7 @@ components:
       additionalProperties: false
       description: >-
         One action a Bot might take. Who: a Bot, and either the person whose
-        accounts it runs on or a directory group, for any member of it. What
+        accounts it runs on or a team or directory group, for any member of it. What
         starts the run. Then either an app's tool, or something on the Bot's
         computer. A field that does not apply is empty.
       required:
@@ -3994,7 +3995,9 @@ components:
           description: The person's id. Empty when a group is named.
         group:
           type: string
-          description: A directory group's name. Empty when a person is named.
+          description: >-
+            A directory group's name, or team:<id> for one of the
+            organization's teams. Empty when a person is named.
         initiator:
           $ref: '#/components/schemas/WhatIfInitiator'
         surface:
@@ -4264,6 +4267,19 @@ components:
           description: The directory groups, by name.
           items:
             type: string
+        teams:
+          type: array
+          description: >-
+            The organization's teams. An action names one in group, as
+            team:<id>.
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
         apps:
           type: array
           items:
@@ -4294,19 +4310,19 @@ components:
       enum: [owner, people, team]
       description: >-
         Who may steer a Bot that uses a shared app's account: only the Bot's
-        owner, the people and directory groups named, or everybody in the
-        organization.
+        owner, the people, teams and directory groups named, or everyone in
+        the organization (team).
     SharedUseMember:
       type: object
-      description: One person or directory group an audience names.
+      description: One person, team or directory group an audience names.
       required: [kind, value]
       properties:
         kind:
           type: string
-          enum: [user, group]
+          enum: [user, group, team]
         value:
           type: string
-          description: The person's id, or the directory group's name.
+          description: The person's id, the team's id, or the directory group's name.
     SharedUseApproval:
       type: object
       description: >-
@@ -4322,7 +4338,7 @@ components:
           description: Whether runs started by outside input are covered.
         members:
           type: array
-          description: The people and groups named, when the audience is people. Empty otherwise.
+          description: The people, teams and groups named, when the audience is people. Empty otherwise.
           items:
             $ref: '#/components/schemas/SharedUseMember'
     SharedUseRequest:

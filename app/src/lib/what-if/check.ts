@@ -9,7 +9,7 @@ import {
   checkWhatIf as check,
   explainAuditEvent as explain,
 } from "@/lib/api/generated/what-if/what-if";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /**
  * A question read as one action, for the admin to confirm, or why it couldn't be. `missing` says what
@@ -42,7 +42,7 @@ export type WhatIfExplained = WhatIfChecked & { recorded: WhatIfRecorded };
 /** Question in, action out. The model only names the action; nothing is decided yet. */
 export async function askWhatIf(question: string): Promise<WhatIfReading> {
   const reading = await ask(
-    ORGANIZATION_ID,
+    organizationId(),
     { question },
     { "Idempotency-Key": idempotencyKey() },
     {
@@ -59,7 +59,7 @@ export async function checkWhatIf(
   question?: string,
 ): Promise<WhatIfChecked> {
   const checked = await check(
-    ORGANIZATION_ID,
+    organizationId(),
     { action, ...(question ? { question } : {}) },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't check that action. Try again." },
@@ -71,7 +71,7 @@ export async function checkWhatIf(
 export async function explainAuditEvent(
   eventId: string,
 ): Promise<WhatIfExplained> {
-  const explained = await explain(ORGANIZATION_ID, eventId, {
+  const explained = await explain(organizationId(), eventId, {
     fallback: "Couldn't explain this event. Try again.",
   });
   return explained as WhatIfExplained;

@@ -32,19 +32,27 @@ afterAll(async () => {
 const spec = GALLERY.find(({ name }) => name === "showActivityReport");
 if (!spec) throw new Error("the Activity report is not in the gallery");
 
-/** Every read the card asks of `POST /api/components/showActivityReport/call`. */
+/** Every read the card asks (`callComponentFunction`), as the Bot it names and what it read. */
 let reads: unknown[] = [];
 const originalFetch = global.fetch;
+const READ =
+  /\/api\/v2\/organizations\/default\/bots\/([^/]+)\/components\/showActivityReport\/call$/;
 beforeAll(() => {
-  // What the server answers an allowed read of `botActivity` (`server/src/components/routes.ts`).
+  // What the API answers an allowed read of `botActivity`.
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (url.endsWith("/api/components/showActivityReport/call")) {
+      const read = READ.exec(url);
+      if (read) {
         const body = JSON.parse(String(init?.body ?? "{}"));
-        reads.push(body);
+        reads.push({
+          agentId: decodeURIComponent(read[1] ?? ""),
+          args: body.arguments,
+          function: body.function,
+        });
         return Response.json({
           allowed: true,
+          reason: null,
           data:
             body.function === "recentRefusals"
               ? {

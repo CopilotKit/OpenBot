@@ -3,12 +3,17 @@
  */
 import type { CursorParameter } from "./cursorParameter";
 import type { LimitParameter } from "./limitParameter";
+import type { ListBotsScope } from "./listBotsScope";
 
 export type ListBotsParams = {
   /**
    * List the Bots the caller hid instead of the ones they did not.
    */
   hidden?: boolean;
+  /**
+   * Whose Bots: caller, the Bots the caller can see; organization, every Bot in the organization, for an admin of it only.
+   */
+  scope?: ListBotsScope;
   /**
    * Most items in one page.
    * @minimum 1

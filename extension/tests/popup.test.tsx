@@ -48,7 +48,7 @@ afterEach(() => {
   fake.uninstall();
 });
 
-/** As /api/recorder/learning answers: the person's own space, named except when there is none (unassigned, missing). */
+/** As /api/v2/organizations/default/recorder/learning answers: the person's own space, named except when there is none (unassigned, missing). */
 const learning = (state: LearningSpaceState["state"]): LearningSpaceState => ({
   state,
   containerId: state === "unassigned" || state === "missing" ? null : "c1",

@@ -48,7 +48,10 @@ import {
   type GrantActionProblem,
   translateAppGrants,
 } from "@/lib/app-grants/translate";
-import type { SharedUseApproval } from "@/lib/plugins/shared-use";
+import {
+  approvalNamesNobody,
+  type SharedUseApproval,
+} from "@/lib/plugins/shared-use";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
@@ -464,7 +467,7 @@ export function DescribeGrants({
               Let {botName} use the shared {appTitle} account?
             </DialogTitle>
           </DialogHeader>
-          <DialogBody className="mt-4">
+          <DialogBody className="mt-4 overflow-y-auto">
             <SharedApprovalFields onChange={setApproval} value={approval} />
           </DialogBody>
           {save.error ? (
@@ -481,7 +484,7 @@ export function DescribeGrants({
               Cancel
             </Button>
             <Button
-              disabled={save.isPending}
+              disabled={save.isPending || approvalNamesNobody(approval)}
               onClick={() => commit(approval)}
               size="sm"
             >

@@ -1,12 +1,15 @@
 import type { ConnectCodeResponse } from "@openbot/shared/recorder-api";
-import { recorderPaths } from "@openbot/shared/recorder-api";
 import {
   RECORDER_PAGE_MESSAGES,
   type RecorderPageMessage,
   type RecorderPageState,
 } from "@openbot/shared/recorder-page";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  createRecorderConnectCode,
+  deleteRecorderConnection,
+} from "@/lib/api/generated/recorder/recorder";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   connectRefusalSentence,
   sendConnectCode,
@@ -19,10 +22,13 @@ export function revokeRecorderConnectionMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (connectionId: string): Promise<void> => {
-      await client(recorderPaths.connection(connectionId), {
-        method: "DELETE",
-        fallback: "Couldn't disconnect this browser.",
-      });
+      await deleteRecorderConnection(
+        organizationId(),
+        "me",
+        connectionId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't disconnect this browser." },
+      );
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: recorderKeys.all }),
@@ -31,13 +37,14 @@ export function revokeRecorderConnectionMutationOptions(
 
 /** A step inside the connect flow: a code for the Recorder to exchange, not state anything caches. */
 export async function mintRecorderConnectCode(): Promise<ConnectCodeResponse> {
-  return (
-    await client(recorderPaths.connectCodes, {
-      method: "POST",
-      body: { via: "web" },
-      fallback: "Couldn't start connecting this browser.",
-    })
-  ).json();
+  // A fresh key each time: the code is a credential, so the API never answers the same write twice.
+  return createRecorderConnectCode(
+    organizationId(),
+    "me",
+    { via: "web" },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Couldn't start connecting this browser." },
+  );
 }
 
 /**

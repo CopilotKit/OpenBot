@@ -26,11 +26,6 @@ info:
     that opens the socket.
 
 
-    The three sockets OpenBot serves were first at other addresses, which are
-    still served for apps released before these and are described here as the
-    channels whose names start with legacy. They take a session only.
-
-
     A voice call that the server sets up over WebRTC has no socket to
     describe: its audio and its events travel on a peer connection, which is
     outside what AsyncAPI describes. The REST operation that starts a call
@@ -64,9 +59,20 @@ servers:
       CopilotKit Intelligence's realtime gateway, where runs stream. Its
       address is never configured in a client: the REST answer that carries a
       join token carries the address to dial with it (realtime.clientUrl).
-      Where an OpenBot is set to relay the gateway, that address is OpenBot's
-      own, at /api/intelligence/client, and the relay also asks for the
-      person's session.
+      Where Intelligence runs beside an OpenBot, that address is OpenBot's
+      own, so a client dials one host: either /api/intelligence/client, which
+      OpenBot relays, or /client, which the deployment's edge sends straight
+      to the gateway. The relayed address also asks who is connecting, with
+      the same credential that made the join token: the web app's session, an
+      app's access token (conversations:read) or an API key, the last two as
+      Authorization: Bearer on the request that opens the socket, or a key in
+      an x-api-key header. So a script that holds only an API key mints a
+      join token with it and opens the socket with it. A credential that is
+      not valid is answered 401 before the socket opens. A join token the
+      gateway refuses, because it was used already or has expired, closes the
+      relayed socket with code 1008 and the reason "This join token has been
+      used or has expired. Ask for a new one."; 1011 means the gateway could
+      not be reached at all.
     security:
       - $ref: "#/components/securitySchemes/joinToken"
   voiceService:
@@ -184,90 +190,6 @@ channels:
         $ref: "#/components/messages/TerminalResize"
       terminalAck:
         $ref: "#/components/messages/TerminalAck"
-  legacyConversationEvents:
-    address: /api/channels/events
-    title: Conversation events, at the earlier address
-    description: >-
-      The conversationEvents channel at the address it had before the API's, still served
-      for apps released before then. The same messages. It takes a session
-      only, never an API key or an app's access token.
-    servers:
-      - $ref: "#/servers/openbot"
-    bindings:
-      ws:
-        method: GET
-        bindingVersion: 0.1.0
-    messages:
-      conversationActivity:
-        $ref: "#/components/messages/ConversationActivity"
-      conversationResync:
-        $ref: "#/components/messages/ConversationResync"
-  legacyBotScreen:
-    address: /api/computers/{botId}/stream
-    title: A Bot's screen, at the earlier address
-    description: >-
-      The botScreen channel at the address it had before the API's, still served
-      for apps released before then. The same messages. It takes a session
-      only, never an API key or an app's access token.
-    servers:
-      - $ref: "#/servers/openbot"
-    parameters:
-      botId:
-        $ref: "#/components/parameters/botId"
-    bindings:
-      ws:
-        method: GET
-        bindingVersion: 0.1.0
-    messages:
-      screenHello:
-        $ref: "#/components/messages/ScreenHello"
-      screenFrame:
-        $ref: "#/components/messages/ScreenFrame"
-      screenError:
-        $ref: "#/components/messages/ScreenError"
-      screenInputError:
-        $ref: "#/components/messages/ScreenInputError"
-      screenFrameReceived:
-        $ref: "#/components/messages/ScreenFrameReceived"
-      screenMouse:
-        $ref: "#/components/messages/ScreenMouse"
-      screenWheel:
-        $ref: "#/components/messages/ScreenWheel"
-      screenKey:
-        $ref: "#/components/messages/ScreenKey"
-      screenText:
-        $ref: "#/components/messages/ScreenText"
-  legacyBotTerminal:
-    address: /api/computers/{botId}/terminal
-    title: A Bot's terminal, at the earlier address
-    description: >-
-      The botTerminal channel at the address it had before the API's, still served
-      for apps released before then. The same messages. It takes a session
-      only, never an API key or an app's access token.
-    servers:
-      - $ref: "#/servers/openbot"
-    parameters:
-      botId:
-        $ref: "#/components/parameters/botId"
-    bindings:
-      ws:
-        method: GET
-        bindingVersion: 0.1.0
-    messages:
-      terminalOutput:
-        $ref: "#/components/messages/TerminalOutput"
-      terminalSnapshot:
-        $ref: "#/components/messages/TerminalSnapshot"
-      terminalReady:
-        $ref: "#/components/messages/TerminalReady"
-      terminalError:
-        $ref: "#/components/messages/TerminalError"
-      terminalInput:
-        $ref: "#/components/messages/TerminalInput"
-      terminalResize:
-        $ref: "#/components/messages/TerminalResize"
-      terminalAck:
-        $ref: "#/components/messages/TerminalAck"
   threadStream:
     address: /websocket
     title: A conversation's runs
@@ -275,8 +197,11 @@ channels:
       A Bot's runs in one conversation thread, as AG-UI events, on the
       gateway's socket for clients. The socket speaks the Phoenix Channels
       protocol, version 2: every frame is a JSON array of five items, [join
-      reference, reference, topic, event, payload]. The topic is
-      thread:{threadId}, and a join token opens exactly one thread.
+      reference, reference, topic, event, payload]. The topic is the one the
+      REST answer gave as realtime.topic, and a join token opens exactly one
+      thread. The topic names the thread as the gateway knows it, which in an
+      organization other than default is not the threadId a client has, so a
+      client uses the topic as given and never makes one from threadId.
 
 
       A client joins the topic, and the gateway answers with connected, then
@@ -510,59 +435,6 @@ operations:
       - $ref: "#/channels/threadStream/messages/threadHeartbeat"
       - $ref: "#/channels/threadStream/messages/threadStopRun"
       - $ref: "#/channels/threadStream/messages/threadLeave"
-  sendLegacyConversationEvents:
-    action: send
-    title: Tell a person what changed in their conversations, at the earlier address
-    summary: A conversation the person is in changed, or everything may have.
-    channel:
-      $ref: "#/channels/legacyConversationEvents"
-    messages:
-      - $ref: "#/channels/legacyConversationEvents/messages/conversationActivity"
-      - $ref: "#/channels/legacyConversationEvents/messages/conversationResync"
-  sendLegacyBotScreen:
-    action: send
-    title: Show a Bot's screen, at the earlier address
-    summary: The screen's pictures, and why something could not be shown or done.
-    channel:
-      $ref: "#/channels/legacyBotScreen"
-    messages:
-      - $ref: "#/channels/legacyBotScreen/messages/screenHello"
-      - $ref: "#/channels/legacyBotScreen/messages/screenFrame"
-      - $ref: "#/channels/legacyBotScreen/messages/screenError"
-      - $ref: "#/channels/legacyBotScreen/messages/screenInputError"
-  receiveLegacyBotScreenInput:
-    action: receive
-    title: Take a person's mouse and keyboard, at the earlier address
-    summary: The person's input to the Bot's computer, and each picture's receipt.
-    channel:
-      $ref: "#/channels/legacyBotScreen"
-    messages:
-      - $ref: "#/channels/legacyBotScreen/messages/screenFrameReceived"
-      - $ref: "#/channels/legacyBotScreen/messages/screenMouse"
-      - $ref: "#/channels/legacyBotScreen/messages/screenWheel"
-      - $ref: "#/channels/legacyBotScreen/messages/screenKey"
-      - $ref: "#/channels/legacyBotScreen/messages/screenText"
-  sendLegacyBotTerminal:
-    action: send
-    title: Show a Bot's terminal, at the earlier address
-    summary: The terminal's bytes, and when to clear, when it is live and what went wrong.
-    channel:
-      $ref: "#/channels/legacyBotTerminal"
-    messages:
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalOutput"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalSnapshot"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalReady"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalError"
-  receiveLegacyBotTerminalInput:
-    action: receive
-    title: Take a person's typing, at the earlier address
-    summary: What the person typed, the size of their terminal, and how much they have drawn.
-    channel:
-      $ref: "#/channels/legacyBotTerminal"
-    messages:
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalInput"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalResize"
-      - $ref: "#/channels/legacyBotTerminal/messages/terminalAck"
   receiveTrajectoryEvents:
     action: receive
     title: Take what the Recorder captured
@@ -680,8 +552,9 @@ components:
   parameters:
     organizationId:
       description: >-
-        The organization. Until multi-organization lands every install has
-        one, addressed as default.
+        The organization, by its id or its slug, which the caller must be a
+        member of. One the caller is not in answers as one that does not
+        exist, default included.
     botId:
       description: The Bot whose computer it is.
   messages:
@@ -1283,7 +1156,9 @@ components:
     ThreadTopic:
       type: string
       pattern: ^thread:.+$
-      description: The thread, as thread:{threadId}.
+      description: >-
+        The thread, as thread: and the gateway's name for it: the topic the
+        REST answer gave (realtime.topic), used as given.
     ThreadJoinFrame:
       type: array
       description: "[join reference, reference, topic, \"phx_join\", payload]"

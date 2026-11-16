@@ -22,6 +22,7 @@ import {
   botLifecycleKeys,
 } from "@/lib/bot-lifecycle/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { taskKeys } from "@/lib/tasks/queries";
 import {
   activityOf,
   botOperationPath,
@@ -70,6 +71,8 @@ async function renderWith(
     botLifecycleKeys.activity(BOT),
     options.activity ?? activityOf(),
   );
+  // The person's tasks, which the page lists beside the Bot's activity: none here.
+  queryClient.setQueryData(taskKeys.list, []);
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     edition: options.edition,
   });
@@ -92,7 +95,7 @@ async function renderWith(
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  await view.findByText(options.ready ?? "Completed");
+  await view.findByText(options.ready ?? "No activity yet");
   return view;
 }
 
@@ -103,7 +106,9 @@ test("says what it lists, and does not claim the Bot has done nothing", async ()
   });
   expect(view.queryByText("Nothing has finished yet.")).toBeNull();
   expect(
-    view.getByText("No tasks, routines or goals have finished yet."),
+    view.getByText(
+      "Tasks, routines and check-ins show up here once this Bot starts them.",
+    ),
   ).toBeTruthy();
 });
 
@@ -185,6 +190,7 @@ test("Stop on work this Bot handed to another stops that handoff, named by its i
   const view = await renderWith(<BotActivitySections agentId={BOT} />, {
     edition: "team",
     role: "user",
+    ready: "Draft the launch post",
     activity: activityOf({
       inProgress: [
         {

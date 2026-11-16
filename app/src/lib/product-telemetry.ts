@@ -1,29 +1,41 @@
 import { useEffect, useRef } from "react";
-import { tryClient } from "@/lib/client";
+import { recordProductEvent } from "@/lib/api/generated/product-events/product-events";
+import { idempotencyKey } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
+import { organizationId } from "@/lib/organizations/current";
 
 export type ResultReference = { threadId: string; messageId: string };
 type ResultAction = "result_viewed" | "result_copied";
 
-/** Forward observed identifiers only; the server supplies authenticated actor metadata. */
+/**
+ * Forward observed identifiers only; the server supplies authenticated actor metadata.
+ *
+ * Through the API (recordProductEvent), with keepalive, so an event still leaves when the page
+ * closes; the person never waits on it. Its Idempotency-Key is the event's own, so a retry of the
+ * same request would be counted once. An event is about an answer drawn in a conversation, so it
+ * is only ever sent by a signed-in person, to the organization they are working in.
+ */
 export async function recordResultAction(
   kind: ResultAction,
   reference: ResultReference,
 ): Promise<void> {
   try {
-    const response = await tryClient("/api/telemetry/product-events", {
-      method: "POST",
-      body: {
+    await recordProductEvent(
+      organizationId(),
+      {
         kind,
         threadId: reference.threadId,
         messageId: reference.messageId,
         surface: "web",
       },
-    });
-    if (!response.ok)
-      console.warn("Result telemetry was not accepted.", response.status);
-  } catch {
+      { "Idempotency-Key": idempotencyKey() },
+      { keepalive: true },
+    );
+  } catch (error) {
     // This best-effort observation must not interrupt chat or a successful copy.
-    console.warn("Result telemetry could not be delivered.");
+    if (error instanceof ClientError)
+      console.warn("Result telemetry was not accepted.", error.status);
+    else console.warn("Result telemetry could not be delivered.");
   }
 }
 

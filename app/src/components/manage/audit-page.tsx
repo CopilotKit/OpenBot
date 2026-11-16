@@ -9,12 +9,13 @@ import {
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
+import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
   keepPreviousData,
   useInfiniteQuery,
   useQuery,
 } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AskTheTrail, AuditAnswerNote } from "@/components/audit/ask-the-trail";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import {
@@ -44,9 +45,12 @@ import {
   auditVocabularyQueryOptions,
   exportAuditTrail,
 } from "@/lib/audit/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
+import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -130,13 +134,52 @@ function withSkillTitles(
   });
 }
 
+/** What a row's payload calls somebody nobody could put a name to. */
+const NOBODY = new Set(["unattributed", "unknown"]);
+
+/**
+ * Each row a person started with the person named, where the row says only who by id.
+ *
+ * A Bot's actions are recorded on its person's authority (`actorUserId`) and carry no address of
+ * theirs, and many rows name the person only as the payload's `actor`: an address (an app given to
+ * a Bot, a routine switched on) or a person's id (a tool called for them). They read "Started by a
+ * person" with no name, while an organization's own rows named the address they recorded. The
+ * organization's members are what the page knows people by, and the signed-in person is always one
+ * of them. A person no longer a member, named by id alone, keeps "a person": the page has no name
+ * for them to give.
+ */
+export function withPeopleNamed(
+  events: AuditEvent[],
+  people: ReadonlyMap<string, string>,
+): AuditEvent[] {
+  return events.map((event) => {
+    if ((event.initiatorKind ?? "person") !== "person") return event;
+    const by = event.payload?.by;
+    if (typeof by === "string" && by.trim()) return event;
+    const actor =
+      typeof event.payload?.actor === "string"
+        ? event.payload.actor.trim()
+        : "";
+    const fromPayload =
+      actor && !NOBODY.has(actor) && !isOpenBotActor(actor)
+        ? actor.includes("@")
+          ? actor
+          : people.get(actor)
+        : undefined;
+    const named =
+      (event.actorUserId ? people.get(event.actorUserId) : undefined) ??
+      fromPayload;
+    return named ? { ...event, startedBy: named } : event;
+  });
+}
+
 /** Admin's "Why?" on a row one of OpenBot's controls decided: see `what-if/why-button.tsx`. */
 const whyFor = (event: AuditEvent) =>
   explainable(event) ? <WhyButton event={event} /> : null;
 
 /** What the page says under its title in Admin, where an admin reviews every Bot against policy. */
 const ADMIN_DESCRIPTION =
-  "Review Bot actions and actions blocked by this deployment’s policy.";
+  "Review Bot actions and actions blocked by this organization’s policy.";
 
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
@@ -215,12 +258,30 @@ export function AuditPage({
   });
   // Activity names a skill by the title its page shows; the trail keeps only its slug.
   const skills = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...skillListQueryOptions(),
     enabled: edition === "personal",
-  }).data?.skills;
-  const rows = withSkillTitles(
-    oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
-    skills,
+  }).data;
+  // Who started each row, by the address the People page shows: the members, and the reader.
+  const organization = useCurrentOrganizationId();
+  const members = useQuery({
+    ...organizationMembersQueryOptions(organization ?? ""),
+    enabled: edition === "team" && organization !== undefined,
+  }).data;
+  const reader = useQuery(currentUserQueryOptions()).data;
+  const people = useMemo(
+    () =>
+      new Map([
+        ...(members ?? []).map((member) => [member.id, member.email] as const),
+        ...(reader ? [[reader.id, reader.email] as const] : []),
+      ]),
+    [members, reader],
+  );
+  const rows = withPeopleNamed(
+    withSkillTitles(
+      oneRowPerAction(events.data?.pages.flatMap((page) => page.events) ?? []),
+      skills,
+    ),
+    people,
   );
   const nameFor = useBotNames();
   const [exporting, setExporting] = useState(false);
@@ -303,7 +364,7 @@ export function AuditPage({
           {events.isPending ? null : events.isError &&
             !events.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load these events. Reload the page.
+              Couldn't load these events. Try again in a moment.
             </p>
           ) : (
             <AuditTable

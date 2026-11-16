@@ -1,4 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  createConversation,
+  deleteConversation,
+  updateConversation,
+} from "@/lib/api/generated/conversations/conversations";
 import type { CreateRoutineRequest } from "@/lib/api/generated/model";
 import {
   createRoutine as createRoutineRequest,
@@ -7,9 +12,9 @@ import {
   resumeRoutine,
   runRoutine,
 } from "@/lib/api/generated/routines/routines";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
-import { ClientError, client } from "@/lib/client";
+import { ClientError } from "@/lib/client";
 import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
 import {
   createResponsibility,
@@ -57,7 +62,7 @@ const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
 
 /** `createRoutine`: a routine, or with `goalId` the routine that runs that goal on a schedule. */
 function createRoutine(body: CreateRoutineRequest) {
-  return createRoutineRequest(ORGANIZATION_ID, body, once(), {
+  return createRoutineRequest(organizationId(), body, once(), {
     fallback: CREATE_FALLBACK,
   });
 }
@@ -82,19 +87,22 @@ async function withConversation<T>(
 ): Promise<T> {
   let started: string | null = null;
   if (conversationId === NEW_CONVERSATION) {
-    const response = await client("/api/channels", {
-      method: "POST",
-      body: { agentIds: [botId] },
-      fallback: "Couldn't start a conversation for this routine.",
-    });
-    started = ((await response.json()) as { channel: { id: string } }).channel
-      .id;
+    started = (
+      await createConversation(
+        organizationId(),
+        { botIds: [botId] },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't start a conversation for this routine." },
+      )
+    ).conversation.id;
     // Best effort: a conversation that keeps its default name still works.
-    await client(`/api/channels/${started}/title`, {
-      method: "PUT",
-      body: { title: Array.from(name.trim()).slice(0, 60).join("") },
-      fallback: "Couldn't name the conversation.",
-    }).catch(() => undefined);
+    await updateConversation(
+      organizationId(),
+      started,
+      { title: Array.from(name.trim()).slice(0, 60).join("") },
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Couldn't name the conversation." },
+    ).catch(() => undefined);
   }
   let kept = false;
   try {
@@ -111,10 +119,13 @@ async function withConversation<T>(
         "It may have been saved on the Routines page. Open it there to check before creating another one.",
       );
     if (started && !kept) {
-      await client(`/api/channels/${started}`, {
-        method: "DELETE",
-        fallback: "Couldn't remove the conversation.",
-      }).catch(() => undefined);
+      await deleteConversation(
+        organizationId(),
+        started,
+        { "Idempotency-Key": idempotencyKey() },
+        undefined,
+        { fallback: "Couldn't remove the conversation." },
+      ).catch(() => undefined);
     }
     throw error;
   }
@@ -272,7 +283,7 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: { id: string; enabled: boolean }) =>
       (variables.enabled ? resumeRoutine : pauseRoutine)(
-        ORGANIZATION_ID,
+        organizationId(),
         variables.id,
         once(),
         { fallback: FALLBACK },
@@ -284,12 +295,25 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
 /** Every routine delete, so the routine's page can tell it was deleted from there. */
 export const deleteRoutineMutationKey = [...routineKeys.all, "delete"] as const;
 
+/**
+ * Delete a routine. Its runs stop existing with it, so they are removed rather than read again: a
+ * read would ask for a routine that is gone and answer 404, which the page still showing it used to
+ * do once on its way back to Routines. Every other routine read is refreshed.
+ */
 export function deleteRoutineMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationKey: deleteRoutineMutationKey,
     mutationFn: (id: string) =>
-      deleteRoutine(ORGANIZATION_ID, id, once(), { fallback: FALLBACK }),
-    onSuccess: () => invalidateRoutines(queryClient),
+      deleteRoutine(organizationId(), id, once(), { fallback: FALLBACK }),
+    onSuccess: async (_result, id) => {
+      // A read of its runs already on its way is dropped too, not left to land in the cache.
+      await queryClient.cancelQueries({ queryKey: routineKeys.runs(id) });
+      queryClient.removeQueries({ queryKey: routineKeys.runs(id) });
+      return queryClient.invalidateQueries({
+        queryKey: routineKeys.all,
+        predicate: (query) => query.queryKey[1] !== id,
+      });
+    },
   });
 }
 
@@ -300,7 +324,7 @@ export function deleteRoutineMutationOptions(queryClient: QueryClient) {
 export function runRoutineNowMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (id: string) =>
-      runRoutine(ORGANIZATION_ID, id, once(), {
+      runRoutine(organizationId(), id, once(), {
         fallback: "That routine could not be started.",
       }),
     onSuccess: () => invalidateRoutines(queryClient),

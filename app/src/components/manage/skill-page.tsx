@@ -14,6 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { SkillFields } from "@/components/skills/skill-fields";
+import { SkillTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,14 +36,15 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { grantRoster } from "@/lib/agents/grant-roster";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   removeSkillMutationOptions,
   saveSkillMutationOptions,
-  setPluginGrantMutationOptions,
-} from "@/lib/plugins/mutations";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+} from "@/lib/skills/mutations";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 
 /**
  * One of the deployment's skills: which Bots offer it, what it says, and removing it.
@@ -51,17 +53,19 @@ import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
  * here. Each Bot is one row with one switch, as on a tool's page (`plugin-tool-page.tsx`), where the
  * list used to draw a chip per Bot inside every skill's row.
  *
- * Editing saves the same way creating does: `POST /api/plugins/skills` upserts on the slug and
- * leaves the owner alone, so the command is fixed here (`slugLocked`).
+ * Editing saves the same way creating does: `replaceSkill` writes under the slug and leaves the
+ * owner alone, so the command is fixed here (`slugLocked`).
  */
 export function SkillPage({ slug }: { slug: string }) {
   const paths = useManagePaths();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const plugins = useQuery(pluginsPageQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
+  const skillList = useQuery(skillListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
 
@@ -73,12 +77,10 @@ export function SkillPage({ slug }: { slug: string }) {
   const removeSkill = useMutation(removeSkillMutationOptions(queryClient));
 
   const back = { label: "Skills", linkProps: paths.skills() };
-  const skill = plugins.data?.skills.find(
-    (candidate) => candidate.slug === slug,
-  );
+  const skill = skillList.data?.find((candidate) => candidate.slug === slug);
 
   /* Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open. */
-  if (plugins.isPending) {
+  if (skillList.isPending) {
     return (
       <PageShell backButton={back} title="Skill">
         {null}
@@ -87,11 +89,11 @@ export function SkillPage({ slug }: { slug: string }) {
   }
 
   /* A list that could not be read is not a missing skill: `isPending` goes false on a failure too. */
-  if (!plugins.data) {
+  if (!skillList.data) {
     return (
       <PageShell backButton={back} title="Skill">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Reload the page.
+          Couldn't load this skill. Try again in a moment.
         </p>
       </PageShell>
     );
@@ -212,6 +214,14 @@ export function SkillPage({ slug }: { slug: string }) {
       {/* A row that opens the confirmation, as deleting a Bot is on its own page. */}
       <PageSection title="Manage">
         <PageRows>
+          {/* Teams are the team edition's: with one person there is nobody to grant a skill to. */}
+          {paths.edition === "team" ? (
+            <SkillTeamGrantsRow
+              separator="after"
+              skillId={skill.slug}
+              title={skill.title}
+            />
+          ) : null}
           <Item
             render={<button onClick={() => setRemoving(true)} type="button" />}
             size="sm"

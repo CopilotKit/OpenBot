@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
 import { runComputerStep } from "@/lib/api/generated/approvals/approvals";
 import type { ComputerStepOutcome } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { threadAsksEveryStepQueryOptions } from "@/lib/approvals";
 import { ClientError } from "@/lib/client";
 import { failedComputerCall } from "@/lib/computers/call";
@@ -166,7 +166,7 @@ export function useFrontendTool<T extends Record<string, unknown>>(
     try {
       // The gate of the Bot whose run this is, which the person may have navigated away from.
       step = await runComputerStep(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         { botId: botOf(context.agent), conversation: snapshot },
         { "Idempotency-Key": idempotencyKey() },

@@ -8,9 +8,9 @@ export const Route = createFileRoute("/_authed/admin/permissions")({
 });
 
 const DESCRIPTION =
-  "Each switch applies to everybody. A role can override it, and a directory group can get a permission the organization has off. Permissions are checked exactly as set, the same way every time. No model decides. All changes appear in Activity.";
+  "Each switch applies to everybody. A role can override it, and a team can get a permission the organization has off. Permissions are checked exactly as set, the same way every time. No model decides. All changes appear in Activity.";
 
-/** Admin, Permissions: what people may do with Bots, for everybody and per role or group. */
+/** Admin, Permissions: what people may do with Bots, for everybody and per role or team. */
 export function PermissionsPage() {
   return (
     <PageShell description={DESCRIPTION} title="Permissions">

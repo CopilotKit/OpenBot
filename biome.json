@@ -28,7 +28,11 @@
   },
   "overrides": [
     {
-      "includes": ["app/src/lib/api/generated/**"],
+      "includes": [
+        "app/src/lib/api/generated/**",
+        "mobile/src/api/generated/**",
+        "extension/src/shared/generated/**"
+      ],
       "linter": {
         "enabled": false
       }
@@ -99,6 +103,59 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "app/src/**",
+        "mobile/app/**",
+        "mobile/src/**",
+        "extension/src/**",
+        "!app/src/lib/api/generated/**",
+        "!mobile/src/api/generated/**",
+        "!extension/src/shared/generated/**",
+        "!**/tests/**",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "fetch": "Reach the server through the API's generated client (app/src/lib/api/generated), never by hand. A request that must stay outside it is named, with its rule, in api/client-boundary.allow.ts.",
+                  "WebSocket": "Open the API's sockets at the address app/src/lib/socket-url.ts builds (api/asyncapi.yaml). A socket that must stay outside it is named, with its rule, in api/client-boundary.allow.ts.",
+                  "EventSource": "OpenBot streams over WebSockets (api/asyncapi.yaml), never server-sent events.",
+                  "XMLHttpRequest": "Reach the server through the API's generated client (app/src/lib/api/generated), never by hand."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "app/src/lib/client.ts",
+        "app/src/lib/auth/client.ts",
+        "app/src/components/channels/chat-transcript.tsx",
+        "app/src/lib/channels/use-channel-events.ts",
+        "app/src/components/computer/live-screen.tsx",
+        "app/src/components/computer/live-terminal.tsx",
+        "app/src/lib/voice/websocket.ts",
+        "mobile/src/api/request.ts",
+        "mobile/app/computer.tsx",
+        "extension/src/shared/openbot-client.ts",
+        "extension/src/main-world/network-hook.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": "off"
           }
         }
       }

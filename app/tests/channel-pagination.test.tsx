@@ -30,7 +30,13 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { organizationKeys } from "@/lib/organizations/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  problem,
+} from "./conversations-api";
 
 // Keep the sidebar's live-update socket offline; these tests exercise HTTP pagination.
 class OfflineWebSocket extends EventTarget implements WebSocket {
@@ -191,6 +197,12 @@ function renderSidebar() {
     localEvaluation: false,
     edition: "team",
   });
+  // Read by the sign-in gate before the sidebar is drawn: the one organization, nothing to switch to.
+  queryClient.setQueryData(organizationKeys.mine(), {
+    organizations: [],
+    canCreate: false,
+    currentId: "default",
+  });
   // The sidebar's attention list polls on its own schedule; this test counts channel requests only.
   queryClient.setQueryDefaults(botLifecycleKeys.attention, {
     staleTime: Number.POSITIVE_INFINITY,
@@ -275,12 +287,9 @@ test("scrolling requests the cursor once, appends older rows, and stops at the f
     observer.intersect();
   });
   await view.findByRole("button", { name: "Loading older conversations…" });
-  expect(requests).toEqual(["/api/channels?cursor=older%2Fpage"]);
+  expect(requests).toEqual([`${CONVERSATIONS_PATH}?cursor=older%2Fpage`]);
   pending.resolve(
-    Response.json({
-      channels: [channel("Older conversation")],
-      nextCursor: null,
-    }),
+    Response.json(conversationPage([channel("Older conversation")], null)),
   );
   expect(await view.findByText("Older conversation")).toBeTruthy();
   expect(view.getByText("Recent conversation")).toBeTruthy();
@@ -291,8 +300,7 @@ test("scrolling requests the cursor once, appends older rows, and stops at the f
 });
 
 test("a failed page preserves rows and waits for an explicit retry", async () => {
-  respond = async () =>
-    Response.json({ error: "Unavailable" }, { status: 503 });
+  respond = async () => problem(503, "Unavailable");
   const view = renderSidebar();
   await view.findByText("Recent conversation");
   await waitFor(() => expect(ScrollObserver.active.size).toBe(1));
@@ -305,36 +313,32 @@ test("a failed page preserves rows and waits for an explicit retry", async () =>
   expect(ScrollObserver.active.size).toBe(0);
   expect(requests).toHaveLength(1);
   respond = async () =>
-    Response.json({
-      channels: [channel("Recovered conversation")],
-      nextCursor: "last-page",
-    });
+    Response.json(
+      conversationPage([channel("Recovered conversation")], "last-page"),
+    );
   fireEvent.click(view.getByRole("button", { name: "Try again" }));
   expect(await view.findByText("Recovered conversation")).toBeTruthy();
   expect(requests).toEqual([
-    "/api/channels?cursor=older%2Fpage",
-    "/api/channels?cursor=older%2Fpage",
+    `${CONVERSATIONS_PATH}?cursor=older%2Fpage`,
+    `${CONVERSATIONS_PATH}?cursor=older%2Fpage`,
   ]);
   await waitFor(() => expect(ScrollObserver.active.size).toBe(1));
   respond = async () =>
-    Response.json({
-      channels: [channel("Oldest conversation")],
-      nextCursor: null,
-    });
+    Response.json(conversationPage([channel("Oldest conversation")], null));
   act(() => activeObserver().intersect());
   expect(await view.findByText("Oldest conversation")).toBeTruthy();
-  expect(requests.at(-1)).toBe("/api/channels?cursor=last-page");
+  expect(requests.at(-1)).toBe(`${CONVERSATIONS_PATH}?cursor=last-page`);
 });
 
 /** The request a sidebar search makes: the server's search, never the roster's pages. */
 function searchUrl(q: string, cursor?: string) {
   const params = new URLSearchParams({ q, limit: "20" });
   if (cursor) params.set("cursor", cursor);
-  return `/api/channels/search?${params}`;
+  return `${CONVERSATIONS_PATH}?${params}`;
 }
 
 function results(names: string[], nextCursor: string | null = null) {
-  return Response.json({ channels: names.map(channel), nextCursor });
+  return Response.json(conversationPage(names.map(channel), nextCursor));
 }
 
 function searchBox(view: ReturnType<typeof renderSidebar>) {
@@ -372,7 +376,13 @@ test("two characters search the whole history on the server and page its results
     searchUrl("Archived", "search/next"),
   ]);
   expect(view.queryByRole("button", { name: "Load more results" })).toBeNull();
-  expect(requests.some((url) => url.startsWith("/api/channels?"))).toBe(false);
+  expect(
+    requests.some(
+      (url) => !new URL(url, "http://openbot.invalid").searchParams.has("q"),
+    ),
+  ).toBe(false);
+  // And nothing at the addresses the list and its search used to have.
+  expect(requests.some((url) => url.startsWith("/api/channels"))).toBe(false);
 });
 
 test("one character asks for another instead of searching", async () => {
@@ -411,8 +421,7 @@ test("a search on its way says so, and only an answer says nothing matched", asy
 });
 
 test("a failed search says so with Retry, never as no matches", async () => {
-  respond = async () =>
-    Response.json({ error: "Search is unavailable." }, { status: 503 });
+  respond = async () => problem(503, "Search is unavailable.");
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
@@ -430,8 +439,7 @@ test("a failed search says so with Retry, never as no matches", async () => {
   expect(requests).toEqual([searchUrl("zz"), searchUrl("zz")]);
 
   // A later page that fails keeps the results already found.
-  respond = async () =>
-    Response.json({ error: "Search is unavailable." }, { status: 503 });
+  respond = async () => problem(503, "Search is unavailable.");
   fireEvent.click(view.getByRole("button", { name: "Load more results" }));
   expect(await view.findByRole("alert")).toHaveProperty(
     "textContent",
@@ -491,14 +499,11 @@ test("clearing the search puts back the loaded history where it was scrolled, pa
   // The roster's own paging is back, from the cursor it had.
   await waitFor(() => expect(ScrollObserver.active.size).toBe(1));
   respond = async () =>
-    Response.json({
-      channels: [channel("Older conversation")],
-      nextCursor: null,
-    });
+    Response.json(conversationPage([channel("Older conversation")], null));
   act(() => activeObserver().intersect());
   expect(await view.findByText("Older conversation")).toBeTruthy();
   expect(requests).toEqual([
     searchUrl("Archived"),
-    "/api/channels?cursor=older%2Fpage",
+    `${CONVERSATIONS_PATH}?cursor=older%2Fpage`,
   ]);
 });

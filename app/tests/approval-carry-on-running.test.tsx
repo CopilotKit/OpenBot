@@ -11,10 +11,13 @@ import {
   carryingOnAfterApproval,
 } from "@/lib/approvals";
 import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
+import { applyToRoster } from "@/lib/channels/use-channel-events";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { approvalBody, approvalInboxResponse } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -178,14 +181,14 @@ beforeAll(() => {
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/maps-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("maps-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("maps-bot"))
         return NativeResponse.json({
           bot: { id: "maps-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/maps-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("maps-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
@@ -206,9 +209,17 @@ beforeAll(() => {
        */
       if (url.pathname.endsWith("/connect"))
         return new NativeResponse(null, { status: 204 });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname)) {
         historyReads += 1;
@@ -469,3 +480,73 @@ test("a second approval the server's turn stops on is asked in the conversation"
   expect(view.getByRole("button", { name: "Allow once" })).toBeTruthy();
   expect(view.container.querySelector(WORKING)).toBeNull();
 }, 20_000);
+
+/*
+ * A TASK'S THREAD IS NEVER IN THE LIST. A conversation learns that its Bot said something this tab
+ * did not stream from its row in the list, and a task's thread has none. So a turn the server
+ * carried on there (the person's answer to its question, sent before the thread had drawn) was
+ * written and announced and never read: the thread sat on "reading your answer" until a reload,
+ * with the approval the turn had stopped on nowhere on screen. The socket's event for a
+ * conversation no page holds now reaches the conversation itself.
+ */
+function mountingATaskThread(history: Message[]) {
+  status = "pending";
+  decidedAt = null;
+  later = [];
+  stored = history;
+  decisions = [];
+  // The list as it is for a task's thread: loaded, and without it.
+  queryClient.setQueryData(channelKeys.list(), {
+    pages: [{ channels: [], nextCursor: null }],
+    pageParams: [""],
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <CopilotKitProvider runtimeUrl="http://localhost/api/copilotkit">
+        <ChannelChat channel={channel} runtimeAgentId="maps-bot" />
+      </CopilotKitProvider>
+    </QueryClientProvider>,
+  );
+}
+/** The socket's event for a line the server's turn wrote in this thread. */
+const serverSaid = (text: string) =>
+  act(async () => {
+    applyToRoster(queryClient, {
+      channelId: channel.id,
+      lastMessage: text,
+      lastMessageAt: "2026-11-08T09:05:00.000Z",
+      lastMessageAgentId: "maps-bot",
+    });
+  });
+
+test("in a task's thread, an approval the server's carried-on turn stopped on is drawn when the socket says so, without a reload", async () => {
+  // The thread as the tab drew it: the search has not been asked for yet.
+  const view = mountingATaskThread([ask, geocode, geocoded]);
+  await view.findByText(ask.content);
+  expect(
+    view.queryByRole("region", { name: "Waiting for your approval" }),
+  ).toBeNull();
+  const readsBefore = historyReads;
+
+  // The server carries the turn on, which stops on the search and says what it waits on.
+  stored = [ask, geocode, geocoded, search];
+  await serverSaid("This action is waiting for your approval.");
+
+  expect(
+    await view.findByRole("region", { name: "Waiting for your approval" }),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Allow once" })).toBeTruthy();
+  expect(historyReads).toBeGreaterThan(readsBefore);
+});
+
+test("in a task's thread, a reply the server's carried-on turn wrote is drawn when the socket says so, without a reload", async () => {
+  const view = mountingATaskThread([ask, geocode, geocoded, search, searched]);
+  status = "completed";
+  await view.findByText(ask.content);
+  expect(view.queryByText(WHOLE)).toBeNull();
+
+  stored = [ask, geocode, geocoded, search, searched, said(WHOLE)];
+  await serverSaid(WHOLE);
+
+  expect(await view.findByText(WHOLE)).toBeTruthy();
+});

@@ -1,16 +1,16 @@
 import { expect, test } from "bun:test";
 import { managePaths } from "@/lib/manage-paths";
+import type { AppSetup } from "@/lib/api/generated/model";
 import {
   brokeredConnectionDescription,
   brokeredDisconnectNote,
-  brokeredProvenance,
   brokeredReach,
   directoryRouteDecision,
+  fromDirectory,
   moreAppsRow,
   moreAppsSectionDescription,
   providerVocabulary,
 } from "@/lib/plugins/provider-vocabulary";
-import type { PluginsPage } from "@/lib/plugins/queries";
 
 /**
  * The Plugins screens name no broker at all: a person, the admin included, connects apps through
@@ -19,7 +19,7 @@ import type { PluginsPage } from "@/lib/plugins/queries";
  */
 
 const page = (provider?: "composio" | "arcade") =>
-  ({ provider }) as PluginsPage;
+  ({ directoryProvider: provider ?? null }) as AppSetup;
 
 const everythingSaid = (provider: "composio" | "arcade") =>
   JSON.stringify([
@@ -39,7 +39,7 @@ test("no sentence names either broker", () => {
   expect(managePaths("team").brokerDirectory("arcade").to).toBe(
     "/admin/plugins/arcade",
   );
-  expect(brokeredProvenance("arcade")).toBe(true);
+  expect(fromDirectory({ source: "directory" })).toBe(true);
 });
 
 test("a Composio deployment's words are OpenBot's", () => {
@@ -111,11 +111,10 @@ test("each provider's directory path is its own route", () => {
   );
 });
 
-test("brokered-ness is read off the row and needs no provider", () => {
-  expect(brokeredProvenance("composio")).toBe(true);
-  expect(brokeredProvenance("arcade")).toBe(true);
-  expect(brokeredProvenance("custom")).toBe(false);
-  expect(brokeredProvenance("first-party")).toBe(false);
+test("coming from the directory is read off the app and needs no provider", () => {
+  expect(fromDirectory({ source: "directory" })).toBe(true);
+  expect(fromDirectory({ source: "address" })).toBe(false);
+  expect(fromDirectory({ source: "catalogue" })).toBe(false);
 });
 
 test("the Composio directory route does not answer on an Arcade deployment", () => {

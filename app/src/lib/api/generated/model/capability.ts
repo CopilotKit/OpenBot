@@ -4,6 +4,7 @@
 import type { CapabilityGroups } from "./capabilityGroups";
 import type { CapabilityId } from "./capabilityId";
 import type { CapabilityRoles } from "./capabilityRoles";
+import type { CapabilityTeams } from "./capabilityTeams";
 
 /**
  * A permission switch, and what each level set it to. Null at a level means it sets nothing and the level beneath decides.
@@ -18,6 +19,8 @@ export interface Capability {
   organization: boolean | null;
   /** What each member role is set to, by role. A role absent sets nothing. */
   roles: CapabilityRoles;
-  /** What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive. */
+  /** What each directory group is set to, by the group's name. A group absent sets nothing. */
   groups: CapabilityGroups;
+  /** What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it. */
+  teams?: CapabilityTeams;
 }

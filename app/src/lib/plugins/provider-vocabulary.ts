@@ -1,18 +1,29 @@
-import { type PluginsPage, pluginsProvider } from "./queries";
+import type { AppSetup } from "@/lib/api/generated/model";
 
 /**
- * The words an admin Plugins screen uses for the ACTIVE broker, and nothing of the other's (spec D11).
+ * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
+ * other's (spec D11).
  *
- * TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE TRAP. A screen that FILTERS by brokered-ness
- * needs no provider name: one provider holds rows at a time (spec D3), so {@link brokeredProvenance}
- * answers it from the row. A screen that NAMES a vendor cannot derive the name from a row that
- * happens to exist — a deployment with the key set and no app enabled yet has no row at all — so it
- * reads {@link pluginsProvider} and asks this module for the words.
+ * TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE TRAP. A screen that FILTERS by where an app
+ * came from needs no service name: an app's `source` says `directory`, whichever service that is. A
+ * screen that NAMES the service (its own directory page, the setting an admin sets) cannot derive
+ * the name from an app that happens to exist, so it reads {@link directoryProvider} off getAppSetup
+ * and asks this module for the words.
  *
  * Pure functions, so the vocabulary is pinned without a DOM. Nothing here carries a key or a
  * capability: the provider is a NAME.
  */
-export type PluginsProvider = NonNullable<PluginsPage["provider"]>;
+export type PluginsProvider = NonNullable<AppSetup["directoryProvider"]>;
+
+/**
+ * The service the directory comes from, as getAppSetup names it: `"composio"` before it has
+ * answered, or where it names none, so a label never blanks.
+ */
+export function directoryProvider(
+  setup: AppSetup | undefined,
+): PluginsProvider {
+  return setup?.directoryProvider ?? "composio";
+}
 
 /**
  * Which edition reads the sentence. The team edition's words are for an admin and for each person
@@ -34,9 +45,9 @@ function capitalised(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Whether a row came through a broker, whichever one. Filters; never names. */
-export function brokeredProvenance(provenance: string): boolean {
-  return provenance === "composio" || provenance === "arcade";
+/** Whether an app came from the directory, whichever service that is. Filters; never names. */
+export function fromDirectory(app: { source: string }): boolean {
+  return app.source === "directory";
 }
 
 /*
@@ -84,7 +95,7 @@ export function providerVocabulary(
  * fallback once spelled a vendor on its own and printed Composio's name on an Arcade deployment.
  */
 export function directoryReadFailure(_provider: PluginsProvider): string {
-  return "Couldn't load the apps you can connect. Reload the page.";
+  return "Couldn't load the apps you can connect. Try again in a moment.";
 }
 
 /**
@@ -282,14 +293,14 @@ function joinNames(names: readonly string[]): string {
 /**
  * Whether a directory route may answer on this deployment.
  *
- * `pending` until the page has said which provider this is: the default of `"composio"` is right for
- * a label and wrong for a gate, because acting on it would fire a Composio request against an Arcade
- * project in the moment before the answer arrives.
+ * `pending` until getAppSetup has said which service this is: the default of `"composio"` is right
+ * for a label and wrong for a gate, because acting on it would fire a request for the other
+ * service's directory page in the moment before the answer arrives.
  */
 export function directoryRouteDecision(
   routeProvider: PluginsProvider,
-  page: PluginsPage | undefined,
+  setup: AppSetup | undefined,
 ): "pending" | "render" | "redirect" {
-  if (!page) return "pending";
-  return pluginsProvider(page) === routeProvider ? "render" : "redirect";
+  if (!setup) return "pending";
+  return directoryProvider(setup) === routeProvider ? "render" : "redirect";
 }

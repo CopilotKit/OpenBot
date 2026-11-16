@@ -9,11 +9,13 @@ import {
 } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
 import { PageShell } from "@/components/layout/page-shell";
+import { setCurrentOrganization } from "@/lib/organizations/current";
 import { SKINS } from "@/skins/registry";
 import type { SkinId } from "@/skins/types";
 import { ME_PATH, meBody, PREFERENCES_PATH } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 
 /**
  * A skin's frame around a page, as `_authed/_app` draws it, as a page of its own for
@@ -23,7 +25,12 @@ import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
  * `?skin=<id>&path=<path>` picks the skin and the page the frame opens on. `&attention=dot` gives
  * one Bot an unread message, so the Bots badge is a dot, and `&attention=<n>` gives it n things
  * waiting on the person, so the badge is a count.
+ *
+ * The page has no sign-in in front of it, so it starts in `default`, the organization the fake
+ * answers for, as every test does (preload.ts, which a page loaded in a browser does not run).
  */
+setCurrentOrganization("default");
+
 const params = new URLSearchParams(location.search);
 const skinId = (params.get("skin") ?? "openduet") as SkinId;
 const path = params.get("path") ?? "/";
@@ -74,13 +81,10 @@ const bodies: Record<string, unknown> = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
   },
-  "/api/channels": {
-    channels: [
-      channel("c-1", ["b-1"], "Renewal for the studio policy"),
-      channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
-    ],
-    nextCursor: null,
-  },
+  [CONVERSATIONS_PATH]: conversationPage([
+    channel("c-1", ["b-1"], "Renewal for the studio policy"),
+    channel("g-1", ["b-1", "b-2"], "Kiln repair plan"),
+  ]),
 };
 
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {

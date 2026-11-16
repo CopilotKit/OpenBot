@@ -38,7 +38,14 @@ import {
   COMPUTER_STEPS_PATH,
   computerStepResponse,
 } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+} from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -349,8 +356,15 @@ beforeAll(() => {
         )
       )
         return NativeResponse.json({ asksEveryStep: false });
-      if (url.pathname.startsWith(`/api/computers/${bot}/`)) {
-        const route = url.pathname.replace(`/api/computers/${bot}`, "");
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${bot}`,
+        )
+      ) {
+        const route = url.pathname.replace(
+          `/api/v2/organizations/default/computers/${bot}`,
+          "",
+        );
         direct.push(route);
         // A read goes straight to the computer, which answers as `agent-computer` does.
         if (route === "/files/read")
@@ -360,7 +374,7 @@ beforeAll(() => {
             truncated: false,
             bytes: 9,
           });
-        if (route === "/status")
+        if (route === "")
           return NativeResponse.json({ botId: bot, state: "ready" });
         // Opening a page, as `agent-computer` answers it: where it landed, its title and its text.
         if (route === "/navigate")
@@ -374,21 +388,25 @@ beforeAll(() => {
       }
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === `/api/plugins/for/${bot}`)
-        return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/voice/sessions")
+      if (url.pathname === botGrantsPath(bot)) return botGrantsResponse();
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       // The Bot holds the approval card, as `server/src/components/routes.ts` answers for a granted one.
-      if (url.pathname === "/api/components/catalogue")
-        return NativeResponse.json({ added: [] });
-      if (url.pathname === `/api/components/for-agent/${bot}`)
-        return NativeResponse.json({
-          components: [
-            { name: "askApproval", description: APPROVAL.description },
-          ],
-        });
+      if (url.pathname === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
+      if (url.pathname === botComponentsPath(bot))
+        return botComponentsResponse([
+          { name: "askApproval", description: APPROVAL.description },
+        ]);
       // Grants, capabilities, profiles: none of them decides anything here, and the app reads none as a refusal.
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },

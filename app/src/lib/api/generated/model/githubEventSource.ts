@@ -13,6 +13,6 @@ export interface GithubEventSource {
   repository: string;
   /** When it was connected. */
   createdAt: string;
-  /** The path on this server to give the repository's webhook. Answered when the source is made. */
-  webhookPath?: string;
+  /** The path on this server to give the repository's webhook, with the source's secret. A client shows it on this server's own address and never builds it. */
+  webhookPath: string;
 }

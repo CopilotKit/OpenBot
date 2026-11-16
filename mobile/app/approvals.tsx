@@ -8,12 +8,11 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { loadApprovalInbox, ME, ORGANIZATION_ID } from "../src/api";
 import {
-  api,
-  approvalDecisionPath,
-  loadApprovalInbox,
-  questionResponsePath,
-} from "../src/api";
+  decideApproval,
+  respondToQuestion,
+} from "../src/api/generated/approvals/approvals";
 import { authClient } from "../src/auth";
 import { useLoad } from "../src/use-load";
 export default function ApprovalsScreen() {
@@ -32,10 +31,7 @@ export default function ApprovalsScreen() {
     setBusy(id);
     setError("");
     try {
-      await api(approvalDecisionPath(id), {
-        method: "POST",
-        body: { decision },
-      });
+      await decideApproval(ORGANIZATION_ID, ME, id, { decision });
       await inbox.refresh();
     } catch (failure) {
       setError(
@@ -51,9 +47,8 @@ export default function ApprovalsScreen() {
     setBusy(id);
     setError("");
     try {
-      await api(questionResponsePath(id), {
-        method: "POST",
-        body: { response: answers[id] ?? "" },
+      await respondToQuestion(ORGANIZATION_ID, ME, id, {
+        response: answers[id] ?? "",
       });
       await inbox.refresh();
     } catch (failure) {
@@ -100,16 +95,12 @@ export default function ApprovalsScreen() {
             }}
           >
             <Text style={{ fontWeight: "600" }}>
-              {request.botId ?? request.action?.botId} asks to use{" "}
-              {request.toolRef ?? request.action?.toolRef}
+              {request.action.botId} asks to use {request.action.toolRef}
             </Text>
             <Text>
-              {request.effect ?? request.action?.effect} ·{" "}
-              {request.scope ?? request.action?.scope}
+              {request.action.effect} · {request.action.scope}
             </Text>
-            <Text>
-              {JSON.stringify(request.preview ?? request.action?.args, null, 2)}
-            </Text>
+            <Text>{JSON.stringify(request.action.args, null, 2)}</Text>
             <Button
               disabled={Boolean(busy)}
               title="Allow once"
@@ -118,7 +109,7 @@ export default function ApprovalsScreen() {
               }}
             />
             {/* Not for a check-in task's approval: tasks ask before every change, rules or not. */}
-            {request.action?.policy?.source === "task" ? null : (
+            {request.action.policy?.source === "task" ? null : (
               <Button
                 disabled={Boolean(busy)}
                 title="Always allow this scope"

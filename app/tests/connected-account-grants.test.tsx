@@ -20,9 +20,18 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
 import type { GrantState } from "@/lib/plugins/grants";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { ME_PATH, meBody } from "./accounts-api";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
+import {
+  authorizationsResponse,
+  authorizationStartResponse,
+  confirmationResponse,
+  connectionPage,
+  connectionsProblem,
+  disconnectPreviewResponse,
+  MY_CONNECTIONS_PATH,
+} from "./connections-api";
 
 /**
  * THE GRANT LIST on an app's own page, drawn by `GrantState`, grouped by permission, with the consent
@@ -78,7 +87,7 @@ type Provider = "composio" | "arcade";
 function server(
   provider: Provider,
   accountMode: "shared" | null = null,
-): PluginServer {
+): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -130,10 +139,9 @@ const siblingReads: string[] = [];
 
 function install(setup: Setup) {
   siblingReads.length = 0;
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server(setup.provider, setup.accountMode ?? null)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: setup.configured ?? true,
@@ -149,13 +157,14 @@ function install(setup: Setup) {
   authorizeCalls.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
-    if (path.endsWith("/grants")) return json({ actions: setup.grants ?? [] });
+    if (path.endsWith("/authorizations"))
+      return authorizationsResponse(setup.grants ?? []);
     if (path.endsWith("/connect") && setup.connectRefusal) {
-      return json({ error: setup.connectRefusal }, 503);
+      return connectionsProblem(503, setup.connectRefusal);
     }
     if (path.endsWith("/authorize")) {
       authorizeCalls.push(String(init?.body));
-      return json({ authorizationUrl: "https://vendor.invalid/consent" });
+      return authorizationStartResponse("https://vendor.invalid/consent");
     }
     if (path === ME_PATH)
       return json(
@@ -163,14 +172,14 @@ function install(setup: Setup) {
           user: { id: "u", role: setup.role ?? "user", email: "u@x.io" },
         }),
       );
-    if (path === "/api/plugins") return json(page);
-    if (path.startsWith("/api/plugins/connections")) {
-      return json({
-        connections: setup.connected
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
+    if (path === MY_CONNECTIONS_PATH) {
+      return connectionPage(
+        setup.connected
           ? [
               {
                 serverId: APP,
-                scope: "",
                 connectedAt: "2026-09-10T00:00:00.000Z",
                 verified: true,
                 verifiedAt: null,
@@ -178,16 +187,17 @@ function install(setup: Setup) {
               },
             ]
           : [],
-        redirectUri: null,
-      });
+      );
     }
-    if (path.endsWith("/connection/siblings")) {
+    if (path.endsWith("/disconnect-preview")) {
       siblingReads.push(path);
-      if (setup.siblingsFail) return json({ error: "no" }, 500);
-      return json(setup.siblings ?? { siblings: [], unanswered: 0 });
+      if (setup.siblingsFail) return connectionsProblem(500, "no");
+      return disconnectPreviewResponse(
+        setup.siblings ?? { siblings: [], unanswered: 0 },
+      );
     }
-    if (path.endsWith("/connection/confirm"))
-      return json({ connected: setup.connected });
+    if (path.endsWith("/confirm"))
+      return confirmationResponse(setup.connected === true);
     return json({ error: "unexpected" }, 404);
   }) as typeof fetch;
 }
@@ -258,7 +268,7 @@ const GMAIL: GrantState[] = [
   { action: "Gmail.SendEmail", state: "needs-consent", scopes: ["gmail.send"] },
   {
     action: "Gmail.Setup",
-    state: "needs-operator",
+    state: "needs-admin",
     missing: ["GOOGLE_CLIENT_SECRET"],
   },
   { action: "Gmail.Flaky", state: "unknown", reason: "Try again in a moment." },
@@ -301,14 +311,14 @@ test("Authorize appears for needs-consent and for nothing else", async () => {
   expect(buttons("Gmail.Flaky")).not.toContain("Authorize");
 });
 
-test("needs-operator names the missing secret, says an admin has to set it, and offers no Authorize", async () => {
+test("needs-admin names the missing secret, says an admin has to set it, and offers no Authorize", async () => {
   install({
     provider: "arcade",
     connected: true,
     grants: [
       {
         action: "Gmail.Setup",
-        state: "needs-operator",
+        state: "needs-admin",
         missing: ["GOOGLE_CLIENT_SECRET"],
       },
     ],
@@ -515,7 +525,7 @@ test("with mixed unauthorized states past ten, the ten drawn are in state order:
       { length: 3 },
       (_, index): GrantState => ({
         action: `Gmail.B${index}`,
-        state: "needs-operator",
+        state: "needs-admin",
         missing: ["GOOGLE_CLIENT_SECRET"],
       }),
     ),
@@ -606,7 +616,7 @@ test("a Shared app landing from a consent names the action and marks its row", a
   expect(row(view, "Gmail.ListEmails").hasAttribute("data-landed")).toBe(true);
   expect(row(view, "Gmail.SendEmail").hasAttribute("data-landed")).toBe(false);
   // The Shared branch is the one drawing this, not the personal-account branch.
-  expect(view.container.textContent).toContain("Team account");
+  expect(view.container.textContent).toContain("Shared account");
 });
 
 test("a Shared app reached without an action says nothing about authorizing", async () => {
@@ -647,7 +657,7 @@ test("pressing Authorize renders consentCopy's sentence and redirects nowhere ye
   fireEvent.click(view.getByText("Continue to consent"));
   await waitFor(() =>
     expect(authorizeCalls).toEqual([
-      JSON.stringify({ action: "Gmail.SendEmail" }),
+      JSON.stringify({ action: "Gmail.SendEmail", returnTo: "connections" }),
     ]),
   );
 });
@@ -755,7 +765,7 @@ test("a Composio deployment draws no grant list and never reads the grants", asy
  *
  * The case where the two DISAGREE, which is the whole reason the screen stopped comparing names: a
  * deployment whose provider is named arcade but whose broker declares no per-action authorization
- * flow. `/servers/:id/authorize` refuses such a deployment with 503, so a list drawn here would be
+ * flow. authorizeConnectionAction refuses such a deployment with 503, so a list drawn here would be
  * a screenful of buttons that cannot work. The name says draw it; the capability says do not; the
  * capability is what the route behind the buttons reads.
  */

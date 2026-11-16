@@ -118,7 +118,7 @@ export function UpdateRoutingSection() {
     >
       {routing.isPending || transports.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load where your updates go. Reload the page.
+          Couldn't load where your updates go. Try again in a moment.
         </p>
       ) : shown.length === 0 ? (
         <PageEmpty

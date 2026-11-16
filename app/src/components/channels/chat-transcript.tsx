@@ -47,6 +47,7 @@ import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
+import { SteerLanded } from "@/components/tasks/task-steer";
 import {
   MessageReactions,
   SentFromBot,
@@ -76,7 +77,7 @@ import {
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { attachmentUrl } from "@/lib/channels/attachments";
+import { attachmentAddress, attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
@@ -104,6 +105,8 @@ import {
 } from "@/lib/plugins/research-results";
 import {
   asText,
+  CUT_OFF_SENTENCE,
+  cutOffStep,
   forDisplay,
   refusalOf,
   toolResultFailed,
@@ -870,6 +873,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
    */
   const answerer = isUser ? null : answeredBy(messageId);
   const report = isUser ? null : readTaskReport(messageId);
+  /*
+   * What the person told a task in its own thread, written here so the Bot knows of it. The person
+   * reads it on the line under the task's card, once, so the transcript draws no message for it.
+   */
+  if (report?.kind === "steer") return <SteerLanded taskId={report.taskId} />;
 
   return (
     <MessageRow
@@ -1264,13 +1272,15 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
    * transcript drew, announcing to whoever owns it that this person opened this channel.
    */
   const servable = url.startsWith(ATTACHMENT_URL_PREFIX);
+  // Where the bytes are read from: the API's address for the attachment the message names.
+  const address = servable ? attachmentAddress(url) : url;
   /*
    * ONLY OURS IS EVER ASKED ABOUT, and that is the same rule as the line above rather than a second
    * one: a probe is a request like any other, so asking a third party whether a file is still there
    * announces the reader exactly as fetching it would. An off-site url is already unavailable
    * without anybody being asked.
    */
-  const gone = useDocumentIsGone(url, servable && modality === "document");
+  const gone = useDocumentIsGone(address, servable && modality === "document");
   const unavailable = failedToLoad || gone || !servable;
 
   /*
@@ -1320,12 +1330,12 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
   }
 
   return (
-    <AttachmentLightbox filename={filename} url={url}>
+    <AttachmentLightbox filename={filename} url={address}>
       <img
         alt={filename ? `Attachment: ${filename}` : "Attachment"}
         className="size-32 rounded-xl object-cover"
         onError={() => setFailedToLoad(true)}
-        src={url}
+        src={address}
       />
     </AttachmentLightbox>
   );
@@ -1756,8 +1766,9 @@ export function ServerToolLine({
   place?: CardPlace;
 }) {
   const running = result === undefined;
-  const named = readToolName(name, running);
-  const { label } = named;
+  // Cut off with its outcome unknown: named as it is while under way, since nobody knows it was done.
+  const interrupted = cutOffStep(result);
+  const named = readToolName(name, running || interrupted);
   const folders = useContext(FolderNamesContext);
   // The file a file step read or saved, as a computer's own file steps name it; a step on a folder
   // on the person's computer names the folder too ("todo.txt in share").
@@ -1778,7 +1789,18 @@ export function ServerToolLine({
   const refused = reason !== undefined;
   // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
   const unoffered = unofferedTool(result);
-  const failed = !refused && (unoffered || toolResultFailed(result));
+  const failed =
+    !refused && !interrupted && (unoffered || toolResultFailed(result));
+  const role = researchRoleOfCall(name);
+  /*
+   * A search with its results in reads as done. A research step is named for what it does ("Search
+   * the web"), which on a line of its own, finished, read as a search still going on; folded with
+   * other steps it has always read "Searched the web".
+   */
+  const label =
+    role === "search" && !running && !interrupted && !refused && !failed
+      ? "Searched the web"
+      : named.label;
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1819,24 +1841,28 @@ export function ServerToolLine({
   const shown =
     name === SHOW_APP_ACCESS_TOOL || folderRefusal !== undefined
       ? undefined
-      : unoffered
-        ? UNOFFERED_TOOL_SENTENCE
-        : refused && body
-          ? outcomeForPerson(body)
-          : answersTheModel(name)
-            ? // Written for the model. A tool search opens to the tools it found, in words.
-              name === SEARCH_TOOLS
-              ? foundToolsInWords(answer)
-              : undefined
-            : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
-              folderStepBody(name, body);
+      : interrupted
+        ? // What the Bot was told is for the Bot. The person is told what happened.
+          CUT_OFF_SENTENCE
+        : unoffered
+          ? UNOFFERED_TOOL_SENTENCE
+          : refused && body
+            ? outcomeForPerson(body)
+            : answersTheModel(name)
+              ? // Written for the model. A tool search opens to the tools it found, in words.
+                name === SEARCH_TOOLS
+                ? foundToolsInWords(answer)
+                : undefined
+              : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
+                folderStepBody(name, body);
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
    */
-  const role = researchRoleOfCall(name);
   const sources =
-    role && shown && !refused && !failed ? readResearchSources(shown) : null;
+    role && shown && !refused && !failed && !interrupted
+      ? readResearchSources(shown)
+      : null;
   if (role && sources)
     return (
       <ToolLine
@@ -1861,6 +1887,7 @@ export function ServerToolLine({
       label={label}
       refused={refused}
       failed={failed}
+      interrupted={interrupted}
       running={running}
     >
       {shown ? (

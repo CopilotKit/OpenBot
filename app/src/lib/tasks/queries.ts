@@ -1,8 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { Reaction } from "@/lib/api/generated/model";
+import type { Reaction, Task } from "@/lib/api/generated/model";
 import { listReactions } from "@/lib/api/generated/reactions/reactions";
-import { ORGANIZATION_ID } from "@/lib/api/request";
-import { client } from "@/lib/client";
+import { getTask, listTasks } from "@/lib/api/generated/tasks/tasks";
+import { organizationId } from "@/lib/api/request";
 
 /*
  * The person's tasks: what Start makes of an item a Bot's check-in found. Each runs in a conversation
@@ -45,9 +45,25 @@ export type BotTask = {
   /** Why its turn couldn't finish, in plain words, while `failed`. Null otherwise. */
   failure: string | null;
   failedAt: string | null;
+  /**
+   * When the person stopped its run. Its status is `failed` while this is set, and its card reads
+   * Stopped. Null once it carries on.
+   */
+  stoppedAt?: string | null;
   /** One line on what comes next, from the last thing said in its conversation. */
   next: string | null;
+  /** When the work it is doing now began, for how long it has been working. Null unless working. */
+  workingSince?: string | null;
+  /**
+   * When its turn will next be tried, while it waits to try again after a failure that passes (a
+   * rate limit, a service that did not answer). Null or absent when it is not waiting.
+   */
+  tryingAgainAt?: string | null;
+  /** When it last did something: a step of its work, or a line said in its conversation. */
+  lastActivityAt?: string;
   resolvedAt: string | null;
+  /** The latest thing the person told it directly in its conversation, unasked. See `TaskSteer`. */
+  steer?: { text: string; at: string } | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -55,6 +71,8 @@ export type BotTask = {
 export const taskKeys = {
   all: ["tasks"] as const,
   list: ["tasks", "list"] as const,
+  /** Every task read on its own, whichever it is: what a card in a conversation reads. */
+  ones: ["tasks", "one"] as const,
   one: (id: string) => ["tasks", "one", id] as const,
   reactions: (threadId: string) => ["tasks", "reactions", threadId] as const,
 };
@@ -72,11 +90,44 @@ const moving = (status: TaskStatus) =>
  * Every open task of the person's, and the ones marked done in the last 7 days, kept live while any
  * of them is under way.
  */
+/**
+ * A task as the API answers it, in the names the app's screens use: the API calls a task's Bot
+ * `botId` and its conversation `conversationId`.
+ */
+export function botTaskOf({
+  botId,
+  conversationId,
+  originConversationId,
+  ...rest
+}: Task): BotTask {
+  return {
+    ...rest,
+    agentId: botId,
+    channelId: conversationId,
+    originChannelId: originConversationId,
+  };
+}
+
 export const taskListQueryOptions = () =>
   queryOptions({
     queryKey: taskKeys.list,
-    queryFn: (): Promise<BotTask[]> =>
-      client("/api/tasks", "tasks", { fallback: "Couldn't load your tasks" }),
+    queryFn: async (): Promise<BotTask[]> => {
+      const tasks: BotTask[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      // Read to the end; a cursor handed back twice ends the list too.
+      do {
+        const page = await listTasks(
+          organizationId(),
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load your tasks" },
+        );
+        tasks.push(...page.tasks.map(botTaskOf));
+        if (cursor) seen.add(cursor);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && !seen.has(cursor));
+      return tasks;
+    },
     refetchInterval: (query) =>
       query.state.data?.some((task) => moving(task.status))
         ? LIVE_MS
@@ -90,10 +141,14 @@ export const taskListQueryOptions = () =>
 export const taskQueryOptions = (id: string) =>
   queryOptions({
     queryKey: taskKeys.one(id),
-    queryFn: (): Promise<BotTask> =>
-      client(`/api/tasks/${encodeURIComponent(id)}`, "task", {
-        fallback: "Couldn't load this task",
-      }),
+    queryFn: async (): Promise<BotTask> =>
+      botTaskOf(
+        (
+          await getTask(organizationId(), id, {
+            fallback: "Couldn't load this task",
+          })
+        ).task,
+      ),
     refetchInterval: (query) =>
       query.state.data && moving(query.state.data.status) ? LIVE_MS : false,
   });
@@ -112,7 +167,7 @@ export const reactionsQueryOptions = (threadId: string) =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listReactions(
-          ORGANIZATION_ID,
+          organizationId(),
           { threadId, limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load reactions." },
         );
@@ -147,3 +202,38 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 export function couldNotFinish(failure: string | null): string {
   return failure ? `Couldn't finish: ${failure}.` : "Couldn't finish.";
 }
+
+/**
+ * Why a task couldn't finish, as a line of its own under its status: a sentence. The server words
+ * its reason to follow "Couldn't finish:" ("this Bot isn't shared with you any more"), so on its
+ * own it starts in capitals and ends with a full stop.
+ */
+export function failureSentence(failure: string): string {
+  const said = failure.trim();
+  if (!said) return said;
+  const sentence = `${said[0]?.toUpperCase()}${said.slice(1)}`;
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/**
+ * Whether the person stopped this task. Its status is `failed` either way, and only a stop sets
+ * `stoppedAt`. A stop is the person's own choice, so nothing that lists the task calls it a failure.
+ */
+export function stoppedByYou(
+  task: { status?: TaskStatus; stoppedAt?: string | null } | undefined,
+): boolean {
+  return task?.status === "failed" && Boolean(task.stoppedAt);
+}
+
+/**
+ * A finished task's status in a word, on its card and on its row under Done on a Bot's Activity
+ * page. One name for one state: a row under Done never reads "Ready for review".
+ */
+export const TASK_DONE_LABEL = "Done";
+
+/** A stopped task's status in a word, on its card and on every row that lists it. */
+export const TASK_STOPPED_LABEL = "Stopped";
+
+/** What a stopped task says after its status. Stopping never undoes what was already done. */
+export const TASK_STOPPED =
+  "You stopped this. Anything it had already done stays done.";

@@ -1,18 +1,22 @@
-import {
-  type BotBrowserApiState,
-  botBrowserApiPaths,
-} from "@openbot/shared/bot-browser";
+import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import type {
   BrowserNavigateRequest,
   BrowserTabsRequest,
 } from "@openbot/shared/openbot-browser";
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import {
+  changeBotBrowserTabs,
+  clearBotBrowser,
+  narrateInBotBrowser,
+  navigateBotBrowser,
+  recordInBotBrowser,
+} from "@/lib/api/generated/browsers/browsers";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import {
   type NarrationAnswer,
   type NarrationPost,
-  sendNarrationTo,
+  sendNarrationWith,
 } from "@/lib/browser/mutations";
-import { client } from "@/lib/client";
 import { botBrowserKeys } from "./queries";
 
 /*
@@ -40,21 +44,21 @@ export function startBotBrowserRecordingMutationOptions(
   botId: string,
 ) {
   return mutationOptions({
-    mutationFn: async (variables: {
+    mutationFn: (variables: {
       title: string;
       language?: string;
     }): Promise<BotBrowserApiState> =>
-      (
-        await client(botBrowserApiPaths.recording(botId), {
-          method: "POST",
-          body: {
-            action: "start",
-            title: variables.title,
-            ...(variables.language ? { language: variables.language } : {}),
-          },
-          fallback: "Couldn't start recording. Try again.",
-        })
-      ).json(),
+      recordInBotBrowser(
+        organizationId(),
+        botId,
+        {
+          action: "start",
+          title: variables.title,
+          ...(variables.language ? { language: variables.language } : {}),
+        },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't start recording. Try again." },
+      ),
     onSuccess: () => invalidateBotBrowser(queryClient, botId),
   });
 }
@@ -69,14 +73,14 @@ export function stopBotBrowserRecordingMutationOptions(
   botId: string,
 ) {
   return mutationOptions({
-    mutationFn: async (): Promise<BotBrowserApiState> =>
-      (
-        await client(botBrowserApiPaths.recording(botId), {
-          method: "POST",
-          body: { action: "stop" },
-          fallback: "Couldn't stop recording. Try again.",
-        })
-      ).json(),
+    mutationFn: (): Promise<BotBrowserApiState> =>
+      recordInBotBrowser(
+        organizationId(),
+        botId,
+        { action: "stop" },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't stop recording. Try again." },
+      ),
     onSettled: () => invalidateBotBrowser(queryClient, botId),
   });
 }
@@ -87,16 +91,14 @@ export function botBrowserTabsMutationOptions(
   botId: string,
 ) {
   return mutationOptions({
-    mutationFn: async (
-      request: BrowserTabsRequest,
-    ): Promise<BotBrowserApiState> =>
-      (
-        await client(botBrowserApiPaths.tabs(botId), {
-          method: "POST",
-          body: request,
-          fallback: "Couldn't change the tabs. Try again.",
-        })
-      ).json(),
+    mutationFn: (request: BrowserTabsRequest): Promise<BotBrowserApiState> =>
+      changeBotBrowserTabs(
+        organizationId(),
+        botId,
+        request,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't change the tabs. Try again." },
+      ),
     onSuccess: () => invalidateBotBrowser(queryClient, botId),
   });
 }
@@ -107,16 +109,16 @@ export function navigateBotBrowserMutationOptions(
   botId: string,
 ) {
   return mutationOptions({
-    mutationFn: async (
+    mutationFn: (
       request: BrowserNavigateRequest,
     ): Promise<BotBrowserApiState> =>
-      (
-        await client(botBrowserApiPaths.navigate(botId), {
-          method: "POST",
-          body: request,
-          fallback: "Couldn't open that page. Try again.",
-        })
-      ).json(),
+      navigateBotBrowser(
+        organizationId(),
+        botId,
+        request,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't open that page. Try again." },
+      ),
     onSuccess: () => invalidateBotBrowser(queryClient, botId),
   });
 }
@@ -130,13 +132,13 @@ export function clearBotBrowserMutationOptions(
   botId: string,
 ) {
   return mutationOptions({
-    mutationFn: async (): Promise<BotBrowserApiState> =>
-      (
-        await client(botBrowserApiPaths.clear(botId), {
-          method: "POST",
-          fallback: "Couldn't clear the browser. Try again.",
-        })
-      ).json(),
+    mutationFn: (): Promise<BotBrowserApiState> =>
+      clearBotBrowser(
+        organizationId(),
+        botId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't clear the browser. Try again." },
+      ),
     onSettled: () => invalidateBotBrowser(queryClient, botId),
   });
 }
@@ -149,5 +151,15 @@ export function sendBotBrowserNarration(
   botId: string,
   post: NarrationPost,
 ): Promise<NarrationAnswer> {
-  return sendNarrationTo(botBrowserApiPaths.narration(botId), post);
+  return sendNarrationWith(
+    (narration, options) =>
+      narrateInBotBrowser(
+        organizationId(),
+        botId,
+        narration,
+        { "Idempotency-Key": idempotencyKey() },
+        options,
+      ),
+    post,
+  );
 }

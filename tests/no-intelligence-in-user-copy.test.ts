@@ -19,11 +19,17 @@ const REPO = join(import.meta.dir, "..");
 const WORD = /\bIntelligence\b/;
 
 /**
- * Text that names Intelligence and never reaches a person: written only to a log, or refused
- * before anything is served. None today. Each entry must still match, so one that goes stale is
- * removed rather than kept as a hole.
+ * Text that names Intelligence and never reaches a person: written only to a log, refused before
+ * anything is served, or only compared with an answer. Each entry must still match, so one that
+ * goes stale is removed rather than kept as a hole.
  */
-const NOT_SHOWN: { file: string; text: string; why: string }[] = [];
+const NOT_SHOWN: { file: string; text: string; why: string }[] = [
+  {
+    file: "extension/src/offscreen/grant.ts",
+    text: "Could not connect to Intelligence",
+    why: "the CopilotKit runtime's own sentence, which the Recorder looks for in an answer and never shows; reworded, it matches nothing",
+  },
+];
 
 /** Calls whose arguments are written to a log, never shown. */
 const LOGGING =
@@ -151,19 +157,13 @@ test("no text a person reads in the desktop app, the app or the Recorder says In
 });
 
 /**
- * "Backend" is one word in what a person reads, never "back end" or "Back-end". The one two-word
- * "back end" left is the Recorder matching a message OpenBot does not write. The bare "back-end" is
- * the id of a group of containers (partNames.ts), never shown.
+ * "Backend" is one word in what a person reads, never "back end" or "Back-end". The bare "back-end"
+ * is the id of a group of containers (partNames.ts), never shown.
  */
 test("no text a person reads says back end in two words", () => {
   expect(
     shown(/\b[Bb]ack(?:[\s-]|\\\n)+ends?\b/).filter(
-      (hit) =>
-        !/\s{2}back-end$/.test(hit) &&
-        !(
-          hit.startsWith("extension/src/offscreen/grant.ts:") &&
-          hit.includes("Could not connect to OpenBot's back end")
-        ),
+      (hit) => !/\s{2}back-end$/.test(hit),
     ),
   ).toEqual([]);
 });

@@ -6,6 +6,10 @@ import {
   SavedButRefused,
 } from "../src/lib/routines/mutations";
 import type { RoutinePlan } from "../src/lib/routines/plan";
+import { CONVERSATIONS_PATH, conversationPath } from "./conversations-api";
+
+/** The conversation a routine starts for itself, at its address in the API. */
+const NEW = conversationPath("c9");
 
 const realFetch = globalThis.fetch;
 
@@ -21,20 +25,36 @@ function stub(refuse: Record<string, { status: number; body: unknown }> = {}) {
   globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const path = String(url);
-    calls.push([
-      method,
-      path,
-      init?.body === undefined ? undefined : JSON.parse(String(init.body)),
-    ]);
+    const sent =
+      init?.body === undefined ? undefined : JSON.parse(String(init.body));
+    calls.push([method, path, sent]);
     const refusal = refuse[`${method} ${path}`];
     const [status, body] = refusal
       ? [refusal.status, refusal.body]
       : method === "POST" && path === "/api/v2/organizations/default/goals"
         ? [200, { goal: { id: "g1", title: "Ship it" } }]
-        : method === "POST" && path === "/api/channels"
-          ? [200, { channel: { id: "c9" } }]
-          : [200, { ok: true }];
-    return new Response(JSON.stringify(body), {
+        : method === "POST" && path === CONVERSATIONS_PATH
+          ? // Starting a conversation answers 201 with the conversation it made.
+            [
+              201,
+              {
+                conversation: {
+                  id: "c9",
+                  name: "Assistant",
+                  botIds: sent.botIds,
+                  threadId: "t9",
+                  active: true,
+                  lastMessageAt: null,
+                },
+              },
+            ]
+          : method === "PATCH" && path === NEW
+            ? // Naming it answers with the name it now has.
+              [200, { summary: sent.title }]
+            : method === "DELETE" && path === NEW
+              ? [204, undefined]
+              : [200, { ok: true }];
+    return new Response(body === undefined ? null : JSON.stringify(body), {
       status,
       headers: { "content-type": "application/json" },
     });
@@ -177,8 +197,8 @@ test("a new conversation is started first and used by every write", async () => 
   const calls = stub();
   await run(goalPlan(NEW_CONVERSATION, { schedule: true }));
   expect(methodsAndPaths(calls)).toEqual([
-    "POST /api/channels",
-    "PUT /api/channels/c9/title",
+    `POST ${CONVERSATIONS_PATH}`,
+    `PATCH ${NEW}`,
     "POST /api/v2/organizations/default/goals",
     "POST /api/v2/organizations/default/routines",
   ]);
@@ -194,7 +214,7 @@ test("a refused write takes the new conversation back", async () => {
     },
   });
   const { error } = await run(checkInPlan(NEW_CONVERSATION));
-  expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
+  expect(methodsAndPaths(calls)).toContain(`DELETE ${NEW}`);
   expect(error?.message).toBe("x");
 });
 
@@ -210,7 +230,7 @@ test("a check-in the Bot already has is refused, says so, and takes the new conv
   const { error } = await run(checkInPlan(NEW_CONVERSATION));
   expect(error).not.toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(same);
-  expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
+  expect(methodsAndPaths(calls)).toContain(`DELETE ${NEW}`);
 });
 
 const refusedSchedule = {
@@ -226,12 +246,12 @@ test("a refused schedule takes back the goal and its conversation, and says what
     goalPlan(NEW_CONVERSATION, { schedule: true, runNow: true }),
   );
   expect(methodsAndPaths(calls)).toEqual([
-    "POST /api/channels",
-    "PUT /api/channels/c9/title",
+    `POST ${CONVERSATIONS_PATH}`,
+    `PATCH ${NEW}`,
     "POST /api/v2/organizations/default/goals",
     "POST /api/v2/organizations/default/routines",
     "DELETE /api/v2/organizations/default/goals/g1",
-    "DELETE /api/channels/c9",
+    `DELETE ${NEW}`,
   ]);
   // Nothing is kept, so the form stays editable and Create can be pressed again.
   expect(error).toBeDefined();
@@ -265,7 +285,7 @@ test("a refused schedule whose goal can't be taken back pauses it and says so", 
   );
   const seen = methodsAndPaths(calls);
   expect(seen).toContain("POST /api/v2/organizations/default/goals/g1/pause");
-  expect(seen).not.toContain("DELETE /api/channels/c9");
+  expect(seen).not.toContain(`DELETE ${NEW}`);
   expect(seen).not.toContain("POST /api/v2/organizations/default/goals/g1/run");
   expect(error).toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(
@@ -283,7 +303,7 @@ test("a failed pause still says the goal was saved", async () => {
     },
   });
   const { error } = await run(goalPlan(NEW_CONVERSATION, { schedule: true }));
-  expect(methodsAndPaths(calls)).not.toContain("DELETE /api/channels/c9");
+  expect(methodsAndPaths(calls)).not.toContain(`DELETE ${NEW}`);
   expect(error).toBeInstanceOf(SavedButRefused);
   expect(error?.message).toBe(
     "It's saved on the Routines page, but it won't run on its own. Its schedule was refused. You have 20 routines switched on.",
@@ -356,7 +376,7 @@ test("a refused routine takes the new conversation back", async () => {
       timezone,
     },
   });
-  expect(methodsAndPaths(calls)).toContain("DELETE /api/channels/c9");
+  expect(methodsAndPaths(calls)).toContain(`DELETE ${NEW}`);
   expect(error?.message).toBe("x");
 });
 
@@ -400,7 +420,7 @@ test("a refused goal changes nothing it can't take back", async () => {
   });
   const { error } = await run(goalPlan(NEW_CONVERSATION, { schedule: true }));
   const seen = methodsAndPaths(calls);
-  expect(seen).toContain("DELETE /api/channels/c9");
+  expect(seen).toContain(`DELETE ${NEW}`);
   expect(seen).not.toContain("POST /api/v2/organizations/default/routines");
   // Nothing was saved, so this must not read as "saved but refused".
   expect(error).toBeDefined();
@@ -467,7 +487,7 @@ for (const kind of ["routine", "goal", "check-in"] as const) {
                 },
               };
       const { error } = await run(plan);
-      expect(methodsAndPaths(calls)).not.toContain("DELETE /api/channels/c9");
+      expect(methodsAndPaths(calls)).not.toContain(`DELETE ${NEW}`);
       expect(error).toBeInstanceOf(SavedButRefused);
       expect(error?.message).toContain("may have been saved");
     });

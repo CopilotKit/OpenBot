@@ -11,7 +11,6 @@ import {
   RECORDER_SIGNED_OUT,
   type RecorderActivity,
   recorderActivitySchema,
-  recorderPaths,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
@@ -83,7 +82,7 @@ let activityAnswer:
 const signedOut = () =>
   Response.json(
     {
-      error: "This browser is no longer connected to OpenBot.",
+      detail: "This browser is no longer connected to OpenBot.",
       code: RECORDER_SIGNED_OUT,
       reason: "revoked",
     },
@@ -118,13 +117,16 @@ function route(request: Request): Response | Promise<Response> | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  if (path === recorderPaths.activity && request.method === "POST")
+  if (
+    path === "/api/v2/organizations/default/recorder/activity" &&
+    request.method === "POST"
+  )
     return activity(request, token);
-  if (path === recorderPaths.me)
+  if (path === "/api/v2/organizations/default/recorder/me")
     return liveTokens.has(token)
       ? Response.json({ user: ada, connectionId: `c-${token}` })
       : signedOut();
-  if (path.startsWith("/api/recorder/"))
+  if (path.startsWith("/api/v2/organizations/default/recorder"))
     return Response.json({ error: "Not found." }, { status: 404 });
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
   if (!pass || request.method !== "POST") return null;

@@ -17,4 +17,12 @@ export interface TeamBotPublication {
    * @items.maxLength 200
    */
   groups?: string[];
+  /**
+   * With people, the teams to publish to, by each team's id. Every one must be a team of this organization. The people in a team, and in the teams under it, can use the Bot, and nobody else in the organization can.
+   * @maxItems 100
+   * @items.minLength 1
+   * @items.maxLength 200
+   * @items.pattern ^[A-Za-z0-9_-]+$
+   */
+  teams?: string[];
 }

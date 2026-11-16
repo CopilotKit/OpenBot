@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { desktopShell } from "@/lib/desktop/shell";
-import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
+import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -71,24 +71,22 @@ const RECHECK_FAILED =
  * What this person actually does to connect: click through a consent screen, type a secret, or
  * nothing at all.
  *
- * A coarser question than the scheme the app's authorization config was created as. The recorded
- * `authScheme` is a vendor literal — `OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH` and the rest — and
- * a row that branched on it would be re-asking the same three-way question at every branch, each
- * copy free to forget a literal the others remembered.
+ * The app's `connectsWith` (listApps) answers it: `sign-in`, `key`, `nothing`, or `unreadable` where
+ * OpenBot can't tell from what it recorded. A row branches on the three kinds below, never on the
+ * answer itself, so each branch asks the same question.
  */
 export type { BrokeredAccountKind };
 
 /**
- * Which of the three a recorded scheme is.
+ * Which of the three an app's `connectsWith` is.
  *
- * Everything that is not `NO_AUTH` and not one of the typed schemes is consent, including a scheme
- * this file has never heard of: the catalogue is the vendor's and it may name a new one tomorrow,
- * and sending somebody to a consent screen that turns out not to exist is a refusal they can read,
- * where an empty form is a box they cannot fill in.
+ * Everything that is not `nothing` and not `key` is consent, including one OpenBot couldn't read:
+ * sending somebody to a consent screen that turns out not to exist is a refusal they can read, where
+ * an empty form is a box they cannot fill in.
  */
-function kindOf(authScheme: string | null): BrokeredAccountKind {
-  if (authScheme === "NO_AUTH") return "no-auth";
-  return schemeNeedsKey(authScheme) ? "fields" : "consent";
+function kindOf(connectsWith: string | null): BrokeredAccountKind {
+  if (connectsWith === "nothing") return "no-auth";
+  return connectsWith === "key" ? "fields" : "consent";
 }
 
 /** The row's state and the things it can do, from {@link useBrokeredAccount}. */
@@ -264,6 +262,8 @@ export type BrokeredAccount = {
   rechecking: boolean;
   /** The app this row is about, for the account list beneath it. */
   serverId: string;
+  /** Whether this row is the app's one shared account, which lists no accounts of anybody's own. */
+  shared: boolean;
   /** Whether the last key handed over was taken, which closes the form it was typed into. */
   fieldsSubmitted: boolean;
   /** Leave for the app's sign-in page to add one more account beside the ones connected. */
@@ -310,17 +310,19 @@ export function useBrokeredAccount(input: {
    */
   checkable: boolean;
   /**
-   * How the app's authorization config was CREATED, as the vendor's own scheme literal.
+   * How a person connects the app, from the app itself (listApps' `connectsWith`).
    *
-   * Read off the recorded server row rather than off a connection row: the connections endpoint
-   * answers two different row shapes, so the absence of a field there says which READ a row came
-   * from and never how an app connects. Null where the app is not brokered at all.
+   * Read off the app rather than off a connection row: the connections endpoint answers two
+   * different row shapes, so the absence of a field there says which READ a row came from and never
+   * how an app connects. Null where the app is not from the directory at all.
    */
-  authScheme: string | null;
+  connectsWith: string | null;
   /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed in. */
   reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
+  /** Whether the account is the app's one shared account rather than the person's own. */
+  shared?: boolean;
   /**
    * Where this row's failures go: the screen's own banner.
    *
@@ -331,7 +333,7 @@ export function useBrokeredAccount(input: {
 }): BrokeredAccount {
   const queryClient = useQueryClient();
   const {
-    authScheme,
+    connectsWith,
     brokered,
     checkable,
     configured,
@@ -341,6 +343,7 @@ export function useBrokeredAccount(input: {
     report,
     returnTo,
     serverId,
+    shared = false,
     verified,
     verifiedAt,
   } = input;
@@ -363,7 +366,7 @@ export function useBrokeredAccount(input: {
    * that ends in the one state this row has a sentence for anyway.
    */
   const confirmation = useMutation(
-    confirmBrokeredConnectionMutationOptions(queryClient),
+    confirmBrokeredConnectionMutationOptions(queryClient, shared),
   );
   const confirmAccount = confirmation.mutate;
   /*
@@ -421,7 +424,7 @@ export function useBrokeredAccount(input: {
    * So the row says when it last checked, and the person decides when to check again.
    */
   const recheck = useMutation({
-    ...recheckBrokeredConnectionMutationOptions(queryClient),
+    ...recheckBrokeredConnectionMutationOptions(queryClient, shared),
     onError: (thrown: Error) =>
       report(readableRefusal(thrown.message, RECHECK_FAILED)),
   });
@@ -443,7 +446,7 @@ export function useBrokeredAccount(input: {
   const forgetRecheck = recheck.reset;
 
   const connect = useMutation({
-    ...connectAccountMutationOptions(returnTo),
+    ...connectAccountMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
@@ -468,8 +471,8 @@ export function useBrokeredAccount(input: {
        *
        * The route this pressed serves both kinds of brokered app and answers a field list to the
        * kind whose key somebody types — so a 200 with nothing to leave for means this press went to
-       * a key app that `kindOf` above read as consent, which is what happens the day Composio names
-       * a typed scheme this app's copy of `FIELD_SCHEMES` does not carry. Assigning that nothing
+       * a key app that `kindOf` above read as consent, which is what happens when OpenBot couldn't
+       * read how the app connects (`unreadable`) and it turns out to take a key. Assigning that nothing
        * navigated: the browser resolved the string `undefined` against the current document and
        * followed it, putting the person on a page of that name on this deployment's own origin,
        * with no sentence anywhere saying why.
@@ -481,7 +484,7 @@ export function useBrokeredAccount(input: {
        */
       if (start === null) {
         report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
         return;
       }
@@ -526,7 +529,7 @@ export function useBrokeredAccount(input: {
    * `onSettled` here, where it WOULD shadow the refetch.
    */
   const disconnect = useMutation({
-    ...disconnectBrokeredMutationOptions(queryClient),
+    ...disconnectBrokeredMutationOptions(queryClient, shared),
     onError: (thrown: Error) => {
       report(thrown.message);
       forgetAnswers();
@@ -543,7 +546,7 @@ export function useBrokeredAccount(input: {
    * vendor's published list, which is metadata about the app and nobody's secret.
    */
   const fieldsRequest = useMutation({
-    ...brokeredConnectionFieldsMutationOptions(),
+    ...brokeredConnectionFieldsMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
   });
 
@@ -591,7 +594,7 @@ export function useBrokeredAccount(input: {
    * guaranteed to be refused, and withholds the Re-check and Disconnect buttons the sentence names.
    */
   const submission = useMutation({
-    ...connectBrokeredWithFieldsMutationOptions(queryClient),
+    ...connectBrokeredWithFieldsMutationOptions(queryClient, returnTo, shared),
     onError: (thrown: Error) => {
       report(readableRefusal(thrown.message, KEY_CHECK_FAILED));
       forgetAnswers();
@@ -647,7 +650,7 @@ export function useBrokeredAccount(input: {
       }
       if (start === null) {
         report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
         return;
       }
@@ -757,7 +760,7 @@ export function useBrokeredAccount(input: {
      * which is equally true of an app nobody ever connected.
      */
     disconnected: disconnect.isSuccess,
-    kind: kindOf(authScheme),
+    kind: kindOf(connectsWith),
     fields: published?.fields ?? null,
     guide: published?.guide ?? null,
     requestFields: () => {
@@ -779,6 +782,7 @@ export function useBrokeredAccount(input: {
     submittingFields: submission.isPending,
     submissionError: submission.error?.message ?? null,
     serverId,
+    shared,
     fieldsSubmitted: submission.isSuccess,
     connectAnother: () => {
       report(null);
@@ -1149,10 +1153,16 @@ export function BrokeredAccountRow({
    * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
    * or could not be read the row reads as it always did: one connection, with its own Disconnect.
    */
+  // Not read while this connection is being ended: it would ask for one that is gone.
+  const ending = useConnectionEnding(account.serverId);
   const listing = useQuery({
     ...brokeredAccountsQueryOptions(account.serverId),
     enabled:
-      account.configured && account.connected && account.kind !== "no-auth",
+      account.configured &&
+      account.connected &&
+      account.kind !== "no-auth" &&
+      !account.shared &&
+      !ending,
   });
   const accounts =
     account.connected && !listing.isPending && !listing.error && listing.data

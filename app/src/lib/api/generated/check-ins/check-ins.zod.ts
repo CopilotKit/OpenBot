@@ -13,7 +13,7 @@ export const ListCheckInsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -182,7 +182,7 @@ export const CreateCheckInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -387,7 +387,7 @@ export const UpdateCheckInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   checkInId: zod
     .string()
@@ -551,7 +551,7 @@ export const DeleteCheckInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   checkInId: zod
     .string()
@@ -589,7 +589,7 @@ export const RunCheckInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   checkInId: zod
     .string()
@@ -647,7 +647,7 @@ export const ListCheckInItemsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -758,7 +758,7 @@ export const StartCheckInItemParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   checkInItemId: zod
     .string()
@@ -850,7 +850,7 @@ export const DismissCheckInItemParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   checkInItemId: zod
     .string()
@@ -923,7 +923,7 @@ export const DismissCheckInItemResponse = zod.object({
 });
 
 /**
- * Return, per Bot, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the daily limit in force. Counts only: no item's title, source or person. Only an administrator may read it.
+ * Return, per Bot in the organization, over the last 7 or 30 days: how its check-ins ended, what they raised, what people did with it and how many notices carried it, with the organization's daily limit in force. Counts only: no item's title, source or person. Only an administrator of the organization may read it.
  * @summary Read how check-ins are going
  */
 
@@ -932,7 +932,7 @@ export const GetCheckInUsageParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 

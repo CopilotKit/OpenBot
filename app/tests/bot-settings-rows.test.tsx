@@ -12,9 +12,17 @@ import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { meResponse } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
-import { answerTeamBots, teamBotOf } from "./bots-api";
-import { notificationsResponse } from "./notifications-api";
 import { approvalInboxResponse } from "./approvals-api";
+import { botGrantsResponse } from "./bot-grants-api";
+import { answerTeamBots, teamBotOf } from "./bots-api";
+import {
+  MEMORY,
+  memoryContract,
+  memorySourceBody,
+  page,
+  requestOf,
+} from "./learning-api";
+import { notificationsResponse } from "./notifications-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -79,8 +87,8 @@ function serving(
       ],
     });
     if (schedules) return schedules;
-    if (url.includes("/api/plugins/for/")) {
-      return Response.json({ tools: [], skills: [] });
+    if (url.includes("/bots/") && url.includes("/grants")) {
+      return botGrantsResponse();
     }
     const reach = notificationsResponse("GET", url, {
       bindings: [
@@ -90,10 +98,10 @@ function serving(
       available: { slack: true, sms: true },
     });
     if (reach) return reach;
-    if (url === "/api/memory/sources") {
-      return Response.json({
-        sources: [{ id: "s1", agentId: "expenses", enabled: true }],
-      });
+    if (requestOf(input, init).path === MEMORY.sources) {
+      return page(memoryContract.ListMemorySourcesResponse, "sources", [
+        memorySourceBody({ id: "s1", botId: "expenses" }),
+      ]);
     }
     const approvals = approvalInboxResponse(url, {
       enabled: true,
@@ -218,7 +226,7 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   serving("user", [{ id: "expenses", audience: "team" }]);
   const view = draw({ ...BOT, mine: false, canManage: false });
   expect(await view.findByText("Sharing")).toBeTruthy();
-  expect(await view.findByText("Whole team")).toBeTruthy();
+  expect(await view.findByText("Everyone in the organization")).toBeTruthy();
 });
 
 test("the rows for routines, reach, memory and approvals say what this Bot has and open their pages", async () => {

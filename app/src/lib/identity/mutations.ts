@@ -3,7 +3,7 @@ import {
   deleteLinkedAccount,
   linkAccount,
 } from "@/lib/api/generated/linked-accounts/linked-accounts";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { identityKeys } from "./queries";
 
@@ -31,7 +31,7 @@ export function unlinkMutationOptions(queryClient: QueryClient) {
     mutationFn: async (id: string): Promise<void> => {
       try {
         await deleteLinkedAccount(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           id,
           { "Idempotency-Key": idempotencyKey() },
@@ -60,7 +60,7 @@ export function issueSlackCodeMutationOptions() {
   return mutationOptions({
     mutationFn: async (): Promise<SlackLinkCode> => {
       const started = await linkAccount(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         { provider: "slack" },
         { "Idempotency-Key": idempotencyKey() },
@@ -112,7 +112,7 @@ export function connectGithubMutationOptions() {
       // Checked, whatever the answer says: the browser follows it.
       githubAuthorizationUrl(
         await linkAccount(
-          ORGANIZATION_ID,
+          organizationId(),
           "me",
           { provider: "github" },
           { "Idempotency-Key": idempotencyKey() },

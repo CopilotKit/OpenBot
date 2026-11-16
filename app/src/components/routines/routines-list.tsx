@@ -14,6 +14,7 @@ import {
 } from "@/components/layout/page-shell";
 import { STATUS } from "@/components/responsibilities/goal-page";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
+import { useGoalTriggers } from "@/components/responsibilities/use-goal-reads";
 import {
   SettingRow,
   useCheckInsBlocked,
@@ -32,7 +33,6 @@ import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import {
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
-  triggersQueryOptions,
 } from "@/lib/responsibilities";
 import { describeEvent } from "@/lib/routines/events";
 import {
@@ -158,10 +158,7 @@ function GoalItem({
     (Boolean(goal.successCriteria) &&
       goalCanEnd(goal, routines, undefined) &&
       !goal.endsWhenMet);
-  const triggers = useQuery({
-    ...triggersQueryOptions(goal.id),
-    enabled: triggersDecide,
-  });
+  const triggers = useGoalTriggers(goal.id, { enabled: triggersDecide });
   const Icon = STATUS[goal.status].icon;
   const starts =
     goal.status === "active"
@@ -282,7 +279,7 @@ export function RoutinesList({
       {/* One read failing leaves the other two listed, and says which part is missing. */}
       {failed.length > 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your {failed.join(" and ")}. Reload the page.
+          Couldn't load your {failed.join(" and ")}. Try again in a moment.
         </p>
       ) : null}
 

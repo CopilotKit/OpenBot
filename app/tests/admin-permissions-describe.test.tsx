@@ -21,6 +21,7 @@ import userEvent from "@testing-library/user-event";
 import type { CapabilityPreview } from "@/lib/capability-changes/queries";
 import type { CapabilityTranslation } from "@/lib/capability-changes/translate";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { teamKeys } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { Route as DescribeRoute } from "@/routes/_authed/admin/permissions_.describe";
 import {
@@ -106,6 +107,7 @@ beforeEach(() => {
     localEvaluation: false,
     edition: "team",
   });
+  queryClient.setQueryData(teamKeys.list(), { teams: [], canCreate: false });
   serving();
 });
 

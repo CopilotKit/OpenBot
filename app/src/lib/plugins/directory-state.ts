@@ -1,6 +1,5 @@
-import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
+import type { DirectoryApp } from "@/lib/apps/queries";
 import {
-  type ComposioApp,
   type PluginConnection,
   type PluginServer,
   personalConnections,
@@ -31,46 +30,30 @@ export type DirectoryAppState =
 
 /** How a person connects an app: a sign-in page, a key typed in, or nothing at all. */
 export function directoryConnect(
-  app: Pick<ComposioApp, "connection">,
+  app: Pick<DirectoryApp, "connectsWith">,
 ): "sign-in" | "key" | "none" {
-  switch (app.connection.kind) {
-    case "fields":
+  switch (app.connectsWith) {
+    case "key":
       return "key";
-    case "no-auth":
+    case "nothing":
       return "none";
     default:
       return "sign-in";
   }
 }
 
-/**
- * The row this deployment recorded for a directory app, if it has one: the broker's own row at the
- * app's address. Several rows may share an address; the first one listed answers for the app, as it
- * does on the server.
- */
-export function directoryServer(
-  servers: PluginServer[],
-  provider: PluginsProvider,
-  slug: string,
-): PluginServer | undefined {
-  return servers.find(
-    (server) =>
-      server.provenance === provider && server.url === `${provider}://${slug}`,
-  );
-}
-
 export function directoryAppState(
-  app: Pick<ComposioApp, "slug" | "enabled" | "connection">,
+  app: Pick<DirectoryApp, "appId" | "connectsWith">,
   input: {
-    provider: PluginsProvider;
     servers: PluginServer[] | undefined;
     connections: PluginConnection[] | undefined;
   },
 ): DirectoryAppState {
-  if (!app.enabled) return { kind: "addable" };
+  if (app.appId === null) return { kind: "addable" };
   if (directoryConnect(app) === "none") return { kind: "added" };
   if (!input.servers || !input.connections) return { kind: "loading" };
-  const server = directoryServer(input.servers, input.provider, app.slug);
+  // The app the directory says this entry was added as, which answers for it on the server too.
+  const server = input.servers.find((row) => row.id === app.appId);
   // Listed as added by the directory and not yet in the app list: the refetch is on its way.
   if (!server) return { kind: "loading" };
   if (server.accountMode === "shared") return { kind: "added" };

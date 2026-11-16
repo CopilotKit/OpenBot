@@ -181,7 +181,9 @@ test("Take control in the terminal gives the terminal the keyboard, says so in t
       "of the terminal and the screen. Click the terminal and type.",
     ),
   );
-  expect(asked).toContain("POST /api/computers/wheel-bot/control/take");
+  expect(asked).toContain(
+    "POST /api/v2/organizations/default/computers/wheel-bot/control/take",
+  );
   // The keyboard is the terminal's, and the full-size screen did not open over it.
   await waitFor(() =>
     expect(document.activeElement?.className).toContain(

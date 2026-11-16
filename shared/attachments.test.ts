@@ -35,6 +35,11 @@ describe("classifyAttachment", () => {
     expect(classifyAttachment("application/json")).toBe("text");
   });
 
+  test("a PDF is a document, whose text the server reads out", () => {
+    expect(classifyAttachment("application/pdf")).toBe("document");
+    expect(classifyAttachment("Application/PDF")).toBe("document");
+  });
+
   test("anything else is unsupported", () => {
     expect(classifyAttachment("application/zip")).toBe("unsupported");
   });

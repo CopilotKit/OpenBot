@@ -1,12 +1,13 @@
 import type {
+  DrawnTaskReportKind,
   LinkedThread,
-  TaskReportKind,
 } from "@openbot/shared/orchestration";
 import {
   IconAlertTriangle,
   IconArrowUpRight,
   IconCircleCheck,
   IconHandStop,
+  IconPlayerStop,
   IconProgress,
 } from "@tabler/icons-react";
 import { QueryClientContext, useQuery } from "@tanstack/react-query";
@@ -14,9 +15,17 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useContext } from "react";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { elapsed, useNow } from "@/lib/elapsed";
+import { relativeTime } from "@/lib/relative-time";
 import {
+  type BotTask,
+  failureSentence,
   type Reaction,
   reactionsQueryOptions,
+  stoppedByYou,
+  TASK_DONE_LABEL,
+  TASK_STOPPED,
+  TASK_STOPPED_LABEL,
   type TaskStatus,
   taskListQueryOptions,
   taskQueryOptions,
@@ -37,11 +46,18 @@ import { cn } from "@/lib/utils";
  * Where a task stands, in the words its card uses. The states A2A gives a task (working,
  * input-required, completed, failed), in the person's words.
  */
-type CardState = "working" | "needs" | "done" | "failed";
+type CardState = "working" | "needs" | "done" | "failed" | "stopped";
 
-function cardState(status: TaskStatus | undefined): CardState {
+/**
+ * A task the person stopped is told apart from one that couldn't finish by when it was stopped: its
+ * status is `failed` either way, and only a stop sets `stoppedAt`.
+ */
+function cardState(
+  task: { status?: TaskStatus; stoppedAt?: string | null } | undefined,
+): CardState {
+  const status = task?.status;
   if (status === "needs_input") return "needs";
-  if (status === "failed") return "failed";
+  if (status === "failed") return stoppedByYou(task) ? "stopped" : "failed";
   if (status === "ready_for_review" || status === "resolved") return "done";
   return "working";
 }
@@ -63,7 +79,7 @@ const STATE: Record<
     text: "text-amber-700 dark:text-amber-400",
   },
   done: {
-    label: "Done",
+    label: TASK_DONE_LABEL,
     icon: IconCircleCheck,
     dot: "bg-emerald-500",
     text: "text-emerald-700 dark:text-emerald-400",
@@ -74,7 +90,110 @@ const STATE: Record<
     dot: "bg-destructive",
     text: "text-destructive",
   },
+  stopped: {
+    label: TASK_STOPPED_LABEL,
+    icon: IconPlayerStop,
+    dot: "bg-muted-foreground",
+    text: "text-muted-foreground",
+  },
 };
+
+/**
+ * When a working task's turn is tried again, while that is still ahead of this clock: its turn hit
+ * something that passes (a rate limit, a service that did not answer) and waits. Undefined when it
+ * is not waiting, when the time has passed, and once it is no longer working.
+ */
+function tryingAgainAt(
+  task: BotTask | undefined,
+  state: CardState,
+  now: number,
+): number | undefined {
+  if (state !== "working" || !task?.tryingAgainAt) return undefined;
+  const at = Date.parse(task.tryingAgainAt);
+  return Number.isFinite(at) && at > now ? at : undefined;
+}
+
+/**
+ * What a waiting task says in place of its last activity: the time on the person's own clock, with
+ * the day when it is not today, and no clock time for a wait of under a minute.
+ */
+function tryingAgain(at: number, now: number): ReactNode {
+  if (at - now < 60_000) return "Trying again in a moment";
+  const when = new Date(at);
+  const time = when.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const today = when.toDateString() === new Date(now).toDateString();
+  return (
+    <>
+      Waiting to try again{" "}
+      <time dateTime={when.toISOString()} title={when.toLocaleString()}>
+        {today
+          ? `at ${time}`
+          : `on ${when.toLocaleDateString(undefined, { month: "short", day: "numeric" })} at ${time}`}
+      </time>
+    </>
+  );
+}
+
+/**
+ * How long a working task has been at it, and when a task last did something, kept right while the
+ * conversation stays open: a long task that says nothing is seen to be alive, or seen to have gone
+ * quiet. Counted every second while it works, and every half minute otherwise.
+ *
+ * A task waiting to try again says that and when in place of its last activity, which would read
+ * as a task gone quiet. `now` is the card's clock, so the line and the card change together.
+ */
+function TaskTimes({
+  task,
+  state,
+  now,
+}: {
+  task: BotTask;
+  state: CardState;
+  now: number;
+}) {
+  const working = state === "working";
+  const since =
+    working && task.workingSince ? Date.parse(task.workingSince) : NaN;
+  const at = task.lastActivityAt;
+  const lead = state === "done" ? "Finished" : "Last activity";
+  const retryAt = tryingAgainAt(task, state, now);
+  return (
+    <>
+      {Number.isFinite(since) ? (
+        <span data-slot="task-elapsed">
+          {" · "}
+          <time
+            className="tabular-nums"
+            dateTime={task.workingSince ?? undefined}
+          >
+            {elapsed(Math.max(0, Math.floor((now - since) / 1000)))}
+          </time>
+        </span>
+      ) : null}
+      {retryAt !== undefined ? (
+        <span
+          className="block font-normal text-muted-foreground"
+          data-slot="task-trying-again"
+        >
+          {tryingAgain(retryAt, now)}
+        </span>
+      ) : at ? (
+        <span
+          className="block font-normal text-muted-foreground"
+          data-slot="task-last-activity"
+        >
+          {lead}{" "}
+          <time dateTime={at} title={new Date(at).toLocaleString()}>
+            {relativeTime(at)}
+          </time>
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 /** The way into a task's thread. */
 function OpenThread({
@@ -126,6 +245,7 @@ export function TaskCard({
   title,
   brief,
   refusal,
+  children,
 }: {
   /** Absent while the call is still on its way, or when it was refused. */
   taskId?: string;
@@ -134,30 +254,51 @@ export function TaskCard({
   brief?: string;
   /** Why no task was started, when the server said no. */
   refusal?: string;
+  /** What sits directly under the card and belongs to it, such as the last thing the person told it. */
+  children?: ReactNode;
 }) {
   const task = useQuery({
     ...taskQueryOptions(taskId ?? ""),
     enabled: Boolean(taskId),
   });
+  const state = cardState(taskId ? task.data : undefined);
+  // The card's clock, once there is a task to time: every second while it works, and every half
+  // minute otherwise.
+  const now = useNow(
+    state === "working" ? 1_000 : 30_000,
+    task.data !== undefined,
+  );
   if (refusal)
     return (
       <TaskFrame state="failed" title={title}>
         <p className="text-muted-foreground text-sm">{refusal}</p>
       </TaskFrame>
     );
-  const state = cardState(taskId ? task.data?.status : undefined);
   /*
    * What it waits for is said once, on the needs-you line the task posts, not here as well: the
    * card says only that it needs the person, and leads into the thread.
    */
   const next =
     state === "failed"
-      ? (task.data?.failure ?? null)
-      : state === "working" && !taskId
-        ? "Starting…"
-        : null;
+      ? task.data?.failure
+        ? failureSentence(task.data.failure)
+        : null
+      : state === "stopped"
+        ? TASK_STOPPED
+        : state === "working" && !taskId
+          ? "Starting…"
+          : null;
   return (
     <TaskFrame
+      below={children}
+      times={
+        task.data ? (
+          <TaskTimes now={now} state={state} task={task.data} />
+        ) : null
+      }
+      waiting={
+        tryingAgainAt(task.data, state, now) !== undefined ? "retry" : undefined
+      }
       action={
         channelId ? (
           <OpenThread channelId={channelId} primary={state === "needs"}>
@@ -190,37 +331,53 @@ function TaskFrame({
   state,
   title,
   action,
+  times,
+  waiting,
+  below,
   children,
 }: {
   state: CardState;
   title: string;
   action?: ReactNode;
+  /** Set while a working task waits to try again, so the card can be found as waiting. */
+  waiting?: "retry";
+  /** How long it has worked and when it last did something, after and under its state. */
+  times?: ReactNode;
+  /** What sits directly under the card, in the card's own column. */
+  below?: ReactNode;
   children?: ReactNode;
 }) {
   const { label, text } = STATE[state];
   return (
-    <section
-      aria-label={`Task: ${title}`}
-      className="my-2 w-full max-w-md rounded-xl border border-border bg-card p-3 dark:border-transparent"
-      data-slot="task-card"
-      data-state={state}
-    >
-      <div className="flex items-start gap-3">
-        <StateIcon state={state} />
-        <div className="min-w-0 flex-1 space-y-1">
-          <p className="font-medium text-sm leading-snug">{title}</p>
-          <p className={cn("font-medium text-xs", text)}>
-            <span
-              className={state === "working" ? "tool-line-running" : undefined}
-            >
-              {label}
-            </span>
-          </p>
-          {children}
+    <div className="my-2 w-full max-w-md space-y-1.5" data-slot="task">
+      <section
+        aria-label={`Task: ${title}`}
+        className="w-full rounded-xl border border-border bg-card p-3 dark:border-transparent"
+        data-slot="task-card"
+        data-state={state}
+        data-waiting={waiting}
+      >
+        <div className="flex items-start gap-3">
+          <StateIcon state={state} />
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="font-medium text-sm leading-snug">{title}</p>
+            <p className={cn("font-medium text-xs", text)}>
+              <span
+                className={
+                  state === "working" ? "tool-line-running" : undefined
+                }
+              >
+                {label}
+              </span>
+              {times}
+            </p>
+            {children}
+          </div>
         </div>
-      </div>
-      {action ? <div className="mt-3 flex justify-end">{action}</div> : null}
-    </section>
+        {action ? <div className="mt-3 flex justify-end">{action}</div> : null}
+      </section>
+      {below}
+    </div>
   );
 }
 
@@ -236,7 +393,7 @@ export function TaskReport({
   children,
 }: {
   taskId: string;
-  kind: TaskReportKind;
+  kind: DrawnTaskReportKind;
   /** What the report said, as text, to tell a request still waiting from one answered since. */
   words?: string;
   children: ReactNode;
@@ -244,7 +401,14 @@ export function TaskReport({
   const task = useQuery(taskQueryOptions(taskId));
   const title = task.data?.title;
   const channelId = task.data?.channelId;
-  if (kind === "result")
+  const live = cardState(task.data);
+  if (kind === "result") {
+    /*
+     * A result that left the task waiting on the person (an app's Request access card drawn under
+     * it) is not finished: its link reads as needing them, as the task's card does, not as done.
+     */
+    const waiting = live === "needs";
+    const ResultIcon = waiting ? IconHandStop : IconCircleCheck;
     return (
       <div
         className="w-full space-y-2"
@@ -258,10 +422,18 @@ export function TaskReport({
         {channelId ? (
           <Link
             className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
+            data-state={waiting ? "needs" : "done"}
             params={{ channelId }}
             to="/channel/$channelId"
           >
-            <IconCircleCheck className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <ResultIcon
+              className={cn(
+                "size-3.5 shrink-0",
+                waiting
+                  ? STATE.needs.text
+                  : "text-emerald-600 dark:text-emerald-400",
+              )}
+            />
             <span className="truncate">{title ?? "Task"}</span>
             <IconArrowUpRight className="size-3.5 shrink-0" />
           </Link>
@@ -269,8 +441,11 @@ export function TaskReport({
         {children}
       </div>
     );
-  const state: CardState = kind === "needs" ? "needs" : "failed";
-  const live = cardState(task.data?.status);
+  }
+  // A task the person stopped says so here too: it did not fail, and its line is not an alarm.
+  const stopped = kind === "failed" && live === "stopped";
+  const state: CardState =
+    kind === "needs" ? "needs" : stopped ? "stopped" : "failed";
   /*
    * A request answered since changes in place: it says it was answered and where the task is now,
    * and no longer asks. The task waiting on something else now is this one answered too.
@@ -286,13 +461,19 @@ export function TaskReport({
   return (
     <section
       aria-label={
-        kind === "needs" ? "This needs you" : "A task couldn't finish"
+        kind === "needs"
+          ? "This needs you"
+          : stopped
+            ? "A task was stopped"
+            : "A task couldn't finish"
       }
       className={cn(
         "w-full max-w-md rounded-xl border p-3",
         kind === "needs"
           ? "border-amber-500/30 bg-amber-500/5"
-          : "border-destructive/30 bg-destructive/5",
+          : stopped
+            ? "border-border bg-card dark:border-transparent"
+            : "border-destructive/30 bg-destructive/5",
         answered && "border-border bg-card opacity-80 dark:border-transparent",
       )}
       data-kind={kind}
@@ -306,7 +487,7 @@ export function TaskReport({
               ? answered
                 ? "Needed you"
                 : "Needs you"
-              : "Couldn't finish"}
+              : STATE[state].label}
             {title ? (
               <span className="text-muted-foreground"> · {title}</span>
             ) : null}
@@ -340,6 +521,7 @@ const ANSWERED: Record<CardState, string> = {
   needs: "You answered this in its thread. It needs you again there.",
   done: "You answered this in its thread, and it's done.",
   failed: "You answered this in its thread, but it couldn't finish.",
+  stopped: "You answered this in its thread, and stopped it after.",
 };
 
 /**
@@ -364,7 +546,7 @@ export function ThreadLinks({ threads }: { threads: LinkedThread[] }) {
 
 function ThreadLink({ thread }: { thread: LinkedThread }) {
   const task = useQuery(taskQueryOptions(thread.taskId));
-  const state = cardState(task.data?.status ?? (thread.status as TaskStatus));
+  const state = cardState(task.data ?? { status: thread.status as TaskStatus });
   return (
     <li data-state={state}>
       <Link
@@ -401,15 +583,27 @@ export function SentFromBot({
 }) {
   const { data: bots } = useQuery(agentListQueryOptions());
   const { data: tasks } = useQuery(taskListQueryOptions());
-  const agentId = tasks?.find((task) => task.threadId === threadId)?.agentId;
-  const name = bots?.find((bot) => bot.id === agentId)?.name;
+  const task = tasks?.find((task) => task.threadId === threadId);
+  const name = bots?.find((bot) => bot.id === task?.agentId)?.name;
+  const label = `Sent from ${name ?? "your Bot"}`;
   return (
     <div
       className="flex w-full flex-col items-end gap-1"
       data-slot="task-brief"
     >
       <p className="text-muted-foreground text-xs">
-        Sent from {name ?? "your Bot"}
+        {/* The way back to the conversation that asked for the task. A check-in's task has none. */}
+        {task?.originChannelId ? (
+          <Link
+            className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            params={{ channelId: task.originChannelId }}
+            to="/channel/$channelId"
+          >
+            {label}
+          </Link>
+        ) : (
+          label
+        )}
       </p>
       <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm">
         {brief}

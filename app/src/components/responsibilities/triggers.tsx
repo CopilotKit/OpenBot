@@ -8,7 +8,7 @@ import {
   IconPlus,
   IconWebhook,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
@@ -57,9 +57,9 @@ import {
   type TriggerConfig,
   type TriggerKind,
   type TriggerRecord,
-  triggersQueryOptions,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
+import { useGoalTriggers } from "./use-goal-reads";
 
 export const KIND_LABEL: Record<TriggerKind, string> = {
   webhook: "Webhook",
@@ -175,7 +175,7 @@ function describeFilter(config: TriggerConfig) {
  * the list refetching after the write that produced it.
  */
 export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
-  const triggers = useQuery(triggersQueryOptions(goal.id));
+  const triggers = useGoalTriggers(goal.id);
   const [adding, setAdding] = useState(false);
   const [freshSecret, setFreshSecret] = useState<{
     id: string;

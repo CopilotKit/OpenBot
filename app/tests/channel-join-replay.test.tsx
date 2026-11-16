@@ -32,7 +32,9 @@ import {
   askPersonReplayStart,
   askPersonStored,
 } from "./ask-person-replay.fixture";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { answerBotsList, botPath } from "./bots-api";
+import { conversationOf, conversationPath } from "./conversations-api";
 import {
   ANSWER_TEXT,
   ANSWERED_EARLY,
@@ -42,6 +44,7 @@ import {
   lookupsReplayStart,
   lookupsStored,
 } from "./parallel-lookups.fixture";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /*
  * Opening a conversation joins its thread, and the join replays the thread onto the screen. A Bot's
@@ -165,14 +168,14 @@ beforeAll(() => {
       );
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === "/api/plugins/for/join-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath("join-bot"))
+        return botGrantsResponse();
       if (url.pathname === botPath("join-bot"))
         return NativeResponse.json({
           bot: { id: "join-bot", visibility: "public", canManage: true },
         });
-      if (url.pathname === "/api/components/for-agent/join-bot")
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath("join-bot"))
+        return botComponentsResponse();
       if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       {
@@ -228,17 +231,25 @@ beforeAll(() => {
             topic: TOPIC,
           },
         });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname)) {
         historyReads += 1;
         return history();
       }
       // The conversation's own page, for the test that goes through the router.
-      if (url.pathname === `/api/channels/${channel.id}`)
-        return NativeResponse.json({ channel });
+      if (url.pathname === conversationPath(channel.id))
+        return NativeResponse.json({ conversation: conversationOf(channel) });
       throw new Error(`Unexpected fixture request: ${url.pathname}`);
     },
     {

@@ -44,6 +44,10 @@ pub struct Problem {
     /// Only a Windows restart fixes this, so the window offers one instead of Try again.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub restart_windows: bool,
+    /// Which failure this is, for the commands that connect to an OpenBot that runs elsewhere, so
+    /// the window can choose what to offer next. See `connected::Kind`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
 }
 
 /// Exactly what one confirmed reset removes: the containers first, then the volumes.
@@ -67,6 +71,7 @@ impl Problem {
             database_reset: None,
             leftover: None,
             restart_windows: false,
+            kind: None,
         }
     }
 
@@ -80,6 +85,7 @@ impl Problem {
             database_reset: None,
             leftover: None,
             restart_windows: false,
+            kind: None,
         }
     }
 

@@ -16,13 +16,22 @@ not touch the same lines:
 | `audit-events.yaml` | The audit trail |
 | `accounts.yaml` | People, API keys, sessions, linked accounts and identity providers |
 | `admin-settings.yaml` | Deployment, organization settings, capabilities, network policies, model usage, computer actions and the setup checklist |
-| `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls and conversation join tokens |
+| `conversations.yaml` | Conversations and their members, messages and attachments, tasks, reactions, dictation, voice calls, conversation join tokens and product events |
 | `model-connections.yaml` | The vault, the model key, the model catalogue and model choices |
+| `notifications.yaml` | Devices, destinations, deliveries and notification settings |
+| `components.yaml` | The components a Bot draws, their drafts and publishing, their data functions, and which a Bot may use |
+| `skills.yaml` | Skills |
+| `apps.yaml` | The apps added to OpenBot, the app directory, app setup and each app's account mode and OAuth client |
+| `connections.yaml` | A person's connections to apps and their accounts, and an app's shared connection |
+| `bot-grants.yaml` | What a Bot was given: its grants and apps, giving and taking back an app, and app access requests |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
 | `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
+| `organizations.yaml` | The organizations a person is a member of, and each one's members |
 | `computers.yaml` | A Bot's computer: its state, screen, control, a Bot's actions on it, its files, and the administrator's list |
 | `browsers.yaml` | A Bot's browser and a person's own OpenBot browser |
 | `passwords-and-recorder.yaml` | Sign-in requests, saved logins and the Recorder |
+| `learning.yaml` | OpenBot's side of Automatic learning: Learning settings, each person's spaces and sharing choices, sharing requests, and the skills delivered to Bots |
+| `memory.yaml` | A person's memories and memory sources |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual
@@ -47,6 +56,31 @@ conflict; the bundle and the client are rebuilt from the merged sources, and CI'
 (the bundle matches its sources, the client matches the bundle) catch anything the merge got
 wrong. If both sides changed the same line of `common.yaml`, union keeps both: delete the stale
 one.
+
+## What CI checks
+
+The `API spec` job in `.github/workflows/ci.yml` fails a pull request when:
+
+- `api/openapi.yaml` is not what its sources bundle to, or `app/src/lib/api/generated` is not what
+  it generates;
+- `bun run api:lint` fails. It runs Redocly's strict rules and OpenBot's conventions
+  (`redocly.yaml`, `api/redocly/rules.mjs`): OpenAPI 3.1, every path under
+  `/api/v2/organizations/{organizationId}/`, no path CopilotKit Intelligence already serves
+  (`api/intelligence-reserved.yaml`), errors as `application/problem+json`, an `Idempotency-Key` on
+  every write, and `cursor` and `limit` on every list;
+- the spec breaks a client of the base branch's spec (oasdiff). A change that takes nothing from a
+  client goes through only when it is listed with its reason in
+  [accepted-breaking-changes.md](accepted-breaking-changes.md).
+
+## The live channels
+
+`api/asyncapi.yaml` (AsyncAPI 3.1) describes every WebSocket: a Bot's run as it streams, what
+changed in a person's conversations, a Bot's screen and terminal, a voice call, and what the
+Recorder captures. It is one file, edited by hand, and `bun run api:lint` lints it with the REST
+spec. CI compares it with the base branch's (`bun run api:live:diff <base file> api/asyncapi.yaml`;
+`api/asyncapi-diff.ts` says what counts as breaking), and
+[accepted-live-breaking-changes.md](accepted-live-breaking-changes.md) lists the changes let
+through.
 
 ## Adding an area
 

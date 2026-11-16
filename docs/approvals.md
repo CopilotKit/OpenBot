@@ -1,7 +1,6 @@
 # Approvals
 
-A Bot asks you before some actions. What asks is decided in this order, in
-`server/src/approvals/policy.ts`, and the first answer wins:
+A Bot asks you before some actions. What asks is decided in this order, and the first answer wins:
 
 1. **Kinds of action.** Deleting, sending to other people, sharing, posting, paying, and changing a
    password or account settings ask, in every edition, whatever your own switch says. They are open

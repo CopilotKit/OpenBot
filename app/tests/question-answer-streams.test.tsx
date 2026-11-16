@@ -24,12 +24,14 @@ import {
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { approvalInboxResponse } from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import {
   answerBotAttention,
   answerBotsList,
   attentionOf,
   botPath,
 } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 /**
  * The Bot asked the person a question in their conversation ("Which city?"), and they answered it
@@ -219,14 +221,13 @@ beforeAll(() => {
         input instanceof Request ? input : new Request(url, init);
       const bots = answerBotsList(url, init, { visible: [] });
       if (bots) return bots;
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ skills: [], tools: [] });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
       if (url.pathname === botPath(BOT))
         return NativeResponse.json({
           bot: { id: BOT, visibility: "public", canManage: true },
         });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
       const waiting = answerBotAttention(url, init, {
         bots: [
           attentionOf(BOT, channel.name, {
@@ -296,9 +297,17 @@ beforeAll(() => {
         finishRun?.();
         return NativeResponse.json({ stopped: true });
       }
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
-      if (url.pathname === "/api/voice/sessions")
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
       if (/\/threads\/[^/]+\/messages$/.test(url.pathname))
         return NativeResponse.json({ messages: history });

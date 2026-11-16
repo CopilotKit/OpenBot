@@ -17,12 +17,14 @@ import {
   agentListQueryOptions,
 } from "@/lib/agents/queries";
 import { getBot } from "@/lib/api/generated/bots/bots";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
+import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
+import { useNoBotComputers } from "@/lib/deployment/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
 export const Route = createFileRoute("/_authed/_app/bot")({
@@ -60,7 +62,7 @@ type BotDetailLookup =
 /** One Bot, read through the API (`getBot`): found, or not here at all (404). */
 async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
   try {
-    const { bot } = await getBot(ORGANIZATION_ID, agentId, {
+    const { bot } = await getBot(organizationId(), agentId, {
       fallback: "Couldn't load this Bot.",
     });
     return { bot, status: "found" };
@@ -103,7 +105,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your Bots. Reload the page.
+          Couldn't load your Bots. Try again in a moment.
         </p>
       </div>
     );
@@ -112,7 +114,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot. Reload the page.
+          Couldn't load this Bot. Try again in a moment.
         </p>
       </div>
     );
@@ -146,7 +148,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
    * page can say so instead of letting the Bot answer as if nothing were missing. `startNew`
    * mints another fresh thread on demand for the New chat control below.
    */
-  const { threadId, history, startNew } = useBotThread(agentId);
+  const { threadId, liveThreadId, history, startNew } = useBotThread(agentId);
   /*
    * A turn that ends without an answer has to be said out loud here, because the packaged chat says
    * nothing. It reports a failed run to an `onError` prop and otherwise carries on as though the
@@ -165,6 +167,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
     });
   // A command in the chat clicked opens the Computer on its terminal.
   useOpenComputerOnRequest(agentId, () => showComputer(true));
+  const noComputers = useNoBotComputers() === true;
 
   return (
     <DetailPanel
@@ -194,6 +197,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
             <div className="flex flex-wrap items-start gap-2">
               <ComputerChatControls
                 computerId={agentId}
+                noComputers={noComputers}
                 open={watch === true}
                 onOpenChange={showComputer}
               />
@@ -248,6 +252,18 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
            * old id. A key that omits the thread would leave the previous conversation on screen
            * under a composer that silently posts to the new one.
            */}
+          {/*
+           * A run started elsewhere on this thread is picked up live. Live updates name the thread
+           * by its live id, which the chat is helped to hear only where that is not the id it has.
+           */}
+          {threadId && liveThreadId && liveThreadId !== threadId ? (
+            <LiveThreadUpdates
+              agentId={agentId}
+              key={`${agentId}:${threadId}`}
+              liveThreadId={liveThreadId}
+              threadId={threadId}
+            />
+          ) : null}
           {threadId ? (
             <CopilotChat
               agentId={agentId}

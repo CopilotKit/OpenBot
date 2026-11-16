@@ -90,7 +90,7 @@ export const getListTeamBotsUrl = (
 };
 
 /**
- * Return one page of the published Bots the caller may use or manages: their own publications, the ones published to them by name, to a group they are in or to the whole team, and the ones an administrator assigned them. An administrator sees every one. Who a Team Bot reaches (people, groups and assignments) is shown only to its owner and administrators. Ordered by name, then the Bot's id. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the published Bots the caller may use or manages: their own publications, the ones published to them by name, to a group or team they are in or to everyone in the organization, and the ones an administrator assigned them. An administrator sees every one. Who a Team Bot reaches (people, groups and assignments) is shown only to its owner and administrators. Ordered by name, then the Bot's id. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Team Bots
  */
 export const listTeamBots = async (
@@ -497,8 +497,8 @@ export const getPublishTeamBotUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Publish one of the caller's own Bots to the whole team, or to named people and directory groups, or change who it is published to. Each person's conversations with it are private to them; its owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how teammates tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
- * @summary Publish a Bot to the team
+ * Publish one of the caller's own Bots to everyone in the organization, or to named people, teams and directory groups, or change who it is published to. Each person's conversations with it are private to them; its owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how the people it is published to tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
+ * @summary Publish a Bot to everyone in the organization, or to some of them
  */
 export const publishTeamBot = async (
   organizationId: string,
@@ -610,7 +610,7 @@ export type PublishTeamBotMutationVariables = {
 };
 
 /**
- * @summary Publish a Bot to the team
+ * @summary Publish a Bot to everyone in the organization, or to some of them
  */
 export const usePublishTeamBot = <
   TError =
@@ -649,7 +649,7 @@ export const getUnpublishTeamBotUrl = (
 };
 
 /**
- * Stop publishing a Bot: teammates can't use it until it is published again, and its assignments wait, doing nothing. Its owner or an administrator may unpublish it. Unpublishing a Bot that is not published changes nothing.
+ * Stop publishing a Bot: the people it was published to can't use it until it is published again, and its assignments wait, doing nothing. Its owner or an administrator may unpublish it. Unpublishing a Bot that is not published changes nothing.
  * @summary Unpublish a Team Bot
  */
 export const unpublishTeamBot = async (
@@ -1091,7 +1091,7 @@ export const getAnswerTeamBotConsentUrl = (
 };
 
 /**
- * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own answer and binds nobody else.
+ * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own answer and binds nobody else. Allowing is only for an app the Bot uses, one it holds a tool of; any other app is refused with VALIDATION_ERROR. Skip is accepted for any app.
  * @summary Answer whether a Team Bot may use the caller's account
  */
 export const answerTeamBotConsent = async (

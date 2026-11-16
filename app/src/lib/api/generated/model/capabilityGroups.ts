@@ -3,6 +3,6 @@
  */
 
 /**
- * What each directory group is set to, by the group's name. A group absent sets nothing. Team scopes will be added when teams arrive.
+ * What each directory group is set to, by the group's name. A group absent sets nothing.
  */
 export type CapabilityGroups = { [key: string]: boolean };

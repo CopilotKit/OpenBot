@@ -1,13 +1,15 @@
 import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
 import { Alert, Button, Switch, Text, View } from "react-native";
+import { everyPage, ORGANIZATION_ID } from "../src/api";
 import {
-  api,
-  everyPage,
-  ORGANIZATION,
-  type Routine,
-  type RoutineRun,
-} from "../src/api";
+  deleteRoutine,
+  listRoutineRuns,
+  listRoutines,
+  pauseRoutine,
+  resumeRoutine,
+  runRoutine,
+} from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
 import { RUN_COLORS, RUN_LABELS, when } from "../src/routines";
 import {
@@ -28,15 +30,19 @@ export default function RoutineScreen() {
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
   const loadRoutines = useCallback(
-    () => everyPage<Routine>(`${ORGANIZATION}/routines`, "routines"),
+    () =>
+      everyPage(
+        (page) => listRoutines(ORGANIZATION_ID, page),
+        (page) => page.routines,
+      ),
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
   const loadRuns = useCallback(
     () =>
-      everyPage<RoutineRun>(
-        `${ORGANIZATION}/routines/${encodeURIComponent(routineId)}/runs`,
-        "runs",
+      everyPage(
+        (page) => listRoutineRuns(ORGANIZATION_ID, routineId, page),
+        (page) => page.runs,
       ),
     [routineId],
   );
@@ -47,29 +53,22 @@ export default function RoutineScreen() {
 
   async function setActive(enabled: boolean) {
     await action.run("active", async () => {
-      await api(
-        `${ORGANIZATION}/routines/${encodeURIComponent(routineId)}/${enabled ? "resume" : "pause"}`,
-        { method: "POST" },
+      await (enabled ? resumeRoutine : pauseRoutine)(
+        ORGANIZATION_ID,
+        routineId,
       );
       await routines.refresh();
     });
   }
   async function runNow() {
     await action.run("run", async () => {
-      await api(
-        `${ORGANIZATION}/routines/${encodeURIComponent(routineId)}/run`,
-        {
-          method: "POST",
-        },
-      );
+      await runRoutine(ORGANIZATION_ID, routineId);
       await runs.refresh();
     });
   }
   async function remove() {
     const removed = await action.run("delete", () =>
-      api(`${ORGANIZATION}/routines/${encodeURIComponent(routineId)}`, {
-        method: "DELETE",
-      }),
+      deleteRoutine(ORGANIZATION_ID, routineId),
     );
     if (removed) router.back();
   }

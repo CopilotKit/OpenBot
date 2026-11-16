@@ -125,6 +125,7 @@ jobs:
     outputs:
       becomes_latest: ${{ steps.latest.outputs.becomes_latest }}
       image_repository: ${{ steps.registry.outputs.repository }}
+      release_files: ${{ steps.files.outputs.digest }}
     steps:
       # The whole history and the tags: the policy check reads the database of each release it
       # upgrades from at that release's tag, and a final cut from a candidate is compared with the
@@ -163,11 +164,44 @@ jobs:
               exit 1
             }
           fi
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.6.5
+      # What the OpenBot images of this release were published with: the two Helm charts the release
+      # attaches, and the name of the last migration its server applies, which the policy check
+      # below needs. Fetched at the tag backend-images.env names, which the release PR pinned to
+      # this version, and only once its signature verifies (scripts/release-files.sh). The digest
+      # goes to `tag and release`, which attaches exactly these files.
+      - id: files
+        name: Fetch the release files published with this release's OpenBot images
+        run: |
+          set -euo pipefail
+          tag="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
+          digest="$(scripts/release-files.sh "$tag" "$RUNNER_TEMP/release-files")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Release files of the OpenBot images at '$tag': $digest"
+      # A starting release whose tag carries no migrations says which database it left in the release
+      # manifest it attached. Every one that has a manifest is fetched; the policy check says which
+      # it needed and did not get.
+      - name: Fetch the release manifests of the releases this one upgrades from
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-manifests"
+          while IFS= read -r version; do
+            gh release download "$version" --repo "$GITHUB_REPOSITORY" \
+              --pattern release-manifest.json --output "$RUNNER_TEMP/release-manifests/$version.json" \
+              || echo "$version attached no release manifest."
+          done < <(jq -r '.upgrade.fromVersions[]' release-policy.json)
       # release-policy.json must name this version. One left over from the previous release names
-      # that release, and is refused here, before anything is built or pushed.
+      # that release, and is refused here, before anything is built or pushed. So is one whose
+      # database transition is not the one the migrations make.
       - name: Validate release compatibility and source baseline
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          OPENBOT_RELEASE_FILES: ${{ runner.temp }}/release-files
+          OPENBOT_RELEASE_MANIFESTS: ${{ runner.temp }}/release-manifests
         run: bun scripts/release-manifest.ts --validate-policy
       - id: registry
         name: Resolve this distribution's registry namespace
@@ -379,10 +413,12 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.images.outputs.manifest-artifact }}
-      # The list `image-list` wrote, attached beside it, so the release is never without it.
+      # The list `image-list` wrote, attached beside it, so the release is never without it. Named
+      # for the run and not the attempt: a re-run of this job alone is a new attempt, and the list
+      # was uploaded by the first.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: desktop-images-${{ github.run_id }}-${{ github.run_attempt }}
+          name: desktop-images-${{ github.run_id }}
       # A rerun of a half-published release. The provenance bundle is signed again on every run, so
       # this run's bytes never equal the published ones even when nothing changed. What was published is fetched first; each asset this run produces is
       # compared with it by content, and the published bytes are kept, so the manifest and the
@@ -401,17 +437,33 @@ jobs:
             fi
             echo "OPENBOT_PUBLISHED_ASSETS=$published" >> "$GITHUB_ENV"
           fi
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.6.5
+      # The two Helm charts, `openbot` and `openbot-bundle`, as the OpenBot images of this release
+      # published them: the very files `verify` checked the policy against, fetched again by their
+      # digest and their signature. The step below copies them into release-assets and refuses one
+      # that is not this release's. The release manifest names the `openbot` chart, in the shape it
+      # has always had, so the readers of earlier releases still read it; release-charts.json,
+      # written beside it, lists both.
+      - name: Fetch this release's Helm charts
+        env:
+          RELEASE_FILES: ${{ needs.verify.outputs.release_files }}
+        run: scripts/release-files.sh "$RELEASE_FILES" "$RUNNER_TEMP/release-files" > /dev/null
       - name: Archive exact source and write release manifest
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          OPENBOT_RELEASE_FILES: ${{ runner.temp }}/release-files
         run: bun scripts/release-manifest.ts
       - id: source-provenance
-        name: Authenticate release metadata and source archive
+        name: Authenticate release metadata, source archive and charts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             release-assets/release-manifest.json
+            release-assets/release-charts.json
             release-assets/openbot-source.tar.gz
+            release-assets/*.tgz
             container-images.json
       - name: Save portable provenance bundle
         env:
@@ -558,7 +610,7 @@ jobs:
         with:
           bun-version: 1.4.3
           no-cache: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
       - run: |
@@ -577,9 +629,12 @@ jobs:
           cat desktop-images.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-images-${{ github.run_id }}-${{ github.run_attempt }}
+          # One name for every attempt of this run, which `tag and release` reads; a re-run of the
+          # whole workflow writes it again.
+          name: desktop-images-${{ github.run_id }}
           path: desktop-images.json
           if-no-files-found: error
+          overwrite: true
 
   # A candidate or beta's ad-hoc and unsigned installers, onto the release once `desktop` has built
   # them, so testers have a link before signing is approved. Signing is already running by now, and

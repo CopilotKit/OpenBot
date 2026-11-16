@@ -16,7 +16,7 @@ OpenBot asks the server, with no credential, how it is reached:
 The consent request uses PKCE (S256) and the `resource` parameter (RFC 8707). The callback checks the
 `iss` the server sends back against the issuer it discovered (RFC 9207) before redeeming the code.
 Discovery, registration, the authorization URL, the code exchange and refresh are the MCP TypeScript
-SDK's own (`@modelcontextprotocol/sdk/client/auth`), in `server/src/plugins/remote-oauth.ts`.
+SDK's own (`@modelcontextprotocol/sdk/client/auth`).
 
 Each person's token set (access token, refresh token, expiry) is encrypted in the vault as an
 `mcp_user_token`, like the catalogue's OAuth apps. The access token is used until it is about to
@@ -38,7 +38,7 @@ whose metadata names a resource for a different address, or whose authorization 
 a different issuer, is refused.
 
 `OPENBOT_ALLOW_LOOPBACK_MCP=1` admits `http://127.0.0.1:<port>` and `[::1]` for development and the
-end-to-end tests (`server/tests/support/oauth-mcp-server.ts` is a real OAuth MCP server for them).
+end-to-end tests, which run a real OAuth MCP server on this machine.
 Leave it unset anywhere people use OpenBot.
 
 ## The MCP allowlist (team edition)

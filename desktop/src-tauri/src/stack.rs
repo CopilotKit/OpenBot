@@ -6847,6 +6847,15 @@ fn main() {
     // it is asked. Every command is in the record above.
     if scenario == "installed-services" {
         let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        // Podman is addressed by a connection; Docker here is not.
+        let podman = args.first().map(String::as_str) == Some("--connection");
+        // An engine's images are the same wherever a command about them runs from: they are kept
+        // beside the installation the record is named after.
+        if matches!(actual.first().map(String::as_str), Some("image") | Some("version")) {
+            if let Ok(record) = std::env::var("OPENBOT_TEST_ENGINE_RECORD") {
+                std::env::set_current_dir(std::path::PathBuf::from(record).with_extension("")).unwrap();
+            }
+        }
         let listed = || -> Vec<(String, String, String)> {
             std::fs::read_to_string(".fixture-containers").unwrap_or_default().lines().map(|line| {
                 let mut fields = line.split('\t').map(str::to_string);
@@ -6879,6 +6888,89 @@ fn main() {
             }
             Some("compose") if actual == ["compose", "pull", "--help"] => {
                 println!("      --policy string   Apply pull policy (\"missing\"|\"always\")");
+            }
+            // An engine that is not answering, where `.fixture-engine-not-answering` says so, in
+            // each engine's own words and with its own exit code.
+            Some("image") | Some("version") if std::path::Path::new(".fixture-engine-not-answering").exists() => {
+                if podman {
+                    eprintln!("Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start` to manage a new Linux VM");
+                    std::process::exit(125);
+                }
+                eprintln!("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?");
+                std::process::exit(1);
+            }
+            Some("version") => println!("1.51"),
+            // The engine's images: `.fixture-images` lists them, one `reference<TAB>id,id` a line,
+            // the ids being the containers made from it. `image inspect` finds one or does not.
+            // `image rm` removes one as Docker 29 and Podman 6 do without `--force`: an image a
+            // container that still exists was made from is refused, running or stopped (Docker
+            // exits 1, Podman 2), and one the engine does not have is an error (both exit 1). It
+            // is never asked to force, and never to prune.
+            Some("image") => {
+                assert!(
+                    actual.len() == 3 && !actual.iter().any(|arg| arg == "--force" || arg == "-f" || arg == "prune"),
+                    "{actual:?}"
+                );
+                let reference = actual[2].as_str();
+                let images: Vec<(String, Vec<String>)> = std::fs::read_to_string(".fixture-images").unwrap_or_default().lines().map(|line| {
+                    let (name, made) = line.split_once('\t').unwrap_or((line, ""));
+                    (name.to_string(), made.split(',').filter(|id| !id.is_empty()).map(str::to_string).collect())
+                }).collect();
+                let found = images.iter().find(|(name, _)| name == reference);
+                let unknown = || {
+                    if podman { eprintln!("Error: {reference}: image not known"); }
+                    else { eprintln!("Error response from daemon: No such image: {reference}"); }
+                };
+                match (actual[1].as_str(), found) {
+                    ("inspect", Some(_)) => println!("[{{\"RepoDigests\":[\"{reference}\"]}}]"),
+                    ("inspect", None) => {
+                        println!("[]");
+                        unknown();
+                        std::process::exit(if podman { 125 } else { 1 });
+                    }
+                    ("rm", None) => {
+                        unknown();
+                        std::process::exit(1);
+                    }
+                    ("rm", Some((_, made))) => {
+                        let existing: Vec<String> = listed().into_iter().map(|(id, _, _)| id).collect();
+                        if let Some(user) = made.iter().find(|id| existing.contains(id)) {
+                            if podman {
+                                eprintln!("Error: image used by {user}: image is in use by a container: consider listing external containers and force-removing image");
+                                std::process::exit(2);
+                            }
+                            eprintln!("Error response from daemon: conflict: unable to delete {reference} (must be forced) - container {user} is using its referenced image {reference}");
+                            std::process::exit(1);
+                        }
+                        let remaining: String = images.iter()
+                            .filter(|(name, _)| name != reference)
+                            .map(|(name, made)| format!("{name}\t{}\n", made.join(",")))
+                            .collect();
+                        std::fs::write(".fixture-images", remaining).unwrap();
+                        println!("Untagged: {reference}");
+                    }
+                    _ => panic!("unexpected command: {actual:?}"),
+                }
+            }
+            // What Compose answers for the files OpenBot publishes, where the engine has images to
+            // list: the database image the file names, and the server's and the computer's from
+            // the variables Desktop hands it (`deployment::IMAGE_VARIABLES`), each once.
+            Some("compose")
+                if std::path::Path::new(".fixture-images").exists()
+                    && actual.iter().any(|arg| arg == "--images") =>
+            {
+                let file = std::fs::read_to_string("docker-compose.yml").unwrap();
+                let database = file.lines()
+                    .skip_while(|line| line.trim_end() != "  postgres:")
+                    .find_map(|line| line.strip_prefix("    image: "))
+                    .unwrap()
+                    .to_string();
+                let mut images = vec![database];
+                for variable in ["SERVER_IMAGE", "COMPUTER_IMAGE"] {
+                    let image = std::env::var(variable).unwrap();
+                    if !images.contains(&image) { images.push(image); }
+                }
+                for image in images { println!("{image}"); }
             }
             // Compose's own container bookkeeping, where `.fixture-compose-containers` asks for it.
             // `up` makes a container for each service it is given, and for `migrate` when the
@@ -10475,6 +10567,550 @@ fn main() {
             down(&docker, &root).unwrap();
             up(&docker, &root, false, &Secrets::new()).unwrap();
             assert!(!std::fs::read_to_string(&record).unwrap().contains("\trm "));
+        }
+    }
+
+    /// A release as an update lays it out: its Compose file and the image list it publishes.
+    struct Release {
+        version: &'static str,
+        compose: String,
+        images: String,
+    }
+
+    /// One of OpenBot's published images, pinned by digest as a release's image list names it.
+    fn published(name: &str, digest: char) -> String {
+        format!(
+            "ghcr.io/copilotkit/{name}@sha256:{}",
+            digest.to_string().repeat(64)
+        )
+    }
+
+    fn image_list(version: &str, images: &[(&str, String)]) -> String {
+        let images: serde_json::Map<String, serde_json::Value> = images
+            .iter()
+            .map(|(name, reference)| {
+                (
+                    (*name).to_string(),
+                    serde_json::json!({ "reference": reference }),
+                )
+            })
+            .collect();
+        serde_json::json!({ "version": version, "images": images }).to_string()
+    }
+
+    /// The database image an earlier release's Compose file named, which this release's does not.
+    const EARLIER_DATABASE: &str = "pgvector/pgvector:pg16";
+    const THIS_DATABASE: &str = "pgvector/pgvector:pg17";
+
+    /// 1.0.3 as it was published: a server image and a computer image of their own. Its database
+    /// is named here by a tag this release's file has moved on from, so an image an earlier
+    /// release pulled that is not OpenBot's own is on the engine too.
+    fn earlier_release() -> Release {
+        Release {
+            version: "v1.0.3",
+            compose: RELEASED_COMPOSE_1_0_3.replace(THIS_DATABASE, EARLIER_DATABASE),
+            images: image_list(
+                "v1.0.3",
+                &[
+                    ("server", published("openbot-server", 'a')),
+                    ("supervisor", published("openbot-supervisor", 'a')),
+                    ("agent-computer", published("openbot-agent-computer", 'a')),
+                    (
+                        "agent-claude-sdk",
+                        published("openbot-agent-claude-sdk", 'c'),
+                    ),
+                    (
+                        "agent-langgraph-agui",
+                        published("openbot-agent-langgraph-agui", 'a'),
+                    ),
+                ],
+            ),
+        }
+    }
+
+    /// A release with this tree's Compose file: the server and the computer run from the one
+    /// OpenBot image, at `digest`. Its first sign-in image is the one 1.0.3 published, unchanged.
+    fn release_with_this_file(version: &'static str, digest: char) -> Release {
+        Release {
+            version,
+            compose: THIS_RELEASES_COMPOSE.to_string(),
+            images: image_list(
+                version,
+                &[
+                    ("server", published("openbot", digest)),
+                    ("supervisor", published("openbot-supervisor", digest)),
+                    ("agent-computer", published("openbot", digest)),
+                    (
+                        "agent-claude-sdk",
+                        published("openbot-agent-claude-sdk", 'c'),
+                    ),
+                    (
+                        "agent-langgraph-agui",
+                        published("openbot-agent-langgraph-agui", digest),
+                    ),
+                ],
+            ),
+        }
+    }
+
+    /// Images on the engine that are nobody's to remove but their owner's: somebody else's, and
+    /// the ones the backend's own tool pulled for a backend it runs on this computer.
+    const NOT_OPENBOTS: [&str; 3] = [
+        "redis:7-alpine",
+        "ghcr.io/copilotkit/intelligence/app-api:0.16.0-rc.9",
+        "docker.io/rancher/k3s@sha256:53cf744fe2fabf140cee240d2db70d13a4f2d98f1a13c98f58f457f423096917",
+    ];
+
+    fn lay_out_release(root: &Path, release: &Release) {
+        std::fs::write(root.join("docker-compose.yml"), &release.compose).unwrap();
+        std::fs::write(crate::deployment::images_path(root), &release.images).unwrap();
+        crate::deployment::record(root, release.version, false).unwrap();
+    }
+
+    /// The images on the fake engine, by reference.
+    fn engine_images(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join(".fixture-images"))
+            .unwrap()
+            .lines()
+            .map(|line| line.split('\t').next().unwrap().to_string())
+            .collect()
+    }
+
+    /// Install what is laid out, as the window's Install does: ask which images the installation
+    /// runs (`preparation::installation_pull_set`), pull the ones the engine does not have, and
+    /// record the finished install with the engine checked for each (`preparation::complete`).
+    fn install_release(engine: &Address, root: &Path) -> Result<(), Problem> {
+        let images = crate::preparation::installation_pull_set(engine, root, root, None)?;
+        let mut store = std::fs::read_to_string(root.join(".fixture-images")).unwrap();
+        for image in &images {
+            if !engine_images(root).contains(image) {
+                store.push_str(&format!("{image}\t\n"));
+            }
+        }
+        std::fs::write(root.join(".fixture-images"), store).unwrap();
+        crate::preparation::complete(root, None, images, engine)
+    }
+
+    /// Say that `container` was made from `image`, as the engine knows it.
+    fn made_from(root: &Path, image: &str, container: &str) {
+        let store: String = std::fs::read_to_string(root.join(".fixture-images"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                if line.split('\t').next() == Some(image) {
+                    format!("{image}\t{container}\n")
+                } else {
+                    format!("{line}\n")
+                }
+            })
+            .collect();
+        std::fs::write(root.join(".fixture-images"), store).unwrap();
+    }
+
+    /// The update's steps (`upgrade::Steps`) with each release's own images, through the
+    /// functions Install, Start and Stop use, on the fake engine. There is no database to dump.
+    struct UpdateToRelease<'a> {
+        engine: &'a Address,
+        root: &'a Path,
+        to: &'a Release,
+    }
+
+    impl crate::upgrade::Steps for UpdateToRelease<'_> {
+        fn stop(&mut self) -> Result<(), Problem> {
+            down(self.engine, self.root).map_err(Problem::from)
+        }
+        fn has_database(&mut self) -> Result<bool, Problem> {
+            Ok(false)
+        }
+        fn back_up(&mut self, _to: &Path) -> Result<(), Problem> {
+            unreachable!("there is no database to back up")
+        }
+        fn lay_out(&mut self) -> Result<(), Problem> {
+            lay_out_release(self.root, self.to);
+            Ok(())
+        }
+        fn install(&mut self) -> Result<(), Problem> {
+            install_release(self.engine, self.root)
+        }
+        fn start(&mut self) -> Result<(), Problem> {
+            up(self.engine, self.root, false, &Secrets::new()).map(|_| ())
+        }
+        fn restore(&mut self, _from: &Path) -> Result<(), Problem> {
+            unreachable!("there is no dump to restore")
+        }
+    }
+
+    /// 1.0.3 installed and running on an engine that also holds images that are not OpenBot's.
+    fn running_earlier_release_with_images(
+        path: &PathFixture,
+        engine: &Address,
+        label: &str,
+    ) -> (PathBuf, PathBuf) {
+        let earlier = earlier_release();
+        let (root, record) = installed_services_root(path, label, &earlier.compose, "");
+        std::fs::write(root.join(".fixture-compose-containers"), "").unwrap();
+        let others: String = NOT_OPENBOTS
+            .iter()
+            .map(|image| format!("{image}\t\n"))
+            .collect();
+        std::fs::write(root.join(".fixture-images"), others).unwrap();
+        lay_out_release(&root, &earlier);
+        install_release(engine, &root).unwrap();
+        up(engine, &root, false, &Secrets::new()).unwrap();
+        std::fs::remove_file(&record).unwrap();
+        (root, record)
+    }
+
+    /// The images still to be removed, as the installation's list holds them.
+    fn listed_for_removal(root: &Path) -> Vec<String> {
+        let Ok(bytes) = std::fs::read(root.join(crate::superseded_images::FILE)) else {
+            return Vec::new();
+        };
+        let list: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        list["images"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|image| image.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// What the engine was asked about its images, without the connection Podman is named by.
+    fn image_commands(record: &Path) -> Vec<String> {
+        engine_commands(record)
+            .into_iter()
+            .map(|command| {
+                command
+                    .strip_prefix("--connection fixture-machine ")
+                    .unwrap_or(&command)
+                    .to_string()
+            })
+            .filter(|command| command.starts_with("image "))
+            .collect()
+    }
+
+    /// The images the engine was asked to remove, in the order it was asked.
+    fn asked_to_remove(record: &Path) -> Vec<String> {
+        image_commands(record)
+            .into_iter()
+            .filter_map(|command| command.strip_prefix("image rm ").map(str::to_string))
+            .collect()
+    }
+
+    /// Every entry logged in this process. Only a test that runs alone in its process
+    /// (`isolated_process`) installs it.
+    static UPDATE_LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    struct KeepUpdateLog;
+
+    impl log::Log for KeepUpdateLog {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            UPDATE_LOGGED
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", record.level(), record.args()));
+        }
+        fn flush(&self) {}
+    }
+
+    /// The update from 1.0.3 left its server and computer images on the engine beside the new
+    /// release's (1.62 GB and 1.45 GB on a Mac under Podman and on Windows). Once the new release
+    /// has started, the images only the earlier release ran are removed, one `image rm` each and
+    /// none forced: its server, its computer and the sign-in image this release replaced. What
+    /// this release runs stays, the sign-in image both releases share included. So does every
+    /// image that is not OpenBot's own: the database image the earlier file named by a tag,
+    /// somebody else's image, and the ones the backend's own tool pulled. On Docker and on Podman.
+    #[test]
+    fn an_update_removes_the_previous_releases_images_once_the_new_release_has_started() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_removes_the_previous_releases_images_once_the_new_release_has_started",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let (root, record) =
+                running_earlier_release_with_images(&path, &engine, &format!("images-{name}"));
+            let earlier = [
+                published("openbot-agent-computer", 'a'),
+                published("openbot-agent-langgraph-agui", 'a'),
+                published("openbot-server", 'a'),
+            ];
+            let shared = published("openbot-agent-claude-sdk", 'c');
+            for image in earlier.iter().chain([&shared]) {
+                assert!(engine_images(&root).contains(image), "{name}: {image}");
+            }
+
+            let this = release_with_this_file("v1.0.4", 'b');
+            let mut steps = UpdateToRelease {
+                engine: &engine,
+                root: &root,
+                to: &this,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Moved), "{name}: {ran:?}");
+            // The update itself removed no image: everything it could go back to was there
+            // until the new release had started.
+            assert_eq!(asked_to_remove(&record), [""; 0], "{name}");
+
+            let removed = crate::superseded_images::remove(&engine, &root);
+            assert_eq!(removed, earlier, "{name}");
+            assert_eq!(asked_to_remove(&record), earlier, "{name}");
+            let mut left = engine_images(&root);
+            left.sort();
+            let mut expected: Vec<String> =
+                NOT_OPENBOTS.iter().map(|image| image.to_string()).collect();
+            expected.extend([
+                EARLIER_DATABASE.to_string(),
+                THIS_DATABASE.to_string(),
+                published("openbot", 'b'),
+                published("openbot-agent-langgraph-agui", 'b'),
+                shared,
+            ]);
+            expected.sort();
+            assert_eq!(left, expected, "{name}");
+            // Nothing is left to try again, and the next Start asks for nothing.
+            assert!(
+                !root.join(crate::superseded_images::FILE).exists(),
+                "{name}"
+            );
+            std::fs::remove_file(&record).unwrap();
+            up(&engine, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(crate::superseded_images::remove(&engine, &root), [""; 0]);
+            assert_eq!(image_commands(&record), [""; 0], "{name}");
+        }
+    }
+
+    /// An update whose new release does not start goes back to the earlier one, which needs
+    /// every image it had. None is listed for removal and the engine is asked to remove none,
+    /// then or after the earlier release has started again.
+    #[test]
+    fn an_update_that_did_not_start_removes_no_image() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_update_that_did_not_start_removes_no_image",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, record) = running_earlier_release_with_images(&path, &docker, "images-kept");
+        let before = engine_images(&root);
+        std::fs::write(root.join(".fixture-this-release-does-not-start"), "").unwrap();
+
+        let this = release_with_this_file("v1.0.4", 'b');
+        let mut steps = UpdateToRelease {
+            engine: &docker,
+            root: &root,
+            to: &this,
+        };
+        let ran = crate::upgrade::run(&root, &mut steps);
+        assert!(matches!(ran, crate::upgrade::Ran::Kept(_)), "{ran:?}");
+        assert_eq!(
+            crate::deployment::installed(&root).unwrap().version,
+            "v1.0.3"
+        );
+
+        assert!(!root.join(crate::superseded_images::FILE).exists());
+        assert_eq!(crate::superseded_images::remove(&docker, &root), [""; 0]);
+        assert_eq!(asked_to_remove(&record), [""; 0]);
+        // Everything the earlier release runs is still there, beside what the update pulled.
+        let after = engine_images(&root);
+        for image in &before {
+            assert!(after.contains(image), "{image} is gone");
+        }
+    }
+
+    /// An image a container was made from cannot go yet: the earlier computer image, which a
+    /// stopped Bot computer of this installation still uses, and the earlier server image, which
+    /// a container of another Compose project uses. The engine refuses each, in its own words and
+    /// with its own exit code, and that is not a failure of anything: it is logged, the image
+    /// stays on the list beside the installation, and it is tried again after the next start. An
+    /// engine that is not answering removes nothing and forgets nothing. An image that is gone by
+    /// the time it is tried comes off the list.
+    #[test]
+    fn an_image_a_container_still_uses_stays_and_is_removed_after_a_later_start() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_image_a_container_still_uses_stays_and_is_removed_after_a_later_start",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let _ = log::set_boxed_logger(Box::new(KeepUpdateLog));
+        log::set_max_level(log::LevelFilter::Info);
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let (root, record) =
+                running_earlier_release_with_images(&path, &engine, &format!("images-used-{name}"));
+            let computer = published("openbot-agent-computer", 'a');
+            let server = published("openbot-server", 'a');
+            let sign_in = published("openbot-agent-langgraph-agui", 'a');
+            let mut containers = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
+            containers.push_str("computer-ada-1\topenbot-desktop-computers\tcomputer\n");
+            containers.push_str("elsewhere-1\tanother-project\tserver\n");
+            std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+            made_from(&root, &computer, "computer-ada-1");
+            made_from(&root, &server, "elsewhere-1");
+
+            let this = release_with_this_file("v1.0.4", 'b');
+            let mut steps = UpdateToRelease {
+                engine: &engine,
+                root: &root,
+                to: &this,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Moved), "{name}: {ran:?}");
+
+            UPDATE_LOGGED.lock().unwrap().clear();
+            assert_eq!(
+                crate::superseded_images::remove(&engine, &root),
+                [sign_in.as_str()],
+                "{name}"
+            );
+            assert_eq!(
+                listed_for_removal(&root),
+                [computer.clone(), server.clone()],
+                "{name}"
+            );
+            for image in [&computer, &server] {
+                assert!(engine_images(&root).contains(image), "{name}: {image}");
+            }
+            // Each refusal is in the log with what the engine said, and nowhere else.
+            let logged = UPDATE_LOGGED.lock().unwrap().join("\n");
+            let refusal = if name == "podman" {
+                "image is in use by a container"
+            } else {
+                "is using its referenced image"
+            };
+            for image in [&computer, &server] {
+                assert!(
+                    logged.lines().any(|line| line.starts_with("INFO ")
+                        && line.contains(&format!("left {image}"))
+                        && line.contains(refusal)),
+                    "{name}: {logged}"
+                );
+            }
+
+            // An engine that is not answering: nothing removed, nothing forgotten.
+            std::fs::write(root.join(".fixture-engine-not-answering"), "").unwrap();
+            assert_eq!(crate::superseded_images::remove(&engine, &root), [""; 0]);
+            assert_eq!(
+                listed_for_removal(&root),
+                [computer.clone(), server.clone()],
+                "{name}"
+            );
+            std::fs::remove_file(root.join(".fixture-engine-not-answering")).unwrap();
+
+            // The Bot computer is gone by the next Start, and its image goes after it. The other
+            // project still has its container, and its image stays.
+            let containers: String = std::fs::read_to_string(root.join(".fixture-containers"))
+                .unwrap()
+                .lines()
+                .filter(|line| !line.starts_with("computer-ada-1\t"))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+            std::fs::remove_file(&record).unwrap();
+            up(&engine, &root, false, &Secrets::new()).unwrap();
+            assert_eq!(
+                crate::superseded_images::remove(&engine, &root),
+                [computer.as_str()],
+                "{name}"
+            );
+            assert_eq!(
+                asked_to_remove(&record),
+                [computer.clone(), server.clone()],
+                "{name}"
+            );
+            assert_eq!(listed_for_removal(&root), [server.as_str()], "{name}");
+            assert!(engine_images(&root).contains(&server), "{name}");
+
+            // Somebody removes that container and the image themselves: nothing is left to do.
+            let store: String = std::fs::read_to_string(root.join(".fixture-images"))
+                .unwrap()
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{server}\t")))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            std::fs::write(root.join(".fixture-images"), store).unwrap();
+            assert_eq!(crate::superseded_images::remove(&engine, &root), [""; 0]);
+            assert!(
+                !root.join(crate::superseded_images::FILE).exists(),
+                "{name}"
+            );
+        }
+    }
+
+    /// An installation updated twice while an image of the first release could not go: the list
+    /// holds what both updates left, the second update's images are removed after it starts, and
+    /// the image still in use is still waiting. Nothing the installed release runs is on it.
+    #[test]
+    fn an_installation_updated_again_still_removes_what_every_earlier_release_left() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_installation_updated_again_still_removes_what_every_earlier_release_left",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        let [docker, _] = computer_stop_addresses(&path);
+        let (root, _record) = running_earlier_release_with_images(&path, &docker, "images-twice");
+        let server = published("openbot-server", 'a');
+        let mut containers = std::fs::read_to_string(root.join(".fixture-containers")).unwrap();
+        containers.push_str("elsewhere-1\tanother-project\tserver\n");
+        std::fs::write(root.join(".fixture-containers"), containers).unwrap();
+        made_from(&root, &server, "elsewhere-1");
+
+        for (version, digest) in [("v1.0.4", 'b'), ("v1.0.5", 'd')] {
+            let next = release_with_this_file(version, digest);
+            let mut steps = UpdateToRelease {
+                engine: &docker,
+                root: &root,
+                to: &next,
+            };
+            let ran = crate::upgrade::run(&root, &mut steps);
+            assert!(matches!(ran, crate::upgrade::Ran::Moved), "{ran:?}");
+            if version == "v1.0.4" {
+                // The app closes before anything is removed; the list is beside the installation.
+                assert_eq!(listed_for_removal(&root).len(), 4);
+            }
+        }
+        // What 1.0.3 and 1.0.4 pulled, without what 1.0.5 runs.
+        assert_eq!(
+            listed_for_removal(&root),
+            [
+                published("openbot-agent-claude-sdk", 'c'),
+                published("openbot-agent-computer", 'a'),
+                published("openbot-agent-langgraph-agui", 'a'),
+                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot-server", 'a'),
+                published("openbot", 'b'),
+            ]
+        );
+        assert_eq!(
+            crate::superseded_images::remove(&docker, &root),
+            [
+                published("openbot-agent-computer", 'a'),
+                published("openbot-agent-langgraph-agui", 'a'),
+                published("openbot-agent-langgraph-agui", 'b'),
+                published("openbot", 'b'),
+            ]
+        );
+        assert_eq!(listed_for_removal(&root), [server.as_str()]);
+        let left = engine_images(&root);
+        for image in [
+            server,
+            published("openbot", 'd'),
+            published("openbot-agent-langgraph-agui", 'd'),
+            published("openbot-agent-claude-sdk", 'c'),
+        ] {
+            assert!(left.contains(&image), "{image} is gone");
         }
     }
 

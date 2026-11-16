@@ -68,8 +68,11 @@ export type LocalStartable = {
  * `deferred` is a Start that did not run yet because something else has to happen first, such as
  * the installation that Start found it needs. Whoever deferred it gives the go-ahead again once
  * that is done, so it is not a failure and is never said as one.
+ *
+ * `opening` is a Start whose window is becoming OpenBot (`handover.ts`): its rows stay as they are,
+ * the last one running, until OpenBot's page replaces them.
  */
-export type StartOutcome = "started" | "failed" | "deferred";
+export type StartOutcome = "started" | "failed" | "deferred" | "opening";
 
 /**
  * Between status checks while Intelligence reports that it is starting: about three minutes in
@@ -168,6 +171,11 @@ type State = {
    * release it had is still there and still runs.
    */
   updateFailed: string | null;
+  /**
+   * The update that failed left the back end not working (`leftNotWorking`): the one case its row
+   * says Failed. Otherwise it is a note on the row, under a Start that carries on.
+   */
+  updateBroke: boolean;
   /** The phase this run began at, and when: the whole journey on screen counts from here. */
   began: Phase | null;
   runSince: number | null;
@@ -199,6 +207,7 @@ const idle: State = {
   detail: null,
   download: null,
   updateFailed: null,
+  updateBroke: false,
   began: null,
   runSince: null,
   trail: [],
@@ -209,8 +218,12 @@ const idle: State = {
   held: null,
 };
 
-/** The row an update that failed is said on, under the back end's. */
-const UPDATING = "Updating OpenBot";
+/**
+ * The row an update of the back end that did not happen is said on, under the back end's row. Named
+ * by the part, as the Status window and Quit name it: OpenBot's own update has a row of its own, and
+ * on Windows K the two read as one, "Updating OpenBot · Failed" over a Start still updating OpenBot.
+ */
+const UPDATING = "Updating OpenBot's services";
 
 /**
  * The back end's row while it updates. How long it takes and what it is doing now are the
@@ -231,13 +244,26 @@ export const RELEASE_SAID =
  *
  * `runsWhatItHad` false when the update left the back end not working (paused services): then it
  * does not run the version it had, and Retry is what tries the update again.
+ *
+ * Not a failure of the Start when they run the version they had: OpenBot starts on it, and the
+ * next Start tries the update again. A refusal before it began counts the same, `release_unavailable`
+ * included: the CLI could not get the release this app installs (its download was out of reach on
+ * Windows K), not that there was no newer one, which the status had already said there was.
  */
 function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
-  const where = step ? ` It stopped while ${updateStepSaid(step)}.` : "";
-  return runsWhatItHad
-    ? `OpenBot couldn't finish updating, so it runs the version it had.${where} Your data is kept, and OpenBot tries again the next time it starts.`
-    : `OpenBot couldn't finish updating.${where} Your data is kept. Retry to try the update again.`;
+  const where = step
+    ? ` The update stopped while ${updateStepSaid(step)}.`
+    : "";
+  if (!runsWhatItHad)
+    return `OpenBot's services couldn't finish updating.${where} Your data is kept. Retry to try the update again.`;
+  return step
+    ? `OpenBot's services couldn't finish updating, so they run the version they had.${where} Your data is kept, and OpenBot tries again the next time it starts.`
+    : "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.";
 }
+
+/** An update of the back end that stopped downloading: they run the version they had. */
+const UPDATE_STALLED_SAID =
+  "The update of OpenBot's services stopped downloading, so they run the version they had. OpenBot picks up the download the next time it starts.";
 
 export type LocalSequence = State & {
   /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
@@ -548,8 +574,9 @@ export function useLocalSequence({
       updateFailed: updated
         ? null
         : stalled
-          ? "The update stopped downloading, so OpenBot runs the version it had. It picks up the download the next time it starts."
+          ? UPDATE_STALLED_SAID
           : updateFailedSaid(null),
+      updateBroke: false,
     });
     return true;
   }
@@ -691,6 +718,7 @@ export function useLocalSequence({
       if (failedTo && (failedStep || leftNotWorking)) {
         update({
           updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
+          updateBroke: leftNotWorking,
         });
       }
       /*
@@ -760,6 +788,7 @@ export function useLocalSequence({
       detail: null,
       download: null,
       updateFailed: null,
+      updateBroke: false,
       held: null,
     });
     const { root } = latest.current;
@@ -901,6 +930,8 @@ export function useLocalSequence({
         go.current = false;
         // Waiting on something else, which gives the go-ahead again when it is done.
         if (outcome === "deferred") return stop();
+        // The window is becoming OpenBot: nothing here changes before OpenBot's page replaces it.
+        if (outcome === "opening") return;
       }
     }
     stop();
@@ -1024,9 +1055,20 @@ export function useLocalSequence({
               : stopped
                 ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
                 : { step: label, ok: true, detail: "" };
-      return phase === "wait" && state.updateFailed
-        ? [row, { step: UPDATING, ok: false, detail: state.updateFailed }]
-        : [row];
+      if (phase !== "wait" || !state.updateFailed) return [row];
+      // Failed only when it left the services not working, which stops the Start. Otherwise a
+      // note: the services run the version they had, and the Start carries on over them.
+      return [
+        row,
+        state.updateBroke
+          ? { step: UPDATING, ok: false, detail: state.updateFailed }
+          : {
+              step: UPDATING,
+              ok: true,
+              note: "Not updated",
+              detail: state.updateFailed,
+            },
+      ];
     },
   );
 

@@ -23,6 +23,7 @@ import { ProactiveResearchSettings } from "@/components/suggestions/proactive-pa
 import { queryClient } from "@/query-client";
 import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -128,14 +129,13 @@ function serving() {
           proactive: "on",
         },
       });
-    if (path.startsWith("/api/channels"))
-      return Response.json({
-        channels: [
+    if (path.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json(
+        conversationPage([
           channel("own", "Expense reports", false),
           channel("task", "Deno 2.9.8 Upgrade Review", true),
-        ],
-        nextCursor: null,
-      });
+        ]),
+      );
     const bots = answerBotsList(input, init, {
       visible: [{ id: "expenses", name: "Expenses" }],
     });

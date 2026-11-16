@@ -9,18 +9,29 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { api, type ControlState, type Screenshot } from "../src/api";
+import {
+  type ComputerControl,
+  ORGANIZATION_ID,
+  organizationAddress,
+} from "../src/api";
+import {
+  getComputerControl,
+  getComputerScreenshot,
+  releaseComputerControl,
+  requestComputerControl,
+  sendComputerHumanInput,
+  supplyComputerSecret,
+  takeComputerControl,
+} from "../src/api/generated/computers/computers";
+import type { ComputerHumanInput } from "../src/api/generated/model";
 import { authClient, serverUrl } from "../src/auth";
 import { colors, input, muted, Problem, Screen, useAction } from "../src/ui";
 
 type Frame = { uri: string; width: number; height: number };
 
-const path = (botId: string, rest: string) =>
-  `/api/computers/${encodeURIComponent(botId)}${rest}`;
-
 /** The Bot's screen, live: the API's `computers/{botId}/screen` socket (api/asyncapi.yaml). */
 const screenSocketPath = (botId: string) =>
-  `/api/v2/organizations/default/computers/${encodeURIComponent(botId)}/screen`;
+  organizationAddress(`/computers/${encodeURIComponent(botId)}/screen`);
 
 /**
  * The live screen: frames from the same authenticated stream the web view uses, with a screenshot
@@ -37,8 +48,10 @@ function useLiveFrame(botId: string, enabled: boolean) {
     streaming.current = false;
     void (async () => {
       const cookie = await authClient.getCookie();
-      if (closed) return;
-      const url = `${serverUrl.replace(/^http/, "ws")}${screenSocketPath(botId)}`;
+      // Which organization could not be read: the screenshot poll below says why.
+      const path = await screenSocketPath(botId).catch(() => undefined);
+      if (closed || path === undefined) return;
+      const url = `${serverUrl.replace(/^http/, "ws")}${path}`;
       // React Native's WebSocket accepts headers, which is how the session cookie reaches the upgrade.
       const Native = WebSocket as unknown as new (
         url: string,
@@ -87,11 +100,9 @@ function useLiveFrame(botId: string, enabled: boolean) {
     const poll = setInterval(async () => {
       if (streaming.current || AppState.currentState !== "active") return;
       try {
-        const shot = await api<Screenshot | { frame: Screenshot }>(
-          path(botId, "/screenshot"),
-        );
-        const value = "frame" in shot ? shot.frame : shot;
-        if (closed || streaming.current || !value?.base64) return;
+        // A frame, or `ready: false` for a computer that is asleep or starting, which this does not wake.
+        const value = await getComputerScreenshot(ORGANIZATION_ID, botId);
+        if (closed || streaming.current || !("base64" in value)) return;
         setFrame({
           uri: `data:image/png;base64,${value.base64}`,
           width: value.width,
@@ -123,7 +134,7 @@ export default function ComputerScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
-  const [control, setControl] = useState<ControlState | null>(null);
+  const [control, setControl] = useState<ComputerControl | null>(null);
   const [requestId, setRequestId] = useState("");
   const [text, setText] = useState("");
   const [secret, setSecret] = useState("");
@@ -133,11 +144,10 @@ export default function ComputerScreen() {
   const driving = control?.holder === "human" && !control.transitioning;
 
   const readControl = useCallback(async () => {
-    const state = await api<ControlState>(
-      path(
-        botId,
-        `/control${requestId ? `?requestId=${encodeURIComponent(requestId)}` : ""}`,
-      ),
+    const state = await getComputerControl(
+      ORGANIZATION_ID,
+      botId,
+      requestId ? { requestId } : undefined,
     );
     setControl(state);
     return state;
@@ -152,18 +162,14 @@ export default function ComputerScreen() {
         const id =
           waiting ||
           (
-            await api<ControlState>(path(botId, "/control/request"), {
-              method: "POST",
-              body: { reason: "Opened on mobile." },
+            await requestComputerControl(ORGANIZATION_ID, botId, {
+              reason: "Opened on mobile.",
             })
           ).request?.id;
         if (!id) throw new Error("Control could not be requested.");
         setRequestId(id);
         setControl(
-          await api<ControlState>(path(botId, "/control/take"), {
-            method: "POST",
-            body: { requestId: id },
-          }),
+          await takeComputerControl(ORGANIZATION_ID, botId, { requestId: id }),
         );
       }),
     [action, botId, readControl],
@@ -189,18 +195,20 @@ export default function ComputerScreen() {
   const release = useRef<() => void>(() => {});
   release.current = () => {
     if (requestId && control?.holder === "human")
-      void api(path(botId, "/control/release"), {
-        method: "POST",
-        body: { requestId },
+      void releaseComputerControl(ORGANIZATION_ID, botId, {
+        requestId,
       }).catch(() => undefined);
   };
   useEffect(() => () => release.current(), []);
 
   if (!session && !isPending) return <Redirect href="/" />;
 
-  const send = (kind: "click" | "type" | "key" | "scroll", body: object) =>
+  const send = (
+    kind: "click" | "type" | "key" | "scroll",
+    gesture: ComputerHumanInput,
+  ) =>
     action.run(kind, () =>
-      api(path(botId, `/human/${kind}`), { method: "POST", body }),
+      sendComputerHumanInput(ORGANIZATION_ID, botId, kind, gesture),
     );
   const frame = live.frame;
 
@@ -244,9 +252,8 @@ export default function ComputerScreen() {
             onPress={() => {
               void action
                 .run("secret", () =>
-                  api(path(botId, "/human/secret"), {
-                    method: "POST",
-                    body: { text: secret },
+                  supplyComputerSecret(ORGANIZATION_ID, botId, {
+                    text: secret,
                   }),
                 )
                 // Never kept after it is sent, whether or not it was accepted.
@@ -340,9 +347,8 @@ export default function ComputerScreen() {
             onPress={() => {
               void action.run("release", async () => {
                 setControl(
-                  await api<ControlState>(path(botId, "/control/release"), {
-                    method: "POST",
-                    body: { requestId },
+                  await releaseComputerControl(ORGANIZATION_ID, botId, {
+                    requestId,
                   }),
                 );
               });

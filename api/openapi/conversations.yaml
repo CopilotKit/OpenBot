@@ -1,5 +1,6 @@
 # Conversations: a person's conversations and what is said in them (members, messages, attachments,
-# reactions, dictation and voice calls), their tasks, and joining a conversation's live channel.
+# reactions, dictation and voice calls), their tasks, joining a conversation's live channel, and
+# the product events that count which of a Bot's answers people saw or copied.
 #
 # One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
 # api/openapi.yaml, the file every client and check reads. See api/README.md.
@@ -73,7 +74,11 @@ paths:
         once and for about half a minute, so ask for a new one for every
         connection, and again to reconnect. Only a person in the conversation
         may have one, and it opens the thread they see there and no other. A
-        conversation no Bot has run in yet has nothing to join.
+        conversation no Bot has run in yet has nothing to join (409). Where
+        realtime.clientUrl is on this server, open it with the same
+        credential that made the token: the session, an app's access token,
+        or an API key, as Authorization: Bearer or x-api-key. So a script
+        that holds only an API key can watch a conversation live.
       security:
         - webSession: []
         - appOAuth: [conversations:read]
@@ -821,7 +826,7 @@ paths:
         '409':
           $ref: '#/components/responses/AttachmentConflict'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '500':
@@ -880,8 +885,6 @@ paths:
           $ref: './common.yaml#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -988,8 +991,6 @@ paths:
           $ref: './common.yaml#/components/responses/ConversationNotFound'
         '409':
           $ref: '#/components/responses/ConversationConflict'
-        '413':
-          $ref: '#/components/responses/UploadTooLarge'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1490,7 +1491,7 @@ paths:
         '404':
           $ref: './common.yaml#/components/responses/OrganizationNotFound'
         '413':
-          $ref: '#/components/responses/UploadTooLarge'
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedFile'
         '422':
@@ -1505,6 +1506,57 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
           $ref: '#/components/responses/ServiceUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/product-events:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordProductEvent
+      summary: Record that the caller saw or copied a Bot's answer
+      description: >-
+        Tell OpenBot that the caller saw a Bot's answer on screen, or copied
+        it, so OpenBot can count which answers people use. It is best effort:
+        a client sends one for each answer it shows or copies, waits on
+        nothing, and sends it with keepalive so it still leaves when the page
+        closes. The event counts for the caller, and names only the answer.
+        Where this OpenBot has product telemetry switched off, it is accepted
+        and dropped.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductEvent'
+            examples:
+              viewed:
+                $ref: '#/components/examples/ProductEventViewed'
+      responses:
+        '204':
+          description: The event is accepted.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
@@ -1639,11 +1691,18 @@ components:
               minLength: 1
               description: >-
                 The socket's address, without the /websocket it ends in or its
-                query. A ws or wss address, or a path on this server.
+                query. A ws or wss address, or a path on this server, which is
+                resolved against the address the API was called at. Where it
+                is on this server, the socket is opened with the credential
+                that made the token (see createConversationJoinToken).
             topic:
               type: string
               pattern: ^thread:.+$
-              description: The topic to join on the socket, thread:{threadId}.
+              description: >-
+                The topic to join on the socket, as the realtime gateway knows
+                the thread. Use it as given: outside the organization default
+                it does not name threadId, so a topic made from threadId joins
+                nothing.
     Conversation:
       type: object
       description: A conversation between the caller and one or more Bots.
@@ -1893,6 +1952,7 @@ components:
           description: Whether the caller has it pinned, when that was changed.
     ConversationActivity:
       type: object
+      additionalProperties: false
       required:
         - text
         - botId
@@ -1917,14 +1977,59 @@ components:
           description: When it was said.
     ConversationBusy:
       type: object
+      additionalProperties: false
       required:
         - busy
       properties:
         busy:
           type: boolean
           description: True when a Bot started answering, false when it stopped.
+    ProductEvent:
+      type: object
+      description: The caller saw a Bot's answer, or copied it. Names the answer and
+        nothing about the person, who is the caller.
+      additionalProperties: false
+      required:
+        - kind
+        - threadId
+        - messageId
+        - surface
+      properties:
+        kind:
+          type: string
+          enum:
+            - result_viewed
+            - result_copied
+          description: What the caller did with the answer, result_viewed when it was
+            on screen and result_copied when they copied it.
+        threadId:
+          type: string
+          description: The thread the answer is in, as its messages name it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        messageId:
+          type: string
+          description: The answer's message, by the id its thread gives it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        runId:
+          type: string
+          description: The run that wrote the answer, when the client knows it.
+          minLength: 1
+          maxLength: 256
+          pattern: ^[A-Za-z0-9_:.-]+$
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+            - mobile
+          description: Where the caller saw or copied it.
     RouteMessageRequest:
       type: object
+      additionalProperties: false
       required:
         - text
       properties:
@@ -2146,7 +2251,9 @@ components:
       properties:
         id:
           type: string
-          description: The caller's own id for the message, so a retry is the same message.
+          description: The caller's own id for the message, any string, so a retry in the
+            same conversation is the same message. The conversation's messages
+            list it under this id.
           minLength: 1
           maxLength: 160
         text:
@@ -2219,6 +2326,12 @@ components:
         threadId:
           type: string
           description: The new thread's id.
+        liveThreadId:
+          type: string
+          description: The id that live updates about this thread carry. Compare
+            an incoming update with this one, and use threadId everywhere else.
+            It is threadId itself in the organization default. Left out by a
+            server that names threads one way only, where it is threadId.
     ConversationThreadStatus:
       type: object
       required:
@@ -2230,6 +2343,12 @@ components:
         known:
           type: boolean
           description: Whether the thread still holds the caller's conversation.
+        liveThreadId:
+          type: string
+          description: The id that live updates about this thread carry. Compare
+            an incoming update with this one, and use threadId everywhere else.
+            It is threadId itself in the organization default. Left out by a
+            server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
       enum:
@@ -2326,6 +2445,28 @@ components:
             - 'null'
           format: date-time
           description: When it failed.
+        stoppedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.
+        workingSince:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the work it is doing now began. Null or absent unless it is working.
+        tryingAgainAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.
+        lastActivityAt:
+          type: string
+          format: date-time
+          description: When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.
         next:
           type:
             - string
@@ -2337,6 +2478,11 @@ components:
             - 'null'
           format: date-time
           description: When the person marked it done.
+        steer:
+          oneOf:
+            - $ref: '#/components/schemas/TaskSteer'
+            - type: 'null'
+          description: The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.
         createdAt:
           type: string
           format: date-time
@@ -2345,6 +2491,20 @@ components:
           type: string
           format: date-time
           description: When it last changed.
+    TaskSteer:
+      type: object
+      description: What the person told a task directly in its conversation, as its card says it in the conversation that started the task.
+      required:
+        - text
+        - at
+      properties:
+        text:
+          type: string
+          description: The person's words, on one line and cut short when they run long.
+        at:
+          type: string
+          format: date-time
+          description: When they said it.
     TaskPage:
       type: object
       required:
@@ -2400,6 +2560,7 @@ components:
           description: How a call connects.
     VoiceCallRequest:
       type: object
+      additionalProperties: false
       properties:
         sdp:
           type: string
@@ -2434,6 +2595,7 @@ components:
           additionalProperties: true
     VoiceTranscriptEntry:
       type: object
+      additionalProperties: false
       required:
         - id
         - role
@@ -2457,6 +2619,7 @@ components:
           pattern: \S
     VoiceSessionInput:
       type: object
+      additionalProperties: false
       required:
         - id
         - anchorMessageId
@@ -2789,24 +2952,6 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
-    UploadTooLarge:
-      description: The file or the request is larger than OpenBot takes.
-      content:
-        application/problem+json:
-          schema:
-            $ref: './common.yaml#/components/schemas/Problem'
-          examples:
-            tooLarge:
-              value:
-                type: https://open.bot/errors/payload-too-large
-                title: The request is too large.
-                status: 413
-                detail: Recordings must be smaller than 10 MiB.
-                code: PAYLOAD_TOO_LARGE
-                category: validation
-                retryable: false
-                requestId: req_example
-                traceId: trace_example
     UnsupportedFile:
       description: The file is not a type OpenBot can read.
       content:
@@ -2948,16 +3093,19 @@ components:
       value: {"transport": "webrtc"}
     ConversationThreadExample:
       summary: "A new thread id."
-      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a"}
+      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "liveThreadId": "2b503bf7-514a-8c4e-b132-3ca9b729ffeb"}
     ConversationThreadStatusExample:
       summary: "A thread that is still there."
-      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true}
+      value: {"threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "known": true, "liveThreadId": "2b503bf7-514a-8c4e-b132-3ca9b729ffeb"}
     TaskPageExample:
       summary: "One task, ready to read."
-      value: {"tasks": [{"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "next": "Read the draft and send it.", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}], "nextCursor": null}
+      value: {"tasks": [{"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}], "nextCursor": null}
     TaskResponseExample:
       summary: "A task ready to read."
-      value: {"task": {"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "next": "Read the draft and send it.", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}}
+      value: {"task": {"id": "7c2d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "botId": "general-assistant", "conversationId": "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10", "threadId": "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a", "title": "Reply to Sam about the spec", "why": "Sam asked for the spec by Friday.", "origin": "check_in", "suggestionId": "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21", "sourceApp": "Gmail", "sourceLink": null, "originConversationId": null, "status": "ready_for_review", "failure": null, "failedAt": null, "stoppedAt": null, "next": "Read the draft and send it.", "workingSince": null, "lastActivityAt": "2026-11-14T09:05:00.000Z", "resolvedAt": null, "createdAt": "2026-11-14T09:00:00.000Z", "updatedAt": "2026-11-14T09:05:00.000Z"}}
     TranscriptionExample:
       summary: "What was said."
       value: {"text": "Remind me to send the forecast on Friday."}
+    ProductEventViewed:
+      summary: "An answer the caller saw in the web app."
+      value: {"kind": "result_viewed", "threadId": "6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "messageId": "msg_0b1c6f0e", "surface": "web"}

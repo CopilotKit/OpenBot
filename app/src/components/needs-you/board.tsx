@@ -2,7 +2,10 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
-import { useWaitingByBot } from "@/components/approvals/waiting";
+import {
+  useHeldAnswers,
+  useWaitingByBot,
+} from "@/components/approvals/waiting";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
@@ -15,7 +18,9 @@ import {
 } from "@/lib/proactive";
 import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
+import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
 import { useNeedsYou } from "./needs-you";
+import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
 
 /** How many of one Bot's finds show before the rest open in place. */
 const FINDS_SHOWN = 3;
@@ -35,17 +40,51 @@ const FINDS_SHOWN = 3;
 export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const agents = useQuery(agentListQueryOptions());
   const settings = useQuery(proactiveSettingsQueryOptions());
-  const waiting = useWaitingByBot(agentId);
   const list = useNeedsYou(agentId);
+  // A question or an action waiting in a task's own conversation is that task waiting: one row.
+  const waiting = useWaitingByBot(
+    agentId,
+    heldByTaskOf([...list.tasks, ...list.done]),
+  );
+
+  const stalledHandoffs = useStalledHandoffs(agentId);
+  // A task waiting on something in its thread is answered on its own row.
+  const heldAnswer = useHeldAnswers();
 
   const blocked = new Map(waiting.byBot);
+  // Questions and actions each wait on the person; a task does when the badge counts it.
+  let waitingCount = [...waiting.byBot.values()].reduce(
+    (total, group) => total + group.rows.length,
+    0,
+  );
   for (const listed of list.tasks) {
+    if (countsAsWaiting(listed)) waitingCount += 1;
     const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
-      <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
+      <TaskBoardRow
+        held={
+          listed.status === "needs_input" ? heldAnswer(listed.task) : undefined
+        }
+        key={`task-${listed.task.id}`}
+        listed={listed}
+      />,
     );
-    group.times.push(listed.task.updatedAt);
+    // Only what waits on the person says how long it has waited.
+    if (countsAsWaiting(listed)) group.times.push(listed.task.updatedAt);
     blocked.set(listed.task.agentId, group);
+  }
+  // A hand-off that ran out of tries waits on the person too, and the badge counts it.
+  for (const stalled of stalledHandoffs) {
+    waitingCount += 1;
+    const group = blocked.get(stalled.botId) ?? { rows: [], times: [] };
+    group.rows.push(
+      <StalledHandoffBoardRow
+        key={`handoff-${stalled.item.id}`}
+        stalled={stalled}
+      />,
+    );
+    group.times.push(stalled.item.at);
+    blocked.set(stalled.botId, group);
   }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)
@@ -77,10 +116,6 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
   const settingOf = (id: string | null | undefined) =>
     id ? settings.data?.find((setting) => setting.id === id) : undefined;
-  const waitingCount = [...blocked.values()].reduce(
-    (total, group) => total + group.rows.length,
-    0,
-  );
   const foundCount = list.items.length;
 
   return (
@@ -106,17 +141,21 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
           </div>
         ) : null}
         {blocked.size ? (
-          <Half title="Waiting on you">
+          <Half title={waitingCount ? "Waiting on you" : "Your tasks"}>
             {[...blocked].map(([botId, group]) => (
               <BotGroup
                 bot={bot(botId)}
                 botId={botId}
                 key={botId}
-                note={`waiting since ${relativeTime(
-                  group.times.reduce((first, at) =>
-                    Date.parse(at) < Date.parse(first) ? at : first,
-                  ),
-                )}`}
+                note={
+                  group.times.length
+                    ? `waiting since ${relativeTime(
+                        group.times.reduce((first, at) =>
+                          Date.parse(at) < Date.parse(first) ? at : first,
+                        ),
+                      )}`
+                    : "nothing waiting on you"
+                }
               >
                 {group.rows}
               </BotGroup>

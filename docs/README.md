@@ -6,9 +6,10 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
 - [Configuration](configuration.md): environment variables and tenant package YAML.
 - [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
+- [The API spec](../api/README.md): the REST API in OpenAPI and the live channels in AsyncAPI, the client generated from them, and how to change them.
 - [Bots](coworkers.md): durable Bot profiles, conversations, visibility, deletion, and external AG-UI registration.
 - [Approvals](approvals.md): which actions a Bot asks before, the order that decides it, and what an admin can close.
-- [Routines](routines.md): the one list of routines, goals and check-ins, the worker that fires them, and who they run as.
+- [Routines](routines.md): the one list of routines, goals and check-ins, how the server fires them, and who they run as.
 - [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.
 - [Public-web research](web-research.md): search and page reading through Parallel, Exa or Firecrawl.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:

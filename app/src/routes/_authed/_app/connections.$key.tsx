@@ -39,42 +39,47 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import {
+  appSetupQueryOptions,
+  appsQueryOptions,
+  catalogueQueryOptions,
+} from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
-  brokeredProvenance,
+  directoryProvider,
   disconnectSiblingsNotice,
+  fromDirectory,
 } from "@/lib/plugins/provider-vocabulary";
 import {
   connectionSiblingsQueryOptions,
   connectionsQueryOptions,
   type PluginServer,
   personalConnections,
-  pluginsPageQueryOptions,
-  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
 /**
- * Whether this server is reached through Composio AS THIS PERSON.
+ * Whether this app is from the directory AND reached AS THIS PERSON.
  *
- * A Shared app is also `provenance === "composio"` — it is still Composio that holds the account —
- * but there is no "your account" here to confirm: the one account is the deployment's, and every
- * Bot holding a grant acts as it regardless of who is asking. Exported so the test for this file can
- * pin the distinction without rendering the page.
+ * A Shared app is from the directory too, but there is no "your account" here to confirm: the one
+ * account is the deployment's, and every Bot holding a grant acts as it regardless of who is asking.
+ * Exported so the test for this file can pin the distinction without rendering the page.
  */
 export function brokeredFor(server: PluginServer | undefined): boolean {
   /*
-   * A FILTER, so it asks whether the row came through a broker at all and needs no vendor name: one
-   * provider holds rows at a time (spec D3). Naming the vendor on this page is a different question
-   * and reads the active provider, below.
+   * A FILTER, so it asks whether the app came from the directory at all and needs no service name.
+   * Naming the service on this page is a different question and reads getAppSetup, below.
    */
   return (
     server !== undefined &&
-    brokeredProvenance(server.provenance) &&
+    fromDirectory(server) &&
     server.accountMode !== "shared"
   );
 }
@@ -156,6 +161,7 @@ function RouteComponent() {
     if (connect === undefined) return;
     navigate({ search: ({ connect: _c, ...rest }) => rest, replace: true });
   }, [connect, navigate]);
+  useDropBrokerReturn();
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
@@ -211,7 +217,9 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     if (action === undefined) return;
     navigate({ search: ({ action: _a, ...rest }) => rest, replace: true });
   }, [action, navigate]);
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -247,8 +255,8 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     },
   });
 
-  const entry = plugins.data?.catalogue.find((item) => item.key === key);
-  const server = (plugins.data?.servers ?? []).find((s) => s.id === key);
+  const entry = catalogue.data?.find((item) => item.key === key);
+  const server = (plugins.data ?? []).find((s) => s.id === key);
   const enabled = server !== undefined;
   /*
    * READ THROUGH `personalConnections`, never the raw list: a Shared app's row is the deployment's
@@ -268,15 +276,16 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * THE VENDOR'S NAME, from the active provider and never from a row: a deployment with the key set
    * and nothing enabled has no row, and a row cannot say which broker holds the account.
    */
-  const provider = pluginsProvider(plugins.data);
+  const provider = directoryProvider(setup.data);
   /*
    * WHAT A DISCONNECT WOULD ALSO END, asked only while there is an account for it to end. The query
    * is gated on the connection and its answer is read only through the same gate, so a cached answer
    * from before a disconnect is never drawn beside "Connect".
    */
+  const ending = useConnectionEnding(key);
   const siblings = useQuery({
     ...connectionSiblingsQueryOptions(key),
-    enabled: brokered && connection !== undefined,
+    enabled: brokered && connection !== undefined && !ending,
   });
   const siblingsNotice =
     brokered && connection !== undefined && siblings.data
@@ -287,34 +296,35 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   /*
    * THE GRANT LIST IS DRAWN WHERE THE BROKER AUTHORIZES PER ACTION, read off the declared
    * capability and never off the vendor's name. The server computes `authorizesPerAction` from the
-   * same expression `/servers/:id/authorize` behind the Authorize button gates on, so the list this
+   * same expression authorizeConnectionAction behind the Authorize button gates on, so the list this
    * screen draws and the route its buttons call cannot key on different facts. `provider ===
    * "arcade"` keyed on a different one: the day a broker named arcade is reached with that flow
    * absent, this drew the list and every press 503'd. False on Composio — whose auth config fixes
    * one state for the whole toolkit — so every Composio render is unchanged.
    */
-  const perActionGrants = plugins.data?.authorizesPerAction ?? false;
+  const perActionGrants = setup.data?.authorizesPerAction ?? false;
   /* Who is asking only matters to a Shared app's Authorize, so it is not read for anything else. */
   const sharedHere = server?.accountMode === "shared";
   const me = useQuery({
     ...currentUserQueryOptions(),
     enabled: perActionGrants && sharedHere,
   }).data;
-  const isAdmin = me?.role === "admin";
+  const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
-    authScheme: server?.authScheme ?? null,
+    connectsWith: server?.connectsWith ?? null,
     /* The same capability the grant list below is drawn on: a broker that approves per action takes
        a consent over the connection that stands. */
     reconnectsInPlace: perActionGrants,
     brokered,
-    configured: plugins.data?.composioConfigured ?? false,
+    configured: setup.data?.directoryAvailable ?? false,
     recorded: connection !== undefined,
     report: setNotice,
     returnTo: "settings",
     serverId: key,
+    shared: sharedHere,
     /*
      * Off the same row `recorded` is read from, and absent where you have never connected this app:
      * with no row there is nothing that could have been checked, which is what the server's own
@@ -348,7 +358,12 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * and this gated on `plugins` alone — so a connections read still in flight drew the row with the
    * whole of its state defaulted to "you have never connected this".
    */
-  if (plugins.isPending || connections.isPending) {
+  if (
+    plugins.isPending ||
+    catalogue.isPending ||
+    setup.isPending ||
+    connections.isPending
+  ) {
     return <PageShell title="Account">{null}</PageShell>;
   }
 
@@ -361,7 +376,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * AND A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, WHICH IS WHAT THIS PAGE DID
    * WITH IT.
    *
-   * Nothing read `connections.error`, so a 500 from `/api/plugins/connections` left `connection`
+   * Nothing read `connections.error`, so a 500 from listConnections left `connection`
    * undefined and the row was handed `recorded: false, verified: false, probe: undefined,
    * checkable: false` — a connection nobody has made. For a brokered key app whose last check did
    * not come back clean, that is the exact state this whole feature exists to keep visible: the page
@@ -377,8 +392,8 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this connection. Reload the page, or ask an admin if it
-          keeps happening.
+          Couldn't load this connection. Try again in a moment, or ask an admin
+          if it keeps happening.
         </p>
       </PageShell>
     );
@@ -389,25 +404,31 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * without it they concluded there is none: "This is not a service you connect for yourself",
    * about a connector this person may hold right now.
    */
-  if (!plugins.data) {
+  if (!plugins.data || !catalogue.data || !setup.data) {
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this app. Reload the page, or ask an admin if it keeps
-          happening.
+          Couldn't load this app. Try again in a moment, or ask an admin if it
+          keeps happening.
         </p>
       </PageShell>
     );
   }
 
   /*
-   * A COMPOSIO APP ON A DEPLOYMENT WITH NO COMPOSIO KEY, BEFORE EITHER BRANCH BELOW DRAWS A ROW.
+   * AN APP FROM A COMPOSIO DIRECTORY THAT ISN'T SET UP HERE, BEFORE EITHER BRANCH BELOW DRAWS A ROW.
    *
    * The list on the way in no longer offers one, but a link from elsewhere still lands here, and the
    * brokered row's own sentence for this case names an environment variable — an instruction for
-   * whoever runs the deployment, read by somebody who cannot act on it.
+   * whoever runs the deployment, read by somebody who cannot act on it. An Arcade directory's app
+   * draws its row, whose sentence asks a person to have an admin set it up.
    */
-  if (server?.provenance === "composio" && !plugins.data.composioConfigured) {
+  if (
+    server !== undefined &&
+    fromDirectory(server) &&
+    provider === "composio" &&
+    !setup.data.directoryAvailable
+  ) {
     return (
       <PageShell backButton={back} title={server.title}>
         <PageEmpty icon={IconPlugOff} title="Not set up yet">
@@ -451,9 +472,9 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           <PageRows className="mt-0">
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Team account</ItemTitle>
+                <ItemTitle>Shared account</ItemTitle>
                 <ItemDescription>
-                  Shared by your organisation. Bots act as the team account.
+                  Shared by your organization. Bots act as this account.
                 </ItemDescription>
               </ItemContent>
             </Item>
@@ -468,6 +489,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
             landedAction={landedAction}
             returnTo="settings"
             serverId={key}
+            shared
           />
         ) : null}
       </PageShell>
@@ -584,16 +606,16 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    */
   const app =
     entry ??
-    (server?.provenance === "custom"
+    (server?.source === "address"
       ? {
           title: server.title,
-          vendor: hostOf(server.url),
+          vendor: hostOf(server.address ?? ""),
           summary: "",
           auth: server.signIn ? ("user-oauth" as const) : ("none" as const),
         }
       : undefined);
 
-  if (app && server?.provenance === "custom" && app.auth !== "user-oauth") {
+  if (app && server?.source === "address" && app.auth !== "user-oauth") {
     return (
       <PageShell backButton={back} title={app.title}>
         <PageEmpty icon={IconPlug} title="No account needed">

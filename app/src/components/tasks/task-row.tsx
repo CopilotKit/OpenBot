@@ -3,10 +3,12 @@ import {
   IconCircleCheck,
   IconFileCheck,
   IconHandStop,
+  IconPlayerStop,
   IconProgress,
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import type { HeldAnswer } from "@/components/approvals/waiting";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,14 +20,19 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
-import type { ListedTask } from "@/lib/tasks/groups";
+import { countsAsWaiting, type ListedTask } from "@/lib/tasks/groups";
+import { taskLine } from "@/lib/tasks/line";
 import {
   resolveTaskMutationOptions,
   tryTaskAgainMutationOptions,
 } from "@/lib/tasks/mutations";
 import {
   couldNotFinish,
+  stoppedByYou,
+  TASK_DONE_LABEL,
   TASK_STATUS_LABEL,
+  TASK_STOPPED,
+  TASK_STOPPED_LABEL,
   type TaskStatus,
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
@@ -51,14 +58,73 @@ const DOT: Partial<Record<TaskStatus, string>> = {
 };
 
 /**
- * What a task needs next, after its status: why it couldn't finish, or the last thing its Bot said.
- * Before the Bot has said anything, a working task has just started.
+ * Whether the row reads Stopped: the person stopped the task and it has not carried on since. Read
+ * off the live status, so a stopped task whose conversation is running a turn again reads Working.
  */
-function nextLine({ task, status }: ListedTask): string | null {
+function stopped({ task, status }: ListedTask): boolean {
+  return status === "failed" && stoppedByYou(task);
+}
+
+/**
+ * How a row draws its task. A task the person stopped is not a failure: it has the card's stop
+ * icon and a quiet dot, never the warning triangle and the red one.
+ */
+function look(listed: ListedTask): {
+  state: TaskStatus | "stopped";
+  Icon: typeof IconProgress;
+  dot: string | undefined;
+} {
+  return stopped(listed)
+    ? { state: "stopped", Icon: IconPlayerStop, dot: "bg-muted-foreground" }
+    : {
+        state: listed.status,
+        Icon: ICONS[listed.status],
+        dot: DOT[listed.status],
+      };
+}
+
+/**
+ * The task's status in a word or two. One the person stopped reads Stopped, as its card does, and
+ * one listed as finished (`settled`) reads Done, as its card does and as the heading over it says.
+ */
+function statusLabel(listed: ListedTask, settled = false): string {
+  if (stopped(listed)) return TASK_STOPPED_LABEL;
+  if (
+    settled &&
+    (listed.status === "ready_for_review" || listed.status === "resolved")
+  )
+    return TASK_DONE_LABEL;
+  return TASK_STATUS_LABEL[listed.status];
+}
+
+/**
+ * What a task says after its status, on every row that lists it: why it couldn't finish, that the
+ * person stopped it, or the last thing its Bot said, as plain text (`taskLine`). Nothing when the
+ * Bot's last words say nothing about the task. Before the Bot has said anything, a working task has
+ * just started.
+ */
+function nextLine(listed: ListedTask): string | null {
+  const { task, status } = listed;
+  if (stopped(listed)) return TASK_STOPPED;
   if (status === "failed") return couldNotFinish(task.failure);
-  const said = task.next?.trim();
+  const said = taskLine(task.next);
   if (said) return said;
   return status === "working" ? "Just started." : null;
+}
+
+/**
+ * Whether a row offers Mark done: only where it does something. Not while the task is working:
+ * there is nothing finished to mark, and its conversation would carry on behind a row that said it
+ * was done. Not on a row that already reads Done, as a finished task's row under Done does: marking
+ * it changes nothing the row says.
+ */
+function canMarkDone(listed: ListedTask, settled = false): boolean {
+  const { status } = listed;
+  return (
+    status !== "working" &&
+    status !== "resolved" &&
+    statusLabel(listed, settled) !== TASK_DONE_LABEL
+  );
 }
 
 /**
@@ -72,21 +138,35 @@ function nextLine({ task, status }: ListedTask): string | null {
 export function TaskRow({
   listed,
   botName,
+  askedIn,
+  settled = false,
 }: {
   listed: ListedTask;
-  botName: string;
+  /** Left out on a Bot's own page, where every row is that Bot's. */
+  botName?: string;
+  /**
+   * The conversation that asked for the task, for a link back to it, with what that conversation is
+   * called when it is known. A check-in's task was not asked for in one.
+   */
+  askedIn?: { channelId: string; title: string | null };
+  /**
+   * Listed as finished, on a Bot's Activity page: no dot asking for attention, and Open does not
+   * lead. Its result was already said in the conversation that asked for it.
+   */
+  settled?: boolean;
 }) {
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
-  const Icon = ICONS[status];
-  const dot = DOT[status];
+  const { state, Icon, dot: stateDot } = look(listed);
+  const dot = settled ? undefined : stateDot;
   const next = nextLine(listed);
   const busy = resolve.isPending || again.isPending;
   const error = resolve.error ?? again.error;
-  const openFirst = status === "ready_for_review" || status === "needs_input";
+  const openFirst =
+    !settled && (status === "ready_for_review" || status === "needs_input");
   return (
-    <Item size="sm">
+    <Item data-task-state={state} size="sm">
       <ItemMedia className="relative" variant="icon">
         <Icon />
         {dot ? (
@@ -102,12 +182,32 @@ export function TaskRow({
       <ItemContent>
         <ItemTitle className="line-clamp-none">{task.title}</ItemTitle>
         <ItemDescription>
-          {[TASK_STATUS_LABEL[status], botName, relativeTime(task.updatedAt)]
+          {[statusLabel(listed, settled), botName, relativeTime(task.updatedAt)]
             .filter(Boolean)
             .join(" · ")}
         </ItemDescription>
         {next ? (
           <ItemDescription className="text-foreground">{next}</ItemDescription>
+        ) : null}
+        {askedIn ? (
+          /*
+           * Not clamped: a clamped line cuts the underline off, and the link then reads as plain
+           * text. The underline sits close, as on the task's own "Sent from" label.
+           */
+          <ItemDescription
+            className="line-clamp-none [&>a]:underline-offset-2"
+            data-slot="task-asked-in"
+          >
+            <Link
+              className="rounded-sm outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              params={{ channelId: askedIn.channelId }}
+              to="/channel/$channelId"
+            >
+              {askedIn.title
+                ? `Asked in ${askedIn.title}`
+                : "Asked in another conversation"}
+            </Link>
+          </ItemDescription>
         ) : null}
         <ItemFooter className="mt-2 flex-wrap justify-start">
           {status === "failed" ? (
@@ -140,7 +240,7 @@ export function TaskRow({
             >
               {resolve.isPending ? "Reopening…" : "Reopen"}
             </Button>
-          ) : (
+          ) : canMarkDone(listed, settled) ? (
             <Button
               disabled={busy}
               onClick={() => resolve.mutate({ id: task.id, done: true })}
@@ -149,7 +249,7 @@ export function TaskRow({
             >
               {resolve.isPending ? "Saving…" : "Mark done"}
             </Button>
-          )}
+          ) : null}
         </ItemFooter>
         {error ? (
           <p className="mt-1 text-destructive text-sm" role="alert">
@@ -165,14 +265,73 @@ export function TaskRow({
  * A task on the Needs you board: the same task, in the board's one row shape, with its actions on
  * the right. Open leads while there is something to read or answer.
  */
-export function TaskBoardRow({ listed }: { listed: ListedTask }) {
+export function TaskBoardRow({
+  listed,
+  held,
+}: {
+  listed: ListedTask;
+  /**
+   * The wait inside the task's conversation, when one is there, with its answers: the row stands
+   * for it and answers it, Allow and Deny for an action, Answer for a question, without the person
+   * opening the thread (`useHeldAnswers`).
+   */
+  held?: HeldAnswer | undefined;
+}) {
   const { task, status } = listed;
   const resolve = useMutation(resolveTaskMutationOptions(queryClient));
   const again = useMutation(tryTaskAgainMutationOptions(queryClient));
-  const Icon = ICONS[status];
+  const { state, Icon } = look(listed);
   const busy = resolve.isPending || again.isPending;
   const error = resolve.error ?? again.error;
-  const openFirst = status === "ready_for_review" || status === "needs_input";
+  /*
+   * A delegated task that is done waits on nobody: its result was said in the conversation that
+   * asked. It reads Done, as its card does, untinted and uncounted, with Open no longer leading.
+   */
+  const settled = !countsAsWaiting(listed) && status === "ready_for_review";
+  const openFirst =
+    !settled && (status === "ready_for_review" || status === "needs_input");
+  if (held)
+    return (
+      <BoardRow
+        actions={
+          <>
+            {held.actions}
+            <Button
+              disabled={busy}
+              onClick={() => resolve.mutate({ id: task.id, done: true })}
+              size="sm"
+              variant="ghost"
+            >
+              {resolve.isPending ? "Saving…" : "Mark done"}
+            </Button>
+            <Button
+              render={
+                <Link
+                  params={{ channelId: task.channelId }}
+                  to="/channel/$channelId"
+                />
+              }
+              size="sm"
+              variant="ghost"
+            >
+              Open
+            </Button>
+          </>
+        }
+        detail={nextLine(listed)}
+        icon={<Icon />}
+        meta={[
+          <span key="status">{statusLabel(listed)}</span>,
+          <span key="when">{relativeTime(task.updatedAt)}</span>,
+          ...held.meta,
+        ]}
+        more={held.more}
+        open={held.more !== undefined}
+        state={state}
+        title={task.title}
+        waiting
+      />
+    );
   return (
     <BoardRow
       actions={
@@ -186,14 +345,16 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
               {again.isPending ? "Starting…" : "Try again"}
             </Button>
           ) : null}
-          <Button
-            disabled={busy}
-            onClick={() => resolve.mutate({ id: task.id, done: true })}
-            size="sm"
-            variant="ghost"
-          >
-            {resolve.isPending ? "Saving…" : "Mark done"}
-          </Button>
+          {canMarkDone(listed) ? (
+            <Button
+              disabled={busy}
+              onClick={() => resolve.mutate({ id: task.id, done: true })}
+              size="sm"
+              variant="ghost"
+            >
+              {resolve.isPending ? "Saving…" : "Mark done"}
+            </Button>
+          ) : null}
           <Button
             render={
               <Link
@@ -209,9 +370,11 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
         </>
       }
       detail={nextLine(listed)}
+      // What a waiting task waits for is what the person has to answer: read in full, never cut.
+      readDetail={status === "needs_input"}
       icon={<Icon />}
       meta={[
-        <span key="status">{TASK_STATUS_LABEL[status]}</span>,
+        <span key="status">{statusLabel(listed, settled)}</span>,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">
@@ -220,7 +383,9 @@ export function TaskBoardRow({ listed }: { listed: ListedTask }) {
         ) : null,
       ]}
       title={task.title}
-      waiting={openFirst || status === "failed"}
+      state={state}
+      // Tinted where a Bot is stopped on the person. One they stopped themselves is not.
+      waiting={openFirst || state === "failed"}
     />
   );
 }

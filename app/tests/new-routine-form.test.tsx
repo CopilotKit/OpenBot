@@ -15,6 +15,12 @@ import { proactiveKeys } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  conversationPath,
+  noContent,
+} from "./conversations-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
@@ -85,8 +91,28 @@ function serving({
         url,
         typeof init?.body === "string" ? JSON.parse(init.body) : null,
       ]);
-      if (method === "POST" && url === "/api/channels")
-        return Response.json({ channel: { id: "new-conversation" } });
+      // A conversation started for the routine: made (201), named (200), or removed (204).
+      if (method === "POST" && url === CONVERSATIONS_PATH)
+        return Response.json(
+          {
+            conversation: {
+              id: "new-conversation",
+              name: "Bot One",
+              botIds: (JSON.parse(String(init?.body)) as { botIds: string[] })
+                .botIds,
+              threadId: "thread-new-conversation",
+              active: true,
+              lastMessageAt: null,
+            },
+          },
+          { status: 201 },
+        );
+      if (method === "PATCH" && url === conversationPath("new-conversation"))
+        return Response.json({
+          summary: (JSON.parse(String(init?.body)) as { title: string }).title,
+        });
+      if (method === "DELETE" && url === conversationPath("new-conversation"))
+        return noContent();
       if (method === "POST" && url === "/api/v2/organizations/default/routines")
         return routines();
       if (
@@ -106,11 +132,10 @@ function serving({
       ],
     });
     if (bots) return bots;
-    if (url.startsWith("/api/channels"))
-      return Response.json({
-        channels: [channel("c1", "Bot One", ["bot-1"])],
-        nextCursor: null,
-      });
+    if (url.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json(
+        conversationPage([channel("c1", "Bot One", ["bot-1"])]),
+      );
     if (url === "/api/v2/organizations/default/check-ins?limit=100")
       return Response.json({
         nextCursor: null,
@@ -323,7 +348,7 @@ test("a hidden event does not block a schedule", async () => {
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Send it");
   await choose(view, user, "Starts", "When something happens");
-  await user.type(await view.findByLabelText("Event"), "a".repeat(129));
+  await setValue(await view.findByLabelText("Event"), "a".repeat(129));
   await choose(view, user, "Starts", "On a schedule");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
   await waitFor(() => expect(writes()).not.toHaveLength(0));
@@ -385,7 +410,7 @@ test("a long instruction that only tells you is refused on What to do", async ()
   const view = draw();
   const user = userEvent.setup({ document });
   await choose(view, user, "It should", "Only tell you");
-  await user.type(await view.findByLabelText("What to do"), "a".repeat(1001));
+  await setValue(await view.findByLabelText("What to do"), "a".repeat(1001));
   await user.click(await view.findByRole("button", { name: "Create routine" }));
   expect(
     await view.findByText(
@@ -1009,13 +1034,22 @@ const NO_MORE_THAN_1000 =
   "Keep it under 1000 characters when it only tells you.";
 const NO_MORE_THAN_2000 = "Keep it to 2000 characters or fewer.";
 
-/** Replaces the text of a field. */
+/**
+ * Replaces the text of a field: select it all, delete it, paste all but the last character, and
+ * type that one. The rules here read what the field holds, not how it got there. Typed whole, each
+ * character was its own input event and its own render of the form, and a 2001-character
+ * instruction took up to 6.4 seconds on a CI runner against bun's five-second limit.
+ *
+ * The last character is typed because a paste alone goes unseen here: React DOM loads before the
+ * test registers its DOM, so it falls back to noticing a change on the next key, not on `input`.
+ */
 async function setValue(element: HTMLElement, value: string) {
-  // No wait between keystrokes: 2000 of them at the default pace outlast the test's timeout.
   const user = userEvent.setup({ document, delay: null });
   await user.click(element);
   await user.keyboard("{Control>}a{/Control}{Delete}");
-  if (value) await user.type(element, value);
+  if (!value) return;
+  if (value.length > 1) await user.paste(value.slice(0, -1));
+  await user.type(element, value.slice(-1), { skipClick: true });
 }
 
 /** Empties the Time input, which `user.clear` leaves alone: select it all and delete. */
@@ -1412,7 +1446,7 @@ test("an uncertain routine save locks the form and links to the chosen Bot", asy
   expect(
     writes().some(
       ([method, path]) =>
-        method === "DELETE" && path.startsWith("/api/channels/"),
+        method === "DELETE" && path.startsWith(`${CONVERSATIONS_PATH}/`),
     ),
   ).toBe(false);
   expect(view.getByRole("alert").textContent).toContain("may have been saved");

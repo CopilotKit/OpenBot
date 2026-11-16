@@ -6,14 +6,14 @@ import type { WhatIfActionSurface } from "./whatIfActionSurface";
 import type { WhatIfInitiator } from "./whatIfInitiator";
 
 /**
- * One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.
+ * One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.
  */
 export interface WhatIfAction {
   /** The Bot's id. */
   bot: string;
   /** The person's id. Empty when a group is named. */
   person: string;
-  /** A directory group's name. Empty when a person is named. */
+  /** A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named. */
   group: string;
   initiator: WhatIfInitiator;
   surface: WhatIfActionSurface;

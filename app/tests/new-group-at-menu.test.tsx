@@ -17,6 +17,7 @@ import {
   deploymentKeys,
 } from "@/lib/deployment/queries";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
+import { CONVERSATIONS_PATH, conversationPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -101,13 +102,18 @@ beforeAll(() => {
         path: url.pathname,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-    if (url.pathname === "/api/groups" && method === "POST")
+    // A group and a conversation with one Bot are started at one address: a group says `group`.
+    const starts =
+      url.pathname === CONVERSATIONS_PATH && method === "POST"
+        ? (JSON.parse(String(init?.body)) as { group?: boolean })
+        : null;
+    if (starts?.group === true)
       return NativeResponse.json(
         {
-          channel: {
+          conversation: {
             id: "group-1",
             name: "Claude Agent SDK, Personal Assistant",
-            agentIds: [CLAUDE.id, ASSISTANT.id],
+            botIds: [CLAUDE.id, ASSISTANT.id],
             threadId: "group-thread",
             active: true,
             lastMessageAt: null,
@@ -115,15 +121,25 @@ beforeAll(() => {
         },
         { status: 201 },
       );
-    if (url.pathname === "/api/groups/group-1" && method === "POST")
-      return new NativeResponse(null, { status: 202 });
-    if (url.pathname === "/api/channels" && method === "POST")
+    // The group's first message is taken (202) to be answered there.
+    if (
+      url.pathname === conversationPath("group-1", "/messages") &&
+      method === "POST"
+    )
       return NativeResponse.json(
         {
-          channel: {
+          id: (JSON.parse(String(init?.body)) as { id: string }).id,
+          queued: true,
+        },
+        { status: 202 },
+      );
+    if (starts)
+      return NativeResponse.json(
+        {
+          conversation: {
             id: "channel-1",
             name: "Claude Agent SDK",
-            agentIds: [CLAUDE.id],
+            botIds: [CLAUDE.id],
             threadId: "channel-thread",
             active: true,
             lastMessageAt: null,
@@ -270,12 +286,14 @@ test("@ in a new conversation with two Bots in To: offers both, and the first me
   await waitFor(() => expect(sent).toHaveLength(2));
   expect(sent[0]).toEqual({
     method: "POST",
-    path: "/api/groups",
-    body: { agentIds: [ASSISTANT.id, CLAUDE.id] },
+    path: CONVERSATIONS_PATH,
+    body: { botIds: [ASSISTANT.id, CLAUDE.id], group: true },
   });
-  expect(sent[1]?.path).toBe("/api/groups/group-1");
+  expect(sent[1]?.path).toBe(
+    "/api/v2/organizations/default/conversations/group-1/messages",
+  );
   expect(sent[1]?.body).toMatchObject({
-    agentId: CLAUDE.id,
+    botId: CLAUDE.id,
     text: "@Claude Agent SDK hello",
   });
   await waitFor(() =>
@@ -296,7 +314,7 @@ test("a first message to a new group with no @ still goes to every Bot", async (
   await user.keyboard("hello both{Enter}");
 
   await waitFor(() => expect(sent).toHaveLength(2));
-  expect(sent[1]?.body).toMatchObject({ agentId: null, text: "hello both" });
+  expect(sent[1]?.body).toMatchObject({ botId: null, text: "hello both" });
 });
 
 test("a Bot taken out of To: is no longer offered by @", async () => {
@@ -341,11 +359,17 @@ test("a new conversation with its one Bot picked offers that Bot to @, and sends
   await waitFor(() =>
     expect(sent).toContainEqual({
       method: "POST",
-      path: "/api/channels",
-      body: { agentIds: [CLAUDE.id] },
+      path: CONVERSATIONS_PATH,
+      body: { botIds: [CLAUDE.id] },
     }),
   );
-  expect(sent.some((write) => write.path.startsWith("/api/groups"))).toBe(
-    false,
-  );
+  // No group was made, and nothing was sent to one.
+  expect(
+    sent.some(
+      (write) =>
+        (write.body as { group?: boolean } | undefined)?.group === true ||
+        write.path.endsWith("/messages") ||
+        write.path.startsWith("/api/groups"),
+    ),
+  ).toBe(false);
 });

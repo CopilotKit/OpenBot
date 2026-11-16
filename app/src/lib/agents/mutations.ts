@@ -12,9 +12,9 @@ import {
   updateBot,
 } from "@/lib/api/generated/bots/bots";
 import type { CreateBotRequest } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
+import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
 import { type AgentProfile, agentKeys } from "./queries";
 
 /**
@@ -41,7 +41,7 @@ export function createAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
       (
-        await createBot(ORGANIZATION_ID, input, once(), {
+        await createBot(organizationId(), input, once(), {
           fallback: FALLBACK,
         })
       ).bot,
@@ -57,7 +57,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
     }): Promise<AgentProfile> =>
       (
         await updateBot(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.agentId,
           variables.input,
           once(),
@@ -77,7 +77,7 @@ export function duplicateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string): Promise<AgentProfile> =>
       (
-        await duplicateBot(ORGANIZATION_ID, agentId, once(), {
+        await duplicateBot(organizationId(), agentId, once(), {
           fallback: FALLBACK,
         })
       ).bot,
@@ -89,7 +89,7 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; hidden: boolean }) => {
       const write = variables.hidden ? hideBot : unhideBot;
-      await write(ORGANIZATION_ID, variables.agentId, once(), {
+      await write(organizationId(), variables.agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -101,7 +101,7 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; pinned: boolean }) => {
       const write = variables.pinned ? pinBot : unpinBot;
-      await write(ORGANIZATION_ID, variables.agentId, once(), {
+      await write(organizationId(), variables.agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -109,14 +109,38 @@ export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** Every Bot delete, so what reads a Bot can tell it is being deleted from this browser. */
+export const deleteAgentMutationKey = [...agentKeys.all, "delete"] as const;
+
+/**
+ * Delete a Bot. What was read of it (the Bot itself, its handoffs) stops existing with it, so it is
+ * removed rather than read again: a read would ask for a Bot that is gone and answer 404, which the
+ * Bot's page, still up while the list of Bots is read again, used to do on its way back to Bots.
+ * Every other Bot read is refreshed.
+ */
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
+    mutationKey: deleteAgentMutationKey,
     mutationFn: async (agentId: string) => {
-      await deleteBot(ORGANIZATION_ID, agentId, once(), {
+      await deleteBot(organizationId(), agentId, once(), {
         fallback: FALLBACK,
       });
     },
-    onSuccess: () => invalidateAgents(queryClient),
+    onSuccess: async (_result, agentId) => {
+      // Each of one Bot's reads is keyed ["agents", <read>, <Bot id>].
+      const ofThisBot = {
+        queryKey: agentKeys.all,
+        predicate: (query: { queryKey: readonly unknown[] }) =>
+          query.queryKey[2] === agentId,
+      };
+      // A read of it already on its way is dropped too, not left to land in the cache.
+      await queryClient.cancelQueries(ofThisBot);
+      queryClient.removeQueries(ofThisBot);
+      return queryClient.invalidateQueries({
+        queryKey: agentKeys.all,
+        predicate: (query) => query.queryKey[2] !== agentId,
+      });
+    },
   });
 }
 
@@ -131,7 +155,7 @@ export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string): Promise<string> =>
       (
-        await issueBotCallbackToken(ORGANIZATION_ID, agentId, once(), {
+        await issueBotCallbackToken(organizationId(), agentId, once(), {
           fallback: FALLBACK,
         })
       ).token,
@@ -143,7 +167,7 @@ export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
 export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await revokeBotCallbackToken(ORGANIZATION_ID, agentId, once(), {
+      await revokeBotCallbackToken(organizationId(), agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -154,9 +178,9 @@ export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
 /**
  * Whether one Bot may hand work to another.
  *
- * The same `plugin_grants` write every other grant makes, with `kind: "bot"`, so the audit row and
- * the refusals are the ones already in place: an administrator only, never a Bot on itself, and
- * never onto a Bot that does not exist.
+ * The same grant every other grant is (replaceBotGrant, deleteBotGrant), addressed `bot:<Bot id>`,
+ * so the audit row and the refusals are the ones already in place: an administrator only, never a
+ * Bot on itself, and never onto a Bot that does not exist.
  *
  * DIRECTIONAL, and the two ids are easy to swap: `agentId` is the Bot doing the asking and `ref` is
  * the Bot it may reach. Granted the other way round it reads as working and hands over nothing.
@@ -170,18 +194,16 @@ export function setHandoffGrantMutationOptions(queryClient: QueryClient) {
       ref: string;
       granted: boolean;
     }) => {
+      const grant = {
+        kind: "bot" as const,
+        ref: variables.ref,
+        agentId: variables.agentId,
+      };
       if (variables.granted) {
-        await client("/api/plugins/grants", {
-          method: "POST",
-          body: { kind: "bot", ref: variables.ref, agentId: variables.agentId },
-          fallback: FALLBACK,
-        });
+        await grantPlugin(grant);
         return;
       }
-      await client(
-        `/api/plugins/grants?kind=bot&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
-        { method: "DELETE", fallback: FALLBACK },
-      );
+      await revokePlugin(grant);
     },
     onSuccess: () => invalidateAgents(queryClient),
   });

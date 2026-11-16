@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Single sign-on can't be required before an identity provider is registered, or the Idempotency-Key was used for a different request.
+ * Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than `default`, or the Idempotency-Key was used for a different request.
  */
 export type SettingsConflictResponse = Problem;

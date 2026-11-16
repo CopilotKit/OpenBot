@@ -283,6 +283,28 @@ fi
 # told where it is before they start: the Bots call their tools back through it there.
 OPENBOT_TOOL_URL="$(setting OPENBOT_TOOL_URL "http://server:3001/api/agent-tools/call")"
 export OPENBOT_TOOL_URL
+# This machine's loopback addresses, as a Bot's computer reaches them. The Recorder in a Bot's browser
+# reaches OpenBot only at https or at loopback, so here it is handed the address this window uses,
+# `http://127.0.0.1:$APP_PORT`, which inside a computer's container is that container: a recording
+# made there was never saved. So each computer relays the app's and the server's ports to the
+# server's container, and the port of an Intelligence gateway on this machine to this machine
+# (COMPUTER_LOOPBACK_RELAYS in docs/configuration.md). docker-compose.yml hands the setting to the
+# one computer and to the supervisor, which tells every computer it makes. One set in the
+# environment or in .env wins.
+loopback_relays() {
+  local relays="$APP_PORT=server:3001" gateway
+  if [ "$SERVER_PORT" != "$APP_PORT" ]; then
+    relays="$relays,$SERVER_PORT=server:3001"
+  fi
+  gateway="$(printf '%s' "$(setting INTELLIGENCE_GATEWAY_WS_URL "")" \
+    | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://(localhost|127\.0\.0\.1|\[::1\]):([0-9]+)(/.*)?$#\2#p')"
+  if [ -n "$gateway" ] && [ "$gateway" != "$APP_PORT" ] && [ "$gateway" != "$SERVER_PORT" ]; then
+    relays="$relays,$gateway=host.docker.internal:$gateway"
+  fi
+  printf '%s' "$relays"
+}
+COMPUTER_LOOPBACK_RELAYS="$(setting COMPUTER_LOOPBACK_RELAYS "$(loopback_relays)")"
+export COMPUTER_LOOPBACK_RELAYS
 # Per-Bot computers on that network too, where the server can open them, or no supervisor at all.
 if [ "$ONE_COMPUTER_EACH" = "true" ]; then
   COMPOSE_PROJECT="$(docker compose config --format json 2>/dev/null | bun -e 'process.stdout.write(JSON.parse(await Bun.stdin.text()).name ?? "")' 2>/dev/null || true)"
@@ -442,6 +464,24 @@ for pair in OPENAI_BASE_URL:OPENAI_CONTAINER_BASE_URL \
     export "$container_name=$(in_container "$(setting "$host_name" "")")"
   fi
 done
+# ONE ADDRESS, where it can be kept. With an Intelligence gateway on this machine the server can
+# carry the gateway's socket itself, so the app dials OpenBot's own address and never the gateway's
+# port (docker-compose.yml, INTELLIGENCE_GATEWAY_PROXY). It does only when `.env` or the environment
+# names OPENBOT_PUBLIC_URL. The Recorder is not on the page, so it needs that socket as a whole
+# address, and without a public URL the server has none to write: it is in a container, where a
+# call from this machine does not arrive on loopback, so it cannot vouch for the name it was reached
+# by. A recording would not save. So with no public URL the browser and the Recorder are given the
+# gateway's own address, as before, which each computer relays (COMPUTER_LOOPBACK_RELAYS above).
+# An Intelligence somewhere else is reached at its own address either way.
+GATEWAY_WS_URL="$(setting INTELLIGENCE_GATEWAY_WS_URL "")"
+if printf '%s' "$GATEWAY_WS_URL" | grep -qE '^[a-zA-Z][a-zA-Z0-9+.-]*://(localhost|127\.0\.0\.1|\[::1\])([:/]|$)' \
+   && [ -n "$(setting OPENBOT_PUBLIC_URL "")" ]; then
+  export OPENBOT_GATEWAY_PROXY=on
+  export OPENBOT_BROWSER_GATEWAY_WS_URL=""
+else
+  export OPENBOT_GATEWAY_PROXY=""
+  export OPENBOT_BROWSER_GATEWAY_WS_URL="$GATEWAY_WS_URL"
+fi
 # An agent somebody registers on their own loopback is dialled on this machine, not in the container.
 export OPENBOT_THIS_MACHINE_CONTAINER_HOST="${OPENBOT_THIS_MACHINE_CONTAINER_HOST:-host.docker.internal}"
 # The app is this checkout's, on APP_PORT, so the server's own copy of it is published nowhere fixed.
@@ -506,8 +546,17 @@ INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/inf
 # machine has. On Windows `python3` is usually the Microsoft Store alias, which prints "Python was not
 # found" and exits 49, so the run stopped here with the server and worker up and the app never
 # started.
-bun run - "$INFO" <<'JS'
+# Nobody is signed in here, and the server lists Bots only to somebody working in an organization.
+# So the list is checked where there is one person who is always signed in (the personal edition,
+# or OPENBOT_SINGLE_USER), and where people sign in an empty list is what a healthy server answers.
+if [ "$EDITION" = "personal" ] || [ "$(setting OPENBOT_SINGLE_USER "")" = "true" ]; then
+  LISTS_BOTS=true
+else
+  LISTS_BOTS=false
+fi
+bun run - "$INFO" "$LISTS_BOTS" <<'JS'
 const info = JSON.parse(process.argv[2]);
+const listsBots = process.argv[3] === "true";
 const status = info.licenseStatus;
 const agents = Object.keys(info.agents ?? {});
 if (status !== "valid") {
@@ -516,11 +565,13 @@ if (status !== "valid") {
   console.log("\x1b[31m  See README.md for Intelligence setup.\x1b[0m");
   process.exit(1);
 }
-if (agents.length === 0) {
+if (listsBots && agents.length === 0) {
   console.log("\x1b[31m  No Bots registered.\x1b[0m");
   process.exit(1);
 }
-console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${agents.join(", ")}\x1b[0m`);
+// A server that lists its Bots to nobody signed in still names them here, as it always has.
+const bots = agents.length > 0 ? agents.join(", ") : "listed to people once they sign in";
+console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${bots}\x1b[0m`);
 JS
 
 info "4/4  App"

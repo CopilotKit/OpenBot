@@ -301,7 +301,7 @@ jobs:
       # must come from the tree and the lockfiles, not from anything an earlier run left behind.
       # The standard library for the architecture this job builds, which on the Apple silicon
       # runner is a second target for the Intel build.
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.platform.rust-target }}

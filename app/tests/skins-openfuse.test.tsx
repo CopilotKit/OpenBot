@@ -32,7 +32,6 @@ import type { ChannelSummary } from "@/lib/channels/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import type { MemoryRecord } from "@/lib/memory";
 import { isNavigationLink, navigationFor } from "@/lib/navigation";
-import type { PluginsPage } from "@/lib/plugins/queries";
 import type { ProactiveSetting, ProactiveSuggestion } from "@/lib/proactive";
 import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
@@ -59,6 +58,7 @@ import {
 } from "./accounts-api";
 import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
+import { type AppsFixture, answerAppsApi } from "./apps-api";
 import {
   activityOf,
   answerBotAttention,
@@ -66,6 +66,14 @@ import {
   attentionOf,
   botOperationPath,
 } from "./bots-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPage,
+  noContent,
+  problem,
+} from "./conversations-api";
+import { MEMORY } from "./learning-api";
 import {
   CHECK_IN_ITEMS_PATH,
   CHECK_INS_PATH,
@@ -149,6 +157,7 @@ const scout = agent({ id: "scout", name: "Scout", title: "Research" });
 // OpenBot's default Bot: `defaultAgentProfile` prefers the picked harness over list order.
 const fuse = agent({
   id: "picked-harness",
+  packageBotId: "picked-harness",
   name: "Fuse",
   title: "Your helper",
 });
@@ -372,15 +381,16 @@ const memories: MemoryRecord[] = [
     enabled: true,
     reviewState: "confirmed",
     formedBy: "person",
-    formedByAgentId: null,
+    formedByBotId: null,
     sourceApp: null,
     sourceLink: null,
     observedAt: null,
+    createdAt: earlier,
     updatedAt: earlier,
   },
 ];
 
-const plugins: PluginsPage = {
+const plugins: AppsFixture = {
   catalogue: [
     {
       key: "notion",
@@ -402,10 +412,9 @@ const plugins: PluginsPage = {
     },
   ],
   servers: [
-    { id: "notion" },
-    { id: "google-drive" },
-  ] as unknown as PluginsPage["servers"],
-  skills: [],
+    { id: "notion", title: "Notion", provenance: "first-party" },
+    { id: "google-drive", title: "Google Drive", provenance: "first-party" },
+  ],
   botsMayCallBack: false,
   redirectUri: null,
   composioConfigured: false,
@@ -414,7 +423,16 @@ const plugins: PluginsPage = {
 
 type Call = { method: string; path: string; body: unknown };
 
-function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
+function serve(
+  options: {
+    role?: "admin" | "user";
+    userId?: string;
+    /** What each Bot waits on the person for, as the server counts it. */
+    attention?: BotAttention[];
+    /** Fuse's own Activity. */
+    activity?: BotActivity;
+  } = {},
+) {
   const calls: Call[] = [];
   const routes: Record<string, unknown> = {
     [ME_PATH]: meBody({
@@ -426,8 +444,8 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         onboarding: null,
       },
     }),
-    "/api/channels": { channels, nextCursor: null },
-    [botOperationPath(fuse.id, "activity")]: activity,
+    [CONVERSATIONS_PATH]: conversationPage(channels),
+    [botOperationPath(fuse.id, "activity")]: options.activity ?? activity,
     [botOperationPath(scout.id, "activity")]: activityOf(),
     [`${CHECK_INS_PATH}?limit=100`]: {
       checkIns: settings,
@@ -440,8 +458,7 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
     },
     [`${ROUTINES_PATH}?limit=100`]: { routines, nextCursor: null },
     [`${GOALS_PATH}?limit=100`]: { goals: responsibilities, nextCursor: null },
-    "/api/memory": { memories },
-    "/api/plugins": plugins,
+    [`${MEMORY.memories}?limit=100`]: { memories, nextCursor: null },
     "/api/plugins/connections": {
       connections: [{ serverId: "notion", holder: "person" }],
       redirectUri: null,
@@ -466,20 +483,34 @@ function serve(options: { role?: "admin" | "user"; userId?: string } = {}) {
         path,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
+      // A conversation marked read, or saying what it is doing, answers with nothing.
+      if (
+        method === "POST" &&
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(mark-read|activity|signal-busy)$/.test(
+          path,
+        )
+      )
+        return noContent();
       if (method !== "GET")
         return (
           approvalWriteResponse(input, init) ?? Response.json({ ok: true })
         );
       const bots = answerBotsList(input, init, { visible: [scout, fuse] });
       if (bots) return bots;
-      const waiting = answerBotAttention(input, init, { bots: attention });
+      const apps = answerAppsApi(input, init, plugins);
+      if (apps) return apps;
+      const waiting = answerBotAttention(input, init, {
+        bots: options.attention ?? attention,
+      });
       if (waiting) return waiting;
-      const detail = path.match(/^\/api\/channels\/([^/?]+)$/);
+      const detail = path.match(
+        /^\/api\/v2\/organizations\/default\/conversations\/([^/?]+)$/,
+      );
       if (detail) {
         const found = channels.find((row) => row.id === detail[1]);
         return found
-          ? Response.json({ channel: found })
-          : Response.json({ error: "Not found" }, { status: 404 });
+          ? Response.json({ conversation: conversationOf(found) })
+          : problem(404, "Couldn't find that conversation.");
       }
       const approvals = approvalInboxResponse(input, inbox);
       if (approvals) return approvals;
@@ -610,6 +641,68 @@ describe("the frame", () => {
     ).toBeTruthy();
   });
 
+  /*
+   * The bell counted the approval inbox its own way, so a task that couldn't finish was in
+   * OpenBot's Bots badge and not on the bell. It shows OpenBot's count.
+   */
+  test("the bell says the same number as OpenBot's Bots badge, tasks included", async () => {
+    serve({
+      attention: [
+        attentionOf(fuse.id, fuse.name, {
+          approvals: 1,
+          tasks: { needsInput: 0, ready: 0, failed: 1 },
+        }),
+        attentionOf(scout.id, scout.name, { unread: 1 }),
+      ],
+    });
+    renderAt("/connections");
+    expect(
+      await page().findByRole("button", { name: "Needs you, 2 waiting" }),
+    ).toBeTruthy();
+    expect(
+      page().getAllByRole("img", { name: "2 things need you" }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  /*
+   * The bell's number counted a hand-off that ran out of tries, and its sheet listed only questions
+   * and approvals, so it said 2 over one row. Every thing the number counts is a row.
+   */
+  test("the bell lists every thing its number counts, a stalled hand-off included", async () => {
+    serve({
+      attention: [
+        attentionOf(fuse.id, fuse.name, { approvals: 1, handoffs: 1 }),
+        attentionOf(scout.id, scout.name, { unread: 1 }),
+      ],
+      activity: activityOf({
+        inProgress: [
+          {
+            id: "hop-stalled",
+            kind: "handoff",
+            title: "Book the venue for Friday",
+            detail: "Delegated to Scout",
+            status: "failed",
+            at: now,
+            channelId: "c-fuse",
+            needsYou: true,
+            stoppable: false,
+            cancellable: false,
+          },
+        ],
+      }),
+    });
+    renderAt("/connections");
+    fireEvent.click(
+      await page().findByRole("button", { name: "Needs you, 2 waiting" }),
+    );
+    const sheet = await page().findByRole("dialog");
+    expect(
+      await within(sheet).findByText("Book the venue for Friday"),
+    ).toBeTruthy();
+    // And the approval beside it: two rows under a 2.
+    expect(within(sheet).getByText("Fuse wants to open url")).toBeTruthy();
+  });
+
   test("a one-to-one conversation puts its own Bot at the centre", async () => {
     serve();
     renderAt("/channel/c-scout");
@@ -728,10 +821,8 @@ describe("the frame", () => {
       const real = globalThis.fetch;
       return Object.assign(
         (input: RequestInfo | URL, init?: RequestInit) =>
-          String(input) === "/api/channels"
-            ? Promise.resolve(
-                Response.json({ channels: roster, nextCursor: null }),
-              )
+          String(input) === CONVERSATIONS_PATH
+            ? Promise.resolve(Response.json(conversationPage(roster)))
             : real(input, init),
         { preconnect: originalFetch.preconnect },
       );
@@ -935,8 +1026,12 @@ describe("each tab is OpenBot's own sections for the centre Bot", () => {
     // OpenBot's activity sections for the Bot.
     expect(await page().findByText("Morning briefing")).toBeTruthy();
     expect(page().getByText("Draft the launch post")).toBeTruthy();
-    expect(page().getByRole("heading", { name: "In progress" })).toBeTruthy();
-    expect(page().getByRole("heading", { name: "Completed" })).toBeTruthy();
+    expect(page().getByRole("heading", { name: "Working" })).toBeTruthy();
+    expect(page().getByRole("heading", { name: "Done" })).toBeTruthy();
+    // What waits on the person is on the board above, once.
+    expect(page().getAllByRole("heading", { name: "Needs you" }).length).toBe(
+      1,
+    );
   });
 
   test("Ideas shows only the centre Bot's suggestions and starts one through OpenBot", async () => {

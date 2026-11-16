@@ -1,6 +1,11 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  environmentManager,
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,18 +14,19 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import {
   MessageReactions,
+  SentFromBot,
   TaskCard,
   TaskReport,
   ThreadLinks,
 } from "@/components/tasks/task-thread";
-import { todayRoutes } from "@/lib/api/served-today";
+import { refreshTaskCards } from "@/lib/channels/use-channel-events";
 import { inAppPath, markdownComponents } from "@/lib/markdown";
 import { settleReactWork } from "./settle-react-work";
 
@@ -39,8 +45,8 @@ const WAITING =
 
 let task = {
   id: "task-1",
-  agentId: "general-assistant",
-  channelId: "channel_task",
+  botId: "general-assistant",
+  conversationId: "channel_task",
   threadId: "thread_task",
   title: "Order heirloom tomato seeds",
   why: null,
@@ -48,10 +54,14 @@ let task = {
   suggestionId: null,
   sourceApp: null,
   sourceLink: null,
-  originChannelId: "channel_main",
+  originConversationId: "channel_main",
   status: "needs_input",
-  failure: null,
-  failedAt: null,
+  failure: null as string | null,
+  failedAt: null as string | null,
+  stoppedAt: null as string | null,
+  workingSince: null as string | null,
+  tryingAgainAt: null as string | null,
+  lastActivityAt: "2026-11-12T22:00:00.000Z",
   next: WAITING as string | null,
   resolvedAt: null,
   createdAt: "2026-11-12T22:00:00.000Z",
@@ -59,18 +69,33 @@ let task = {
 };
 const requests: string[] = [];
 const server = setupServer(
-  http.get("*/api/tasks/:id", ({ params }) =>
+  // Tasks and reactions, at the API's addresses and in its shapes, as the server answers them.
+  http.get("*/api/v2/organizations/:organizationId/tasks/:id", ({ params }) =>
     params.id === task.id
       ? HttpResponse.json({ task })
       : HttpResponse.json(
-          { error: "Couldn't find that task." },
-          { status: 404 },
+          {
+            type: "https://open.bot/errors/not-found",
+            title: "Not found.",
+            status: 404,
+            detail: "Couldn't find that task.",
+            code: "NOT_FOUND",
+            category: "not_found",
+            retryable: false,
+            requestId: "req_test",
+            traceId: "trace_test",
+          },
+          {
+            status: 404,
+            headers: { "content-type": "application/problem+json" },
+          },
         ),
   ),
-  http.get("*/api/tasks/reactions/:threadId", ({ params }) =>
+  http.get("*/api/v2/organizations/:organizationId/reactions", ({ request }) =>
     HttpResponse.json({
+      nextCursor: null,
       reactions:
-        params.threadId === "thread_main"
+        new URL(request.url).searchParams.get("threadId") === "thread_main"
           ? [
               {
                 messageId: "message-thanks",
@@ -81,6 +106,10 @@ const server = setupServer(
             ]
           : [],
     }),
+  ),
+  // The task list, which the brief finds its task in by thread.
+  http.get("*/api/v2/organizations/:organizationId/tasks", () =>
+    HttpResponse.json({ tasks: [task], nextCursor: null }),
   ),
   // The Bots list, at the API's address and in its shape, as the server answers it.
   http.get("*/api/v2/organizations/:organizationId/bots", () =>
@@ -96,22 +125,32 @@ server.events.on("request:start", ({ request }) => {
   requests.push(`${request.method} ${url.pathname}${url.search}`);
 });
 
+let wasServer = true;
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://openbot.invalid/" });
   server.listen({ onUnhandledRequest: "error" });
+  /*
+   * A browser, with the page in front, as it is for a person reading the conversation. The query
+   * library decided it was on a server when it was first evaluated, before this DOM existed, and on
+   * a server no read is ever repeated on a timer, which is how a card follows its task.
+   */
+  wasServer = environmentManager.isServer();
+  environmentManager.setIsServer(() => false);
+  focusManager.setFocused(true);
 });
 afterEach(() => {
   cleanup();
   requests.length = 0;
 });
 afterAll(async () => {
+  environmentManager.setIsServer(() => wasServer);
+  focusManager.setFocused(undefined);
   server.close();
-  todayRoutes.on = true;
   await settleReactWork();
   GlobalRegistrator.unregister();
 });
 
-function draw(children: ReactNode) {
+function draw(children: ReactNode, client?: QueryClient) {
   const rootRoute = createRootRoute({
     component: () => (
       <>
@@ -134,6 +173,7 @@ function draw(children: ReactNode) {
   return render(
     <QueryClientProvider
       client={
+        client ??
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
@@ -286,21 +326,439 @@ test("a Bot's reaction is read through the generated client and drawn under its 
     name: "General Assistant reacted 👍",
   });
   expect(chip.textContent).toBe("👍");
-  // Asked at the API's address, and sent where today's server answers it.
-  expect(requests).toContain("GET /api/tasks/reactions/thread_main");
+  // Asked at the API's address, and nowhere else.
+  expect(requests).toContain(
+    "GET /api/v2/organizations/default/reactions?threadId=thread_main&limit=100",
+  );
+  expect(requests.filter((request) => request.includes("/api/tasks"))).toEqual(
+    [],
+  );
 });
 
-test("today's table sends the reactions operation where today's server answers it", async () => {
-  const { servedToday } = await import("@/lib/api/served-today");
-  const route = servedToday(
-    "/api/v2/organizations/default/reactions?threadId=thread%2Fwith%20slash&limit=100",
+test("a task's brief links back to the conversation that asked for it, and a check-in's stays plain", async () => {
+  task = { ...task, origin: "delegated", originConversationId: "channel_main" };
+  const delegated = draw(
+    <SentFromBot brief="Order the seeds." threadId="thread_task" />,
   );
-  expect(route?.path).toBe("/api/tasks/reactions/thread%2Fwith%20slash");
-  expect(route?.answer({ reactions: [{ emoji: "👍" }] })).toEqual({
-    reactions: [{ emoji: "👍" }],
-    nextCursor: null,
+  const link = await delegated.findByRole("link", {
+    name: "Sent from General Assistant",
   });
+  expect(link.getAttribute("href")).toBe("/channel/channel_main");
+  link.click();
+  await delegated.findByText("the thread");
+  cleanup();
+
+  // A check-in's task was not asked for in a conversation, so there is nowhere to go back to.
+  task = { ...task, origin: "check_in", originConversationId: null as never };
+  const checkIn = draw(
+    <SentFromBot brief="Order the seeds." threadId="thread_task" />,
+  );
+  await checkIn.findByText("Sent from General Assistant");
+  expect(checkIn.queryByRole("link")).toBeNull();
+});
+
+/** An ISO time this many seconds before now, as the server stamps a task. */
+const ago = (seconds: number) =>
+  new Date(Date.now() - seconds * 1000).toISOString();
+
+const cardOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-card]");
+const stateOf = (view: ReturnType<typeof draw>) =>
+  cardOf(view)?.getAttribute("data-state");
+const elapsedOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-elapsed] time")?.textContent;
+const lastActivityOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-last-activity]")?.textContent;
+
+test("one card follows its task through every state without a reload: working, needs you, stopped, done, couldn't finish", async () => {
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    workingSince: ago(125),
+    lastActivityAt: ago(4),
+  };
+  // The card is drawn once and never drawn again: every change below reaches this one card.
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await view.findByText("Working");
+  expect(stateOf(view)).toBe("working");
+  // How long it has been at it, counted from when this stretch of work began, and still counting.
+  const first = elapsedOf(view);
+  expect(first).toMatch(/^2:0[5-9]$/);
+  await waitFor(() => expect(elapsedOf(view)).not.toBe(first), {
+    timeout: 3_000,
+  });
+  expect(lastActivityOf(view)).toMatch(/^Last activity .*(second|now)/);
+
+  // It stops for the person: the card says so on its next read, which is seconds away.
+  task = { ...task, status: "needs_input", next: WAITING, workingSince: null };
+  await view.findByText("Needs you", {}, { timeout: 6_000 });
+  expect(stateOf(view)).toBe("needs");
+  // Nothing is counted while it waits on the person.
+  expect(elapsedOf(view)).toBeUndefined();
+
+  // The person stops it in its thread. Its status is failed, and the card does not call it a failure.
+  task = {
+    ...task,
+    status: "failed",
+    next: null,
+    failure: "the run was stopped",
+    failedAt: ago(1),
+    stoppedAt: ago(1),
+  };
+  await view.findByText("Stopped", {}, { timeout: 6_000 });
+  expect(stateOf(view)).toBe("stopped");
+  expect(view.queryByText("Couldn't finish")).toBeNull();
   expect(
-    servedToday("/api/v2/organizations/default/reactions", "POST"),
-  ).toBeUndefined();
+    view.getByText(
+      "You stopped this. Anything it had already done stays done.",
+    ),
+  ).toBeTruthy();
+  expect(lastActivityOf(view)).toMatch(/^Last activity /);
+}, 20_000);
+
+test("a card that had stopped reading its task reads it again when the conversation's work changes", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  task = {
+    ...task,
+    status: "ready_for_review",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: null,
+    lastActivityAt: ago(600),
+  };
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+    client,
+  );
+  await view.findByText("Done");
+  expect(lastActivityOf(view)).toBe("Finished 10 minutes ago");
+
+  // The person replied in its thread and the task carries on. Done is no longer read on a timer,
+  // so nothing tells the card: it still says Done well past the few seconds a working card waits.
+  task = {
+    ...task,
+    status: "working",
+    workingSince: ago(2),
+    lastActivityAt: ago(1),
+  };
+  const asked = () =>
+    requests.filter((request) => request.endsWith("/tasks/task-1")).length;
+  const before = asked();
+  await new Promise((resolve) => setTimeout(resolve, 3_500));
+  expect(asked()).toBe(before);
+  expect(stateOf(view)).toBe("done");
+
+  // An event that is not about work leaves the card alone.
+  act(() =>
+    refreshTaskCards(client, {
+      channelId: "channel_main",
+      lastMessage: "hello",
+      lastMessageAt: ago(0),
+      lastMessageAgentId: null,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(asked()).toBe(before);
+
+  // The server says the conversation's work changed: the card reads its task again, at once.
+  act(() =>
+    refreshTaskCards(client, {
+      channelId: "channel_main",
+      lastMessage: null,
+      lastMessageAt: null,
+      lastMessageAgentId: null,
+      work: [],
+      workAt: "2026-11-14T23:59:00.000000Z",
+    }),
+  );
+  await view.findByText("Working", {}, { timeout: 2_000 });
+  expect(stateOf(view)).toBe("working");
+
+  // It runs out of tries: Couldn't finish, with why, and not Stopped.
+  task = {
+    ...task,
+    status: "failed",
+    failure: "a service didn't answer",
+    failedAt: ago(0),
+    stoppedAt: null,
+    workingSince: null,
+  };
+  await view.findByText("Couldn't finish", {}, { timeout: 6_000 });
+  expect(stateOf(view)).toBe("failed");
+  expect(view.getByText("A service didn't answer.")).toBeTruthy();
+}, 20_000);
+
+test("last activity moves when the task does something, and keeps ageing when it does not", async () => {
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: ago(400),
+    lastActivityAt: ago(57),
+  };
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await view.findByText("Working");
+  expect(lastActivityOf(view)).toMatch(/^Last activity 5\d seconds ago$/);
+  // The task says and does nothing: the same stamp reads older as the seconds pass, by itself.
+  await waitFor(
+    () => expect(lastActivityOf(view)).toBe("Last activity 1 minute ago"),
+    { timeout: 6_000 },
+  );
+  // It takes a step: the stamp moves, and the card shows it on its next read.
+  task = { ...task, lastActivityAt: ago(0) };
+  await waitFor(
+    () =>
+      expect(lastActivityOf(view)).toMatch(
+        /^Last activity (now|\d seconds? ago)$/,
+      ),
+    { timeout: 6_000 },
+  );
+}, 20_000);
+
+const tryingAgainOf = (view: ReturnType<typeof draw>) =>
+  view.container.querySelector("[data-slot=task-trying-again]");
+const waitingOf = (view: ReturnType<typeof draw>) =>
+  cardOf(view)?.getAttribute("data-waiting");
+
+test("a working task that waits to try again says so and when, and reads as before once the time has passed", async () => {
+  // Its turn hit a rate limit twelve minutes in, and is tried again in ten minutes.
+  const at = new Date(Date.now() + 600_000);
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: ago(720),
+    lastActivityAt: ago(700),
+    tryingAgainAt: at.toISOString(),
+  };
+  const view = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  // It is still working, and still counting: only the line under it changes.
+  await view.findByText("Working");
+  expect(stateOf(view)).toBe("working");
+  expect(elapsedOf(view)).toMatch(/^12:0\d$/);
+  expect(waitingOf(view)).toBe("retry");
+  // The time is the person's own clock's, with the date only when it is another day.
+  const time = at.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const sameDay = at.toDateString() === new Date().toDateString();
+  expect(tryingAgainOf(view)?.textContent).toBe(
+    sameDay
+      ? `Waiting to try again at ${time}`
+      : `Waiting to try again on ${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })} at ${time}`,
+  );
+  expect(tryingAgainOf(view)?.querySelector("time")?.dateTime).toBe(
+    at.toISOString(),
+  );
+  expect(lastActivityOf(view)).toBeUndefined();
+
+  // A wait that ends on another day names the day.
+  const later = new Date(Date.now() + 3 * 86_400_000);
+  task = { ...task, tryingAgainAt: later.toISOString() };
+  await waitFor(
+    () =>
+      expect(tryingAgainOf(view)?.textContent).toBe(
+        `Waiting to try again on ${later.toLocaleDateString(undefined, { month: "short", day: "numeric" })} at ${later.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`,
+      ),
+    { timeout: 6_000 },
+  );
+
+  // Nearly there: no clock time for a wait of seconds.
+  task = { ...task, tryingAgainAt: new Date(Date.now() + 5_000).toISOString() };
+  await waitFor(
+    () =>
+      expect(tryingAgainOf(view)?.textContent).toBe("Trying again in a moment"),
+    { timeout: 6_000 },
+  );
+  expect(waitingOf(view)).toBe("retry");
+
+  // The time passes with nothing new read from the task: the card goes back to what it says today.
+  await waitFor(() => expect(tryingAgainOf(view)).toBeNull(), {
+    timeout: 9_000,
+  });
+  expect(waitingOf(view)).toBeNull();
+  expect(lastActivityOf(view)).toMatch(/^Last activity 1\d minutes ago$/);
+  expect(view.getByText("Working")).toBeTruthy();
+}, 30_000);
+
+test("a task that is not waiting to try again, or is no longer working, reads as it does today", async () => {
+  // The server says nothing of a wait.
+  task = {
+    ...task,
+    status: "working",
+    next: null,
+    failure: null,
+    failedAt: null,
+    stoppedAt: null,
+    workingSince: ago(125),
+    lastActivityAt: ago(120),
+    tryingAgainAt: null,
+  };
+  const none = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await none.findByText("Working");
+  expect(lastActivityOf(none)).toBe("Last activity 2 minutes ago");
+  expect(tryingAgainOf(none)).toBeNull();
+  expect(waitingOf(none)).toBeNull();
+  cleanup();
+
+  // A server from before the field: the task it returns does not carry it at all.
+  const { tryingAgainAt: _absent, ...without } = task;
+  task = without as typeof task;
+  expect("tryingAgainAt" in task).toBe(false);
+  const absent = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await absent.findByText("Working");
+  expect(lastActivityOf(absent)).toBe("Last activity 2 minutes ago");
+  expect(tryingAgainOf(absent)).toBeNull();
+  expect(waitingOf(absent)).toBeNull();
+  cleanup();
+  task = { ...task, tryingAgainAt: null };
+
+  // A time already behind this clock when the card is first drawn, as after a reload.
+  task = { ...task, tryingAgainAt: ago(30) };
+  const past = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await past.findByText("Working");
+  expect(lastActivityOf(past)).toBe("Last activity 2 minutes ago");
+  expect(tryingAgainOf(past)).toBeNull();
+  expect(waitingOf(past)).toBeNull();
+  cleanup();
+
+  // It ran out of tries: a time still ahead is not a wait any more.
+  task = {
+    ...task,
+    status: "failed",
+    failure: "a service didn't answer",
+    failedAt: ago(1),
+    workingSince: null,
+    tryingAgainAt: new Date(Date.now() + 600_000).toISOString(),
+  };
+  const failed = draw(
+    <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+  );
+  await failed.findByText("Couldn't finish");
+  expect(lastActivityOf(failed)).toMatch(/^Last activity /);
+  expect(tryingAgainOf(failed)).toBeNull();
+  expect(waitingOf(failed)).toBeNull();
+});
+
+test("a stopped task's line in the conversation reads Stopped, and its link row too", async () => {
+  task = {
+    ...task,
+    status: "failed",
+    failure: "the run was stopped",
+    failedAt: ago(30),
+    stoppedAt: ago(30),
+    workingSince: null,
+  };
+  const view = draw(
+    <>
+      <TaskReport kind="failed" taskId="task-1">
+        <p>Stopped. I had found two suppliers and ordered nothing.</p>
+      </TaskReport>
+      <ThreadLinks
+        threads={[
+          {
+            taskId: "task-1",
+            channelId: "channel_task",
+            title: "Order heirloom tomato seeds",
+            status: "failed",
+            link: "/channel/channel_task",
+          },
+        ]}
+      />
+    </>,
+  );
+  const line = await view.findByRole("region", { name: "A task was stopped" });
+  expect(line.textContent).toContain("Stopped · Order heirloom tomato seeds");
+  expect(view.queryByText(/Couldn't finish/)).toBeNull();
+  expect(
+    view.container.querySelector("li[data-state]")?.getAttribute("data-state"),
+  ).toBe("stopped");
+});
+
+test("a task that couldn't finish says why on its card as a sentence of its own", async () => {
+  // The server words the reason to follow "Couldn't finish:", so it starts in lower case.
+  for (const [failure, said] of [
+    [
+      "this Bot isn't shared with you any more",
+      "This Bot isn't shared with you any more.",
+    ],
+    [
+      "Pipeline Bot isn't shared with you",
+      "Pipeline Bot isn't shared with you.",
+    ],
+  ] as const) {
+    task = {
+      ...task,
+      status: "failed",
+      next: null,
+      failure,
+      failedAt: ago(5),
+      stoppedAt: null,
+      workingSince: null,
+    };
+    const view = draw(
+      <TaskCard channelId="channel_task" taskId="task-1" title="Order seeds" />,
+    );
+    await view.findByText("Couldn't finish");
+    expect(view.getByText(said)).toBeTruthy();
+    expect(view.queryByText(failure)).toBeNull();
+    cleanup();
+  }
+});
+
+test("a result whose task now needs the person doesn't read as done above its card", async () => {
+  task = {
+    ...task,
+    status: "needs_input",
+    next: "This needs you: Slack isn't ready for this Bot yet",
+    failure: null,
+    stoppedAt: null,
+  };
+  const view = draw(
+    <TaskReport kind="result" taskId="task-1">
+      <p>
+        “refunds batch done” was not posted because I haven't been granted Slack
+        access.
+      </p>
+    </TaskReport>,
+  );
+  const link = await view.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  await waitFor(() => expect(link.getAttribute("data-state")).toBe("needs"));
+  task = { ...task, status: "ready_for_review", next: null };
+  cleanup();
+  const done = draw(
+    <TaskReport kind="result" taskId="task-1">
+      <p>Posted.</p>
+    </TaskReport>,
+  );
+  const doneLink = await done.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  await waitFor(() => expect(doneLink.getAttribute("data-state")).toBe("done"));
 });

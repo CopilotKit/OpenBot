@@ -57,6 +57,7 @@ import type {
   NoBotToAnswerResponse,
   NoSpeechResponse,
   OrganizationNotFoundResponse,
+  PayloadTooLargeResponse,
   RecordConversationActivityHeaders,
   RemoveConversationMemberHeaders,
   RouteConversationMessageHeaders,
@@ -78,7 +79,6 @@ import type {
   UpdateConversationRequest,
   UpdatedConversation,
   UploadConversationAttachmentHeaders,
-  UploadTooLargeResponse,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -115,7 +115,7 @@ export const getCreateConversationJoinTokenUrl = (
 };
 
 /**
- * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join.
+ * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Authorization: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
  * @summary Get a token to watch a conversation live
  */
 export const createConversationJoinToken = async (
@@ -2930,7 +2930,7 @@ export const getUploadConversationAttachmentMutationOptions = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | AttachmentConflictResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -2987,7 +2987,7 @@ export type UploadConversationAttachmentMutationError =
   | ForbiddenResponse
   | ConversationNotFoundResponse
   | AttachmentConflictResponse
-  | UploadTooLargeResponse
+  | PayloadTooLargeResponse
   | UnsupportedFileResponse
   | ServerErrorResponse
   | ServiceUnavailableResponse
@@ -3009,7 +3009,7 @@ export const useUploadConversationAttachment = <
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | AttachmentConflictResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | ServerErrorResponse
     | ServiceUnavailableResponse
@@ -3857,7 +3857,7 @@ export const getCreateTranscriptionMutationOptions = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | NoSpeechResponse
     | TooManyRequestsResponse
@@ -3909,7 +3909,7 @@ export type CreateTranscriptionMutationError =
   | UnauthenticatedResponse
   | ForbiddenResponse
   | OrganizationNotFoundResponse
-  | UploadTooLargeResponse
+  | PayloadTooLargeResponse
   | UnsupportedFileResponse
   | NoSpeechResponse
   | TooManyRequestsResponse
@@ -3931,7 +3931,7 @@ export const useCreateTranscription = <
     | UnauthenticatedResponse
     | ForbiddenResponse
     | OrganizationNotFoundResponse
-    | UploadTooLargeResponse
+    | PayloadTooLargeResponse
     | UnsupportedFileResponse
     | NoSpeechResponse
     | TooManyRequestsResponse

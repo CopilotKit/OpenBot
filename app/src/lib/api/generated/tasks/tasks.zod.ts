@@ -13,7 +13,7 @@ export const ListTasksParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -105,11 +105,57 @@ export const ListTasksResponse = zod.object({
           .datetime({ offset: true })
           .nullable()
           .describe("When it failed."),
+        stoppedAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+          ),
+        workingSince: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the work it is doing now began. Null or absent unless it is working.",
+          ),
+        tryingAgainAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+          ),
+        lastActivityAt: zod.iso
+          .datetime({ offset: true })
+          .optional()
+          .describe(
+            "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+          ),
         next: zod.string().nullable().describe("One line on what comes next."),
         resolvedAt: zod.iso
           .datetime({ offset: true })
           .nullable()
           .describe("When the person marked it done."),
+        steer: zod
+          .union([
+            zod
+              .object({
+                text: zod
+                  .string()
+                  .describe(
+                    "The person's words, on one line and cut short when they run long.",
+                  ),
+                at: zod.iso
+                  .datetime({ offset: true })
+                  .describe("When they said it."),
+              })
+              .describe(
+                "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+              ),
+            zod.null(),
+          ])
+          .optional()
+          .describe(
+            "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+          ),
         createdAt: zod.iso
           .datetime({ offset: true })
           .describe("When it was started."),
@@ -145,7 +191,7 @@ export const GetTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -213,11 +259,57 @@ export const GetTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),
@@ -244,7 +336,7 @@ export const ResolveTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -324,11 +416,57 @@ export const ResolveTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),
@@ -355,7 +493,7 @@ export const ReopenTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -435,11 +573,57 @@ export const ReopenTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),
@@ -466,7 +650,7 @@ export const RetryTaskParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   taskId: zod
     .string()
@@ -546,11 +730,57 @@ export const RetryTaskResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it failed."),
+      stoppedAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the person stopped its run. Its status is failed while this is set. Null or absent otherwise, and once it carries on.",
+        ),
+      workingSince: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      tryingAgainAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.",
+        ),
+      lastActivityAt: zod.iso
+        .datetime({ offset: true })
+        .optional()
+        .describe(
+          "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
+        ),
       next: zod.string().nullable().describe("One line on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
         .describe("When the person marked it done."),
+      steer: zod
+        .union([
+          zod
+            .object({
+              text: zod
+                .string()
+                .describe(
+                  "The person's words, on one line and cut short when they run long.",
+                ),
+              at: zod.iso
+                .datetime({ offset: true })
+                .describe("When they said it."),
+            })
+            .describe(
+              "What the person told a task directly in its conversation, as its card says it in the conversation that started the task.",
+            ),
+          zod.null(),
+        ])
+        .optional()
+        .describe(
+          "The latest thing the person told the task directly in its conversation, when the task had not asked them for anything. Null or absent when they have not.",
+        ),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was started."),

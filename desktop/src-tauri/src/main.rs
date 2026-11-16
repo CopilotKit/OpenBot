@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_connected;
 mod desktop_connection;
 mod desktop_host_access;
 mod desktop_page;
@@ -12,6 +13,7 @@ mod desktop_status;
 mod desktop_telemetry;
 mod first_paint;
 mod intelligence_bridge;
+mod key_menu;
 mod notice;
 mod outside_links;
 mod zoom;
@@ -25,7 +27,8 @@ use openbot_desktop_lib::{
     local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    telemetry, tray, troubleshooting, uninstall, update_ready, upgrade, windows as win,
+    superseded_images, telemetry, tray, troubleshooting, uninstall, update_ready, upgrade,
+    windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -124,6 +127,9 @@ struct Shell {
     app_update: app_update::Known,
     /// Wakes the thread that gets a newer version ready when the feed names one.
     update_ready: update_ready::Nudge,
+    /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
+    /// window shows it. See `desktop_connected`.
+    connected: desktop_connected::State,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -481,6 +487,7 @@ answers.
 */
 #[tauri::command]
 async fn wake_engine(app: tauri::AppHandle, root: String) -> Result<(), Problem> {
+    desktop_connected::local_only(&app)?;
     let root = stack::root_from(&root);
     let shell_app = app.clone();
     let up = tauri::async_runtime::spawn_blocking(move || {
@@ -1164,36 +1171,70 @@ fn bring_to_front<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     };
     let _ = window.show();
     let _ = window.unminimize();
+    focus(&window, why);
+}
+
+/**
+Activates `window`, already shown and not minimised, without tao's `set_focus` on Windows: past a
+refusal that presses and releases Alt (`force_window_active`), and a lone Alt puts the window into
+menu mode, where the page and OpenBot stop hearing each other until a click (`key_menu`). On
+Windows it is `SetForegroundWindow`, and when Windows refuses, the taskbar button flashes; `why`
+goes in the log then. Everywhere else, `set_focus`.
+*/
+fn focus<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, why: &str) {
     #[cfg(windows)]
     {
         let hwnd = window.hwnd().ok().map(|hwnd| hwnd.0 as isize);
         let why = why.to_owned();
+        let flashing = window.clone();
         // On the window's own thread, as `notice::bring_to_front` is.
-        let _ = app.run_on_main_thread(move || {
+        let _ = window.run_on_main_thread(move || {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetForegroundWindow, SetForegroundWindow,
+            };
             let front = come_forward(
                 || {
+                    // SAFETY: `hwnd` is this window's live handle, read just now.
                     hwnd.is_some_and(|hwnd| {
-                        use windows::Win32::Foundation::HWND;
-                        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-                        // SAFETY: `hwnd` is this window's live handle, read just now.
                         unsafe { SetForegroundWindow(HWND(hwnd as *mut core::ffi::c_void)) }
                             .as_bool()
                     })
                 },
                 || {
-                    let _ = window
+                    hwnd.is_some_and(|hwnd| {
+                        // SAFETY: no arguments; it only reads which window is in front.
+                        let front = unsafe { GetForegroundWindow() };
+                        front == HWND(hwnd as *mut core::ffi::c_void)
+                    })
+                },
+                || {
+                    let _ = flashing
                         .request_user_attention(Some(tauri::UserAttentionType::Informational));
                 },
             );
-            if front == Front::Flashed {
-                log::info!(
+            match front {
+                Front::Came => log::info!("[front] {why}: in front"),
+                Front::Flashed => log::info!(
                     "[front] {why}: Windows kept another window in front; flashed the taskbar"
-                );
+                ),
             }
         });
     }
     #[cfg(not(windows))]
-    let _ = window.set_focus();
+    {
+        let _ = why;
+        let _ = window.set_focus();
+    }
+}
+
+/// Keeps the window `label` (handle `hwnd`) out of menu mode on a lone Alt or F10 (`key_menu`).
+/// On the window's own thread.
+#[cfg(windows)]
+fn ignore_lone_menu_key(label: &str, hwnd: isize) {
+    if !key_menu::ignore_lone_menu_key(hwnd) {
+        log::warn!("[window] {label}: a lone Alt or F10 can still put it into menu mode");
+    }
 }
 
 /// The browser sign-in is open (`sign_in_to_copilotkit`): the person is in their browser.
@@ -1251,11 +1292,27 @@ enum Front {
     Flashed,
 }
 
-/// Bring the window forward with `set_foreground`, and if Windows refuses, `flash` its taskbar
-/// button. Nothing else: no key pressed or released on the person's behalf.
+/**
+Ask for the foreground with `set_foreground`, then look at whether the window is in front
+(`in_front`), and only if it is not, `flash` its taskbar button. What is in front decides, not what
+`set_foreground` answered: the person sees the window, not the answer. Nothing else: no key pressed
+or released on the person's behalf, no input attached to another thread.
+
+Windows lets a process take the foreground only when it is the foreground process, was started by
+it, received the last input event, or the foreground lock time-out has passed ("SetForegroundWindow
+function", Remarks, Microsoft Learn). After Allow in the browser, the browser is the foreground
+process and took the last input, and the request it then sends this app's loopback listener passes
+none of that on. A refusal there is Windows' rule, so the browser tab tells the person to go back
+to OpenBot (`sign_in::SIGNED_IN_PAGE`).
+*/
 #[cfg_attr(not(windows), allow(dead_code))]
-fn come_forward(set_foreground: impl FnOnce() -> bool, flash: impl FnOnce()) -> Front {
-    if set_foreground() {
+fn come_forward(
+    set_foreground: impl FnOnce() -> bool,
+    in_front: impl FnOnce() -> bool,
+    flash: impl FnOnce(),
+) -> Front {
+    let _answered = set_foreground();
+    if in_front() {
         Front::Came
     } else {
         flash();
@@ -1893,6 +1950,7 @@ async fn upgrade_and_start(
     model: ChosenModel,
     harness: Option<harness::HarnessChoice>,
 ) -> Result<upgrade::Outcome, Problem> {
+    desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
     let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness).await;
@@ -2002,6 +2060,7 @@ async fn upgrade_and_start_now(
                 engine::StepLine::here("OpenBot is updated.")
                     .logged(format!("OpenBot is on {}.", planned.to)),
             );
+            remove_superseded_images(&app, &selected);
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::moved(&planned))
         }
@@ -2167,6 +2226,12 @@ fn get_updates_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             let mut next = BEHIND_TICK;
             loop {
                 handle.state::<Shell>().update_ready.wait(next);
+                // Connected to an OpenBot that runs elsewhere: nothing is downloaded for an
+                // installation here. The app's own update is not this thread's.
+                if desktop_connected::is_connected(&handle) {
+                    next = app_update::TICK;
+                    continue;
+                }
                 let behind = try_getting_own_release_ready(&handle, &mut own, &mut own_said);
                 if fed {
                     try_getting_update_ready(&handle, test.as_deref(), &mut lists, &mut said);
@@ -2894,6 +2959,7 @@ async fn install_app_update(app: tauri::AppHandle) -> Result<(), Problem> {
 
 #[tauri::command]
 async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
+    desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     let saved = {
         let shell = app.state::<Shell>();
@@ -2909,6 +2975,10 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
 /// the installation in `root`. Once per run of the app. See `early_downloads`.
 #[tauri::command]
 fn start_early_downloads(app: tauri::AppHandle, root: String) {
+    // Nothing is downloaded for this computer while the app is connected to another OpenBot.
+    if desktop_connected::is_connected(&app) {
+        return;
+    }
     let telemetry_app = app.clone();
     early_downloads::start(
         stack::root_from(&root),
@@ -2951,6 +3021,7 @@ async fn prepare_installation(
     root: String,
     harness: Option<harness::HarnessChoice>,
 ) -> Result<(), Problem> {
+    desktop_connected::local_only(&app)?;
     if app
         .state::<Shell>()
         .updating
@@ -4116,6 +4187,7 @@ async fn start_stack<R: tauri::Runtime>(
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
+    desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     // The choices, never the values: which provider and how, not the key or the address.
     log::info!(
@@ -4166,7 +4238,8 @@ async fn start_stack_now<R: tauri::Runtime>(
         return Err(Problem::plain(UPGRADE_INTERRUPTED));
     }
     let menus = app.clone();
-    let started = start_stack_inner(app, root, api_url, gateway_ws_url, model, harness).await;
+    let started =
+        start_stack_inner(app, root.clone(), api_url, gateway_ws_url, model, harness).await;
     // The menu bar says whether OpenBot is running.
     refresh_menus(&menus);
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
@@ -4174,8 +4247,37 @@ async fn start_stack_now<R: tauri::Runtime>(
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
         // Attribution after Start, in the background: OpenBot is already open.
         desktop_telemetry::link_account_after_start(&menus);
+        // What an earlier update could not remove yet, now that OpenBot answers again.
+        remove_superseded_images(&menus, &root);
     }
     started
+}
+
+/**
+Remove the images of releases this installation was updated from, once OpenBot has started and
+answered: straight after the update that replaced them, and after every later Start while any are
+left. See `superseded_images`.
+
+In the background, on its own thread: nothing waits on it and nothing is said about it. An image
+that cannot go yet stays for the next Start. On the engine this Start ran on, which is the one the
+installation's images are in.
+*/
+fn remove_superseded_images<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) {
+    let Some(address) = app
+        .state::<Shell>()
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|owned| owned.root == root)
+        .map(|owned| owned.address.clone())
+    else {
+        return;
+    };
+    let root = root.to_path_buf();
+    std::thread::spawn(move || {
+        superseded_images::remove(&address, &root);
+    });
 }
 
 async fn start_stack_inner<R: tauri::Runtime>(
@@ -4967,6 +5069,13 @@ the same cleanup runs in the same order and the exit follows.
 fn quit_cleanup_shown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
     // A setup window that stopped answering and still has not: said before the flush below.
     desktop_stall::at_quit(app);
+    // Connected to an OpenBot that runs elsewhere: Quit closes. Nothing on this computer runs
+    // because of it, so there is nothing to stop and no Shutting down screen to show.
+    if desktop_connected::is_connected(app) {
+        desktop_telemetry::shutdown(app);
+        desktop_connected::quit(app);
+        return Vec::new();
+    }
     show_shutting_down(app);
     desktop_telemetry::shutdown(app);
     let shell = app.state::<Shell>();
@@ -5105,7 +5214,7 @@ fn show_shutting_down<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    focus(&window, "OpenBot is shutting down");
 }
 
 fn report_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>, step: QuitStep, state: QuitStepState) {
@@ -6419,6 +6528,11 @@ where
 async fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
     let asked = std::time::Instant::now();
     log::info!("[show] asked");
+    // Connected to an OpenBot that runs elsewhere, this computer's own is not looked for.
+    if let Err(problem) = desktop_connected::local_only(&app) {
+        logging::outcome("show", asked, &Err::<(), _>(problem.clone()));
+        return Err(problem);
+    }
     let shown = tauri::async_runtime::spawn_blocking(move || {
         let ports = ports_for_shell(&app)?;
         show_openbot_on(app, &ports)
@@ -6688,6 +6802,19 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
                 log::info!("[window] kept the page; a dropped file does not replace it");
                 return false;
             }
+            // Showing an OpenBot that runs elsewhere, through the relay: only the relay's own pages
+            // are OpenBot in this window. Everything else is the browser's, the address the app is
+            // connected to included, whatever its host (`desktop_connected::leaves_for_browser`).
+            if webview.label() == "main" {
+                if let Some(leaves) =
+                    desktop_connected::leaves_for_browser(webview.app_handle(), destination)
+                {
+                    if leaves {
+                        open_in_browser(webview.app_handle(), destination);
+                    }
+                    return !leaves;
+                }
+            }
             if webview.label() != "main"
                 || !outside_links::leaves(destination)
                 || outside_links::loads_in_a_frame(destination)
@@ -6703,14 +6830,22 @@ fn outside_links_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             if !from_openbot {
                 return true;
             }
-            use tauri_plugin_opener::OpenerExt;
-            let _ = webview
-                .app_handle()
-                .opener()
-                .open_url(destination.as_str(), None::<&str>);
+            open_in_browser(webview.app_handle(), destination);
             false
         })
         .build()
+}
+
+/// Hand `destination` to the person's default browser, and say in the log that it did, or that the
+/// browser did not open it (`outside_links::described` names it).
+fn open_in_browser<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &tauri::Url) {
+    use tauri_plugin_opener::OpenerExt;
+    let connected = desktop_connected::connected_address(app);
+    let shown = outside_links::described(destination, connected.as_deref());
+    match app.opener().open_url(destination.as_str(), None::<&str>) {
+        Ok(()) => log::info!("[window] opened {shown} in the browser"),
+        Err(error) => log::warn!("[window] the browser did not open {shown}: {error}"),
+    }
 }
 
 /**
@@ -6781,16 +6916,22 @@ fn build_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
     let building = std::time::Instant::now();
     let window = builder
         .on_new_window(move |destination, _features| {
-            outside_links::new_window(&destination, |to| {
-                use tauri_plugin_opener::OpenerExt;
-                let _ = opener.opener().open_url(to, None::<&str>);
-            });
+            // Showing an OpenBot that runs elsewhere: whatever is not the relay's own page opens
+            // in the browser, as a navigation to it would (`outside_links_guard`).
+            match desktop_connected::leaves_for_browser(&opener, &destination) {
+                Some(true) => open_in_browser(&opener, &destination),
+                Some(false) => {}
+                None => outside_links::new_window(&destination, |_| {
+                    open_in_browser(&opener, &destination);
+                }),
+            }
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;
     #[cfg(target_os = "windows")]
     if let Ok(hwnd) = window.hwnd() {
         first_paint::cover_now(hwnd.0 as isize);
+        ignore_lone_menu_key("main", hwnd.0 as isize);
     }
     drop(watching);
     if let Some(after) = first_paint::shown_after_start() {
@@ -6932,6 +7073,10 @@ fn saved_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Pla
 fn window_page<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &tauri::Url) -> WindowPage {
     if on_setup_page(app, url) {
         WindowPage::Setup
+    } else if desktop_connected::is_relay_page(app, url) {
+        // OpenBot from the OpenBot the app is connected to, through the relay: its own page, from
+        // a release that makes room for the window buttons. No installation here is asked.
+        WindowPage::OwnedApp
     } else if url.scheme() == "http"
         && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
         && is_owned_app_origin(app, url)
@@ -8053,13 +8198,17 @@ Its own window rather than a page of the main one, so looking at it never takes 
 screen. Closing it hides it, as the main window does; it reads everything again when shown.
 */
 fn show_status_window(app: &tauri::AppHandle) {
+    // Status is about OpenBot on this computer; a connected app has none to report on.
+    if desktop_connected::is_connected(app) {
+        return;
+    }
     if show_status_in_app(app) {
         return;
     }
     if let Some(window) = app.get_webview_window("status") {
         let _ = window.show();
         let _ = window.unminimize();
-        let _ = window.set_focus();
+        focus(&window, "the Status window");
         return;
     }
     let Ok(mut url) = setup_destination(app) else {
@@ -8080,6 +8229,12 @@ fn show_status_window(app: &tauri::AppHandle) {
         // At the level the main window has (`zoom`).
         Ok(window) => {
             let _ = window.set_zoom(saved_zoom(app));
+            #[cfg(windows)]
+            if let Ok(hwnd) = window.hwnd() {
+                let hwnd = hwnd.0 as isize;
+                // On the window's own thread, as `SetWindowSubclass` requires.
+                let _ = window.run_on_main_thread(move || ignore_lone_menu_key("status", hwnd));
+            }
         }
         Err(error) => log::warn!("[status] could not open the Status window: {error}"),
     }
@@ -8122,7 +8277,7 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     }
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    focus(&window, "this computer's settings");
     true
 }
 
@@ -8154,12 +8309,43 @@ pub(crate) struct DesktopStatus {
     log_folder: Option<String>,
 }
 
+impl DesktopStatus {
+    /// What there is to say with no OpenBot on this computer in the picture: the app's version,
+    /// its build and its log folder. Nothing of an installation here is read to answer.
+    fn of_the_app_alone<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Self {
+        DesktopStatus {
+            openbot_running: false,
+            openbot_held: false,
+            processes: Vec::new(),
+            containers: Vec::new(),
+            intelligence_stack: None,
+            intelligence_containers: Vec::new(),
+            engine: None,
+            root: String::new(),
+            app_port: None,
+            version: desktop_version(app),
+            build: build_description(
+                env!("OPENBOT_BUILD_COMMIT"),
+                env!("OPENBOT_BUILD_BRANCH"),
+                env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
+            ),
+            log_folder: logging::folder(app)
+                .ok()
+                .map(|folder| folder.display().to_string()),
+        }
+    }
+}
+
 #[tauri::command]
 async fn desktop_status<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     memory: Option<bool>,
 ) -> Result<DesktopStatus, String> {
     let memory = memory.unwrap_or(true);
+    // Connected to an OpenBot that runs elsewhere: the app's own facts, and no engine asked.
+    if desktop_connected::is_connected(&app) {
+        return Ok(desktop_connected::status(&app));
+    }
     tauri::async_runtime::spawn_blocking(move || read_desktop_status(&app, memory))
         .await
         .map_err(|error| format!("the status could not be read: {error}"))
@@ -8474,9 +8660,8 @@ fn show_setup_and_focus<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(
     window
         .unminimize()
         .map_err(|error| format!("could not unminimize setup: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("could not focus setup: {error}"))
+    focus(&window, "setup");
+    Ok(())
 }
 
 /// Is a deployment this app manages already running?
@@ -8516,6 +8701,10 @@ where
 /// there froze the window until the download finished.
 #[tauri::command]
 async fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) -> bool {
+    // Connected to an OpenBot that runs elsewhere, none here is looked for.
+    if desktop_connected::is_connected(&app) {
+        return false;
+    }
     tauri::async_runtime::spawn_blocking(move || already_running_now(&app, &root))
         .await
         .unwrap_or(false)
@@ -10725,6 +10914,11 @@ fn show_setup_when_stopped<R: tauri::Runtime>(
 /// Used by the tray and by a second launch, both of which happen at moments when the caller has no
 /// idea which of the two the person should be looking at.
 fn show_whichever_applies(app: &tauri::AppHandle) {
+    // Connected to an OpenBot that runs elsewhere: that one, or setup to sign in to it.
+    if desktop_connected::is_connected(app) {
+        desktop_connected::show_window(app);
+        return;
+    }
     match ports_for_shell(app) {
         Ok(ports) => restore_window_on(app, &ports),
         Err(problem) => {
@@ -10776,7 +10970,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     }
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    focus(&window, "OpenBot is showing");
 }
 
 fn schedule_second_instance_restore<T, F>(
@@ -10997,14 +11191,21 @@ fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, erro
 /// Stop in the background, then the setup window: the menu's Stop, and the Status window's and
 /// Settings > This computer's, which `from` tells apart in the log.
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>, from: AskedFrom) {
-    stop_then_show_setup(app, from, false);
+    stop_then_show_setup(app, from, false, false);
+}
+
+/// Settings' Change on where OpenBot runs, while it runs on this computer: the same Stop, then the
+/// setup window at its choice of where OpenBot runs. The choice on record is not changed by
+/// asking. A Stop that failed shows setup with its failure, as any failed Stop does.
+pub(crate) fn change_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    stop_then_show_setup(app, AskedFrom::Settings, false, true);
 }
 
 /// Settings' Change on the AI model row: the same Stop, then the setup window at its AI screen,
 /// where the setup window's own Change AI connection goes. A Stop that failed shows setup as any
 /// failed Stop does, with its failure and Start, since OpenBot may still be running.
 pub(crate) fn change_ai_connection_from_settings<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    stop_then_show_setup(app, AskedFrom::Settings, true);
+    stop_then_show_setup(app, AskedFrom::Settings, true, false);
 }
 
 /// The setup page's one question on load: was it opened to change the AI connection? Answered
@@ -11040,6 +11241,7 @@ fn stop_then_show_setup<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     from: AskedFrom,
     change_ai_connection: bool,
+    choose_connection: bool,
 ) {
     std::thread::spawn(move || {
         let asked = std::time::Instant::now();
@@ -11054,6 +11256,10 @@ fn stop_then_show_setup<R: tauri::Runtime>(
         };
         logging::outcome("stop", asked, &settled);
         settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
+        // Asked for only once everything stopped, as the AI screen is.
+        if choose_connection && settled.is_ok() {
+            desktop_connected::ask_to_choose(&app);
+        }
         match settled {
             Ok(()) => report_plain(&app, "stopped", true, "OpenBot has stopped."),
             // Said rather than swallowed. A menu item that fails silently is worse than one
@@ -11096,6 +11302,14 @@ fn settle_menu_stop(shell: &Shell, fallback_root: &Path, stopped: Stopped) -> Op
 fn chose(app: &tauri::AppHandle, item: &str) {
     match item {
         "open" => show_whichever_applies(app),
+        // The two a connected app's menus carry in place of Status and the troubleshooting logs.
+        CONNECTED_SIGN_OUT_MENU_ID => desktop_connected::sign_out_from_menu(app.clone()),
+        CONNECTED_LOG_FOLDER_MENU_ID => {
+            let _ = open_log_folder_now(app);
+        }
+        // Stop, Status and the engine's logs are about OpenBot on this computer. A connected app's
+        // menus do not carry them, and a shortcut or a stale menu does not reach them either.
+        "stop" | "status" | "logs" if desktop_connected::is_connected(app) => {}
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
         "stop" => stop_from_menu(app.clone(), AskedFrom::Menu),
@@ -11355,6 +11569,13 @@ const TROUBLESHOOTING_MENU_LABEL: &str = "Get Troubleshooting Logs…";
 /// The same item while the logs it asked for are being gathered, which can't be chosen.
 const TROUBLESHOOTING_MENU_GATHERING: &str = "Gathering Logs…";
 
+/// The menus' Sign Out and Open Log Folder while the app is connected to an OpenBot that runs
+/// elsewhere. See `desktop_connected`.
+const CONNECTED_SIGN_OUT_MENU_ID: &str = "sign-out";
+const CONNECTED_SIGN_OUT_MENU_LABEL: &str = "Sign Out";
+const CONNECTED_LOG_FOLDER_MENU_ID: &str = "log-folder";
+const CONNECTED_LOG_FOLDER_MENU_LABEL: &str = "Open Log Folder";
+
 /// The troubleshooting item's label, and whether it can be chosen.
 fn troubleshooting_menu_item(gathering: bool) -> (&'static str, bool) {
     if gathering {
@@ -11376,6 +11597,9 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
     // The menu bar menu follows the system's appearance; its icons are drawn for each.
     let dark = system_is_dark(app);
     let running = app.state::<Shell>().root.lock().unwrap().is_some();
+    // Connected to an OpenBot that runs elsewhere: Show Window, the app's log folder, Sign Out and
+    // Quit. Nothing here starts, stops or reports on OpenBot, because none runs on this computer.
+    let connected = desktop_connected::is_connected(app);
     // Check for Updates… only in a build offered updates: anywhere else it could only say no.
     let updates = app_update_feed(app).is_some();
     let (logs_label, logs_enabled) =
@@ -11402,6 +11626,50 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
      */
     let tray_entries = || -> tauri::Result<Vec<MenuEntry<R>>> {
         let icon = |name: &str| menu_icon(name, dark);
+        if connected {
+            let mut entries = vec![
+                MenuEntry::Icon(IconMenuItem::with_id(
+                    app,
+                    "open",
+                    "Show Window",
+                    true,
+                    icon("open"),
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
+                    CONNECTED_LOG_FOLDER_MENU_ID,
+                    CONNECTED_LOG_FOLDER_MENU_LABEL,
+                    true,
+                    None::<&str>,
+                )?),
+                MenuEntry::Plain(MenuItem::with_id(
+                    app,
+                    CONNECTED_SIGN_OUT_MENU_ID,
+                    CONNECTED_SIGN_OUT_MENU_LABEL,
+                    true,
+                    None::<&str>,
+                )?),
+                MenuEntry::Native(PredefinedMenuItem::separator(app)?),
+                MenuEntry::Native(PredefinedMenuItem::about(
+                    app,
+                    Some("About"),
+                    Some(about_openbot(desktop_version(app))),
+                )?),
+            ];
+            // The app itself still updates.
+            entries.extend(updates.then(check_for_updates).transpose()?);
+            entries.push(MenuEntry::Native(PredefinedMenuItem::separator(app)?));
+            entries.push(MenuEntry::Icon(IconMenuItem::with_id(
+                app,
+                "quit",
+                "Quit",
+                true,
+                icon("quit"),
+                quit_menu_accelerator(),
+            )?));
+            return Ok(entries);
+        }
         let mut entries = vec![
             MenuEntry::Icon(IconMenuItem::with_id_and_native_icon(
                 app,
@@ -11483,6 +11751,30 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
             true,
             None::<&str>,
         )?));
+        if connected {
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                CONNECTED_LOG_FOLDER_MENU_ID,
+                CONNECTED_LOG_FOLDER_MENU_LABEL,
+                true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                CONNECTED_SIGN_OUT_MENU_ID,
+                CONNECTED_SIGN_OUT_MENU_LABEL,
+                true,
+                None::<&str>,
+            )?));
+            entries.push(MenuEntry::Plain(MenuItem::with_id(
+                app,
+                "quit",
+                "Quit",
+                true,
+                quit_menu_accelerator(),
+            )?));
+            return Ok(entries);
+        }
         entries.push(MenuEntry::Plain(MenuItem::with_id(
             app,
             "status",
@@ -12088,6 +12380,15 @@ fn main() {
             open_log_folder,
             troubleshooting_logs,
             save_troubleshooting_logs,
+            // The app connected to an OpenBot that runs elsewhere. See `desktop_connected`.
+            desktop_connected::connection,
+            desktop_connected::check_openbot_address,
+            desktop_connected::connect_to_openbot,
+            desktop_connected::cancel_connect,
+            desktop_connected::show_connected,
+            desktop_connected::sign_out_of_openbot,
+            desktop_connected::use_this_computer,
+            desktop_connected::take_connection_notice,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
@@ -12133,7 +12434,11 @@ fn main() {
             // The level kept from the last launch, on every page this window loads (`zoom`).
             let _ = window.set_zoom(saved_zoom(window.app_handle()));
             if matches!(page, WindowPage::OwnedApp | WindowPage::LocalApp) {
-                let _ = window.eval(outside_links::PAGE);
+                // On the relay's pages only the page's own origin is OpenBot (`page_for`).
+                let _ = window.eval(outside_links::page_for(desktop_connected::is_relay_page(
+                    window.app_handle(),
+                    payload.url(),
+                )));
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
@@ -12237,10 +12542,16 @@ fn main() {
             get_updates_ready(app.handle());
             desktop_telemetry::initialize(app.handle());
             desktop_stall::initialize(app.handle());
+            // Connected to an OpenBot that runs elsewhere, no installation here is looked for.
+            let connected = desktop_connected::is_connected(app.handle());
+            if connected {
+                log::info!("[launch] connected to an OpenBot that runs elsewhere");
+            }
             if let Some(root) = app
                 .path()
                 .app_config_dir()
                 .ok()
+                .filter(|_| !connected)
                 .and_then(|config| preparation::selected_root(&config))
             {
                 remember_selected_root(&app.state::<Shell>(), &root);
@@ -13086,6 +13397,7 @@ mod tests {
     include!("composio_ipc_tests.rs");
     include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
+    include!("connected_ipc_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]
@@ -16845,37 +17157,66 @@ mod tests {
     /// "[front] the engine machine is prepared" with the browser in front.
     #[test]
     fn coming_forward_with_another_window_in_front_flashes_and_sends_no_input() {
-        let done = std::cell::RefCell::new(Vec::new());
-        let front = come_forward(
-            || {
-                done.borrow_mut().push("set foreground");
-                false
-            },
-            || done.borrow_mut().push("flash the taskbar"),
+        // What Windows answers (`SetForegroundWindow`), and which window is in front after.
+        let come = |granted: bool, in_front: bool| {
+            let done = std::cell::RefCell::new(Vec::new());
+            let front = come_forward(
+                || {
+                    done.borrow_mut().push("set foreground");
+                    granted
+                },
+                || {
+                    done.borrow_mut().push("look at what is in front");
+                    in_front
+                },
+                || done.borrow_mut().push("flash the taskbar"),
+            );
+            (front, done.into_inner())
+        };
+        // Refused, the browser still in front: the taskbar button flashes.
+        assert_eq!(
+            come(false, false),
+            (
+                Front::Flashed,
+                vec![
+                    "set foreground",
+                    "look at what is in front",
+                    "flash the taskbar"
+                ]
+            )
         );
-        assert_eq!(front, Front::Flashed);
-        assert_eq!(*done.borrow(), ["set foreground", "flash the taskbar"]);
-        // Allowed in front: nothing flashes.
-        let done = std::cell::RefCell::new(Vec::new());
-        let front = come_forward(
-            || {
-                done.borrow_mut().push("set foreground");
-                true
-            },
-            || done.borrow_mut().push("flash the taskbar"),
+        // Allowed and in front: nothing flashes.
+        assert_eq!(
+            come(true, true),
+            (
+                Front::Came,
+                vec!["set foreground", "look at what is in front"]
+            )
         );
-        assert_eq!(front, Front::Came);
-        assert_eq!(*done.borrow(), ["set foreground"]);
-        // On Windows, `bring_to_front` never reaches tao's `set_focus` (its Alt press), and
-        // nothing in this file sends key input of its own.
+        // Said yes, but another window is still in front: what is in front decides, so it flashes.
+        assert_eq!(come(true, false).0, Front::Flashed);
+        // Said no because the window was in front already: nothing to flash for.
+        assert_eq!(come(false, true).0, Front::Came);
+        // On Windows nothing reaches tao's `set_focus` (its Alt press): every window comes
+        // forward through `focus`, whose only `set_focus` is for the other systems. And nothing in
+        // this file sends key input of its own.
         let main = include_str!("main.rs");
-        let body = &main[main.find("fn bring_to_front<").unwrap()..];
+        let tests = main.find("#[cfg(test)]\nmod tests").unwrap_or(main.len());
+        let body = &main[main.find("fn focus<").unwrap()..];
         let body = &body[..body.find("\n}\n").unwrap()];
         let windows = &body[body.find("#[cfg(windows)]").unwrap()..];
         let windows = &windows[..windows.find("#[cfg(not(windows))]").unwrap()];
         assert!(!windows.contains("set_focus"), "{windows}");
-        assert!(body.contains("#[cfg(not(windows))]\n    let _ = window.set_focus();"));
-        let tests = main.find("#[cfg(test)]\nmod tests").unwrap_or(main.len());
+        assert!(body.contains("#[cfg(not(windows))]\n    {\n        let _ = why;\n        let _ = window.set_focus();"));
+        let calls = main[..tests]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//") && line.contains("set_focus()"))
+            .count();
+        assert_eq!(calls, 1, "a `set_focus` call outside `focus`");
+        let host_access = include_str!("desktop_host_access.rs");
+        assert!(!host_access.contains("set_focus"), "desktop_host_access.rs");
+        let bring = &main[main.find("fn bring_to_front<").unwrap()..];
+        assert!(bring[..bring.find("\n}\n").unwrap()].contains("focus(&window, why);"));
         for input in ["SendInput", "keybd_event", "VK_MENU"] {
             assert!(!main[..tests].contains(input), "{input}");
         }
@@ -21495,6 +21836,10 @@ fn main() {
         let empty = temp_root("openbot-sign-in-no-engine");
         std::fs::create_dir_all(&empty).unwrap();
         std::env::set_var("PATH", &empty);
+        // Each sign-in forgets the CLI's saved code: this one's, not that of whoever runs the test.
+        for home in ["HOME", "APPDATA", "XDG_CONFIG_HOME"] {
+            std::env::set_var(home, &empty);
+        }
         // A CLI that waits on the browser for longer than the test does.
         let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-sign-in-cli", true);
         let sink = desktop_telemetry::sink::Sink::start();

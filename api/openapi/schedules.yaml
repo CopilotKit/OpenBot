@@ -701,10 +701,11 @@ paths:
         - Check-ins
       operationId: getCheckInUsage
       summary: Read how check-ins are going
-      description: "Return, per Bot, over the last 7 or 30 days: how its check-ins
-        ended, what they raised, what people did with it and how many notices
-        carried it, with the daily limit in force. Counts only: no item's title,
-        source or person. Only an administrator may read it."
+      description: "Return, per Bot in the organization, over the last 7 or 30
+        days: how its check-ins ended, what they raised, what people did with
+        it and how many notices carried it, with the organization's daily limit
+        in force. Counts only: no item's title, source or person. Only an
+        administrator of the organization may read it."
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -3190,6 +3191,7 @@ components:
         - source
         - repository
         - createdAt
+        - webhookPath
       properties:
         id:
           type: string
@@ -3206,8 +3208,9 @@ components:
           description: When it was connected.
         webhookPath:
           type: string
-          description: The path on this server to give the repository's webhook. Answered
-            when the source is made.
+          description: The path on this server to give the repository's webhook, with the
+            source's secret. A client shows it on this server's own address and never
+            builds it.
     GithubEventSourcePage:
       type: object
       required:
@@ -3624,6 +3627,7 @@ components:
             source: github
             repository: acme/storefront
             createdAt: 2026-11-12T10:30:00.000Z
+            webhookPath: /api/events/github/6c5d4e3f-2a1b-4c9d-8e7f-0a1b2c3d4e5f
         nextCursor: null
     GithubEventSourceResponseExample:
       summary: A GitHub event source, as it was connected.
