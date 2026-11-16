@@ -1,4 +1,8 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  queryOptions,
+  useQuery,
+} from "@tanstack/react-query";
 import {
   getBotAgent,
   getBotDelegation,
@@ -105,6 +109,27 @@ export function useBotTakesModelChoice(
   if (!onOpenBotModel) return false;
   if (delegation.isError) return true;
   return delegation.isSuccess && delegation.data.mode !== "orchestrate";
+}
+
+/**
+ * Why a conversation with this Bot takes no model pick, or null when it takes one. The rule of
+ * `useBotTakesModelChoice`, asked once: the home composer's pick is made before OpenBot has picked
+ * the Bot, so it is asked when the Bot is known, just before its conversation is made.
+ */
+export async function whyNoModelChoice(
+  queryClient: QueryClient,
+  bot: { id: string; runsOnOpenBotModel: boolean },
+): Promise<"own-agent" | "hands-to-agents" | null> {
+  if (!bot.runsOnOpenBotModel) return "own-agent";
+  try {
+    const delegation = await queryClient.fetchQuery(
+      botDelegationQueryOptions(bot.id),
+    );
+    return delegation.mode === "orchestrate" ? "hands-to-agents" : null;
+  } catch {
+    // As the hook reads it: a Bot whose answer could not be read takes the pick.
+    return null;
+  }
 }
 
 /** The host of an agent's address, for a row that says where it runs. Null when it can't be read. */
