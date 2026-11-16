@@ -297,6 +297,14 @@ export function TaskBoardRow({
           <>
             {held.actions}
             <Button
+              disabled={busy}
+              onClick={() => resolve.mutate({ id: task.id, done: true })}
+              size="sm"
+              variant="ghost"
+            >
+              {resolve.isPending ? "Saving…" : "Mark done"}
+            </Button>
+            <Button
               render={
                 <Link
                   params={{ channelId: task.channelId }}
