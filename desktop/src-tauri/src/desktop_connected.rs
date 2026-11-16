@@ -396,15 +396,8 @@ fn connect_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>, typed: &str) -> Res
         let _ = session.sign_out();
         return Err(problem);
     }
-    let earlier = chosen(app);
-    let chosen = choice::Choice {
-        mode: choice::Mode::Connected,
-        // An organisation belongs to the OpenBot it was picked at.
-        organization_id: earlier
-            .organization_id
-            .filter(|_| earlier.address.as_deref() == Some(address.as_str())),
-        address: Some(address),
-    };
+    // The organisation picked at this address before, through a sign-out; none at a new address.
+    let chosen = choice::signed_in_at(&chosen(app), &address);
     let shown = show(app, session.clone(), chosen.organization_id.as_deref())
         .and_then(|()| keep(app, &chosen));
     if shown.is_err() {
@@ -502,14 +495,16 @@ fn forget_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, origin: &str) {
         .retain(|trusted| trusted != origin);
 }
 
-/// Sign out of the OpenBot on record: revoked there as far as it answers, forgotten here, the
-/// relay stopped, and the organisation picked there cleared. The address stays.
+/// Sign out of the OpenBot on record: revoked there as far as it answers, forgotten here, and the
+/// relay stopped. The address stays, and so does the organisation picked there: a token remembers
+/// nothing, so this is what lets the next sign-in at that address go on where the person left off.
+/// It goes only with a new address (`choice::signed_in_at`) and back on this computer.
 pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(attempt) = state(app).connected.attempt.lock().unwrap().take() {
         attempt.cancel();
     }
     let live = state(app).connected.live.lock().unwrap().take();
-    let mut chosen = chosen(app);
+    let chosen = chosen(app);
     match live {
         Some(live) => {
             forget_origin(app, &live.relay.origin());
@@ -532,14 +527,6 @@ pub fn sign_out_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                     );
                 }
             }
-        }
-    }
-    if chosen.organization_id.take().is_some() {
-        if let Err(problem) = keep(app, &chosen) {
-            log::warn!(
-                "[connect] could not clear the organization: {}",
-                problem.detail.unwrap_or(problem.said)
-            );
         }
     }
     crate::refresh_menus(app);

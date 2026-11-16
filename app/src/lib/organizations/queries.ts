@@ -19,7 +19,10 @@ import {
 } from "@/lib/api/generated/organizations/organizations";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { tellDesktopTheOrganization } from "@/lib/desktop/organization";
+import {
+  forgetDesktopOrganization,
+  tellDesktopTheOrganization,
+} from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
 
@@ -81,7 +84,8 @@ export const SWITCH_FALLBACK = "Couldn't switch organizations. Try again.";
  * is the API's plain not found (`NOT_FOUND`), or a 404 that names no code at all. Every other 404 is
  * a refusal and is said as one: `ORGANIZATION_NOT_FOUND` is the organization the request named not
  * being one of the person's, which an app's sign-in meets when it names an organization they are
- * not in. A 401 or 403 is never this.
+ * not in (at the list of their own, OpenBot Desktop then names none: `ownOrganizations`). A 401 or
+ * 403 is never this.
  */
 function noSuchAddress(error: unknown): boolean {
   return (
@@ -139,7 +143,21 @@ async function ownOrganizations(
   if ((await editionOf(queryClient)) === "personal") return ONLY;
   let listed: Pick<OwnOrganizations, "organizations" | "canCreate">;
   try {
-    listed = await everyOrganization(signal);
+    listed = await everyOrganization(signal).catch(async (error) => {
+      /*
+       * Inside OpenBot Desktop connected to this OpenBot, the desktop app names the organization the
+       * person last worked in, kept through signing out and in again. One they have since left is
+       * answered as not found: the desktop app is asked to name none, so the server works in their
+       * own, and the list is read again. Once, and never an error screen for it.
+       */
+      if (
+        error instanceof ClientError &&
+        error.code === "ORGANIZATION_NOT_FOUND" &&
+        (await forgetDesktopOrganization())
+      )
+        return everyOrganization(signal);
+      throw error;
+    });
   } catch (error) {
     // Not signed in is an answer, as it is for the current user.
     if (error instanceof ClientError && error.status === 401) return null;

@@ -1287,6 +1287,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(config);
     }
 
+    /// Signed out while working in another organisation, then signed in again at the same address:
+    /// the new sign-in's relay names that organisation from its first request, because the app is
+    /// what remembers it (a token remembers nothing). At another address it names none.
+    #[test]
+    fn a_new_sign_in_at_the_same_address_names_the_organisation_kept_through_sign_out() {
+        use super::super::choice;
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let store = in_memory();
+        let first = openbot.sign_in(store.clone());
+        // What the shell leaves in connection.json at sign-out: the address and the organisation.
+        let config = crate::test_support::temp_root("relay-organisation-after-sign-out");
+        let left = choice::Choice {
+            mode: choice::Mode::Connected,
+            address: Some(openbot.address()),
+            organization_id: Some("org_kai".into()),
+        };
+        choice::write(&config, &left).unwrap();
+        first.sign_out().unwrap();
+
+        let again = Arc::new(openbot.sign_in(store.clone()));
+        let next = choice::signed_in_at(&choice::read(&config), &openbot.address());
+        assert_eq!(next.organization_id.as_deref(), Some("org_kai"));
+        let relay = Relay::start(again.clone(), next.organization_id.as_deref(), |_| {}).unwrap();
+        let window = enter(&relay);
+        let sent = window.echo(window.get(ECHO));
+        assert_eq!(
+            sent["headers"].get(ORGANIZATION_HEADER.to_ascii_lowercase()),
+            Some(&serde_json::Value::from("org_kai"))
+        );
+
+        let elsewhere = choice::signed_in_at(&choice::read(&config), "https://another.example.com");
+        assert_eq!(elsewhere.organization_id, None);
+        let _ = std::fs::remove_dir_all(config);
+    }
+
     /// The entry address holds the run's secret, and the log's redaction covers it.
     #[test]
     fn the_entry_address_and_the_cookie_are_redacted_in_a_log_line() {

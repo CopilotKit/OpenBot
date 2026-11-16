@@ -28,8 +28,9 @@ pub struct Choice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
     /// The organisation the person picked in the app at that address, which the relay names on
-    /// every request. Not a secret. Gone at sign-out, with a new address, and back on this
-    /// computer.
+    /// every request. Not a secret. Kept through a sign-out, so signing in again at the same
+    /// address works where the person left off (an app's token carries no memory of it, so the
+    /// app is what remembers). Gone with a new address and back on this computer.
     #[serde(
         default,
         rename = "organizationId",
@@ -53,6 +54,21 @@ impl Choice {
             Mode::Connected => self.address.as_deref(),
             Mode::Local => None,
         }
+    }
+}
+
+/// The choice once signed in at `address`: connected there, with the organisation picked earlier
+/// kept only when it was picked at that same address. An organisation belongs to the OpenBot it
+/// was picked at, and one the person has since left is answered as not found there, which the app
+/// turns back into their own.
+pub fn signed_in_at(earlier: &Choice, address: &str) -> Choice {
+    Choice {
+        mode: Mode::Connected,
+        address: Some(address.to_owned()),
+        organization_id: earlier
+            .organization_id
+            .clone()
+            .filter(|_| earlier.address.as_deref() == Some(address)),
     }
 }
 
