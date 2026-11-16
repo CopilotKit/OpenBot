@@ -30,7 +30,13 @@ import {
   TasksScreen,
 } from "@/skins/openduet/tasks-screen";
 import { APPROVALS_PATH, approvalInboxResponse } from "./approvals-api";
-import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
+import {
+  activityOf,
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  botOperationPath,
+} from "./bots-api";
 import {
   CONVERSATIONS_PATH,
   conversationPage,
@@ -153,6 +159,8 @@ let failing = new Set<string>();
 let busy: string[] = [];
 /** What each Bot is waiting on the person for, as the server counts it. */
 let waitingBots: ReturnType<typeof attentionOf>[] = [];
+/** What the Inbox Bot's Activity lists under way: a hand-off that ran out of tries, when a test says. */
+let stalled: ReturnType<typeof activityOf>["inProgress"] = [];
 const sent: { method: string; path: string }[] = [];
 
 function serving() {
@@ -251,6 +259,8 @@ function serving() {
       });
       if (approvals) return approvals;
     }
+    if (path === botOperationPath("inbox", "activity"))
+      return Response.json(activityOf({ inProgress: stalled }));
     const waiting = answerBotAttention(input, init, { bots: waitingBots });
     if (waiting) return waiting;
     const schedules = answerScheduleLists(input, init);
@@ -274,6 +284,7 @@ beforeEach(() => {
   failing = new Set();
   busy = [];
   waitingBots = [];
+  stalled = [];
   // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
 });
@@ -678,6 +689,43 @@ test("one wait inside a task is one row and one count, and rows that wait on nob
     "[data-slot=item]",
   ) as HTMLElement;
   expect(within(botRow).getByText("1")).toBeTruthy();
+});
+
+/*
+ * The badge counts a hand-off that ran out of tries; the board listed none, so its number and its
+ * rows could disagree. It is a row of its own, under the Bot that asked for it, and counted once.
+ */
+test("a stalled hand-off is a row on the board and in its count, as in the badge", async () => {
+  stalled = [
+    {
+      id: "hop-stalled",
+      kind: "handoff",
+      title: "Book the venue for Friday",
+      detail: "Delegated to Ops Bot",
+      status: "failed",
+      at: now,
+      channelId: "c-hop",
+      needsYou: true,
+      stoppable: false,
+      cancellable: false,
+    },
+  ];
+  waitingBots = [attentionOf("inbox", "Inbox Bot", { handoffs: 1 })];
+  serving();
+  const { region } = await drawAll();
+  for (const name of ["Bots page", "Bot page"]) {
+    const surface = region(name);
+    const row = (await surface.findByText("Book the venue for Friday")).closest(
+      "[data-slot=item]",
+    ) as HTMLElement;
+    expect(within(row).getByText("Stalled hand-off")).toBeTruthy();
+    expect(within(row).getByText("Open")).toBeTruthy();
+    expect(surface.getByText("1 waiting")).toBeTruthy();
+  }
+  // The roster's own count for the Bot says the same.
+  expect(
+    await region("Bots page").findByText("1 stalled hand-off"),
+  ).toBeTruthy();
 });
 
 test("a board with nothing waiting on the person never says it is waiting", async () => {

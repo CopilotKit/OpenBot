@@ -100,7 +100,7 @@ function linkFor(item: ActivityItem, agentId: string) {
   }
 }
 
-function ActivityRow({
+export function ActivityRow({
   agentId,
   item,
   live = false,
