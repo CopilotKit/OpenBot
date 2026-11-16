@@ -11,6 +11,7 @@ import { Link } from "@tanstack/react-router";
 import type { HeldAnswer } from "@/components/approvals/waiting";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   Item,
   ItemContent,
@@ -305,34 +306,56 @@ export function TaskBoardRow({
   const error = resolve.error ?? again.error;
   const openFirst = status === "ready_for_review" || status === "needs_input";
   const said = boardStatus(listed);
+  const markDone = () => resolve.mutate({ id: task.id, done: true });
+  const markDoneWords = resolve.isPending ? "Saving…" : "Mark done";
+  const openLink = (
+    <Link params={{ channelId: task.channelId }} to="/channel/$channelId" />
+  );
+  /*
+   * Mark done and Open come after the row's answers, and fold into its menu where the row's line has
+   * no room for them (`BoardRow`).
+   */
+  const secondary = (openVariant: "default" | "outline" | "ghost") => [
+    ...(held || canMarkDone(listed)
+      ? [
+          {
+            key: "mark-done",
+            button: (
+              <Button
+                disabled={busy}
+                onClick={markDone}
+                size="sm"
+                variant="ghost"
+              >
+                {markDoneWords}
+              </Button>
+            ),
+            menuItem: (
+              <DropdownMenuItem disabled={busy} onClick={markDone}>
+                {markDoneWords}
+              </DropdownMenuItem>
+            ),
+          },
+        ]
+      : []),
+    {
+      key: "open",
+      button: (
+        <Button render={openLink} size="sm" variant={openVariant}>
+          Open
+        </Button>
+      ),
+      menuItem: (
+        <DropdownMenuItem nativeButton={false} render={openLink}>
+          Open
+        </DropdownMenuItem>
+      ),
+    },
+  ];
   if (held)
     return (
       <BoardRow
-        actions={
-          <>
-            {held.actions}
-            <Button
-              disabled={busy}
-              onClick={() => resolve.mutate({ id: task.id, done: true })}
-              size="sm"
-              variant="ghost"
-            >
-              {resolve.isPending ? "Saving…" : "Mark done"}
-            </Button>
-            <Button
-              render={
-                <Link
-                  params={{ channelId: task.channelId }}
-                  to="/channel/$channelId"
-                />
-              }
-              size="sm"
-              variant="ghost"
-            >
-              Open
-            </Button>
-          </>
-        }
+        actions={held.actions}
         detail={said.line}
         icon={<Icon />}
         meta={[
@@ -342,6 +365,7 @@ export function TaskBoardRow({
         ]}
         more={held.more}
         open={held.more !== undefined}
+        secondary={secondary("ghost")}
         state={state}
         title={task.title}
         waiting
@@ -350,40 +374,17 @@ export function TaskBoardRow({
   return (
     <BoardRow
       actions={
-        <>
-          {canTryAgain({ ...task, status }) ? (
-            <Button
-              disabled={busy}
-              onClick={() => again.mutate(task.id)}
-              size="sm"
-            >
-              {again.isPending ? "Starting…" : "Try again"}
-            </Button>
-          ) : null}
-          {canMarkDone(listed) ? (
-            <Button
-              disabled={busy}
-              onClick={() => resolve.mutate({ id: task.id, done: true })}
-              size="sm"
-              variant="ghost"
-            >
-              {resolve.isPending ? "Saving…" : "Mark done"}
-            </Button>
-          ) : null}
+        canTryAgain({ ...task, status }) ? (
           <Button
-            render={
-              <Link
-                params={{ channelId: task.channelId }}
-                to="/channel/$channelId"
-              />
-            }
+            disabled={busy}
+            onClick={() => again.mutate(task.id)}
             size="sm"
-            variant={openFirst ? "default" : "outline"}
           >
-            Open
+            {again.isPending ? "Starting…" : "Try again"}
           </Button>
-        </>
+        ) : null
       }
+      secondary={secondary(openFirst ? "default" : "outline")}
       detail={said.line}
       // What a waiting task waits for is what the person has to answer: read in full, never cut.
       readDetail={status === "needs_input"}

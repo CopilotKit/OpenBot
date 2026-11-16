@@ -11,7 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { PageRows } from "@/components/layout/page-shell";
-import { BoardRow } from "@/components/needs-you/board-row";
+import { BoardRow, RowMenu } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +24,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -500,7 +501,14 @@ function AnswerDialog({
  * Allow for this conversation and Always allow here in the menu; for a hand-off, Don't do it and I
  * did it myself. The action's own row and the row of a task waiting on it both answer with these.
  */
-function RequestAnswers({ request }: { request: WaitingRequest }) {
+function RequestAnswers({
+  request,
+  more = null,
+}: {
+  request: WaitingRequest;
+  /** Menu items of the row it answers on (a task's Mark done and Open), put in this one's menu. */
+  more?: ReactNode;
+}) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const words = approvalWords(request.action);
   const handOff = request.action.policy?.behaviour === "hand_off";
@@ -574,11 +582,22 @@ function RequestAnswers({ request }: { request: WaitingRequest }) {
                 >
                   Always allow here
                 </DropdownMenuItem>
+                {more ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    {more}
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
+          ) : more ? (
+            <RowMenu label={`More for ${words.action}`}>{more}</RowMenu>
           ) : null}
         </>
       )}
+      {handOff && more ? (
+        <RowMenu label={`More for ${words.action}`}>{more}</RowMenu>
+      ) : null}
     </>
   );
 }
@@ -622,7 +641,14 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
  * Answer, for a question a task waits on, from the board: the dialog with the whole question and
  * the box to answer in, so the person answers without opening the thread. And Dismiss beside it.
  */
-function QuestionAnswers({ question }: { question: WaitingQuestion }) {
+function QuestionAnswers({
+  question,
+  more = null,
+}: {
+  question: WaitingQuestion;
+  /** Menu items of the row it answers on (a task's Mark done and Open), in a menu after Dismiss. */
+  more?: ReactNode;
+}) {
   const [answering, setAnswering] = useState(false);
   const dismiss = useMutation(
     dismissPersonQuestionMutationOptions(queryClient),
@@ -646,6 +672,9 @@ function QuestionAnswers({ question }: { question: WaitingQuestion }) {
       >
         <IconX />
       </Button>
+      {more ? (
+        <RowMenu label={`More for ${question.question}`}>{more}</RowMenu>
+      ) : null}
       <AnswerDialog
         onOpenChange={setAnswering}
         open={answering}
@@ -661,7 +690,8 @@ function QuestionAnswers({ question }: { question: WaitingQuestion }) {
  * carries its answers, so the person answers it there without opening the thread.
  */
 export type HeldAnswer = {
-  actions: ReactNode;
+  /** Given the row's folded menu items, or null while they are buttons on the row. */
+  actions: (more: ReactNode | null) => ReactNode;
   meta: ReactNode[];
   more?: ReactNode;
 };
@@ -684,7 +714,7 @@ export function useHeldAnswers(): (task: {
       : undefined;
     if (request)
       return {
-        actions: <RequestAnswers request={request} />,
+        actions: (more) => <RequestAnswers more={more} request={request} />,
         meta: [requestReason(request)],
         more: <ApprovalDetails args={request.action.args} />,
       };
@@ -695,7 +725,7 @@ export function useHeldAnswers(): (task: {
     );
     if (question)
       return {
-        actions: <QuestionAnswers question={question} />,
+        actions: (more) => <QuestionAnswers more={more} question={question} />,
         meta: question.why ? [<span key="why">{question.why}</span>] : [],
       };
     return undefined;
