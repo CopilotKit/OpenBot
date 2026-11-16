@@ -1,6 +1,6 @@
 import { useContext, useState } from "react";
-import { Streamdown } from "streamdown";
 import {
+  BotMarkdown,
   markdownComponents,
   markdownPlugins,
   replyRemarkPlugins,
@@ -43,7 +43,7 @@ export function GalleryMarkdown({
   );
   if (!children) return null;
   return (
-    <Streamdown
+    <BotMarkdown
       className={cn("break-words", className)}
       components={markdownComponents}
       mode={mode}
@@ -51,6 +51,6 @@ export function GalleryMarkdown({
       remarkPlugins={replyRemarkPlugins}
     >
       {children}
-    </Streamdown>
+    </BotMarkdown>
   );
 }

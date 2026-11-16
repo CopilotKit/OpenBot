@@ -13,7 +13,6 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
-import { Streamdown } from "streamdown";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageCard,
@@ -57,7 +56,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { markdownComponents } from "@/lib/markdown";
+import { BotMarkdown, markdownComponents } from "@/lib/markdown";
 import {
   deleteResponsibilityMutationKey,
   deleteResponsibilityMutationOptions,
@@ -686,12 +685,12 @@ function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
  */
 function RunMarkdown({ children }: { children: string }) {
   return (
-    <Streamdown
+    <BotMarkdown
       className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       components={markdownComponents}
       mode="static"
     >
       {children}
-    </Streamdown>
+    </BotMarkdown>
   );
 }
