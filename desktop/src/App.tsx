@@ -6,8 +6,10 @@ import { CopilotKitAccount } from "./CopilotKitAccount";
 import {
   EarlyDownloadsLine,
   earlyDownload,
+  earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
+import { handover } from "./handover";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
@@ -54,8 +56,14 @@ import {
   type SetupStep,
 } from "./telemetry";
 import { UsageDataChoice } from "./UsageDataChoice";
-import { Welcome } from "./Welcome";
-import { type Blocker, WindowsBlocker, WindowsRestart } from "./WindowsBlocker";
+import { type Hosting, Welcome } from "./Welcome";
+import { choseThisComputer, rememberThisComputer } from "./thisComputer";
+import {
+  type Blocker,
+  fixesItself,
+  WindowsBlocker,
+  WindowsRestart,
+} from "./WindowsBlocker";
 
 type AlreadyConfigured = {
   values: Record<string, string>;
@@ -113,7 +121,164 @@ export function App() {
   return <Setup />;
 }
 
+/** Where OpenBot runs, as the shell has it saved (`connection`). */
+type Connection = {
+  mode: "local" | "connected";
+  address: string | null;
+  /** A sign-in for that address is kept on this computer. */
+  signedIn: boolean;
+};
+
+/** Said once by the shell when it put this window back: why, or `choose` to pick again. */
+type ConnectionNotice = { kind: string; message: string | null };
+
+type Launch =
+  | { at: "asking" }
+  /**
+   * OpenBot on this computer: setup as it has always been. `choose`: the person asked from
+   * Settings to choose where OpenBot runs, so the first screen shows before anything starts.
+   */
+  | { at: "local"; address: string; choose: boolean }
+  /** Signed in to an OpenBot that runs elsewhere, which the shell is opening. */
+  | { at: "opening" }
+  /** The first screen with that OpenBot's address, to sign in to it again or choose otherwise. */
+  | {
+      at: "connect";
+      address: string;
+      problem: Problem | null;
+      reopen: boolean;
+    };
+
+/**
+ * Asks where OpenBot runs before anything else. On this computer, setup carries on exactly as it
+ * did (`LocalSetup`). Connected to an OpenBot that runs elsewhere, none of that is mounted, so
+ * nothing about an install on this computer is asked for, downloaded or started: the shell opens
+ * that OpenBot, or the first screen shows its address to sign in to again.
+ *
+ * A shell from before this choice does not know `connection`: that is OpenBot on this computer.
+ */
 function Setup() {
+  const [launch, setLaunch] = useState<Launch>({ at: "asking" });
+  // Asked once, the development double mount included: the shell answers its notice only once.
+  const asked = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    if (!asked.current) {
+      asked.current = true;
+      void (async () => {
+        const found = await invoke<Connection>("connection").catch(() => null);
+        if (!alive.current) return;
+        const address = found?.address ?? "";
+        // An older shell knows neither question: OpenBot on this computer, with nothing to say.
+        if (!found) {
+          setLaunch({ at: "local", address, choose: false });
+          return;
+        }
+        if (found.mode === "connected" && found.signedIn) {
+          setLaunch({ at: "opening" });
+          try {
+            await invoke("show_connected");
+          } catch (error) {
+            if (alive.current)
+              setLaunch({
+                at: "connect",
+                address,
+                problem: asProblem(error),
+                reopen: true,
+              });
+          }
+          return;
+        }
+        const notice = await invoke<ConnectionNotice | null>(
+          "take_connection_notice",
+        ).catch(() => null);
+        if (!alive.current) return;
+        if (found.mode !== "connected") {
+          setLaunch({
+            at: "local",
+            address,
+            choose: notice?.kind === "choose",
+          });
+          return;
+        }
+        setLaunch({
+          at: "connect",
+          address,
+          // `choose` is the person asking to pick again from Settings: nothing went wrong.
+          problem: notice?.message
+            ? { said: notice.message, kind: notice.kind }
+            : null,
+          reopen: false,
+        });
+      })();
+    }
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const connecting = launch.at === "connect";
+  useEffect(() => {
+    if (connecting)
+      recordSetupEvent({ kind: "step_viewed", step: "connect_openbot" });
+  }, [connecting]);
+
+  if (launch.at === "local")
+    return <LocalSetup address={launch.address} choose={launch.choose} />;
+  if (launch.at === "connect") {
+    const { address } = launch;
+    return (
+      <main>
+        <Welcome
+          hosting="connect"
+          onConnect={() => {}}
+          // The saved choice goes back to this computer, then setup carries on as a first run.
+          onThisComputer={async () => {
+            await invoke("use_this_computer");
+            setLaunch({ at: "local", address, choose: false });
+          }}
+          saved={{
+            address,
+            problem: launch.problem,
+            reopen: launch.reopen
+              ? () => invoke<void>("show_connected")
+              : undefined,
+          }}
+          onInstall={() => {}}
+        />
+      </main>
+    );
+  }
+  return (
+    <main>
+      <div className="sheet connection-sheet">
+        <h1>Getting OpenBot ready</h1>
+        {launch.at === "opening" ? (
+          <StatusLine>Opening OpenBot…</StatusLine>
+        ) : (
+          <p className="lede" role="status">
+            Checking your saved setup…
+          </p>
+        )}
+      </div>
+    </main>
+  );
+}
+
+/**
+ * Setup of OpenBot on this computer. `address`: an OpenBot connected to before, if any. `choose`:
+ * open at the first screen, the choice of where OpenBot runs, whatever is already installed.
+ */
+function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
+  /*
+   * The choice the person asked for from Settings, shown over wherever setup would have resumed:
+   * nothing starts by itself while it shows. Continue with Self-hosted drops it, and setup goes on
+   * as this launch would have without it; an installation that is already set up starts as it does
+   * on any relaunch.
+   */
+  const [choosing, setChoosing] = useState<Hosting | null>(
+    choose ? "self-hosted" : null,
+  );
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
   const [restartPending, setRestartPending] = useState(false);
@@ -159,14 +324,22 @@ function Setup() {
   // The back end is ready on the release it had, and its update did not finish.
   const [backEndNotice, setBackEndNotice] = useState<string | null>(null);
   const [step, setStep] = useState<SetupStep>("welcome");
+  const [checkingResume, setCheckingResume] = useState(true);
+  // With nothing set up yet, setup opens at the first screen anyway: it is the choice.
+  useEffect(() => {
+    if (!checkingResume && choosing && step === "welcome") setChoosing(null);
+  }, [checkingResume, choosing, step]);
   const [steps, setSteps] = useState<Progress[]>([]);
   // When the install now running began: its row on the other screens counts from here.
   const [installSince, setInstallSince] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const [checkingResume, setCheckingResume] = useState(true);
   const savedLaunch = useRef<string | null>(null);
   // An interrupted run needs an explicit Start.
   const interruptedAtLaunch = useRef(false);
+  // What stopped the last run, shown until Start runs.
+  const launchNotice = useRef<Problem | null>(null);
+  // A Start has run in this window: what the last quit left is no longer news.
+  const startedSinceLaunch = useRef(false);
   const [refreshIntelligence, setRefreshIntelligence] = useState(false);
   const [preparation, setPreparation] = useState<{
     key: string;
@@ -196,18 +369,54 @@ function Setup() {
   }, [engineReady, installationReady]);
   const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
-  const visibleSetupStep =
-    checkingResume || blockerFailure || blocker || running ? null : step;
   /*
-   * The first screen starts the big downloads, without a click: the person opened OpenBot's setup
-   * to install it. The native side downloads only what this computer's install will need, once per
-   * run of the app (`early_downloads.rs`).
+   * A Start that sent the window to OpenBot (`handover.ts`): Starting stays on screen, as it was,
+   * until OpenBot's page replaces it. `returning` is the screen it was: a first run's Finishing setup
+   * or a return's Starting OpenBot, decided before this Start recorded the installation as launched.
    */
-  const onFirstScreen = visibleSetupStep === "welcome";
+  const [handingOver, setHandingOver] = useState<{ returning: boolean } | null>(
+    null,
+  );
+  const handoverHeld = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
+    },
+    [],
+  );
+  const visibleSetupStep: SetupStep | null =
+    checkingResume || blockerFailure || blocker || running
+      ? null
+      : choosing === "connect"
+        ? "connect_openbot"
+        : choosing
+          ? "welcome"
+          : step;
+  /*
+   * The big downloads (`early_downloads.rs`), which download only what this computer's install
+   * will need, once per run of the app, after a look at the free disk. They start once the person
+   * has chosen this computer. With nothing of OpenBot on it that is Install with Self-hosted
+   * picked, the first thing Install does: Self-hosted is picked to begin with, so the first screen
+   * alone is no choice. Seen on a clean Windows machine: they started with the first screen, and
+   * somebody who only connects to their company's OpenBot downloaded about 2 GB for nothing.
+   */
+  const startEarlyDownloads = useCallback(async () => {
+    if (!root.trim()) return;
+    await invoke("start_early_downloads", { root: root.trim() }).catch(
+      () => {},
+    );
+  }, [root]);
+  /*
+   * Where the person had chosen this computer already (an installation on it, or a first install
+   * whose Windows fix ended the app with a restart), the first screen starts them without a click,
+   * as it always has. Not for the choice asked for from Settings: that screen starts nothing.
+   */
+  const onFirstScreen = visibleSetupStep === "welcome" && !choosing;
   useEffect(() => {
-    if (!onFirstScreen || !root.trim()) return;
-    invoke("start_early_downloads", { root: root.trim() }).catch(() => {});
-  }, [onFirstScreen, root]);
+    // Nothing of OpenBot here and nothing chosen yet (`windowsUnchecked`): Install starts them.
+    if (!onFirstScreen || windowsUnchecked.current) return;
+    void startEarlyDownloads();
+  }, [onFirstScreen, startEarlyDownloads]);
   const lastViewedStep = useRef<SetupStep | null>(null);
   useEffect(() => {
     if (visibleSetupStep === lastViewedStep.current) return;
@@ -276,6 +485,23 @@ function Setup() {
     // And OpenBot's own software is installed again before it sets up (`installAfresh`).
     installAgain: () => installAfresh(),
   });
+  /*
+   * Every notice about the last quit or stop is about that run: what stopped it (`last_failure` at
+   * launch, such as "OpenBot had trouble shutting down last time.") and the services it left
+   * running ("When OpenBot last quit, some of its services didn't stop."). Once Start runs, they
+   * go: a Start that then stops says why in its own row. Kept, they read as the reason this run
+   * stopped, through Start and every Retry. Stop still asks those services to stop, and says so
+   * again if they don't.
+   */
+  useEffect(() => {
+    if (!local.running) return;
+    startedSinceLaunch.current = true;
+    setIntelligenceNotice(null);
+    const notice = launchNotice.current;
+    if (!notice) return;
+    launchNotice.current = null;
+    setRecoveryFailure((current) => (current === notice ? null : current));
+  }, [local.running]);
   // The engine's wake found that only a Windows restart fixes OpenBot's machine: the restart
   // screen, not a Retry that can't work.
   useEffect(() => {
@@ -328,35 +554,62 @@ function Setup() {
     }
   }, [root, model, harness, step]);
 
+  /*
+   * What this computer needs before OpenBot can run on it, which on Windows is WSL, a Windows
+   * feature or a restart: looked at, and its screen shown, which then sets about it by itself
+   * (`WindowsBlocker`). Only ever for a person who has chosen this computer. Seen on a clean
+   * Windows machine: this ran at launch, before the choice, and somebody who only wanted to
+   * connect to their company's OpenBot had WSL turned on and a restart asked for first.
+   *
+   * Answers what is in the way, nothing, or that it could not tell (said on its own screen).
+   */
+  const checkWindows = useCallback(async (): Promise<
+    Blocker | "unknown" | null
+  > => {
+    try {
+      const found = await invoke<Blocker | null>("windows_blocker");
+      setBlocker(found);
+      if (found) {
+        setInstruction(
+          await invoke<string>("windows_blocker_instruction", {
+            blocker: found,
+          }),
+        );
+      }
+      return found;
+    } catch (error) {
+      setBlockerFailure(asProblem(error));
+      return "unknown";
+    }
+  }, []);
+  // Nothing of OpenBot is on this computer and the person has not chosen it yet: Install asks.
+  const windowsUnchecked = useRef(false);
+  const [checkingWindows, setCheckingWindows] = useState(false);
+  // A launch after the restart Windows needed, with Windows ready: the install asked for goes on.
+  const [installAskedFor, setInstallAskedFor] = useState(false);
+
   useEffect(() => {
     let active = true;
-    // A restart still owed comes first: a feature switched on reads as on before it runs.
-    const windowsReady = invoke<boolean>("windows_restart_pending")
+    // A restart still owed comes first: a feature switched on reads as on before it runs. Only a
+    // fix the person's choice of this computer led to records one.
+    const restartOwed = invoke<boolean>("windows_restart_pending")
       .catch(() => false)
-      .then(async (pending) => {
-        if (pending) {
-          setRestartPending(true);
-          return false;
-        }
-        const found = await invoke<Blocker | null>("windows_blocker");
-        setBlocker(found);
-        if (found) {
-          setInstruction(
-            await invoke<string>("windows_blocker_instruction", {
-              blocker: found,
-            }),
-          );
-        }
-        return found === null;
-      })
-      .catch((error) => {
-        setBlockerFailure(asProblem(error));
-        return false;
+      .then((pending) => {
+        if (pending) setRestartPending(true);
+        return pending;
       });
+    // Chosen in an earlier run, which what Windows needed ended: straight back to it.
+    const chosenBefore = choseThisComputer();
+    const windowsBefore = chosenBefore
+      ? restartOwed.then((owed) => (owed ? "owed" : checkWindows()))
+      : null;
     // Read once and kept apart from `last_failure`, which would hold auto-start.
     invoke<Problem | null>("last_local_eval_stop_failure")
       .then((found) => {
-        if (active && found) setIntelligenceNotice(found);
+        // Arriving after a Start has run, it is already old news.
+        if (active && found && !startedSinceLaunch.current) {
+          setIntelligenceNotice(found);
+        }
       })
       .catch(() => {});
     // A supervisor that stopped retrying must stay stopped when it returns to this window.
@@ -364,6 +617,7 @@ function Setup() {
       .then((found) => {
         if (found) {
           interruptedAtLaunch.current = true;
+          launchNotice.current = found;
           setRecoveryFailure(found);
         }
         return found;
@@ -372,10 +626,10 @@ function Setup() {
     Promise.all([
       invoke<string | null>("selected_root").catch(() => null),
       invoke<string>("default_root"),
-      windowsReady,
+      restartOwed,
       interruptedRun,
     ])
-      .then(async ([selected, fallback, canResume, interrupted]) => {
+      .then(async ([selected, fallback, owed, interrupted]) => {
         if (!active) return;
         const found = selected || fallback;
         setRoot(found);
@@ -393,6 +647,31 @@ function Setup() {
         if (!active) return;
         if (configured) {
           setAlreadyHeld({ ...configured.values, saved: configured.saved });
+        }
+        /*
+         * Whether the person has chosen this computer: OpenBot is installed on it, or a restart
+         * for it is owed, or an earlier run's Install found Windows not ready. Then Windows is
+         * looked at now, as it always was. Otherwise nothing is, until Install.
+         */
+        const installedHere = Boolean(
+          configured?.installation ||
+            configured?.launch ||
+            configured?.localEval,
+        );
+        let canResume = false;
+        if (!owed) {
+          if (windowsBefore || installedHere) {
+            canResume = (await (windowsBefore ?? checkWindows())) === null;
+            if (!active) return;
+            if (canResume && chosenBefore) {
+              // Windows is ready: that is over with, and the install asked for carries on.
+              rememberThisComputer(false);
+              if (!installedHere) setInstallAskedFor(true);
+            }
+          } else {
+            windowsUnchecked.current = true;
+            canResume = true;
+          }
         }
         /*
          * Setup resumes part-way only for an installation with a local Intelligence stack recorded.
@@ -483,7 +762,7 @@ function Setup() {
       active = false;
       stop.then((unlisten) => unlisten());
     };
-  }, [recoverFromStart]);
+  }, [recoverFromStart, checkWindows]);
 
   /** True when the installation completed. */
   async function install(nextHarness = harness): Promise<boolean> {
@@ -654,13 +933,18 @@ function Setup() {
         invoke<ReleaseMove | null>("upgrade_due", {
           root: root.trim(),
         }).catch(() => null));
+      // Headed as an update while it is one, and not by the next Start that is not.
+      setReleaseDue(Boolean(due));
       let outcome: ReleaseOutcome | null = null;
       if (due) {
         outcome = await invoke<ReleaseOutcome>("upgrade_and_start", startWith);
       } else {
         await invoke("start_stack", startWith);
       }
-      setSteps((current) => settleProgress(current));
+      const returnedTo = savedLaunch.current === installationKey;
+      const noticed = Boolean(outcome?.notice || intelligence.notice);
+      // Not settled when it hands over: Starting stays on screen as it was, its last row running.
+      if (noticed) setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
       startedAfterReinstall.current = false;
@@ -671,16 +955,26 @@ function Setup() {
       setRefreshIntelligence(false);
       // An upgrade that did not happen is said on the running screen first; Show OpenBot hands over.
       // So is a back end that runs the release it had because its own update did not finish.
-      if (outcome?.notice || intelligence.notice) {
+      if (noticed) {
         // The notice says what the rows would: it is the one thing on the screen.
         setSteps([]);
         setReleaseNotice(outcome?.notice ?? null);
         setBackEndNotice(intelligence.notice ?? null);
         return "started";
       }
+      // Straight from Starting to OpenBot, after an update as after any Start: the running screen
+      // only if this page is still here once OpenBot's page had time to replace it (`handover.ts`).
+      setHandingOver({ returning: returnedTo });
       await invoke("show_openbot");
-      return "started";
+      if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
+      handoverHeld.current = setTimeout(() => {
+        handoverHeld.current = null;
+        setSteps((current) => settleProgress(current));
+        setHandingOver(null);
+      }, handover.holdMs);
+      return "opening";
     } catch (error) {
+      setHandingOver(null);
       recoverFromStart(error);
       // Refused until OpenBot is installed again, which the window now does by itself and then
       // starts. Only once: refused again straight after that install, it is a failure.
@@ -826,6 +1120,7 @@ function Setup() {
   const localAuto =
     !checkingResume &&
     !running &&
+    !choosing &&
     step === "connect" &&
     modelCanStart() &&
     (resumingStart ||
@@ -866,6 +1161,51 @@ function Setup() {
       ...said,
     });
 
+  /** The first screen's Install, once this computer is ready for it. */
+  function installHere() {
+    // The default Bot, recorded as a choice of it would be.
+    recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
+    // The account is the first screen; OpenBot installs behind it meanwhile.
+    setStep("account");
+    void beginLocalInstall();
+  }
+
+  /*
+   * Install, with Self-hosted chosen: the person has chosen this computer. Where nothing of
+   * OpenBot was on it, this is the first look at what Windows needs. Ready, the install begins.
+   * Not ready, its screen shows and sets about it, as it did at launch before there was a choice.
+   * What OpenBot can fix itself costs a restart that ends the app, so that the person chose this
+   * computer is kept for the launch after it (`thisComputer.ts`).
+   */
+  async function chooseThisComputer() {
+    if (!windowsUnchecked.current) {
+      installHere();
+      return;
+    }
+    setCheckingWindows(true);
+    try {
+      const found = await checkWindows();
+      windowsUnchecked.current = false;
+      if (found === null) installHere();
+      else if (found !== "unknown" && fixesItself(found))
+        rememberThisComputer(true);
+    } finally {
+      setCheckingWindows(false);
+    }
+  }
+
+  // The install a launch found asked for, once Windows was ready: on with it, as Install does,
+  // unless the disk is too full, which the first screen says.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, when the launch has finished.
+  useEffect(() => {
+    if (!installAskedFor || checkingResume || running || !root.trim()) return;
+    setInstallAskedFor(false);
+    if (step !== "welcome") return;
+    void earlyDownloadsMeasured().then((now) => {
+      if (now?.state !== "short") installHere();
+    });
+  }, [installAskedFor, checkingResume, running, root]);
+
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
@@ -894,13 +1234,15 @@ function Setup() {
     );
   }
 
-  if (checkingResume) {
+  if (checkingResume || checkingWindows) {
     return (
       <main>
         <div className="sheet connection-sheet">
           <h1>Getting OpenBot ready</h1>
           <p className="lede" role="status">
-            Checking your saved setup…
+            {checkingWindows
+              ? "Checking this computer…"
+              : "Checking your saved setup…"}
           </p>
           <SetupProgress steps={steps} />
         </div>
@@ -912,17 +1254,33 @@ function Setup() {
    * Skipped entirely when a stack is already up: somebody returning to a running OpenBot is not
    * setting one up.
    */
-  if (!running && step === "welcome") {
+  if (!running && choosing && step !== "welcome") {
+    // Asked for from Settings, over a setup that would have resumed further on.
     return (
       <main>
         <Welcome
-          onInstall={() => {
-            // The default Bot, recorded as a choice of it would be.
-            recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
-            // The account is the first screen; OpenBot installs behind it meanwhile.
-            setStep("account");
-            void beginLocalInstall();
-          }}
+          hosting={choosing}
+          onConnect={() => setChoosing("connect")}
+          onThisComputer={() => setChoosing("self-hosted")}
+          saved={{ address }}
+          resumes
+          onInstall={() => setChoosing(null)}
+        />
+      </main>
+    );
+  }
+
+  if (!running && (step === "welcome" || step === "connect_openbot")) {
+    return (
+      <main>
+        <Welcome
+          // The same screen with the other choice picked: an OpenBot that runs elsewhere.
+          hosting={step === "welcome" ? "self-hosted" : "connect"}
+          onConnect={() => setStep("connect_openbot")}
+          onThisComputer={() => setStep("welcome")}
+          saved={{ address }}
+          startDownloads={startEarlyDownloads}
+          onInstall={() => void chooseThisComputer()}
           failure={displayedFailure && <Failure problem={displayedFailure} />}
         />
       </main>
@@ -1162,13 +1520,21 @@ function Setup() {
   // restart: said under the rows.
   const handOff = engineNow(steps);
 
-  if (!running && returningToInstallation && !refreshIntelligence) {
+  // Handing over to OpenBot: Starting, as it was, in place of the running screen.
+  const starting = !running || handingOver !== null;
+  const returning = handingOver?.returning ?? returningToInstallation;
+
+  if (starting && returning && !refreshIntelligence) {
     return (
       <main>
         <div className="sheet connection-sheet">
           <h1>
             {localStarting || installingAfresh
-              ? "Starting OpenBot"
+              ? // A Start that moves the installation to this app's release is an update, and says
+                // so: "Starting OpenBot" over "Updating OpenBot..." read as if nothing were updated.
+                releaseDue && !installingAfresh
+                ? "Updating OpenBot"
+                : "Starting OpenBot"
               : "OpenBot is stopped"}
           </h1>
           <p className="lede">
@@ -1243,11 +1609,11 @@ function Setup() {
    * and valid. While a CLI call runs, Cancel is the only control; leaving is offered only once
    * nothing runs.
    */
-  if (!running) {
+  if (starting) {
     return (
       <main>
         <div className="sheet connection-sheet">
-          {!returningToInstallation && <Sections at="Start" />}
+          {!returning && <Sections at="Start" />}
           {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
           <h1>Finishing setup</h1>
           <p className="lede">
@@ -1255,6 +1621,10 @@ function Setup() {
               ? "OpenBot starts once you choose what happens to the data a previous installation left."
               : "OpenBot is setting up on this computer and starts by itself when it’s ready. This can take a few minutes."}
           </p>
+          {/* The last thing setup asks: whether to share usage data. Above the rows, which come one
+              at a time: under them, on Windows K, the box moved down 147 px while a person could
+              click it, and a click aimed at it missed. */}
+          {!returning && <UsageDataChoice />}
           {freshInstall || (
             <LocalIntelligence
               sequence={local}
@@ -1304,8 +1674,6 @@ function Setup() {
               </button>
             </div>
           )}
-          {/* The last thing setup asks, at the foot of its last screen: whether to share usage data. */}
-          {!returningToInstallation && <UsageDataChoice />}
         </div>
       </main>
     );

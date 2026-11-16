@@ -1,3 +1,5 @@
+import { createTranscription } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   DICTATION_TIMEOUT_MS,
   dictationExtension,
@@ -115,36 +117,19 @@ export async function transcribeRecording(
       "The recording is empty or unsupported. Please record again.",
     );
   }
-  const body = new FormData();
-  body.set("file", audio, `recording.${extension}`);
-  const response = await fetch("/api/audio/transcriptions", {
-    method: "POST",
-    credentials: "include",
-    headers: { "x-openbot-dictation": "1" },
-    body,
-    signal: AbortSignal.any([
-      signal,
-      AbortSignal.timeout(DICTATION_TIMEOUT_MS + 5_000),
-    ]),
-  });
-  const result: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(
-      result &&
-        typeof result === "object" &&
-        "error" in result &&
-        typeof result.error === "string"
-        ? result.error
-        : "Transcription failed. Please retry.",
-    );
-  }
-  if (
-    !result ||
-    typeof result !== "object" ||
-    !("text" in result) ||
-    typeof result.text !== "string" ||
-    !result.text.trim()
-  ) {
+  const result = await createTranscription(
+    organizationId(),
+    { file: new File([audio], `recording.${extension}`, { type: audio.type }) },
+    { "Idempotency-Key": idempotencyKey() },
+    {
+      fallback: "Transcription failed. Please retry.",
+      signal: AbortSignal.any([
+        signal,
+        AbortSignal.timeout(DICTATION_TIMEOUT_MS + 5_000),
+      ]),
+    },
+  );
+  if (typeof result.text !== "string" || !result.text.trim()) {
     throw new Error("No speech was detected. Try recording again.");
   }
   return result.text.trim();

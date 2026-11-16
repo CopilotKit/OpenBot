@@ -15,8 +15,8 @@ import {
   brokeredAccountsListedOn,
   sharedAccountsListedOn,
 } from "../src/lib/plugins/listed";
-import type { PluginServer } from "../src/lib/plugins/queries";
 import { brokeredFor } from "../src/routes/_authed/_app/connections.$key";
+import { appBody } from "./apps-api";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -26,12 +26,13 @@ const server = (
   accountMode: "personal" | "shared" | null,
   authScheme = "OAUTH2",
 ) =>
-  ({
+  appBody({
     id: `s-${accountMode}`,
+    title: `s-${accountMode}`,
     provenance: "composio",
     authScheme,
     accountMode,
-  }) as unknown as PluginServer;
+  });
 
 describe("Settings for a Shared app", () => {
   test("a Shared app is listed as shared, never as one to connect", () => {
@@ -70,7 +71,7 @@ describe("Settings for a Shared app", () => {
         probe: null,
         checkable: false,
         reconnectsInPlace: false,
-        authScheme: "OAUTH2",
+        connectsWith: "sign-in",
         returnTo: "settings",
         report: () => {},
       });
@@ -82,9 +83,7 @@ describe("Settings for a Shared app", () => {
       </QueryClientProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(
-      asked.filter((path) => path.endsWith("/connection/confirm")),
-    ).toEqual([]);
+    expect(asked.filter((path) => path.endsWith("/confirm"))).toEqual([]);
     global.fetch = originalFetch;
   });
 });

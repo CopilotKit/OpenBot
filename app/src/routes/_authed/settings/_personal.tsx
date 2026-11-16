@@ -2,8 +2,8 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
- * What the personal edition keeps of Admin: the plugins, skills, credentials, computer and activity
- * pages, under Settings because there is no Admin to hold them.
+ * What the personal edition also has under Settings: the plugins, skills, credentials, computer and
+ * activity pages, beside the person's own settings. Admin has them too, at their Admin addresses.
  *
  * Pathless, so it adds a guard and no segment. The team edition has these pages under Admin and
  * nowhere else, so an address here sends it back to Settings; so does a deployment whose edition

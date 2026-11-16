@@ -19,18 +19,20 @@ import type { ComponentType } from "react";
 import { EditSkill } from "@/components/skills/edit-skill";
 import { SkillsSettingsPage } from "@/components/skills/skills-settings-page";
 import { learningKeys } from "@/lib/learning/queries";
-import { type PluginsPage, pluginKeys } from "@/lib/plugins/queries";
+import { skillKeys } from "@/lib/skills/queries";
 import { Route as AdminSkillsRoute } from "@/routes/_authed/admin/skills";
+import { ME_PATH, meBody } from "./accounts-api";
+import { answerBotsList } from "./bots-api";
 
 /**
- * The three places skills are listed or opened, when `GET /api/plugins` fails.
+ * The three places skills are listed or opened, when the skills list (`listSkills`) fails.
  *
  * Each read `data?.skills ?? []` once `isPending` was false, and `isPending` goes false on a failed
  * fetch exactly as it does on a successful one: a request that never came back was drawn as "You
  * don't have any skills yet.", "No skills yet." and "That skill no longer exists", to people who
  * may have written a dozen. `agent-roster-error.test.tsx` is the same mistake on the agent screens.
  *
- * Only the plugins read fails here; who is signed in and the roster answer.
+ * Only the skills read fails here; who is signed in and the roster answer.
  *
  * THE HARNESS IS THIS REPOSITORY'S, as in `agent-roster-error.test.tsx` and
  * `boundaries-read-failure.test.tsx`: `GlobalRegistrator` in `beforeAll`/`afterAll`, `cleanup` in
@@ -46,23 +48,26 @@ const originalFetch = global.fetch;
 
 beforeEach(() => {
   global.fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0]) => {
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0];
       const json = (body: unknown) =>
         new Response(JSON.stringify(body), {
           headers: { "content-type": "application/json" },
         });
-      if (path === "/api/me") {
-        return json({
-          user: {
-            id: "user-1",
-            email: "person@example.com",
-            role: "admin",
-            onboarding: null,
-          },
-        });
+      if (path === ME_PATH) {
+        return json(
+          meBody({
+            user: {
+              id: "user-1",
+              email: "person@example.com",
+              role: "admin",
+              onboarding: null,
+            },
+          }),
+        );
       }
-      if (path === "/api/agents") return json({ agents: [] });
+      const bots = answerBotsList(path, init, { visible: [] });
+      if (bots) return bots;
       // The one read under test: a 500 with no body, the shape a broken server sends.
       return new Response(null, { status: 500 });
     },
@@ -79,20 +84,11 @@ function failingQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-/** A client already holding a plugins page with no skills in it: the honest empty answer. */
+/** A client already holding a skills list with nothing in it: the honest empty answer. */
 function answeredEmpty() {
   const client = failingQueryClient();
-  const page: PluginsPage = {
-    catalogue: [],
-    servers: [],
-    skills: [],
-    botsMayCallBack: true,
-    redirectUri: null,
-    composioConfigured: false,
-    authorizesPerAction: false,
-  };
-  client.setQueryData(pluginKeys.page(), page);
-  // Nothing learned either: the person has no skills at all. Held, so only the plugins read fails.
+  client.setQueryData(skillKeys.list(), []);
+  // Nothing learned either: the person has no skills at all. Held, so only the skills read fails.
   client.setQueryDefaults(learningKeys.personal, { staleTime: Infinity });
   client.setQueryData(learningKeys.personal, {
     mode: "closed",
@@ -104,7 +100,7 @@ function answeredEmpty() {
 
 async function waitForFailedRead(client: QueryClient) {
   await waitFor(() => {
-    expect(client.getQueryState(pluginKeys.page())?.status).toBe("error");
+    expect(client.getQueryState(skillKeys.list())?.status).toBe("error");
   });
 }
 
@@ -133,7 +129,7 @@ test("a person's skills page says the skills failed to load, not that they have 
 
   expect(
     await view.findByText(
-      "Couldn't load the skills you wrote. Reload the page.",
+      "Couldn't load the skills you wrote. Try again in a moment.",
     ),
   ).toBeTruthy();
   expect(
@@ -154,7 +150,9 @@ test("a person with genuinely no skills is still told so", async () => {
     ),
   ).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load the skills you wrote. Reload the page."),
+    view.queryByText(
+      "Couldn't load the skills you wrote. Try again in a moment.",
+    ),
   ).toBeNull();
 });
 
@@ -167,7 +165,7 @@ test("the admin skills page says the skills failed to load, not that there are n
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load skills. Reload the page."),
+    await view.findByText("Couldn't load skills. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText("No skills yet")).toBeNull();
 });
@@ -181,7 +179,9 @@ test("a deployment with genuinely no skills still says so on the admin page", as
   await waitForFailedRead(client);
 
   expect(await view.findByText("No skills yet")).toBeTruthy();
-  expect(view.queryByText("Couldn't load skills. Reload the page.")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load skills. Try again in a moment."),
+  ).toBeNull();
 });
 
 test("opening a skill to edit says it failed to load, not that it no longer exists", async () => {
@@ -190,7 +190,7 @@ test("opening a skill to edit says it failed to load, not that it no longer exis
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load this skill. Reload the page."),
+    await view.findByText("Couldn't load this skill. Try again in a moment."),
   ).toBeTruthy();
   expect(
     view.queryByText("This skill was deleted, or it isn't yours to edit."),

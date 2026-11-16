@@ -12,7 +12,7 @@ import {
   connectScreen,
   type ScreenSocket,
 } from "@/lib/computers/screen-connection";
-import { socketUrl } from "@/lib/socket-url";
+import { apiSocketPath, socketUrl } from "@/lib/socket-url";
 import { TERMINAL_THEME } from "./terminal-theme";
 
 /**
@@ -20,7 +20,7 @@ import { TERMINAL_THEME } from "./terminal-theme";
  *
  * The computer runs one bash for the Bot (agent-computer/src/live-shell.ts). Its commands are typed
  * into it, so this shows each one typed and its output as it streams; a person holding the wheel types
- * into the same shell. The socket is proxied by the server from `/api/computers/:botId/terminal`.
+ * into the same shell. The socket is the API's `computers/{botId}/terminal` (api/asyncapi.yaml).
  *
  * THE PROTOCOL, from this end. Binary frames are terminal bytes, written as they come. Text frames are
  * JSON: `snapshot` resets the terminal before the screen as it is now is redrawn, `ready` says the
@@ -173,7 +173,9 @@ export function LiveTerminal({
       open: () => {
         const opened = new WebSocket(
           socketUrl(
-            `/api/computers/${encodeURIComponent(computerId)}/terminal`,
+            apiSocketPath(
+              `/computers/${encodeURIComponent(computerId)}/terminal`,
+            ),
           ),
         );
         opened.binaryType = "arraybuffer";

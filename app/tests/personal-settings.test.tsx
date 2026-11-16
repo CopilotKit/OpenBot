@@ -15,7 +15,7 @@ import {
   isRedirect,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import { ComputersPage } from "@/components/manage/computers-page";
 import { PluginToolPage } from "@/components/manage/plugin-tool-page";
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
@@ -29,9 +29,9 @@ import {
   type DeploymentCapabilities,
   deploymentKeys,
 } from "@/lib/deployment/queries";
-import type { PluginsPage } from "@/lib/plugins/queries";
 import { Route as PersonalSettingsRoute } from "@/routes/_authed/settings/_personal";
 import { Route as LearningRoute } from "@/routes/_authed/settings/learning";
+import { seedAppReads } from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -162,16 +162,7 @@ describe("the personal pages under Settings", () => {
 
   test("link to each other under Settings, not Admin", async () => {
     const client = clientFor("personal");
-    const page: PluginsPage = {
-      catalogue: [],
-      servers: [],
-      skills: [],
-      botsMayCallBack: true,
-      redirectUri: null,
-      composioConfigured: false,
-      authorizesPerAction: false,
-    };
-    client.setQueryData(["plugins", "page"], page);
+    seedAppReads(client, { botsMayCallBack: true });
     const router = createRouter({
       history: createMemoryHistory({ initialEntries: ["/"] }),
       routeTree: createRootRoute({
@@ -194,7 +185,7 @@ describe("the personal pages under Settings", () => {
 /*
  * The Computer page in the personal edition is one person's one computer. It used to say how to give
  * each person a computer of their own (an environment variable only a team deployment sets) and list
- * "Computers in this deployment" by whose seat each was. The person's own controls stay.
+ * "Computers in this organization" by whose seat each was. The person's own controls stay.
  */
 describe("the Computer page", () => {
   /** What the one shared computer answers once the Personal Assistant has opened a page. */
@@ -254,7 +245,7 @@ describe("the Computer page", () => {
     const view = await renderPage("personal");
     const text = view.container.textContent ?? "";
     expect(text).not.toContain("COMPUTER_SUPERVISOR_URL");
-    expect(text).not.toContain("Computers in this deployment");
+    expect(text).not.toContain("Computers in this organization");
     expect(text).not.toContain("isolated Bot");
     expect(text).not.toContain("dev@openbot.local");
     expect(text).not.toContain("This person's profile");
@@ -297,7 +288,7 @@ describe("the Computer page", () => {
     title: string,
   ) {
     const section = view.getByRole("heading", {
-      name: /^(Your Bots' browsers|Computers in this deployment)$/,
+      name: /^(Your Bots' browsers|Computers in this organization)$/,
     }).parentElement?.parentElement as HTMLElement;
     return within(section)
       .getByText(title)
@@ -379,6 +370,28 @@ describe("the Computer page", () => {
     expect(dialog.textContent).not.toContain("The Bot is signed out");
   });
 
+  // FOUND BY THE END-TO-END SUITE: answered with Reset it, the dialog fades out, and as it did its title fell back to
+  // "Reset the computer?", the words for no row at all. It names the Bot's browser until it has gone.
+  test("the Reset dialog keeps naming the Bot's browser while it closes", async () => {
+    const view = await renderPage("personal");
+    within(browserRow(view, "Personal Assistant"))
+      .getByRole("button", { name: "Reset" })
+      .click();
+    const dialog = await view.findByRole("dialog");
+    const title = () =>
+      dialog.querySelector('[data-slot="dialog-title"]')?.textContent;
+    expect(title()).toBe("Reset Personal Assistant's browser?");
+    const titles = new Set([title()]);
+    new MutationObserver(() => titles.add(title())).observe(dialog, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+    within(dialog).getByRole("button", { name: "Reset it" }).click();
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+    expect([...titles]).toEqual(["Reset Personal Assistant's browser?"]);
+  });
+
   /** The section the desktop's folder picker is reached from. */
   function foldersSection(view: Awaited<ReturnType<typeof renderPage>>) {
     return view.getByRole("heading", { name: "Folders on this computer" })
@@ -420,7 +433,7 @@ describe("the Computer page", () => {
     expect(folders.textContent).not.toContain("The desktop app is offline");
   });
 
-  /** A folder request still open, as `GET /api/host-access` lists it. */
+  /** A folder request still open, as the API's `people/me/host-access` lists it. */
   function waiting(
     kind: NonNullable<HostAccessStatus["pending"][number]["kind"]>,
     botId = "personal-assistant",
@@ -538,7 +551,7 @@ describe("the Computer page", () => {
     const text = view.container.textContent ?? "";
     expect(view.getByRole("heading", { name: "Computers" })).toBeTruthy();
     expect(text).toContain("COMPUTER_SUPERVISOR_URL");
-    expect(text).toContain("Computers in this deployment");
+    expect(text).toContain("Computers in this organization");
     expect(text).toContain("dev@openbot.local · Personal Assistant");
     expect(text).toContain("Leaves through network policy filter");
   });

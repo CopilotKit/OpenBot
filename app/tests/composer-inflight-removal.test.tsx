@@ -9,7 +9,12 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { attachmentPath, problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * A CHIP REMOVED WHILE ITS UPLOAD IS STILL IN THE AIR, WHICH USED TO LEAVE A ROW NOBODY COULD SEE.
@@ -69,6 +74,8 @@ beforeEach(() => {
   deletes = [];
   held = [];
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     if (init?.method === "DELETE") {
       deletes.push(path);
       return new Response(null, { status: 204 });
@@ -86,6 +93,7 @@ beforeEach(() => {
         id: `row-${file.name}`,
         name: file.name,
         mimeType: "text/plain",
+        sizeBytes: file.size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -126,7 +134,7 @@ test("a chip removed mid-upload gives its row back once the upload lands", async
   // And now it does exist, with no chip left to stand for it — so it goes back rather than sitting
   // out the sweeper's 24-hour window counting against this channel's cap.
   await waitFor(() =>
-    expect(deletes).toEqual(["/api/attachments/row-notes.txt"]),
+    expect(deletes).toEqual([attachmentPath("row-notes.txt")]),
   );
 });
 
@@ -158,7 +166,7 @@ test("only the removed one is given back when two files are pending", async () =
   releaseUploads();
 
   await waitFor(() =>
-    expect(deletes).toEqual(["/api/attachments/row-gone.txt"]),
+    expect(deletes).toEqual([attachmentPath("row-gone.txt")]),
   );
   // The one nobody touched is still on the strip, and still owns its row.
   expect(view.queryByLabelText("Remove kept.txt")).not.toBeNull();

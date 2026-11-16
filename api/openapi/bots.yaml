@@ -1,0 +1,2764 @@
+# Bots: the Bots a person can see, and creating, changing and deleting them.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/bots:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Bots]
+      operationId: listBots
+      summary: List Bots
+      description: >-
+        Return one page of the Bots the caller can see: theirs, the ones shared
+        with them, the ones assigned to them and the ones that come with
+        OpenBot, oldest first, and by id among Bots made at the same moment.
+        Somebody else's private Bot is never among them, an admin's list
+        included. hidden=true lists only the Bots the caller hid from their own
+        list instead. scope=organization lists every Bot in the organization,
+        people's private Bots included, for an admin's screens that decide what
+        Bots may hold; it is refused to anybody who is not an admin of the
+        organization. Somebody else's private Bot comes withheld there: its
+        name and avatar, and nothing from inside it (see the Bot's withheld).
+        A missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      parameters:
+        - name: hidden
+          in: query
+          description: List the Bots the caller hid instead of the ones they did not.
+          schema:
+            type: boolean
+            default: false
+        - name: scope
+          in: query
+          description: >-
+            Whose Bots: caller, the Bots the caller can see; organization, every
+            Bot in the organization, for an admin of it only.
+          schema:
+            type: string
+            enum: [caller, organization]
+            default: caller
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of Bots.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/BotPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Bots]
+      operationId: createBot
+      summary: Create a Bot
+      description: >-
+        Create a Bot owned by the caller. With no endpoint it runs inside
+        OpenBot on its role description; with one, OpenBot sends each turn to
+        that AG-UI address, which the server checks before saving. A key, when
+        given, is stored encrypted and never returned. Asking for isolated
+        needs the caller's Isolated Bots switch and a deployment that can give
+        a Bot a computer of its own. A repeated request with the same
+        Idempotency-Key and body returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBotRequest'
+            examples:
+              builtIn:
+                summary: A Bot that runs inside OpenBot.
+                value:
+                  name: Expense Review
+                  title: Finance Operations
+                  roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+                  visibility: private
+              ownAgent:
+                summary: An agent somebody runs themselves, behind a key.
+                value:
+                  name: Expense Review
+                  title: ''
+                  roleDescription: Review receipts.
+                  visibility: private
+                  endpoint: https://agents.example.com/ag-ui
+                  auth:
+                    header: Authorization
+                    value: Bearer example-key
+                  harness: langgraph
+      responses:
+        '201':
+          description: The Bot was created.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            Location:
+              description: The new Bot's address.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/bots/agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                created:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: '#/components/responses/InvalidBot'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags: [Bots]
+      operationId: getBot
+      summary: Read one Bot
+      description: >-
+        Return one Bot the caller can see. A Bot that does not exist, was
+        deleted, or is private to somebody else is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Bot.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                starter:
+                  $ref: '#/components/examples/StarterBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Bots]
+      operationId: updateBot
+      summary: Change a Bot
+      description: >-
+        Replace a Bot's name, title, role description and visibility, which are
+        all required, and change any optional field that is present. An absent
+        endpoint, key or isolated leaves that setting as it is, so an edit to
+        a name never drops a key or moves a Bot between computers. Only whoever
+        may manage the Bot may change it, and a Bot that comes with OpenBot
+        cannot be changed. Making a Bot public reports what that means for the
+        shared app accounts it uses.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBotRequest'
+            examples:
+              rename:
+                value:
+                  name: Expense Review Desk
+                  title: Finance Operations
+                  roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+                  visibility: private
+      responses:
+        '200':
+          description: The changed Bot.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateBotResponse'
+              examples:
+                renamed:
+                  $ref: '#/components/examples/CreatedBot'
+                published:
+                  $ref: '#/components/examples/PublishedBot'
+        '400':
+          $ref: '#/components/responses/InvalidBot'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Bots]
+      operationId: deleteBot
+      summary: Delete a Bot
+      description: >-
+        Delete a Bot for everyone and retire its key. Conversations with it
+        stay readable. Only whoever may manage the Bot may delete it, and a
+        Bot that comes with OpenBot cannot be deleted. A Bot that is already
+        deleted is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The Bot was deleted.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/test-connection:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Bots]
+      operationId: testBotConnection
+      summary: Test a Bot's address
+      description: >-
+        Send one short run to an AG-UI address from where OpenBot's runs will
+        reach it, before a Bot is saved with it, and say what came back. The
+        address is checked as saving checks it, so this can't reach an address
+        a Bot could not be saved with. A failed test is an answer, not an
+        error: ok is false and reason says what went wrong in words a person
+        can act on. An address this deployment runs is tried with the token
+        its runs use. Nothing is saved.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotConnectionTestRequest'
+            examples:
+              withKey:
+                value:
+                  endpoint: https://agents.example.com/ag-ui
+                  headers:
+                    Authorization: Bearer example-key
+      responses:
+        '200':
+          description: What the address answered, or why it couldn't be reached.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotConnectionTest'
+              examples:
+                answered:
+                  $ref: '#/components/examples/BotConnectionAnswered'
+                refused:
+                  $ref: '#/components/examples/BotConnectionRefused'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/duplicate:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: duplicateBot
+      summary: Duplicate a Bot
+      description: >-
+        Make a private copy of a Bot the caller can see, owned by the caller,
+        with its address and its key. The copy keeps a computer of its own
+        only when the caller may give it one. Needs the caller's Bots switch.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: The copy.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            Location:
+              description: The copy's address.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/bots/agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                copied:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/hide:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: hideBot
+      summary: Hide a Bot from the caller's list
+      description: >-
+        Take a Bot the caller can see out of their own list, for them only;
+        listBots with hidden=true lists it. Nobody else's list changes. Hiding
+        a hidden Bot changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The Bot, hidden.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                hidden:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/BotAssigned'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/unhide:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: unhideBot
+      summary: Put a Bot back in the caller's list
+      description: >-
+        Put a Bot the caller hid back in their own list. Showing a Bot that is
+        not hidden changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The Bot, back in the list.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                shown:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/pin:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: pinBot
+      summary: Pin a Bot to the top of the caller's list
+      description: >-
+        Pin a Bot the caller can see to the top of their own list, for them
+        only. Pinning a pinned Bot changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The Bot, pinned.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                pinned:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/unpin:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: unpinBot
+      summary: Unpin a Bot
+      description: >-
+        Unpin a Bot from the top of the caller's own list. Unpinning a Bot
+        that is not pinned changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The Bot, unpinned.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                unpinned:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/issue-callback-token:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: issueBotCallbackToken
+      summary: Issue a Bot's callback token
+      description: >-
+        Give a Bot a new credential for calling OpenBot's tools back, and
+        return it this once: it is never returned again, and the audit trail
+        records that one was issued, never what it is. Issuing one for a Bot
+        that has one replaces it, which is how a leaked token is retired. Only
+        whoever may manage the Bot may issue one.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The new token, shown once.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotCallbackToken'
+              examples:
+                issued:
+                  $ref: '#/components/examples/BotCallbackTokenExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/revoke-callback-token:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: revokeBotCallbackToken
+      summary: Revoke a Bot's callback token
+      description: >-
+        Take away a Bot's credential for calling OpenBot's tools back. It can
+        still hold a conversation; it can't reach anything outside one. Only
+        whoever may manage the Bot may revoke it. Revoking a token that is not
+        there changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The Bot, with no callback token.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotResponse'
+              examples:
+                revoked:
+                  $ref: '#/components/examples/CreatedBot'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotForbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/report-decline:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: reportBotDecline
+      summary: Record that a Bot declined a request
+      description: >-
+        Put on the audit trail that a Bot declined something it was asked to
+        do, in its own words. The Bot reports it through the conversation it
+        is in, so the row says the Bot reported it itself: it is evidence of
+        what the Bot is being asked, not a control, and a Bot that declines
+        without reporting writes nothing. Only a Bot the caller can reach can
+        be reported on.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotDeclineReport'
+            examples:
+              declined:
+                value:
+                  reason: Sending money is outside what I'm for.
+                  request: Wire the vendor's invoice amount.
+      responses:
+        '204':
+          description: Recorded.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/handoff:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags: [Bots]
+      operationId: getBotHandoff
+      summary: Read which Bots a Bot may hand work to
+      description: >-
+        Return which Bots this Bot may hand work to today, whether the
+        deployment lets any Bot hand work on at all, whether this Bot can be
+        given that permission, and whether the caller may change it. An
+        administrator grants it, as an app grant of kind bot.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Bot's handoff permissions.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotHandoff'
+              examples:
+                granted:
+                  $ref: '#/components/examples/BotHandoffExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/lifecycle:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags: [Bots]
+      operationId: getBotLifecycle
+      summary: Read whether a Bot is paused for the caller
+      description: >-
+        Return the caller's own state with a Bot: whether they paused it, and
+        how loudly it may reach them. It is theirs alone: pausing a shared Bot
+        stops the work it does for them, not for anybody else.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The caller's state with the Bot.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotLifecycle'
+              examples:
+                running:
+                  $ref: '#/components/examples/BotLifecycleRunning'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/pause:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: pauseBot
+      summary: Pause a Bot for the caller
+      description: >-
+        Stop the work a Bot does for the caller: its turns running for them
+        now are stopped, and nothing it was going to do for them starts until
+        they resume it. Nobody else's work with the Bot changes. Pausing a
+        paused Bot stops anything that started since and keeps it paused.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The caller's state with the Bot, and how many turns were stopped.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotPause'
+              examples:
+                paused:
+                  $ref: '#/components/examples/BotPaused'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/resume:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: resumeBot
+      summary: Resume a Bot for the caller
+      description: >-
+        Let a Bot the caller paused work for them again. Resuming a Bot that
+        is not paused changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The caller's state with the Bot.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotLifecycle'
+              examples:
+                running:
+                  $ref: '#/components/examples/BotLifecycleRunning'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/reset:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: resetBot
+      summary: Reset what a Bot knows about the caller
+      description: >-
+        Delete what a Bot holds for the caller: their conversations with it
+        (any shared with other people are kept), its memory of them, their
+        routines, goals and follow-ups with it, the research it did for them
+        and the approvals they gave it. Nobody else's is touched. The request
+        says validateOnly every time: true counts what a reset would delete
+        and deletes nothing, false deletes it. Both answer the same counts.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotResetRequest'
+            examples:
+              preview:
+                summary: Count it first.
+                value:
+                  validateOnly: true
+              reset:
+                summary: Delete it.
+                value:
+                  validateOnly: false
+      responses:
+        '200':
+          description: What the reset deleted, or with validateOnly what it would delete.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReset'
+              examples:
+                preview:
+                  $ref: '#/components/examples/BotResetPreview'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/activity:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags: [Bots]
+      operationId: getBotActivity
+      summary: Read what a Bot is doing for the caller
+      description: >-
+        Return what a Bot is doing for the caller, in four sections: in
+        progress, scheduled, goals that run only when asked, and recently
+        completed. Each section holds at most its newest items, so this is one
+        view rather than a list to page through. Only the caller's own work
+        with the Bot is in it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Bot's activity for the caller.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotActivity'
+              examples:
+                working:
+                  $ref: '#/components/examples/BotActivityExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/stop-handoff:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Bots]
+      operationId: stopBotHandoff
+      summary: Stop work a Bot handed to another Bot
+      description: >-
+        Stop a task this Bot handed to another Bot for the caller, while it
+        is still running or queued, named by its id in the Bot's activity
+        (an item that is stoppable). A task that has finished, was stopped
+        already, or is not the caller's is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopBotHandoffRequest'
+            examples:
+              stop:
+                value:
+                  handoffId: handoff:hop_3c1d
+      responses:
+        '204':
+          description: Stopped.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/HandoffNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/bot-attention:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Bots]
+      operationId: listBotAttention
+      summary: List what each Bot has waiting on a person
+      description: >-
+        Return one page of the Bots that need the person, have something
+        unread for them, or that they paused: per Bot, its questions,
+        approvals, stalled handoffs, check-in items and tasks waiting on them.
+        Each page also carries the person's newest ping, so a client notifies
+        once per ping however many items it carried. Ordered by the Bot's
+        name, then its id. It is the person's own: nobody else, an
+        administrator included, may read it. A missing cursor starts at the
+        first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of what the person's Bots have waiting on them.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAttentionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/BotAttentionPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/team-bots:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Team Bots]
+      operationId: listTeamBots
+      summary: List Team Bots
+      description: >-
+        Return one page of the published Bots the caller may use or manages:
+        their own publications, the ones published to them by name, to a
+        group or team they are in or to everyone in the organization, and the
+        ones an administrator
+        assigned them. An administrator sees every one. Who a Team Bot reaches
+        (people, groups and assignments) is shown only to its owner and
+        administrators. Ordered by name, then the Bot's id. A missing cursor
+        starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of Team Bots.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamBotPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/TeamBotPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/team-bots/{botId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    get:
+      tags: [Team Bots]
+      operationId: getTeamBot
+      summary: Read one Team Bot
+      description: >-
+        Return one published Bot the caller may use or manages. A Bot that is
+        not published, or not published to the caller, is not found.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Team Bot.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamBotResponse'
+              examples:
+                published:
+                  $ref: '#/components/examples/TeamBotExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamBotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Team Bots]
+      operationId: publishTeamBot
+      summary: Publish a Bot to everyone in the organization, or to some of them
+      description: >-
+        Publish one of the caller's own Bots to everyone in the organization,
+        or to named people, teams and directory groups, or change who it is
+        published to. Each person's conversations with it are private to them;
+        its owner can't read them. Needs the caller's Team Bots switch, and a
+        Bot with a real name and a description, which is how the people it is
+        published to tell it apart. Every
+        person named must have signed in here. Publishing can widen who
+        reaches the shared app accounts the Bot uses, and the answer says
+        which an administrator still has to approve.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamBotPublication'
+            examples:
+              team:
+                summary: To everyone in the organization.
+                value:
+                  audience: team
+              people:
+                summary: To a person and a group.
+                value:
+                  audience: people
+                  emails: [maya@example.com]
+                  groups: [finance]
+      responses:
+        '200':
+          description: The Team Bot, and what publishing it means for its shared apps.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishedTeamBot'
+              examples:
+                published:
+                  $ref: '#/components/examples/PublishedTeamBotExample'
+        '400':
+          $ref: '#/components/responses/InvalidTeamBot'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/TeamBotForbidden'
+        '404':
+          $ref: '#/components/responses/TeamBotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Team Bots]
+      operationId: unpublishTeamBot
+      summary: Unpublish a Team Bot
+      description: >-
+        Stop publishing a Bot: the people it was published to can't use it
+        until it is published again, and its assignments wait, doing nothing. Its owner or an
+        administrator may unpublish it. Unpublishing a Bot that is not
+        published changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Unpublished.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamBotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/team-bots/{botId}/group-assignments/{group}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+      - $ref: '#/components/parameters/DirectoryGroup'
+    put:
+      tags: [Team Bots]
+      operationId: assignTeamBot
+      summary: Assign a Team Bot to a group
+      description: >-
+        Put a published Bot in the Bots list of everybody in a directory
+        group, or of everybody with *, where they can't hide it. Only an
+        administrator may assign, and only a published Bot. Assigning it to a
+        group it is assigned to changes nothing. The answer says what the
+        wider reach means for the shared app accounts the Bot uses.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The Team Bot, and what the assignment means for its shared apps.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishedTeamBot'
+              examples:
+                assigned:
+                  $ref: '#/components/examples/PublishedTeamBotExample'
+        '400':
+          $ref: '#/components/responses/InvalidTeamBot'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/TeamBotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Team Bots]
+      operationId: unassignTeamBot
+      summary: Take a Team Bot's assignment away from a group
+      description: >-
+        Stop putting a Team Bot in a group's Bots lists. Only an administrator
+        may do this. Removing an assignment that is not there changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The group no longer has it assigned.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/team-bots/{botId}/answer-consent:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotId'
+    post:
+      tags: [Team Bots]
+      operationId: answerTeamBotConsent
+      summary: Answer whether a Team Bot may use the caller's account
+      description: >-
+        Record the caller's answer when a Team Bot somebody else published
+        asks to use one of the caller's own app accounts: this once, always
+        for this Bot, always for every Team Bot, or skip, which takes back an
+        earlier answer for this Bot. It is the caller's own answer and binds
+        nobody else. Allowing is only for an app the Bot uses, one it holds a
+        tool of; any other app is refused with VALIDATION_ERROR. Skip is
+        accepted for any app.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamBotConsentAnswer'
+            examples:
+              always:
+                value:
+                  serverId: composio-gmail
+                  decision: allow_always
+      responses:
+        '204':
+          description: Recorded.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/TeamBotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/clear-team-bot-consents:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Team Bots]
+      operationId: clearTeamBotConsents
+      summary: Forget every answer a person gave Team Bots
+      description: >-
+        Forget every answer the person gave a Team Bot about using their own
+        app accounts, so each Team Bot asks again. It is the person's own:
+        nobody else, an administrator included, may do it for them.
+      security:
+        - webSession: []
+        - appOAuth: [team-bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Forgotten.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    BotId:
+      name: botId
+      in: path
+      required: true
+      description: The Bot's id.
+      schema:
+        type: string
+        minLength: 1
+        pattern: \S
+      example: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+    DirectoryGroup:
+      name: group
+      in: path
+      required: true
+      description: >-
+        A directory group, by the name the identity provider gives it, or *
+        for everybody. A team is written team: followed by the team's id, as
+        in team:Tm4Qx8LpV2nWc7RbY1sKd0Ze.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: finance
+  schemas:
+    BotVisibility:
+      type: string
+      enum: [public, private]
+      description: Public Bots are shared with everybody in the organization.
+    Bot:
+      type: object
+      description: >-
+        A Bot as the caller sees it. canManage, mine, systemOwned and the
+        isolation fields are the server's verdicts for this caller; a client
+        renders them and never recomputes them. No secret is ever part of a
+        Bot: hasAuth and hasCallbackToken say whether one is set.
+      required:
+        - id
+        - name
+        - title
+        - roleDescription
+        - avatarSeed
+        - visibility
+        - hidden
+        - pinned
+        - systemOwned
+        - endpoint
+        - hasAuth
+        - hasCallbackToken
+        - isolated
+        - canManage
+        - mine
+        - assignedToMe
+        - builtIn
+        - runsOnOpenBotModel
+        - keyFromOpenBot
+        - isolationActive
+        - isolationOffReason
+      properties:
+        id:
+          type: string
+          description: The Bot's id.
+        name:
+          type: string
+          description: What the Bot is called.
+        title:
+          type: string
+          description: The subtitle under its name. May be empty.
+        roleDescription:
+          type: string
+          description: What it does, in its owner's words.
+        avatarSeed:
+          type: string
+          description: The seed its avatar is drawn from.
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        hidden:
+          type: boolean
+          description: Whether the caller hid it from their own list.
+        pinned:
+          type: boolean
+          description: Whether the caller pinned it to the top of their own list.
+        systemOwned:
+          type: boolean
+          description: Whether it comes with OpenBot rather than belonging to a person.
+        packageBotId:
+          type: [string, 'null']
+          readOnly: true
+          description: >-
+            Which of the Bots an OpenBot starts with this one is, so a client
+            recognises it in whichever organization it is in. It is the id
+            that Bot has in the install package: the same as id in the
+            organization `default`, and the package's id on another
+            organization's copy, whose own id is generated. Null for a Bot
+            somebody made. Never accepted when a Bot is created or changed.
+        endpoint:
+          type: [string, 'null']
+          description: >-
+            The AG-UI address it runs at, as it was stored. Null for a Bot that
+            runs inside OpenBot. Every address saved through this API is an
+            absolute http or https address (see the request's endpoint), but
+            one saved by an older release is returned as it is, so this field
+            states no format.
+        hasAuth:
+          type: boolean
+          description: Whether a key is set for its address. Never the key.
+        hasCallbackToken:
+          type: boolean
+          description: >-
+            Whether it holds a credential for calling OpenBot's tools back.
+            Never the credential.
+        isolated:
+          type: boolean
+          description: >-
+            Whether its owner asked for it to have a computer of its own.
+            isolationActive says whether it has one now.
+        instructions:
+          type: string
+          description: >-
+            What the starter Bot is told, kept apart from its role description.
+            Only the starter Bot has instructions.
+        framework:
+          type: string
+          description: >-
+            What runs it, by the name a person reads ("LangChain", "OpenBot").
+            Absent when OpenBot doesn't know.
+        canManage:
+          type: boolean
+          description: Whether the caller may change and delete it.
+        mine:
+          type: boolean
+          description: >-
+            Whether the caller created it. Separate from canManage, which is
+            also true for an administrator on everybody's Bots.
+        withheld:
+          type: boolean
+          description: >-
+            Whether it is somebody else's private Bot, listed for an admin's
+            screens (listBots with scope=organization) and nothing more. Such
+            a Bot carries its id, name, avatar and the caller's own state with
+            it only: title and roleDescription are empty, endpoint is null,
+            instructions and framework are absent, hasAuth, hasCallbackToken,
+            isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage
+            are false. Absent or false on every other Bot.
+        assignedToMe:
+          type: boolean
+          description: Whether an administrator assigned this Bot to the caller.
+        builtIn:
+          type: boolean
+          description: >-
+            Whether it runs at the deployment's own managed address, so it
+            needs no callback credential of its own.
+        runsOnOpenBotModel:
+          type: boolean
+          description: >-
+            Whether it runs on OpenBot's model, so a person can pick the model
+            per conversation.
+        keyFromOpenBot:
+          type: boolean
+          description: >-
+            Whether OpenBot gives it a key for its tools on every run, because
+            OpenBot runs it.
+        isolationActive:
+          type: boolean
+          description: Whether its next run gets a computer of its own.
+        isolationOffReason:
+          type: [string, 'null']
+          enum: [admin, deployment, null]
+          description: >-
+            Why an isolated Bot runs on a shared computer instead. admin: its
+            owner no longer holds Isolated Bots. deployment: this deployment
+            cannot make another computer. Null otherwise.
+    BotPage:
+      type: object
+      required: [bots, nextCursor]
+      properties:
+        bots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Bot'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    BotResponse:
+      type: object
+      required: [bot]
+      properties:
+        bot:
+          $ref: '#/components/schemas/Bot'
+    SharedApp:
+      type: object
+      required: [serverId, title]
+      properties:
+        serverId:
+          type: string
+          description: The app's id.
+        title:
+          type: string
+          description: The app's name.
+    SharedAppsAfterChange:
+      type: object
+      description: >-
+        What making a Bot public means for the shared app accounts it uses. An
+        administrator's change approves them; anybody else's lists the ones an
+        administrator still has to approve.
+      required: [approved, needsApproval]
+      properties:
+        approved:
+          type: array
+          items:
+            $ref: '#/components/schemas/SharedApp'
+        needsApproval:
+          type: array
+          items:
+            $ref: '#/components/schemas/SharedApp'
+    UpdateBotResponse:
+      type: object
+      required: [bot]
+      properties:
+        bot:
+          $ref: '#/components/schemas/Bot'
+        sharedApps:
+          $ref: '#/components/schemas/SharedAppsAfterChange'
+    BotKey:
+      type: object
+      description: >-
+        A key the Bot's address sits behind. Write-only: stored encrypted and
+        never returned. A blank value sets no key.
+      additionalProperties: false
+      required: [value]
+      properties:
+        header:
+          type: string
+          pattern: ^[A-Za-z0-9-]*$
+          description: The header it is sent in. Blank or absent means Authorization.
+        value:
+          type: string
+          writeOnly: true
+          description: The header's value.
+    BotName:
+      type: string
+      minLength: 1
+      maxLength: 80
+      description: What the Bot is called, 1 to 80 characters once trimmed.
+    BotTitle:
+      type: string
+      maxLength: 120
+      description: The subtitle under its name, up to 120 characters. May be empty.
+    BotRoleDescription:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: >-
+        What it does, 1 to 1000 characters once trimmed. A Bot with no endpoint
+        runs on these words.
+    BotEndpoint:
+      type: string
+      description: >-
+        The AG-UI address it runs at: empty, or an absolute http or https
+        address, the only kinds the server has ever taken. Empty or absent on
+        create means it runs inside OpenBot; empty or absent on a change leaves
+        it as it is. An address that fits can still be refused: the server
+        refuses one this deployment may not reach, such as a private network
+        address on a deployment that keeps Bots off it.
+      anyOf:
+        - type: string
+          maxLength: 0
+        - type: string
+          format: uri
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+    BotIsolated:
+      type: boolean
+      description: >-
+        Whether it gets a computer of its own. Absent leaves it as it is. True
+        needs the owner's Isolated Bots switch.
+    BotInstructions:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      description: >-
+        New instructions for the starter Bot, 1 to 1000 characters once
+        trimmed. Absent leaves them as they are; every other Bot ignores them.
+    BotFields:
+      type: object
+      additionalProperties: false
+      required: [name, title, roleDescription, visibility]
+      properties:
+        name:
+          $ref: '#/components/schemas/BotName'
+        title:
+          $ref: '#/components/schemas/BotTitle'
+        roleDescription:
+          $ref: '#/components/schemas/BotRoleDescription'
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        endpoint:
+          $ref: '#/components/schemas/BotEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotKey'
+        isolated:
+          $ref: '#/components/schemas/BotIsolated'
+        instructions:
+          $ref: '#/components/schemas/BotInstructions'
+    CreateBotRequest:
+      description: >-
+        A new Bot: a Bot's fields, and the framework it is built on. One closed
+        object, not BotFields with harness added in an allOf, because each
+        closed part of an allOf would refuse the other's fields.
+      type: object
+      additionalProperties: false
+      required: [name, title, roleDescription, visibility]
+      properties:
+        name:
+          $ref: '#/components/schemas/BotName'
+        title:
+          $ref: '#/components/schemas/BotTitle'
+        roleDescription:
+          $ref: '#/components/schemas/BotRoleDescription'
+        visibility:
+          $ref: '#/components/schemas/BotVisibility'
+        endpoint:
+          $ref: '#/components/schemas/BotEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotKey'
+        isolated:
+          $ref: '#/components/schemas/BotIsolated'
+        instructions:
+          $ref: '#/components/schemas/BotInstructions'
+        harness:
+          type: string
+          description: >-
+            The framework an agent somebody runs themselves is built on, by
+            its id in OpenBot's harness list (shared/harnesses.json), which
+            the server checks every create against. Empty means none was
+            named, as for an agent somebody already runs. "byo-url" is not
+            one: it names no framework. Kept only with an endpoint.
+          enum:
+            - ''
+            - crewai
+            - llamaindex
+            - agno
+            - langgraph
+            - google-adk
+            - antigravity
+            - pydantic-ai
+            - microsoft-agent-framework
+            - claude-agent-sdk
+            - strands
+            - ag2
+            - langroid
+            - mastra
+    UpdateBotRequest:
+      description: A Bot's fields after the change.
+      allOf:
+        - $ref: '#/components/schemas/BotFields'
+    BotConnectionTestRequest:
+      type: object
+      additionalProperties: false
+      required: [endpoint]
+      properties:
+        endpoint:
+          type: string
+          maxLength: 2048
+          description: >-
+            The AG-UI address to try. Anything that is not an address a Bot
+            could be saved with is answered with ok false and the reason.
+        headers:
+          type: object
+          description: >-
+            Headers to send with the run, such as the key the address sits
+            behind, as name to value. Never stored.
+          maxProperties: 32
+          propertyNames:
+            pattern: ^[A-Za-z0-9-]{1,64}$
+          additionalProperties:
+            type: string
+            maxLength: 4096
+            pattern: ^[\x01-\x09\x0B\x0C\x0E-\xFF]*$
+    BotConnectionTest:
+      type: object
+      description: >-
+        What the address answered. ok true: it answered with AG-UI events,
+        listed in events. ok false: reason says why not.
+      required: [ok, events, reason]
+      properties:
+        ok:
+          type: boolean
+          description: Whether an AG-UI agent answered at the address.
+        events:
+          type: array
+          description: The AG-UI event types that came back, in order. Empty when ok is false.
+          items:
+            type: string
+        reason:
+          type: [string, 'null']
+          description: Why the test failed, in words a person can act on. Null when ok is true.
+    BotCallbackToken:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          description: >-
+            The Bot's credential for calling OpenBot's tools back. Returned
+            this once and never again.
+    BotDeclineReport:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: ^[^\x00]*\S[^\x00]*$
+          description: Why the Bot declined, in its own words. The trail keeps the first 500 characters.
+        request:
+          type: string
+          maxLength: 2000
+          pattern: ^[^\x00]*$
+          description: What it was asked to do, in a few words. The trail keeps the first 500 characters.
+    BotHandoff:
+      type: object
+      required: [enabled, canGrant, reachable, grantable]
+      properties:
+        enabled:
+          type: boolean
+          description: >-
+            Whether this deployment lets Bots hand work to each other at all.
+            False means a grant would never be used.
+        canGrant:
+          type: boolean
+          description: Whether the caller may change which Bots this one may hand work to. Only an administrator may.
+        reachable:
+          type: array
+          description: The ids of the Bots this Bot may hand work to today.
+          items:
+            type: string
+        grantable:
+          type: boolean
+          description: >-
+            Whether this Bot can be given that permission at all. False means
+            every grant would be refused.
+    BotNotify:
+      type: string
+      enum: [all, needs_input, none]
+      description: >-
+        How loudly a Bot may reach the person outside the web app: everything,
+        only what needs them, or nothing. Badges in the web app always show.
+    BotLifecycle:
+      type: object
+      description: The caller's own state with one Bot.
+      required: [botId, paused, pausedAt, notify]
+      properties:
+        botId:
+          type: string
+          description: The Bot.
+        paused:
+          type: boolean
+          description: Whether the caller paused it.
+        pausedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When they paused it. Null when it is not paused.
+        notify:
+          $ref: '#/components/schemas/BotNotify'
+    BotPause:
+      type: object
+      required: [lifecycle, stoppedTurns]
+      properties:
+        lifecycle:
+          $ref: '#/components/schemas/BotLifecycle'
+        stoppedTurns:
+          type: integer
+          minimum: 0
+          description: How many of its turns for the caller were stopped.
+    BotResetRequest:
+      type: object
+      additionalProperties: false
+      required: [validateOnly]
+      properties:
+        validateOnly:
+          type: boolean
+          description: >-
+            True counts what a reset would delete and deletes nothing. False
+            deletes it. Required, so a reset is never asked for by omission.
+    BotResetCounts:
+      type: object
+      description: What a reset deletes, by kind, for the caller only.
+      required:
+        - conversations
+        - sharedConversationsKept
+        - memorySources
+        - memories
+        - routines
+        - responsibilities
+        - followUps
+        - formedMemories
+        - backgroundResearch
+        - standingApprovals
+      properties:
+        conversations:
+          type: integer
+          minimum: 0
+          description: The caller's conversations with the Bot.
+        sharedConversationsKept:
+          type: integer
+          minimum: 0
+          description: Conversations with the Bot shared with other people, which are kept.
+        memorySources:
+          type: integer
+          minimum: 0
+          description: What the Bot reads to remember the caller.
+        memories:
+          type: integer
+          minimum: 0
+          description: What it remembers about the caller.
+        routines:
+          type: integer
+          minimum: 0
+          description: The caller's routines with it.
+        responsibilities:
+          type: integer
+          minimum: 0
+          description: The goals the caller gave it.
+        followUps:
+          type: integer
+          minimum: 0
+          description: Follow-ups it set itself for the caller.
+        formedMemories:
+          type: integer
+          minimum: 0
+          description: Memories it formed itself from what it read for the caller.
+        backgroundResearch:
+          type: integer
+          minimum: 0
+          description: Research it did in the background for the caller, with its suggestions.
+        standingApprovals:
+          type: integer
+          minimum: 0
+          description: The "always allow" and pre-approved rules the caller gave it.
+    BotReset:
+      type: object
+      required: [validateOnly, deleted]
+      properties:
+        validateOnly:
+          type: boolean
+          description: Whether this only counted, as the request asked.
+        deleted:
+          $ref: '#/components/schemas/BotResetCounts'
+    BotActivityItem:
+      type: object
+      required:
+        - id
+        - kind
+        - title
+        - detail
+        - status
+        - at
+        - channelId
+        - needsYou
+        - stoppable
+        - cancellable
+      properties:
+        id:
+          type: string
+          description: >-
+            Unique in the activity. For a handoff, what stop-handoff takes; for
+            a follow-up, what cancelling it takes.
+        kind:
+          type: string
+          enum: [routine, responsibility, handoff, approval, question, follow_up]
+        title:
+          type: string
+        detail:
+          type: [string, 'null']
+        status:
+          type: string
+          description: A short state a person reads, such as running, waiting for you or queued.
+        at:
+          type: string
+          format: date-time
+          description: When it started, is due, or ended, by section.
+        channelId:
+          type: [string, 'null']
+          description: The conversation it belongs to, when one can be named.
+        needsYou:
+          type: boolean
+          description: Whether it needs the caller to do something.
+        stoppable:
+          type: boolean
+          description: A handoff that can still be stopped.
+        cancellable:
+          type: boolean
+          description: A follow-up that can still be cancelled.
+    BotActivity:
+      type: object
+      required: [inProgress, scheduled, onDemand, completed]
+      properties:
+        inProgress:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotActivityItem'
+        scheduled:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotActivityItem'
+        onDemand:
+          type: array
+          description: Goals that run only when somebody asks.
+          items:
+            $ref: '#/components/schemas/BotActivityItem'
+        completed:
+          type: array
+          maxItems: 25
+          description: The most recently finished, newest first.
+          items:
+            $ref: '#/components/schemas/BotActivityItem'
+    StopBotHandoffRequest:
+      type: object
+      additionalProperties: false
+      required: [handoffId]
+      properties:
+        handoffId:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: The handoff's id, as the Bot's activity lists it.
+    BotAttention:
+      type: object
+      description: What one Bot has waiting on the person.
+      required:
+        - botId
+        - name
+        - questions
+        - approvals
+        - handoffs
+        - unread
+        - paused
+        - notify
+        - items
+        - tasks
+        - waitingIn
+      properties:
+        botId:
+          type: string
+        name:
+          type: string
+          description: The Bot's name.
+        questions:
+          type: integer
+          minimum: 0
+          description: Questions it asked the person that are still open.
+        approvals:
+          type: integer
+          minimum: 0
+          description: Its actions waiting on the person's approval.
+        handoffs:
+          type: integer
+          minimum: 0
+          description: Work handed to it or by it that has stalled waiting on the person.
+        unread:
+          type: integer
+          minimum: 0
+          description: Its messages the person hasn't read.
+        paused:
+          type: boolean
+          description: Whether the person paused it.
+        notify:
+          $ref: '#/components/schemas/BotNotify'
+        items:
+          type: integer
+          minimum: 0
+          description: Open items from its check-ins.
+        tasks:
+          type: object
+          required: [needsInput, ready, failed]
+          properties:
+            needsInput:
+              type: integer
+              minimum: 0
+              description: Tasks waiting on an approval or an answer.
+            ready:
+              type: integer
+              minimum: 0
+              description: Tasks with a reply to read.
+            failed:
+              type: integer
+              minimum: 0
+              description: Tasks that couldn't finish.
+        waitingIn:
+          type: [string, 'null']
+          description: >-
+            The conversation of the newest thing it waits on the person for,
+            where a notice about it opens. Null when it waits on nothing in a
+            conversation.
+    BotAttentionPage:
+      type: object
+      required: [attention, lastPingId, nextCursor]
+      properties:
+        attention:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotAttention'
+        lastPingId:
+          type: [string, 'null']
+          description: >-
+            The person's newest ping across all their Bots. A client notifies
+            once each time it changes. Null before the first.
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    TeamBotAudience:
+      type: string
+      enum: [team, people]
+      description: >-
+        team is everyone in the organization; people is the people, teams and
+        groups named.
+    TeamBot:
+      type: object
+      description: >-
+        A published Bot, as the caller sees it. Who it reaches (people, teams,
+        groups and assignedGroups) is present only for its owner and
+        administrators.
+      required:
+        - botId
+        - name
+        - title
+        - roleDescription
+        - mine
+        - audience
+        - publishedAt
+        - assigned
+        - visibleToTeam
+      properties:
+        botId:
+          type: string
+        name:
+          type: string
+        title:
+          type: string
+        roleDescription:
+          type: string
+        mine:
+          type: boolean
+          description: Whether the caller published it.
+        audience:
+          $ref: '#/components/schemas/TeamBotAudience'
+        publishedAt:
+          type: string
+          format: date-time
+        assigned:
+          type: boolean
+          description: Whether an administrator put it in the caller's Bots list, where they can't hide it.
+        visibleToTeam:
+          type: boolean
+          description: >-
+            False while its name or description would leave the people it is
+            published to unable to tell it apart, so they can't see it.
+        people:
+          type: array
+          description: The people it is published to, by email.
+          items:
+            type: string
+        groups:
+          type: array
+          description: The directory groups it is published to.
+          items:
+            type: string
+        teams:
+          type: array
+          description: The teams it is published to, by each team's id.
+          items:
+            type: string
+        assignedGroups:
+          type: array
+          description: The directory groups an administrator assigned it to; * is everybody.
+          items:
+            type: string
+    TeamBotPage:
+      type: object
+      required: [teamBots, nextCursor]
+      properties:
+        teamBots:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamBot'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    TeamBotResponse:
+      type: object
+      required: [teamBot]
+      properties:
+        teamBot:
+          $ref: '#/components/schemas/TeamBot'
+    TeamBotPublication:
+      type: object
+      additionalProperties: false
+      required: [audience]
+      properties:
+        audience:
+          $ref: '#/components/schemas/TeamBotAudience'
+        emails:
+          type: array
+          maxItems: 200
+          description: With people, the people to publish to, by the email they sign in with.
+          items:
+            type: string
+            maxLength: 320
+        groups:
+          type: array
+          maxItems: 100
+          description: With people, the directory groups to publish to.
+          items:
+            type: string
+            maxLength: 200
+        teams:
+          type: array
+          maxItems: 100
+          description: >-
+            With people, the teams to publish to, by each team's id. Every
+            one must be a team of this organization. The people in a team,
+            and in the teams under it, can use the Bot, and nobody else in
+            the organization can.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: ^[A-Za-z0-9_-]+$
+    PublishedTeamBot:
+      type: object
+      required: [teamBot, sharedApps]
+      properties:
+        teamBot:
+          $ref: '#/components/schemas/TeamBot'
+        sharedApps:
+          $ref: '#/components/schemas/SharedAppsAfterChange'
+    TeamBotConsentAnswer:
+      type: object
+      additionalProperties: false
+      required: [serverId, decision]
+      properties:
+        serverId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: The app whose account the Team Bot asked to use.
+        decision:
+          type: string
+          enum: [allow_once, allow_always, allow_all_team_bots, skip]
+          description: >-
+            allow_once: this time. allow_always: always, for this Team Bot.
+            allow_all_team_bots: always, for every Team Bot. skip: not now,
+            taking back an earlier answer for this Team Bot.
+  responses:
+    InvalidBot:
+      description: >-
+        A field is missing or out of bounds, the address is one this deployment
+        may not reach, or the deployment cannot give a Bot a computer of its
+        own.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            name:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Name must be text between 1 and 80 characters.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noIsolation:
+              value:
+                type: https://open.bot/errors/isolation-unavailable
+                title: This OpenBot can't give a Bot a computer of its own.
+                status: 400
+                detail: This OpenBot can't give a Bot a computer of its own, so it runs on yours.
+                code: ISOLATION_UNAVAILABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotForbidden:
+      description: >-
+        The caller may not manage this Bot, the Bot comes with OpenBot, or the
+        caller may not give it a computer of its own.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: You can't manage this Bot.
+                status: 403
+                detail: You can't manage this Bot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            isolation:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: Your admin hasn't turned on Isolated Bots for you.
+                status: 403
+                detail: Your admin hasn't turned on Isolated Bots for you.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: isolatedComputers
+    BotNotFound:
+      description: >-
+        The Bot does not exist, was deleted, or is not visible to the caller,
+        or the organization is not.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/bot-not-found
+                title: Bot not found.
+                status: 404
+                detail: Couldn't find that Bot.
+                code: BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    HandoffNotFound:
+      description: >-
+        The handoff is not running or queued for the caller, the Bot is not
+        one the caller can see, or the organization is not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            finished:
+              value:
+                type: https://open.bot/errors/handoff-not-found
+                title: Handoff not found.
+                status: 404
+                detail: That delegated task is not running or queued.
+                code: HANDOFF_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamBotNotFound:
+      description: >-
+        The Bot is not published, not published to the caller, not theirs to
+        publish, or the organization is not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/team-bot-not-found
+                title: Team Bot not found.
+                status: 404
+                detail: That Team Bot was not found.
+                code: TEAM_BOT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TeamBotForbidden:
+      description: An administrator hasn't turned on Team Bots for the caller.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            switchedOff:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: An admin hasn't turned this on for you.
+                status: 403
+                detail: Your admin hasn't turned on Team Bots for you.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: teamBots
+    InvalidTeamBot:
+      description: >-
+        A field is out of bounds, the Bot has no real name or description, a
+        person named has never signed in here, nobody is named for people, or
+        the Bot is not published yet.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            undescribed:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Give this Bot a name and a description before publishing it to your team.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotAssigned:
+      description: >-
+        An admin assigned this Team Bot to the caller, so it stays in their
+        list, or the Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            assigned:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This Bot was assigned to you by an admin and can't be hidden.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    BotPageLast:
+      summary: Every Bot, on one page.
+      value:
+        bots:
+          - id: general-assistant
+            name: General Assistant
+            title: Everyday Work
+            roleDescription: Help with everyday work using clear, concise, and accurate answers.
+            avatarSeed: general-assistant
+            visibility: public
+            hidden: false
+            pinned: false
+            systemOwned: true
+            endpoint: null
+            hasAuth: false
+            hasCallbackToken: false
+            isolated: false
+            framework: OpenBot
+            canManage: false
+            mine: false
+            assignedToMe: false
+            builtIn: false
+            runsOnOpenBotModel: true
+            keyFromOpenBot: false
+            isolationActive: false
+            isolationOffReason: null
+        nextCursor: null
+    StarterBot:
+      summary: A Bot that comes with OpenBot.
+      value:
+        bot:
+          id: general-assistant
+          name: General Assistant
+          title: Everyday Work
+          roleDescription: Help with everyday work using clear, concise, and accurate answers.
+          avatarSeed: general-assistant
+          visibility: public
+          hidden: false
+          pinned: false
+          systemOwned: true
+          endpoint: null
+          hasAuth: false
+          hasCallbackToken: false
+          isolated: false
+          framework: OpenBot
+          canManage: false
+          mine: false
+          assignedToMe: false
+          builtIn: false
+          runsOnOpenBotModel: true
+          keyFromOpenBot: false
+          isolationActive: false
+          isolationOffReason: null
+    CreatedBot:
+      summary: A Bot a person made, running inside OpenBot.
+      value:
+        bot:
+          id: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          name: Expense Review
+          title: Finance Operations
+          roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+          avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          visibility: private
+          hidden: false
+          pinned: false
+          systemOwned: false
+          endpoint: null
+          hasAuth: false
+          hasCallbackToken: false
+          isolated: false
+          framework: OpenBot
+          canManage: true
+          mine: true
+          assignedToMe: false
+          builtIn: false
+          runsOnOpenBotModel: true
+          keyFromOpenBot: false
+          isolationActive: false
+          isolationOffReason: null
+    PublishedBot:
+      summary: Made public by somebody who is not an administrator.
+      value:
+        bot:
+          id: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          name: Expense Review
+          title: Finance Operations
+          roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+          avatarSeed: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          visibility: public
+          hidden: false
+          pinned: false
+          systemOwned: false
+          endpoint: null
+          hasAuth: false
+          hasCallbackToken: false
+          isolated: false
+          framework: OpenBot
+          canManage: true
+          mine: true
+          assignedToMe: false
+          builtIn: false
+          runsOnOpenBotModel: true
+          keyFromOpenBot: false
+          isolationActive: false
+          isolationOffReason: null
+        sharedApps:
+          approved: []
+          needsApproval:
+            - serverId: composio-gmail
+              title: Gmail
+    BotConnectionAnswered:
+      summary: An agent answered.
+      value:
+        ok: true
+        events: [RUN_STARTED, TEXT_MESSAGE_START, TEXT_MESSAGE_CONTENT, TEXT_MESSAGE_END, RUN_FINISHED]
+        reason: null
+    BotConnectionRefused:
+      summary: The address needs a key.
+      value:
+        ok: false
+        events: []
+        reason: The agent refused this request. If it needs a key, add it as a header.
+    BotCallbackTokenExample:
+      summary: A new token.
+      value:
+        token: obcb_7f3a9c2e5d1b4f60a8e2c9d4b1f7e3a6
+    BotHandoffExample:
+      summary: May hand work to one other Bot.
+      value:
+        enabled: true
+        canGrant: false
+        reachable: [agent_4d2e8a10-1b3c-4e5f-9a7b-6c8d0e2f4a61]
+        grantable: true
+    BotLifecycleRunning:
+      summary: Not paused.
+      value:
+        botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        paused: false
+        pausedAt: null
+        notify: all
+    BotPaused:
+      summary: Paused, with one turn stopped.
+      value:
+        lifecycle:
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          paused: true
+          pausedAt: '2026-11-14T09:30:00.000Z'
+          notify: all
+        stoppedTurns: 1
+    BotResetPreview:
+      summary: What a reset would delete.
+      value:
+        validateOnly: true
+        deleted:
+          conversations: 4
+          sharedConversationsKept: 1
+          memorySources: 2
+          memories: 17
+          routines: 1
+          responsibilities: 0
+          followUps: 2
+          formedMemories: 3
+          backgroundResearch: 0
+          standingApprovals: 1
+    BotActivityExample:
+      summary: One routine running, one follow-up due.
+      value:
+        inProgress:
+          - id: run:run_51ac
+            kind: routine
+            title: Morning inbox summary
+            detail: null
+            status: running
+            at: '2026-11-14T09:00:00.000Z'
+            channelId: chn_2b7d
+            needsYou: false
+            stoppable: false
+            cancellable: false
+        scheduled:
+          - id: wake:wk_8e01
+            kind: follow_up
+            title: Check whether the invoice was paid
+            detail: null
+            status: due
+            at: '2026-11-15T09:00:00.000Z'
+            channelId: chn_2b7d
+            needsYou: false
+            stoppable: false
+            cancellable: true
+        onDemand: []
+        completed: []
+    BotAttentionPageLast:
+      summary: One Bot waiting on the person.
+      value:
+        attention:
+          - botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            name: Expense Review
+            questions: 1
+            approvals: 0
+            handoffs: 0
+            unread: 2
+            paused: false
+            notify: all
+            items: 0
+            tasks:
+              needsInput: 0
+              ready: 1
+              failed: 0
+            waitingIn: chn_2b7d
+        lastPingId: ping_0c4f
+        nextCursor: null
+    TeamBotPageLast:
+      summary: Every Team Bot, on one page.
+      value:
+        teamBots:
+          - botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            name: Expense Review
+            title: Finance Operations
+            roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+            mine: true
+            audience: people
+            publishedAt: '2026-11-12T16:20:00.000Z'
+            assigned: false
+            visibleToTeam: true
+            people: [maya@example.com]
+            groups: [finance]
+            assignedGroups: []
+        nextCursor: null
+    TeamBotExample:
+      summary: Published to everyone in the organization, seen by one of them.
+      value:
+        teamBot:
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          name: Expense Review
+          title: Finance Operations
+          roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+          mine: false
+          audience: team
+          publishedAt: '2026-11-12T16:20:00.000Z'
+          assigned: true
+          visibleToTeam: true
+    PublishedTeamBotExample:
+      summary: Published by its owner, with a shared app to approve.
+      value:
+        teamBot:
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          name: Expense Review
+          title: Finance Operations
+          roleDescription: Review receipts, categorize expenses, and prepare reimbursement reports.
+          mine: true
+          audience: team
+          publishedAt: '2026-11-12T16:20:00.000Z'
+          assigned: false
+          visibleToTeam: true
+          people: []
+          groups: []
+          assignedGroups: []
+        sharedApps:
+          approved: []
+          needsApproval:
+            - serverId: composio-gmail
+              title: Gmail

@@ -21,7 +21,9 @@ export function ToolLine({
   running,
   refused,
   failed,
+  failedLabel,
   notYet,
+  interrupted,
   byYou,
   bare,
   children,
@@ -43,11 +45,22 @@ export function ToolLine({
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
   /**
+   * What a failed step says in place of "<label>, didn't work", where the label would claim the step
+   * happened: a file that was not saved reads "Didn't save a file", not "Saved a file, didn't work".
+   */
+  failedLabel?: string;
+  /**
    * Nothing was done yet, for an ordinary reason: a computer still starting turned the call away
    * before it reached anything. Muted like a success, because nothing went wrong, and labelled so it
    * does not read as one.
    */
   notYet?: boolean;
+  /**
+   * The step was under way when its run was cut off, so nobody knows how it ended. Muted, because
+   * nothing is known to have gone wrong, and labelled with what was tried so it reads neither as
+   * done nor as still happening.
+   */
+  interrupted?: boolean;
   /**
    * The step was handed to the person and they did it themselves. Muted like a success, because it
    * was done, and labelled so it does not read as the Bot having done it.
@@ -90,12 +103,14 @@ export function ToolLine({
         {refused
           ? `Blocked: ${attempted ?? label}`
           : failed
-            ? `${label}, didn't work`
-            : notYet
-              ? `${label}, not done yet`
-              : byYou
-                ? `${label}, done by you`
-                : label}
+            ? (failedLabel ?? `${label}, didn't work`)
+            : interrupted
+              ? `${attempted ?? label}, interrupted`
+              : notYet
+                ? `${label}, not done yet`
+                : byYou
+                  ? `${label}, done by you`
+                  : label}
       </span>
       {detail ? (
         <span className="min-w-0 shrink-[100] truncate opacity-70">

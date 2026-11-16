@@ -71,7 +71,7 @@ const CHOICES: {
 function SettingsError({ message }: { message?: string }) {
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
-      {message ?? "Couldn't load Learning settings. Reload the page."}
+      {message ?? "Couldn't load Learning settings. Try again in a moment."}
     </p>
   );
 }
@@ -213,6 +213,7 @@ export function PeopleProposalsSection() {
   const review = useMutation(reviewPersonProposalMutationOptions(queryClient));
   const [open, setOpen] = useState<{
     userId: string;
+    containerId: string;
     proposalId: string;
   } | null>(null);
   if (settings.isPending) return null;
@@ -245,10 +246,10 @@ export function PeopleProposalsSection() {
           {unreadable.map((person) => (
             <p
               className="mt-4 text-destructive text-sm"
-              key={person.userId}
+              key={person.personId}
               role="alert"
             >
-              {`Couldn't read ${person.name}'s skills. Reload the page to try again.`}
+              {`Couldn't read ${person.name}'s skills. Try again in a moment.`}
             </p>
           ))}
           {rows.length === 0 ? (
@@ -261,14 +262,15 @@ export function PeopleProposalsSection() {
           ) : (
             <PageRows>
               {rows.map(({ person, proposal }, index) => (
-                <Fragment key={`${person.userId}:${proposal.id}`}>
+                <Fragment key={`${person.personId}:${proposal.id}`}>
                   {index > 0 ? <Separator /> : null}
                   <Item
                     render={
                       <button
                         onClick={() =>
                           setOpen({
-                            userId: person.userId,
+                            userId: person.personId,
+                            containerId: person.containerId,
                             proposalId: proposal.id,
                           })
                         }
@@ -301,7 +303,11 @@ export function PeopleProposalsSection() {
           decided={review.data?.status}
           deciding={review.isPending}
           error={review.error}
-          load={personProposalQueryOptions(open.userId, open.proposalId)}
+          load={personProposalQueryOptions(
+            open.userId,
+            open.containerId,
+            open.proposalId,
+          )}
           onClose={() => {
             setOpen(null);
             review.reset();
@@ -323,6 +329,7 @@ export function SharingRequestsSection() {
   const requests = useQuery(sharingRequestsQueryOptions());
   const decide = useMutation(decideSharingMutationOptions(queryClient));
   const [open, setOpen] = useState<{
+    requestId: string;
     userId: string;
     skillName: string;
     requestedAt: string;
@@ -339,13 +346,14 @@ export function SharingRequestsSection() {
   if (settings.isPending) return null;
   if (!people && rows.length === 0 && !requests.error && !settings.error)
     return null;
-  // After a refused decision the list is read again; its stamp, not the one from opening, is current.
-  const requestedAt =
-    rows.find(
-      (request) =>
-        request.userId === open?.userId &&
-        request.skillName === open?.skillName,
-    )?.requestedAt ?? open?.requestedAt;
+  // After a refused decision the list is read again; its request and stamp, not the ones from opening, are current.
+  const current = rows.find(
+    (request) =>
+      request.personId === open?.userId &&
+      request.skillName === open?.skillName,
+  );
+  const requestedAt = current?.requestedAt ?? open?.requestedAt;
+  const requestId = current?.id ?? open?.requestId;
   // Deciding means having seen the skill, and on the version the request is about.
   const cannotDecide =
     decide.isPending || !skill.data || requests.isFetching || !requestedAt;
@@ -372,14 +380,15 @@ export function SharingRequestsSection() {
       ) : (
         <PageRows>
           {rows.map((request, index) => (
-            <Fragment key={`${request.userId}:${request.skillName}`}>
+            <Fragment key={request.id}>
               {index > 0 ? <Separator /> : null}
               <Item
                 render={
                   <button
                     onClick={() =>
                       setOpen({
-                        userId: request.userId,
+                        requestId: request.id,
+                        userId: request.personId,
                         skillName: request.skillName,
                         requestedAt: request.requestedAt,
                       })
@@ -418,7 +427,7 @@ export function SharingRequestsSection() {
                 onClick={() =>
                   decide.mutate(
                     {
-                      ...open,
+                      requestId: requestId ?? open.requestId,
                       requestedAt: requestedAt ?? open.requestedAt,
                       decision: "decline",
                     },
@@ -435,7 +444,7 @@ export function SharingRequestsSection() {
                 onClick={() =>
                   decide.mutate(
                     {
-                      ...open,
+                      requestId: requestId ?? open.requestId,
                       requestedAt: requestedAt ?? open.requestedAt,
                       decision: "approve",
                     },

@@ -23,6 +23,12 @@ import {
 } from "@/lib/responsibilities";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import {
+  GOALS_PATH,
+  pathOf,
+  ROUTINES_PATH,
+  routineRunsPath,
+} from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 let wasServer = true;
@@ -55,9 +61,9 @@ beforeEach(() => {
         });
         return Response.json({});
       }
-      if (url === "/api/routines/routine-1/runs")
-        return Response.json({ runs: [scheduledRun] });
-      return Response.json({ triggers: [], runs: [] });
+      if (pathOf(url) === routineRunsPath("routine-1"))
+        return Response.json({ runs: [scheduledRun], nextCursor: null });
+      return Response.json({ triggers: [], runs: [], nextCursor: null });
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -69,8 +75,8 @@ afterEach(() => {
 
 const goal: ResponsibilityRecord = {
   id: "goal-1",
-  agentId: "bot-1",
-  channelId: "c1",
+  botId: "bot-1",
+  conversationId: "c1",
   threadId: "t1",
   title: "Watch the queue",
   instruction: "Tell me when the queue backs up.",
@@ -81,10 +87,12 @@ const goal: ResponsibilityRecord = {
   subscriptions: [],
   recurring: false,
   endsWhenMet: false,
+  createdAt: "2026-11-10T10:00:00Z",
   updatedAt: "2026-11-10T10:00:00Z",
+  completedAt: null,
 };
 
-/** One firing of the goal's schedule, as `GET /api/routines/:id/runs` lists it. */
+/** One firing of the goal's schedule, as the routine's runs list it. */
 const scheduledRun = {
   id: "run-1",
   status: "failed",
@@ -96,16 +104,17 @@ const scheduledRun = {
 
 const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   id: "routine-1",
-  agentId: "bot-1",
+  botId: "bot-1",
   schedule: "Weekdays at 09:00",
   timezone: "UTC",
   instruction: "Check the queue.",
   title: null,
-  channel: { id: "c1", name: null, title: "Queue", gone: false },
+  conversation: { id: "c1", name: null, title: "Queue", gone: false },
   enabled: true,
   nextRunAt: "2999-01-01T09:00:00.000Z",
   lastRun: null,
   goalId: "goal-1",
+  createdAt: "2026-11-10T08:00:00Z",
   ...overrides,
 });
 
@@ -237,9 +246,9 @@ test("switching a schedule off asks the server to switch that routine off", asyn
   await waitFor(() =>
     expect(sent).toEqual([
       {
-        method: "PUT",
-        url: "/api/routines/routine-1/enabled",
-        body: { enabled: false },
+        method: "POST",
+        url: `${ROUTINES_PATH}/routine-1/pause`,
+        body: undefined,
       },
     ]),
   );
@@ -254,9 +263,9 @@ test("switching an off schedule on asks the server to switch it on", async () =>
   await waitFor(() =>
     expect(sent).toEqual([
       {
-        method: "PUT",
-        url: "/api/routines/routine-1/enabled",
-        body: { enabled: true },
+        method: "POST",
+        url: `${ROUTINES_PATH}/routine-1/resume`,
+        body: undefined,
       },
     ]),
   );
@@ -277,7 +286,11 @@ test("deleting a schedule takes a second press", async () => {
   fireEvent.click(confirm);
   await waitFor(() =>
     expect(sent).toStrictEqual([
-      { method: "DELETE", url: "/api/routines/routine-1", body: undefined },
+      {
+        method: "DELETE",
+        url: `${ROUTINES_PATH}/routine-1`,
+        body: undefined,
+      },
     ]),
   );
 });
@@ -372,7 +385,7 @@ test("Delete, the last row of its actions, asks first, then deletes the goal", a
   fireEvent.click(view.getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(sent).toHaveLength(1));
   expect(sent).toStrictEqual([
-    { method: "DELETE", url: "/api/responsibilities/goal-1", body: undefined },
+    { method: "DELETE", url: `${GOALS_PATH}/goal-1`, body: undefined },
   ]);
 });
 
@@ -407,7 +420,7 @@ test("a goal whose routines couldn't be read says its schedules couldn't be load
   const view = open(undefined);
   await triggersLoaded();
   await view.findByText(
-    "Couldn't load this goal's schedules. Reload the page.",
+    "Couldn't load this goal's schedules. Try again in a moment.",
   );
   await view.findByText("Its schedules, events and triggers start it.");
 });

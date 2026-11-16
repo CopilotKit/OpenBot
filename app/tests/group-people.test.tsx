@@ -4,6 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GroupPeopleButton } from "@/components/channels/group-people";
+import { ME_PATH, meResponse } from "./accounts-api";
+import {
+  answerGroupRead,
+  conversationPath,
+  type GroupFixture,
+  noContent,
+  problem,
+} from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -23,9 +31,9 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-let people: Record<string, unknown>[] = [];
+let people: GroupFixture["people"] = [];
 const requests: string[] = [];
-function serving(initial: Record<string, unknown>[]) {
+function serving(initial: GroupFixture["people"]) {
   people = initial;
   requests.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -33,7 +41,11 @@ function serving(initial: Record<string, unknown>[]) {
     const method = init?.method ?? "GET";
     if (method !== "GET") {
       requests.push(`${method} ${url} ${init?.body ?? ""}`);
-      if (method === "POST") {
+      // Adding answers 201 with the person added; taking one out answers with nothing.
+      if (
+        method === "POST" &&
+        url === conversationPath("group-1", "/members")
+      ) {
         people = [
           ...people,
           {
@@ -43,15 +55,30 @@ function serving(initial: Record<string, unknown>[]) {
             creator: false,
           },
         ];
+        return Response.json({ personId: "u3" }, { status: 201 });
       }
-      return Response.json({ ok: true });
+      const removed = people.find(
+        (person) =>
+          url === conversationPath("group-1", `/members/${person.userId}`),
+      );
+      if (method === "DELETE" && removed) {
+        people = people.filter((person) => person !== removed);
+        return noContent();
+      }
+      return problem(404, "Not found.");
     }
-    if (url === "/api/me") {
-      return Response.json({
+    if (url === ME_PATH) {
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test" },
       });
     }
-    return Response.json({ bots: [], people, messages: [] });
+    return (
+      answerGroupRead(input, init, "group-1", {
+        bots: [],
+        people,
+        messages: [],
+      }) ?? problem(404, "Not found.")
+    );
   }) as unknown as typeof fetch;
 }
 
@@ -95,7 +122,9 @@ test("the creator sees everyone and can take another person out", async () => {
     view.getByRole("button", { name: "Remove alex@example.test" }),
   );
   await waitFor(() =>
-    expect(requests).toContain("DELETE /api/groups/group-1/members/u2 "),
+    expect(requests).toContain(
+      "DELETE /api/v2/organizations/default/conversations/group-1/members/u2 ",
+    ),
   );
 });
 
@@ -111,7 +140,7 @@ test("adding someone by email lists them without reopening the dialog", async ()
   fireEvent.click(view.getByRole("button", { name: "Add" }));
   await waitFor(() =>
     expect(requests).toContain(
-      'POST /api/groups/group-1/members {"email":"sam@example.test"}',
+      'POST /api/v2/organizations/default/conversations/group-1/members {"email":"sam@example.test"}',
     ),
   );
   expect(await view.findByText("Sam")).toBeTruthy();

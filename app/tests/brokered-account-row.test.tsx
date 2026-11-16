@@ -30,10 +30,38 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import type { BrokerField } from "@/lib/plugins/mutations";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
-import { BROKERED_PROBE_OUTCOMES } from "../../server/src/plugins/store";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessRequestsResponse,
+} from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
+import { answerNoTeamGrants } from "./team-grants-api";
+import {
+  accountsPage,
+  checkResponse,
+  confirmationResponse,
+  connectionPage,
+  connectionResponse,
+  connectionsProblem,
+  disconnectionResponse,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
+
+/**
+ * The server's probe outcomes, in the order its `BrokeredProbe` union declares them. The server runs
+ * from the published OpenBot images, so its list is written out here as it answers today.
+ */
+const BROKERED_PROBE_OUTCOMES = [
+  "nothing",
+  "answered",
+  "complained",
+  "unreachable",
+] as const;
 
 /**
  * The brokered account row, on both screens that draw it.
@@ -167,8 +195,8 @@ function asDay(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** A minimal but complete brokered `PluginServer` — the row shape only Composio produces. */
-function brokeredServer(authScheme: string, title = "Gmail"): PluginServer {
+/** A minimal but complete app from the directory, as `GET /api/plugins` listed it. */
+function brokeredServer(authScheme: string, title = "Gmail"): TodayServer {
   return {
     authScheme,
     id: APP_KEY,
@@ -196,11 +224,10 @@ function pluginsPage(
   composioConfigured: boolean,
   authScheme: string,
   title?: string,
-): PluginsPage {
+): AppsFixture {
   return {
     catalogue: [],
     servers: [brokeredServer(authScheme, title)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
@@ -266,7 +293,7 @@ type Deployment = {
    *
    * A NAMED PROBE BESIDE `verified: false` IS THEREFORE NOT A 200 AND THIS STUB NO LONGER MAKES ONE.
    * `recheckBrokeredConnection` writes the row and then RAISES with Composio's own sentence in it,
-   * which `POST /servers/:id/connection/recheck` passes through as a 400 — so the shape a stub
+   * which recheckConnection passes through as a 400 — so the shape a stub
    * answering 200 here pinned is one no deployment can produce, and the screen defect underneath it
    * could not be seen. See {@link REFUSED_RECHECK}.
    */
@@ -303,7 +330,7 @@ type Deployment = {
    */
   refusesFields?: { error: string; status: 400 | 409 | 502 | 503 };
   /**
-   * Whether `/api/plugins/connections` answers 500, with `/api/plugins` answering perfectly.
+   * Whether listConnections answers 500, with the apps reads answering perfectly.
    *
    * THE ONE STATE BOTH SCREENS DEFAULTED THROUGH. Every fact a brokered row draws — `recorded`,
    * `verified`, `verifiedAt`, `probe`, `checkable` — comes off that read, and both screens gated
@@ -350,7 +377,7 @@ type Server = {
    * longer publishes is a 400 on the whole connection, however tidy the screen looked.
    */
   submitted: Record<string, string>[];
-  /** How many times the vendor was asked about the account (`/connection/confirm`). */
+  /** How many times the vendor was asked about the account (confirmConnection). */
   confirmsAsked: number;
   /** What the vendor answers about the account from now on: a consent finished elsewhere. */
   answer: (confirms: boolean) => void;
@@ -425,22 +452,15 @@ function installDeployment(deployment: Deployment): Server {
         headers: { "content-type": "application/json" },
       });
 
-    if (path.startsWith("/api/plugins/connections")) {
+    if (path === MY_CONNECTIONS_PATH) {
       if (state.connectionsFail) {
-        return new Response(
-          JSON.stringify({ error: "the connections could not be read" }),
-          {
-            headers: { "content-type": "application/json" },
-            status: 500,
-          },
-        );
+        return connectionsProblem(500, "the connections could not be read");
       }
-      return json({
-        connections: state.recorded
+      return connectionPage(
+        state.recorded
           ? [
               {
                 serverId: APP_KEY,
-                scope: "",
                 connectedAt: "2026-09-10T00:00:00.000Z",
                 verified: state.verified,
                 verifiedAt: state.verifiedAt,
@@ -460,22 +480,15 @@ function installDeployment(deployment: Deployment): Server {
               },
             ]
           : [],
-        redirectUri: null,
-      });
+      );
     }
-    if (path.endsWith("/connection/confirm") && method === "POST") {
+    if (path.endsWith("/confirm") && method === "POST") {
       server.confirmsAsked += 1;
       // What the route answers with no key at all: nothing to ask, and no answer invented.
       if (!state.composioConfigured) {
-        return new Response(
-          JSON.stringify({ error: "Composio is not set up" }),
-          {
-            headers: { "content-type": "application/json" },
-            status: 503,
-          },
-        );
+        return connectionsProblem(503, "Composio is not set up");
       }
-      return json({ connected: state.confirms });
+      return confirmationResponse(state.confirms);
     }
     /*
      * The first press on an app nobody consents to: what does it want typed in? The consent half of
@@ -497,12 +510,7 @@ function installDeployment(deployment: Deployment): Server {
          * this whole path exists to preserve, and the only thing that tells somebody their key was
          * mistyped rather than their deployment broken.
          */
-        if (state.rejects) {
-          return new Response(JSON.stringify({ error: state.rejects }), {
-            headers: { "content-type": "application/json" },
-            status: 400,
-          });
-        }
+        if (state.rejects) return connectionsProblem(400, state.rejects);
         /*
          * AND THE REFUSAL THAT LEAVES A ROW BEHIND IT, which is the same 400 over a deployment that
          * is no longer in the state the caller was in when they pressed.
@@ -521,13 +529,7 @@ function installDeployment(deployment: Deployment): Server {
           // The action that ran and that the vendor answered no to, which is the whole of what
           // separates this row on a later read from a key nobody ever tried.
           state.probe = PROBE;
-          return new Response(
-            JSON.stringify({ error: state.rejectsAndKeeps }),
-            {
-              headers: { "content-type": "application/json" },
-              status: 400,
-            },
-          );
+          return connectionsProblem(400, state.rejectsAndKeeps);
         }
         state.recorded = true;
         state.confirms = true;
@@ -546,7 +548,11 @@ function installDeployment(deployment: Deployment): Server {
          * the read behind it could never have agreed with.
          */
         state.probe = null;
-        return json({ connected: true, verified: false, probe: state.probe });
+        return startResponse({
+          connected: true,
+          verified: false,
+          probe: state.probe,
+        });
       }
       /*
        * THE FIRST PRESS FORKS ON THE RECORDED SCHEME, exactly as the route does: a typed scheme is
@@ -565,24 +571,21 @@ function installDeployment(deployment: Deployment): Server {
       // {@link Server.holdFields}.
       if (held) await held;
       if (state.refusesFields) {
-        return new Response(
-          JSON.stringify({ error: state.refusesFields.error }),
-          {
-            headers: { "content-type": "application/json" },
-            status: state.refusesFields.status,
-          },
+        return connectionsProblem(
+          state.refusesFields.status,
+          state.refusesFields.error,
         );
       }
       if (SERVER_FIELD_SCHEMES.includes(state.authScheme)) {
-        return json(
+        return startResponse(
           deployment.guide
             ? { fields: state.fields, guide: deployment.guide }
             : { fields: state.fields },
         );
       }
-      return json({ authorizationUrl: CONSENT_URL });
+      return startResponse({ authorizationUrl: CONSENT_URL });
     }
-    if (path.endsWith("/connection/recheck") && method === "POST") {
+    if (path.endsWith("/recheck") && method === "POST") {
       /*
        * A CHECK THAT SPENT SOMETHING WRITES; A CHECK THAT SPENT NOTHING WRITES NOTHING, which is
        * the fork `recheckBrokeredConnection` makes and the reason the verdict cannot be recorded on
@@ -631,14 +634,11 @@ function installDeployment(deployment: Deployment): Server {
        * ever failed.
        */
       if (!state.recheckAnswer.verified && state.recheckAnswer.probe !== null) {
-        return new Response(JSON.stringify({ error: REFUSED_RECHECK }), {
-          headers: { "content-type": "application/json" },
-          status: 400,
-        });
+        return connectionsProblem(400, REFUSED_RECHECK);
       }
-      return json(state.recheckAnswer);
+      return checkResponse(state.recheckAnswer);
     }
-    if (path.endsWith("/connection") && method === "DELETE") {
+    if (path.endsWith("/disconnect") && method === "POST") {
       server.deletes += 1;
       state.recorded = false;
       state.confirms = false;
@@ -648,14 +648,23 @@ function installDeployment(deployment: Deployment): Server {
       state.verified = false;
       state.verifiedAt = null;
       state.probe = undefined;
-      return json({ ok: true });
+      return disconnectionResponse();
     }
-    if (path.startsWith("/api/agents")) return json({ agents: [] });
-    if (path.startsWith("/api/plugins")) {
-      return json(
-        pluginsPage(state.composioConfigured, state.authScheme, state.title),
-      );
-    }
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
+    // Nobody has asked an admin for anything here.
+    if (path.startsWith(APP_ACCESS_REQUESTS_PATH))
+      return appAccessRequestsResponse([]);
+    const apps = answerAppsApi(
+      input,
+      init,
+      pluginsPage(state.composioConfigured, state.authScheme, state.title),
+    );
+    if (apps) return apps;
+    if (path.startsWith("/api/plugins")) return json({ skills: [] });
+    // The app's Teams row: no teams here, and the app granted to none.
+    const teamGrants = answerNoTeamGrants(input, init);
+    if (teamGrants) return teamGrants;
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
@@ -1367,6 +1376,7 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     verified: false,
     verifiedAt: null,
     serverId: "gmail",
+    shared: false,
     fieldsSubmitted: false,
     connectAnother: () => {},
     connectingAnother: false,
@@ -1662,8 +1672,7 @@ test("a check that did not come back clean says so, without ruling on the key", 
  * rounds it did: `["nothing", "answered", "complained", "unreachable"]` written out at the assertion,
  * in this file, compared to the `outcome` fields above it — a fifth member on the server's real
  * `BrokeredProbe` passed that, which is exactly the drift the test was added to catch. It now
- * counts against `BROKERED_PROBE_OUTCOMES`, imported from `server/src/plugins/store.ts`, which that
- * module pins to the union in both directions with `satisfies` and a `Decides<…>` witness.
+ * counts against `BROKERED_PROBE_OUTCOMES` at the top of this file, the server's own list.
  *
  * `SERVER_FIELD_SCHEMES` ABOVE IS STILL A COPY AND STILL SHOULD BE, which is not the same case: it
  * earns its copy by carrying a scheme the screen has never heard of, and a disagreement is the one
@@ -2106,7 +2115,7 @@ test("a key refused with its account left standing stops offering Connect", asyn
 /**
  * A CONNECTIONS READ THAT FAILED IS SAID, NOT DEFAULTED TO "YOU HAVE NEVER CONNECTED THIS".
  *
- * CRITERION. With `/api/plugins` answering perfectly and `/api/plugins/connections` answering 500,
+ * CRITERION. With the apps reads answering perfectly and listConnections answering 500,
  * neither screen draws the brokered row, neither offers Connect, and each says the state could not
  * be read.
  *
@@ -2207,7 +2216,7 @@ test("the administrator's connector screen keeps the rest of the page when the c
   // AND THE PAGE IS STILL THERE. The switch is how a server is removed from this deployment, and
   // its absence was the whole cost of collapsing the page.
   expect(
-    view.getByRole("switch", { name: "Enable Gmail for this deployment" }),
+    view.getByRole("switch", { name: "Enable Gmail for this organization" }),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Refresh tools" })).toBeTruthy();
 });
@@ -2682,7 +2691,7 @@ function AccountProbe() {
     probe: null,
     checkable: true,
     reconnectsInPlace: false,
-    authScheme: "API_KEY",
+    connectsWith: "key",
     returnTo: "settings",
     report: () => {},
   });
@@ -2828,18 +2837,24 @@ test("a re-check that spent nothing leaves the rejection the record still names"
 });
 
 /**
- * A person's accounts at the app, as `/servers/:id/accounts` answers them, for the cases below.
- * Every other request is a 404, so nothing here can be answered by accident.
+ * A person's accounts at the app, as listConnectedAccounts answers them, and whether another can be
+ * added, as the connection itself says. Every other request is a 404, so nothing here can be answered
+ * by accident.
  */
-function answerAccounts(body: unknown) {
+function answerAccounts(body: {
+  accounts: Parameters<typeof accountsPage>[0];
+  canAddAnother: boolean;
+}) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const requested = typeof input === "string" ? input : String(input);
     const path = requested.split("?")[0] ?? requested;
-    if (path.endsWith("/accounts")) {
-      return new Response(JSON.stringify(body), {
-        headers: { "content-type": "application/json" },
+    if (path.endsWith("/accounts")) return accountsPage(body.accounts);
+    if (path === myConnectionPath(APP_KEY))
+      return connectionResponse({
+        serverId: APP_KEY,
+        verified: true,
+        canAddAccount: body.canAddAnother,
       });
-    }
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 }

@@ -23,7 +23,22 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppAccessCard } from "@/components/channels/app-access-card";
 import type { AppAccess } from "@/lib/app-access/queries";
 import { queryClient } from "@/query-client";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
 import { appAccess } from "./app-access-fixture";
+import {
+  appAccessApprovalResponse,
+  appAccessRequest,
+  botAppPath,
+  botAppResponse,
+} from "./bot-grants-api";
+import { botPath } from "./bots-api";
+import {
+  connectionPage,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -59,7 +74,7 @@ beforeAll(() => {
 /*
  * EMPTIED BEFORE EACH CASE, NOT ONLY AFTER. The app's one query client is a module, and `bun test`
  * runs every file in one process, so it reaches this file holding whatever an earlier file left on
- * it. A cached `/api/capabilities` answer never goes stale, and a team one drew the card as the team
+ * it. A cached `deployment` answer never goes stale, and a team one drew the card as the team
  * edition: an admin's "Turn on and give it", never Connect.
  */
 beforeEach(() => queryClient.clear());
@@ -90,15 +105,13 @@ function inTheDesktop() {
 }
 
 /**
- * Gmail as `GET /api/plugins/for/:agentId/apps/:app` answers it on OpenBot Personal before anybody
+ * Gmail as the API answers it on the Bot (getBotApp) on OpenBot Personal before anybody
  * turned it on: no row, so no recorded scheme, and switched off because it is absent.
  */
 const notTurnedOn = (overrides: Partial<AppAccess> = {}): AppAccess =>
   appAccess({
     state: "disabled",
     unavailable: "absent",
-    authScheme: null,
-    accountMode: null,
     granted: false,
     requestKind: "enable",
     ...overrides,
@@ -118,39 +131,34 @@ function serving(before: AppAccess, signIn: Promise<void>) {
     const url = String(input);
     const method = init?.method ?? "GET";
     if (method !== "GET") writes.push(`${method} ${url}`);
-    if (url === "/api/capabilities")
-      return Response.json({ edition: "personal" });
-    if (url === "/api/me")
-      return Response.json({
+    if (url === DEPLOYMENT_PATH) return Response.json({ edition: "personal" });
+    if (url === ME_PATH)
+      return meResponse({
         user: { id: "usr_me", role: "admin", name: "Me" },
       });
-    if (url === "/api/agents/assistant")
+    if (url === botPath("assistant"))
       return Response.json({
-        agent: { id: "assistant", name: "Personal Assistant" },
+        bot: { id: "assistant", name: "Personal Assistant" },
       });
-    if (url === "/api/plugins/for/assistant/apps/composio-gmail")
-      return Response.json({ app: live });
-    if (url === "/api/plugins/for/assistant/apps/composio-gmail/approve") {
+    if (url === botAppPath("assistant", "composio-gmail"))
+      return botAppResponse(live);
+    if (url === `${botAppPath("assistant", "composio-gmail")}/approve`) {
       live = turnedOn;
-      return Response.json({
-        request: {
-          id: "req_1",
+      return appAccessApprovalResponse({
+        request: appAccessRequest({
           kind: "enable",
-          appKey: "composio-gmail",
           status: "approved",
-        },
+          agentId: "assistant",
+        }),
         enabled: true,
         granted: ["composio-gmail/GMAIL_FETCH_EMAILS"],
       });
     }
-    if (
-      url === "/api/plugins/servers/composio-gmail/connect?returnTo=settings"
-    ) {
+    if (url === myConnectionPath("composio-gmail", "connect")) {
       await signIn;
-      return Response.json({ authorizationUrl: CONSENT });
+      return startResponse({ authorizationUrl: CONSENT });
     }
-    if (url.startsWith("/api/plugins/connections"))
-      return Response.json({ connections: [], redirectUri: null });
+    if (url.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
     return Response.json({});
   }) as unknown as typeof fetch;
   return writes;
@@ -223,8 +231,8 @@ test.each([
     answer();
     await waitFor(() => expect(browser).toEqual([CONSENT]), { timeout: 3_000 });
     expect(writes).toEqual([
-      "POST /api/plugins/for/assistant/apps/composio-gmail/approve",
-      "POST /api/plugins/servers/composio-gmail/connect?returnTo=settings",
+      `POST ${botAppPath("assistant", "composio-gmail")}/approve`,
+      `POST ${myConnectionPath("composio-gmail", "connect")}`,
     ]);
     // And it says what it is doing while the person signs in.
     await view.findByText("Finish in the tab that opened.");

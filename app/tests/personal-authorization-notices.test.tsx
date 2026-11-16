@@ -55,7 +55,6 @@ function arrive(edition: "team" | "personal", code: string) {
     localEvaluation: edition === "personal",
     edition,
   });
-  queryClient.setQueryData(pluginKeys.page(), { servers: [], catalogue: [] });
   queryClient.setQueryData(pluginKeys.connections(), { connections: [] });
   queryClient.setQueryData(identityKeys.links(), []);
   queryClient.setQueryData(identityKeys.providers(), {

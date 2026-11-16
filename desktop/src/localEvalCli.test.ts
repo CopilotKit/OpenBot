@@ -77,6 +77,11 @@ test("runs one native command named by its attempt", async () => {
       command: "run_local_eval",
       args: { attempt, action: "status", stack: "local-abc123" },
     },
+    // Then a note for the log that the answer reached the window, under the same attempt.
+    {
+      command: "local_eval_answer_landed",
+      args: { attempt, action: "status", landedAtMs: expect.any(Number) },
+    },
   ]);
 });
 

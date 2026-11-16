@@ -11,7 +11,12 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { Route as ArcadeRoute } from "@/routes/_authed/admin/plugins/arcade";
-import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
+import {
+  APP_SETUP_PATH,
+  answerAppsApi,
+  type TodayDirectoryApp,
+} from "./apps-api";
+import fixture from "./fixtures/arcade-catalogue.json";
 
 /**
  * THE MEASURED LINES, ON A SCREEN SOMEBODY CAN REACH.
@@ -25,7 +30,7 @@ import fixture from "../../server/tests/fixtures/arcade-catalogue.json";
  * markup. Nothing here imports a pure function: a passing pure function is exactly what this defect
  * already had.
  *
- * The app under test is `AirtableApi`, folded out of `server/tests/fixtures/arcade-catalogue.json`
+ * The app under test is `AirtableApi`, folded out of `app/tests/fixtures/arcade-catalogue.json`
  * the way `listApps` folds it — 2 actions, 0 classified, 1 distinct scope set over 1 scoped action.
  * The fixture is evidence of what Arcade returns and is read, never appended to.
  */
@@ -46,7 +51,7 @@ type FixtureTool = {
 };
 
 /** `AirtableApi` as the SERVER measures it, out of the recorded catalogue. */
-function airtableFromFixture() {
+function airtableFromFixture(): TodayDirectoryApp {
   const tools = (Object.values(fixture.tools) as FixtureTool[]).filter(
     (tool) => tool.toolkit.name === "AirtableApi",
   );
@@ -124,28 +129,19 @@ function renderDirectory() {
   );
 }
 
-/** A stub answering the page read with `provider`, and the directory with one app. */
-function stubFetch(provider: string | undefined, apps: unknown[]) {
-  global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input).split("?")[0] ?? "";
-    const json = (body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    if (path === "/api/plugins/composio/apps") return json({ apps });
-    if (path === "/api/plugins") {
-      return json({
-        catalogue: [],
-        servers: [],
-        skills: [],
-        botsMayCallBack: false,
-        redirectUri: null,
-        composioConfigured: true,
-        provider,
-      });
-    }
-    return json({ connections: [] });
+/** A stub answering getAppSetup with `provider`, and the directory with these apps. */
+function stubFetch(provider: "composio" | "arcade", apps: TodayDirectoryApp[]) {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const answered = answerAppsApi(input, init, {
+      composioConfigured: true,
+      provider,
+      directory: apps,
+    });
+    if (answered) return answered;
+    return new Response(JSON.stringify({ connections: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }) as unknown as typeof fetch;
 }
 
@@ -181,17 +177,24 @@ test("the Arcade directory redirects on a Composio deployment", async () => {
   expect(view.queryByLabelText("Search apps")).toBeNull();
 });
 
-test("the Arcade directory draws nothing until the page names a provider", async () => {
+test("the Arcade directory draws nothing until getAppSetup names a provider", async () => {
   let release: () => void = () => undefined;
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  global.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input).split("?")[0] === "/api/plugins") await held;
-    return new Response(JSON.stringify({ apps: [] }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).split("?")[0] === APP_SETUP_PATH) await held;
+    const answered = answerAppsApi(input, init, {
+      composioConfigured: true,
+      provider: "composio",
     });
+    return (
+      answered ??
+      new Response(JSON.stringify({ connections: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
   }) as unknown as typeof fetch;
 
   const view = renderDirectory();
@@ -199,9 +202,8 @@ test("the Arcade directory draws nothing until the page names a provider", async
   expect(view.queryByText("the plugins index")).toBeNull();
   expect(view.queryByRole("alert")).toBeNull();
   release();
-  // Drain what the release started. The deferred stub answers `{ apps: [] }`, which carries no
-  // `provider`, so `pluginsProvider` defaults to "composio" and this route redirects to the decoy.
-  // Awaiting that here is what keeps React's scheduled work INSIDE the test: released and then
+  // Drain what the release started. The deferred answer names Composio, so this route redirects to
+  // the decoy. Awaiting that here is what keeps React's scheduled work INSIDE the test: released and then
   // abandoned, the render lands after `cleanup` and after `GlobalRegistrator.unregister()` has
   // removed `window`, and `scheduler`'s `window.event` throws into the runner — three passes and
   // an exit code of 1, on the one file that proves wave 8's deliverable.

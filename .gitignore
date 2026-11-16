@@ -57,3 +57,6 @@ venv/
 
 # The Recorder extension's signing key never enters the repository (Decision 9).
 extension/**/*.pem
+
+# The folder scripts/start.sh mounts into the server's container for a model sign-in file.
+.openbot/

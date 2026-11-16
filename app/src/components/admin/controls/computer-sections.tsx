@@ -2,9 +2,10 @@ import {
   IconChevronRight,
   IconDeviceDesktop,
   IconNetwork,
+  IconUsersGroup,
   IconWorld,
 } from "@tabler/icons-react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -53,7 +54,10 @@ import type {
   EnterpriseOverview,
   NetworkMode,
   NetworkPolicy,
+  NetworkScopeKind,
 } from "@/lib/enterprise/queries";
+import { MISSING_TEAM, teamName } from "@/lib/teams/names";
+import { type TeamSummary, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { ControlsSection } from "./controls-section";
 import {
@@ -65,8 +69,8 @@ import {
 
 const MODE_NAMES: Record<NetworkMode, string> = {
   allow_all: "Allow all network access",
-  defaults_plus_allowlist: "Defaults plus team allowlist",
-  allowlist_only: "Team allowlist only",
+  defaults_plus_allowlist: "Defaults plus organization allowlist",
+  allowlist_only: "Organization allowlist only",
 };
 
 /**
@@ -151,109 +155,138 @@ export function InactiveComputersSection() {
   );
 }
 
-/** Admin, Computers: where Bot computers may connect, for the organization and per group. */
+/** Whose network policy a row or the dialog is about. An empty id with `team` is a new team policy. */
+type NetworkScope = { scopeKind: NetworkScopeKind; scopeId: string };
+
+/** Admin, Computers: where Bot computers may connect, for the organization and per team. */
 export function NetworkSection() {
-  const [networkScope, setNetworkScope] = useState<
-    { scopeKind: "organization" | "group"; scopeId: string } | undefined
-  >();
   return (
     <ControlsSection
-      description="Control where Bot computers can connect. Changes apply within seconds without a restart. Group policies override the organization’s policy unless it is locked."
+      description="Control where Bot computers can connect. Changes apply within seconds without a restart. Team policies override the organization’s policy unless it is locked."
       title="Network"
     >
-      {({ data }) => {
-        const organizationPolicy = data.network.find(
-          (row) => row.scopeKind === "organization",
-        );
-        const groupPolicies = data.network.filter(
-          (row) => row.scopeKind === "group",
-        );
-        return (
-          <>
-            <PageRows>
-              <Item
-                render={
-                  <button
-                    onClick={() =>
-                      setNetworkScope({
-                        scopeKind: "organization",
-                        scopeId: "",
-                      })
-                    }
-                    type="button"
-                  />
-                }
-                size="sm"
-              >
-                <ItemMedia variant="icon">
-                  <IconWorld />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>Organization</ItemTitle>
-                  <ItemDescription>
-                    {summarizePolicy(organizationPolicy)}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <IconChevronRight className="size-4 text-muted-foreground" />
-                </ItemActions>
-              </Item>
-              {groupPolicies.map((policy) => (
-                <div key={policy.scopeId}>
-                  <Separator />
-                  <Item
-                    render={
-                      <button
-                        onClick={() =>
-                          setNetworkScope({
-                            scopeKind: "group",
-                            scopeId: policy.scopeId,
-                          })
-                        }
-                        type="button"
-                      />
-                    }
-                    size="sm"
-                  >
-                    <ItemMedia variant="icon">
-                      <IconNetwork />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle>Group: {policy.scopeId}</ItemTitle>
-                      <ItemDescription>
-                        {summarizePolicy(policy)}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <IconChevronRight className="size-4 text-muted-foreground" />
-                    </ItemActions>
-                  </Item>
-                </div>
-              ))}
-            </PageRows>
-            {data.groups.length > 0 ? (
-              <Button
-                className="mt-4"
-                onClick={() =>
-                  setNetworkScope({ scopeKind: "group", scopeId: "" })
-                }
-                size="sm"
-                variant="outline"
-              >
-                Add a group policy
-              </Button>
-            ) : null}
-            {networkScope ? (
-              <NetworkDialog
-                data={data}
-                initial={networkScope}
-                onClose={() => setNetworkScope(undefined)}
-              />
-            ) : null}
-          </>
-        );
-      }}
+      {({ data }) => <NetworkPolicies data={data} />}
     </ControlsSection>
+  );
+}
+
+/**
+ * The organization's policy, then each team's and each directory group's.
+ *
+ * A new policy is made for a team, picked by name from the organization's teams, and is saved under
+ * the team's id. A directory group's policy, from before there were teams, stays listed as it was so
+ * it can be opened and removed, and so does one for a team that has since been deleted.
+ */
+function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
+  const [networkScope, setNetworkScope] = useState<NetworkScope | undefined>();
+  const teams = useQuery(teamListQueryOptions());
+  const known = teams.data?.teams ?? [];
+  const organizationPolicy = data.network.find(
+    (row) => row.scopeKind === "organization",
+  );
+  // A team's rows wait for the teams' names: a row is never titled with an id.
+  const scopedPolicies = data.network.filter(
+    (row) =>
+      row.scopeKind === "group" ||
+      (row.scopeKind === "team" && teams.data !== undefined),
+  );
+  const titleOf = (policy: NetworkPolicy) => {
+    if (policy.scopeKind === "group") return `Group: ${policy.scopeId}`;
+    const name = teamName(known, policy.scopeId);
+    return name === MISSING_TEAM ? name : `Team: ${name}`;
+  };
+  return (
+    <>
+      <PageRows>
+        <Item
+          render={
+            <button
+              onClick={() =>
+                setNetworkScope({ scopeKind: "organization", scopeId: "" })
+              }
+              type="button"
+            />
+          }
+          size="sm"
+        >
+          <ItemMedia variant="icon">
+            <IconWorld />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Organization</ItemTitle>
+            <ItemDescription>
+              {summarizePolicy(organizationPolicy)}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+        {scopedPolicies.map((policy) => (
+          <div key={`${policy.scopeKind}:${policy.scopeId}`}>
+            <Separator />
+            <Item
+              render={
+                <button
+                  onClick={() =>
+                    setNetworkScope({
+                      scopeKind: policy.scopeKind,
+                      scopeId: policy.scopeId,
+                    })
+                  }
+                  type="button"
+                />
+              }
+              size="sm"
+            >
+              <ItemMedia variant="icon">
+                {policy.scopeKind === "team" ? (
+                  <IconUsersGroup />
+                ) : (
+                  <IconNetwork />
+                )}
+              </ItemMedia>
+              <ItemContent>
+                {/* A long team name wraps, and the row is a button, whose words center unless told. */}
+                <ItemTitle className="text-left">{titleOf(policy)}</ItemTitle>
+                <ItemDescription>{summarizePolicy(policy)}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+          </div>
+        ))}
+      </PageRows>
+      {teams.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load teams. Try again in a moment.
+        </p>
+      ) : null}
+      {known.some(
+        (team) =>
+          !data.network.some(
+            (row) => row.scopeKind === "team" && row.scopeId === team.id,
+          ),
+      ) ? (
+        <Button
+          className="mt-4"
+          onClick={() => setNetworkScope({ scopeKind: "team", scopeId: "" })}
+          size="sm"
+          variant="outline"
+        >
+          Add a team policy
+        </Button>
+      ) : null}
+      {networkScope ? (
+        <NetworkDialog
+          data={data}
+          initial={networkScope}
+          onClose={() => setNetworkScope(undefined)}
+          teams={known}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -286,17 +319,27 @@ function SweepNow() {
 function NetworkDialog({
   data,
   initial,
+  teams,
   onClose,
 }: {
   data: EnterpriseOverview;
-  initial: { scopeKind: "organization" | "group"; scopeId: string };
+  initial: NetworkScope;
+  /** The organization's teams, to pick a new policy's team from. */
+  teams: TeamSummary[];
   onClose: () => void;
 }) {
   const existing = data.network.find(
     (row) =>
       row.scopeKind === initial.scopeKind && row.scopeId === initial.scopeId,
   );
-  const [group, setGroup] = useState(initial.scopeId || data.groups[0] || "");
+  /* A new team policy is for a team that has none yet: one that has is opened from its row. */
+  const without = teams.filter(
+    (team) =>
+      !data.network.some(
+        (row) => row.scopeKind === "team" && row.scopeId === team.id,
+      ),
+  );
+  const [team, setTeam] = useState(initial.scopeId || without[0]?.id || "");
   const [mode, setMode] = useState<NetworkMode>(
     existing?.mode ?? "defaults_plus_allowlist",
   );
@@ -305,7 +348,13 @@ function NetworkDialog({
   const [written, setWritten] = useState<WrittenAllowlist | null>(null);
   const save = useMutation(setNetworkPolicyMutationOptions(queryClient));
   const remove = useMutation(removeNetworkPolicyMutationOptions(queryClient));
-  const scopeId = initial.scopeKind === "group" ? group : "";
+  const scoped = initial.scopeKind !== "organization";
+  const scopeId =
+    initial.scopeKind === "team"
+      ? team
+      : initial.scopeKind === "group"
+        ? initial.scopeId
+        : "";
   const formId = useId();
 
   const entries = rulesFromText(rules);
@@ -317,7 +366,7 @@ function NetworkDialog({
   const broken = written !== null && !written.check.ok && !edited;
   /*
    * The policy as the dialog holds it, replayed once it differs from the one in force. Each part of
-   * the scope matters: a group's policy covers its members' Bots, and a locked organization policy
+   * the scope matters: a team's policy covers its people's Bots, and a locked organization policy
    * covers everybody's.
    */
   const unchanged =
@@ -326,7 +375,7 @@ function NetworkDialog({
     existing.locked === locked &&
     JSON.stringify(existing.rules) === JSON.stringify(entries);
   const candidate =
-    unchanged || broken || (initial.scopeKind === "group" && !scopeId)
+    unchanged || broken || (scoped && !scopeId)
       ? null
       : { scopeKind: initial.scopeKind, scopeId, mode, rules: entries, locked };
 
@@ -345,7 +394,9 @@ function NetworkDialog({
           <DialogTitle>
             {initial.scopeKind === "organization"
               ? "Organization network policy"
-              : "Group network policy"}
+              : initial.scopeKind === "team"
+                ? "Team network policy"
+                : "Group network policy"}
           </DialogTitle>
         </DialogHeader>
         <DialogBody className="mt-4 space-y-4 overflow-y-auto">
@@ -377,27 +428,39 @@ function NetworkDialog({
             }}
           >
             <FieldGroup>
-              {initial.scopeKind === "group" && !initial.scopeId ? (
+              {initial.scopeKind === "team" && !initial.scopeId ? (
                 <Field>
-                  <FieldLabel>Group</FieldLabel>
+                  <FieldLabel>Team</FieldLabel>
+                  <FieldDescription>
+                    The policy covers the Bots of the people in this team, and
+                    in the teams beneath it.
+                  </FieldDescription>
                   <Select
-                    onValueChange={(value) => setGroup(String(value))}
-                    value={group}
+                    onValueChange={(value) => setTeam(String(value))}
+                    value={team}
                   >
-                    <SelectTrigger aria-label="Group">
-                      <SelectValue />
+                    <SelectTrigger aria-label="Team">
+                      <SelectValue>{teamName(teams, team)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {data.groups.map((name) => (
-                          <SelectItem key={name} value={name}>
-                            {name}
+                        {without.map((candidate) => (
+                          <SelectItem key={candidate.id} value={candidate.id}>
+                            {candidate.name}
                           </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 </Field>
+              ) : scoped ? (
+                <p className="text-muted-foreground text-sm">
+                  {initial.scopeKind === "group"
+                    ? `This policy is for the directory group ${initial.scopeId}. You can change or remove it here. Make new policies for a team.`
+                    : teams.some((one) => one.id === initial.scopeId)
+                      ? `This policy covers the Bots of the people in ${teamName(teams, initial.scopeId)}, and in the teams beneath it.`
+                      : "This team no longer exists, so its policy covers nobody. You can remove it."}
+                </p>
               ) : null}
               <DescribeAllowlist onWritten={takeWritten} />
               <Field>
@@ -449,7 +512,7 @@ function NetworkDialog({
               {initial.scopeKind === "organization" ? (
                 <div className="flex items-center justify-between gap-4">
                   <Label htmlFor="network-locked">
-                    Lock so groups can't replace this policy
+                    Lock so teams can't replace this policy
                   </Label>
                   <Switch
                     checked={locked}
@@ -487,11 +550,7 @@ function NetworkDialog({
             Cancel
           </Button>
           <Button
-            disabled={
-              save.isPending ||
-              broken ||
-              (initial.scopeKind === "group" && !scopeId)
-            }
+            disabled={save.isPending || broken || (scoped && !scopeId)}
             form={formId}
             size="sm"
             type="submit"

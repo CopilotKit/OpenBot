@@ -1,5 +1,6 @@
 import {
   OPENBOT_HARNESS_NAME,
+  reachedThroughMastra,
   summaryFor,
   WEB_HARNESSES,
 } from "@openbot/shared/harnesses";
@@ -58,24 +59,19 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  agentCapabilitiesQueryOptions,
-  testAgentConnection,
-} from "@/lib/agents/queries";
+import { testAgentConnection } from "@/lib/agents/queries";
+import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
   type GiveableApp,
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { isComposing } from "@/lib/composing";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
-import {
-  type PluginsPage,
-  pluginKeys,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -129,10 +125,27 @@ type Step = (typeof STEPS)[number];
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
- * so the server never hears which was picked.
+ * The framework is kept for its connection instructions and default role description, and sent with
+ * the create. Every framework but Mastra is reached the same way, at an AG-UI address. A Mastra
+ * server is reached through Mastra's own API, which the server picks from the framework sent.
  */
-type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
+export type Runtime =
+  | { kind: "builtin" }
+  | { kind: "managed"; harness: string };
+
+/**
+ * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
+ * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
+ * fails if the two drift apart.
+ */
+export function declaredFramework(
+  id: string,
+): CreateBotRequestHarness | undefined {
+  const known: readonly string[] = Object.values(CreateBotRequestHarness);
+  return id !== "" && known.includes(id)
+    ? (id as CreateBotRequestHarness)
+    : undefined;
+}
 
 /** Framework name used in default custom-agent instructions. */
 function frameworkName(runtime: Runtime): string {
@@ -182,22 +195,21 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const personal = capabilities?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
    * from disabled to enabled; the server refuses the create either way.
    */
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
-  const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  const builtInAvailable = capabilities?.builtInBots ?? true;
   /*
    * A computer of its own: whether this deployment can make one, and whether an administrator lets
    * this person ask. Unavailable until the deployment says otherwise, since promising a computer
    * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
    * refuses a create without it either way.
    */
-  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const isolationAvailable = capabilities?.isolatedBots ?? false;
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
   /** Shared with the person's own computer unless they tick it. */
@@ -235,7 +247,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    * list Connections shows as on, and not only the ones this person could give.
    */
   const turnedOn = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...appsQueryOptions(),
     enabled: personal,
   });
   const [leftOut, setLeftOut] = useState<Set<string>>(() => new Set());
@@ -290,6 +302,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
+    const framework = managed ? declaredFramework(chosen.harness) : undefined;
     const agent = await createAgent.mutateAsync({
       ...agentInputFrom({
         name: name.trim(),
@@ -306,9 +319,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       }),
       // The framework picked from the list, so the Bot is told what runs it. None for an agent
       // somebody already runs, since nobody said what is behind its address.
-      ...(managed && chosen.harness !== "byo-url"
-        ? { harness: chosen.harness }
-        : {}),
+      ...(framework ? { harness: framework } : {}),
     });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,
@@ -359,6 +370,25 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setUnreachable(undefined);
+    /*
+     * A Mastra server has no AG-UI route, so the AG-UI test could only fail against it. The create
+     * names the framework and the server proves the address against Mastra's own API before it saves
+     * anything. What it refused with is shown under the address, as a failed test is.
+     */
+    if (runtime?.kind === "managed" && reachedThroughMastra(runtime.harness)) {
+      try {
+        await create(runtime);
+      } catch (error) {
+        createAgent.reset();
+        setUnreachable(
+          error instanceof Error && error.message
+            ? error.message
+            : MASTRA_UNREACHABLE,
+        );
+        focusAddress();
+      }
+      return;
+    }
     setChecking(true);
     const verdict = await testAgentConnection(endpoint.trim(), key).finally(
       () => setChecking(false),
@@ -556,6 +586,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
   );
 }
 
+/** Said when a Mastra create failed without a sentence of the server's own. */
+export const MASTRA_UNREACHABLE =
+  "Couldn't reach a Mastra server at that address.";
+
 /** How long the created view holds before handing over to the new Bot's page. */
 const CREATED_BEAT_MS = 1600;
 /** Shorter with reduced motion: nothing is moving, so the pause is only long enough to read. */
@@ -668,7 +702,7 @@ function AboutStep({
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
-  turnedOn: UseQueryResult<PluginsPage>;
+  turnedOn: UseQueryResult<PluginServer[]>;
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
   isolation: IsolationChoice;
@@ -799,9 +833,13 @@ function AboutStep({
  * (`EVERY_BOT_REFUSAL` in server/src/plugins/personal-defaults.ts). A box to untick would promise a
  * choice the server doesn't offer.
  */
-function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
+function EveryAppList({
+  turnedOn,
+}: {
+  turnedOn: UseQueryResult<PluginServer[]>;
+}) {
   if (turnedOn.isPending) return null;
-  const servers = turnedOn.data?.servers ?? [];
+  const servers = turnedOn.data ?? [];
   return (
     <FieldSet>
       <FieldLegend variant="label">Apps it can use</FieldLegend>
@@ -929,7 +967,7 @@ function IsolatedOption({
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
  * cards. The border is there but transparent until chosen, so choosing one never shifts the rows.
  */
-const OPTION_CLASSES =
+export const OPTION_CLASSES =
   "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
@@ -938,7 +976,11 @@ const OPTION_CLASSES =
  * new question rather than the control on the previous screen. The sheet body scrolls;
  * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
+export function RuntimeStep({
+  onChoose,
+}: {
+  onChoose: (runtime: Runtime) => void;
+}) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
@@ -976,8 +1018,8 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
  * The framework picked on the step before is named at the top so the person can see what they are
- * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
- * stored the same way.
+ * connecting. Nothing below differs by framework but Mastra's: every other one is an AG-UI address,
+ * and a Mastra one is the address of the Mastra server itself, so its example and its hint say so.
  *
  * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
@@ -987,7 +1029,7 @@ function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
  * from there, which is the one thing the browser cannot tell. Why it could not be reached arrives as
  * this field's error.
  */
-function EndpointStep({
+export function EndpointStep({
   harness,
   endpoint,
   secret,
@@ -1003,6 +1045,7 @@ function EndpointStep({
   onKey: (value: string) => void;
 }) {
   const chosen = WEB_HARNESSES.find((entry) => entry.id === harness);
+  const mastra = reachedThroughMastra(harness);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1028,7 +1071,11 @@ function EndpointStep({
             id="new-bot-endpoint"
             inputMode="url"
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://your-agent.example.com/ag-ui"
+            placeholder={
+              mastra
+                ? "https://your-mastra-server.example.com"
+                : "https://your-agent.example.com/ag-ui"
+            }
             value={endpoint}
           />
           {endpointError ? (
@@ -1036,6 +1083,11 @@ function EndpointStep({
               className="text-pretty"
               errors={[{ message: endpointError }]}
             />
+          ) : mastra ? (
+            <FieldDescription>
+              Give the address of your Mastra server. It needs to run one agent,
+              and OpenBot's server has to be able to reach it.
+            </FieldDescription>
           ) : (
             <FieldDescription>
               Any agent that speaks AG-UI works. OpenBot connects to it, so it

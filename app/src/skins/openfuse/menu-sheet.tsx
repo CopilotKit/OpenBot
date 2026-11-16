@@ -28,7 +28,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -314,9 +314,9 @@ function ConversationRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={channel.id === openId ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </div>
   );

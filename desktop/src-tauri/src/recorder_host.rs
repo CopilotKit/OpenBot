@@ -39,6 +39,9 @@ const APP_IDENTIFIER: &str = "ai.copilotkit.openbot.desktop";
 /// The largest message either way. Chrome refuses a host message over 1 MB, and the extension sends
 /// only a few bytes, so a longer length prefix is a broken or hostile pipe.
 const MESSAGE_LIMIT: usize = 1024 * 1024;
+/// Where the local OpenBot makes a connect code for the person signed in to it (the API's
+/// createRecorderConnectCode, in its one organization, for `me`).
+const CONNECT_CODES_PATH: &str = "/api/v2/organizations/default/people/me/recorder-connect-codes";
 
 /// Why the host could not do what it was asked: the `error` of a reply with `ok: false`. The extension shows each one,
 /// so a code never changes its meaning.
@@ -211,7 +214,7 @@ pub fn app_config_dir(
             .map(Path::to_path_buf)
             .unwrap_or_else(|| home.join("AppData").join("Roaming")),
     };
-    config.join(APP_IDENTIFIER)
+    config.join(crate::stack::identifier_for(APP_IDENTIFIER))
 }
 
 fn refused(refusal: Refusal) -> Value {
@@ -264,9 +267,15 @@ fn handoff(
     let app_url = (env.app_url)().ok_or(Refusal::NotRunning)?;
     let response = client
         .post(format!(
-            "{}/api/recorder/connect-codes",
+            "{}{CONNECT_CODES_PATH}",
             app_url.trim_end_matches('/')
         ))
+        // Every write to the API carries a key of its own. A fresh one each time: the code is a
+        // credential, so the API never answers the same write twice.
+        .header(
+            "Idempotency-Key",
+            format!("{:032x}", rand::random::<u128>()),
+        )
         .json(&json!({ "via": "desktop" }))
         .send()
         .map_err(|error| {
@@ -856,8 +865,16 @@ mod tests {
             json!({ "ok": true, "openbotUrl": url, "code": "obc_fixture" })
         );
         let (head, body) = app.join().unwrap();
-        assert!(head.starts_with("POST /api/recorder/connect-codes HTTP/1.1\r\n"));
+        assert!(head.starts_with(
+            "POST /api/v2/organizations/default/people/me/recorder-connect-codes HTTP/1.1\r\n"
+        ));
         let head = head.to_lowercase();
+        let key = head
+            .lines()
+            .find_map(|line| line.strip_prefix("idempotency-key: "))
+            .expect("the write carries an Idempotency-Key");
+        assert_eq!(key.len(), 32);
+        assert!(key.chars().all(|digit| digit.is_ascii_hexdigit()));
         assert!(head.contains("content-type: application/json\r\n"));
         assert!(!head.contains("cookie:"));
         assert_eq!(

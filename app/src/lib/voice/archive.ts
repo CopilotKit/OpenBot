@@ -6,7 +6,12 @@ import type {
 } from "@openbot/shared/voice-session";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
+import type { VoiceSession } from "@/lib/api/generated/model";
+import {
+  listVoiceSessions,
+  saveVoiceSession as saveVoiceSessionAtApi,
+} from "@/lib/api/generated/voice/voice";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { queryClient } from "@/query-client";
 import { closingOf } from "./cut";
 import {
@@ -26,6 +31,14 @@ const keys = {
   pending: (channelId: string) => ["voice-session-drafts", channelId] as const,
 };
 
+/** A saved call as the API answers it, in the names the app uses: its conversation is `channelId`. */
+function recordOf({
+  conversationId,
+  ...rest
+}: VoiceSession): VoiceSessionRecord {
+  return { ...rest, channelId: conversationId };
+}
+
 export function voiceSessionQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: keys.saved(channelId),
@@ -38,13 +51,16 @@ export function voiceSessionQueryOptions(channelId: string) {
       const sessions: VoiceSessionRecord[] = [];
       let cursor: string | null = null;
       do {
-        const params = new URLSearchParams({ channelId });
-        if (cursor) params.set("cursor", cursor);
-        const response = await client(`/api/voice/sessions?${params}`, {
-          signal,
-          fallback: "Could not load voice chats.",
-        });
-        const page = (await response.json()) as VoiceSessionPage;
+        const answered = await listVoiceSessions(
+          organizationId(),
+          channelId,
+          { limit: 50, ...(cursor ? { cursor } : {}) },
+          { signal, fallback: "Could not load voice chats." },
+        );
+        const page: VoiceSessionPage = {
+          sessions: answered.sessions.map(recordOf),
+          nextCursor: answered.nextCursor,
+        };
         sessions.push(...page.sessions);
         for (const session of page.sessions) forgetVoiceCall(session);
         cursor = page.nextCursor;
@@ -94,28 +110,33 @@ export function saveVoiceSession(
   // Errors are retained on the card for retry, including after navigating away and back.
   void (async () => {
     try {
-      const payload = JSON.stringify(input);
-      const response = await fetch("/api/voice/sessions", {
-        method: "POST",
-        credentials: "include",
-        signal: AbortSignal.timeout(30_000),
-        keepalive: new TextEncoder().encode(payload).byteLength < 60_000,
-        headers: { "content-type": "application/json", "x-openbot-voice": "1" },
-        body: payload,
-      });
-      // A proxy's error page is not JSON, and its parser message is no sentence for a person.
-      // Without a session there is nothing saved to show, whatever the status, as `client` holds.
-      const body: { session?: VoiceSessionRecord; error?: string } =
-        await response.json().catch(() => ({}));
-      if (!body.session)
-        throw new Error(body.error ?? "Could not save this voice chat.");
-      const session = body.session;
+      const { channelId, ...call } = input;
+      const payload = JSON.stringify(call);
+      // Sent as the page closes when it is small enough to be: a call ended by leaving is still kept.
+      const saved = await saveVoiceSessionAtApi(
+        organizationId(),
+        channelId,
+        call,
+        { "Idempotency-Key": idempotencyKey() },
+        {
+          fallback: "Could not save this voice chat.",
+          signal: AbortSignal.timeout(30_000),
+          keepalive: new TextEncoder().encode(payload).byteLength < 60_000,
+        },
+      );
+      // An answer with no call in it saved nothing to show, whatever its status.
+      if (!saved?.session) throw new Error("Could not save this voice chat.");
+      const session = recordOf(saved.session);
       forgetVoiceCall(session, ownerId);
       queryClient.setQueryData<VoiceSessionRecord[]>(
         keys.saved(input.channelId),
         (entries) => upsert(entries, session),
       );
-      update({ ...session, ...(response.ok ? {} : { saveError: body.error }) });
+      // Saved, with a summary still to come: the card says so, as the server does.
+      update({
+        ...session,
+        ...(saved.notice === undefined ? {} : { saveError: saved.notice }),
+      });
       await queryClient.invalidateQueries({ queryKey: channelKeys.all });
     } catch (error) {
       update({

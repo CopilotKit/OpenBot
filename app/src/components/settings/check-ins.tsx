@@ -43,7 +43,7 @@ export function CheckInsSection() {
     <PageSection>
       {preferences.isPending ? null : preferences.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your check-ins. Reload the page.
+          Couldn't load your check-ins. Try again in a moment.
         </p>
       ) : (
         <PageRows>

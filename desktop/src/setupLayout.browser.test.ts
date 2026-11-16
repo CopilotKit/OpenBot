@@ -27,6 +27,7 @@ const PLAYWRIGHT: string = "playwright-core";
 type Box = { x: number; y: number; width: number; height: number } | null;
 type Locator = {
   click(): Promise<void>;
+  fill(value: string): Promise<void>;
   waitFor(options?: { state?: "hidden" | "visible" }): Promise<void>;
   boundingBox(): Promise<Box>;
   textContent(): Promise<string | null>;
@@ -51,6 +52,7 @@ type Page = {
   waitForTimeout(ms: number): Promise<void>;
   screenshot(options: { path: string }): Promise<unknown>;
   mouse: {
+    click(x: number, y: number): Promise<void>;
     move(x: number, y: number): Promise<void>;
     wheel(deltaX: number, deltaY: number): Promise<void>;
   };
@@ -169,6 +171,14 @@ export async function invoke(command) {
       return { outcome: "completed", stack, reason: null, conflicted: false };
     case "run_local_eval":
       return status("ready", "valid");
+    // OpenBot's own start, the step's last row: it stays there for the test to look at.
+    case "start_stack":
+      return new Promise(() => {});
+    // Usage data as a first run finds it: shared until the person says otherwise.
+    case "plugin:openbot-desktop|usage_data":
+      return { shared: true, offByEnvironment: false };
+    case "plugin:openbot-desktop|set_usage_data":
+      return { shared: false, offByEnvironment: false };
     default:
       return null;
   }
@@ -263,9 +273,17 @@ let chromium: Chromium;
 beforeAll(async () => {
   if (!asked) return;
   built = await buildWindow();
-  ({ chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium });
-  // The CI job installs full Chromium without the headless shell.
-  browser = await chromium.launch({ channel: "chromium" });
+  const playwright = (await import(PLAYWRIGHT)) as {
+    chromium: Chromium;
+    webkit: { launch(): Promise<Browser> };
+  };
+  ({ chromium } = playwright);
+  // The CI job installs full Chromium without the headless shell. `OPENBOT_APP_ENGINE=webkit` is
+  // for a look in the engine the Mac window draws with, on a machine that has it installed.
+  browser =
+    process.env.OPENBOT_APP_ENGINE === "webkit"
+      ? await playwright.webkit.launch()
+      : await chromium.launch({ channel: "chromium" });
 });
 
 afterAll(async () => {
@@ -722,6 +740,42 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
  * and the text under it moved up. The line holds its tallest height in every state, and before it
  * says anything, so the card's bottom edge stays where it is.
  */
+describe.skipIf(!asked)("the first screen at the window's default size", () => {
+  // The window opens at 1000x800 (tauri.conf.json); a title bar takes some of that. Seen on
+  // Windows: once the first screen listed where OpenBot runs and what Self-hosted needs, the card
+  // showed a scrollbar for a few pixels at that size. Everything on it has to show without one.
+  test("at 1000x760, everything on it shows without the card scrolling", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 760 },
+    });
+    try {
+      await open(page);
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      await page.waitForTimeout(400);
+      const overflow = await page.evaluate(() => {
+        const card = document.querySelector("main > .sheet") as HTMLElement;
+        return card.scrollHeight - card.clientHeight;
+      });
+      expect(overflow).toBeLessThanOrEqual(0);
+      // And with the other choice picked, OpenBot for Business: its address field and Connect.
+      await page.getByText("OpenBot for Business").click();
+      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      await page.waitForTimeout(400);
+      expect(
+        await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          return card.scrollHeight - card.clientHeight;
+        }),
+      ).toBeLessThanOrEqual(0);
+      expect(await page.getByRole("button", { name: "Connect" }).count()).toBe(
+        1,
+      );
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
     [1000, 800],
@@ -731,9 +785,7 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await open(page);
-        await page
-          .getByRole("heading", { name: "Set up OpenBot (self-contained)" })
-          .waitFor();
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await page.waitForTimeout(400);
         // The card's bottom edge: nothing under the line moves, and the card does not shrink.
         const usage = async () => {
@@ -841,7 +893,8 @@ describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
 /** Where the step's heading and its first row are: what a person is reading. */
 async function anchors(page: Page) {
   const heading = await page
-    .getByRole("heading", { name: "Starting OpenBot" })
+    // Only the Start that updates OpenBot (`#start`) asks.
+    .getByRole("heading", { name: "Updating OpenBot" })
     .boundingBox();
   const first = await page
     .getByRole("listitem", { name: "Setting up OpenBot" })
@@ -1233,6 +1286,105 @@ describe.skipIf(!asked)(
   },
 );
 
+/*
+ * Seen on Windows K: on "Finishing setup" the usage data checkbox sat under the step's rows, and the
+ * rows come one at a time. It was on screen and could be clicked from the step's first moment, and
+ * then moved down 49 px three times in about three seconds as the second, third and fourth rows
+ * arrived, 147 px in all. A click aimed at it landed on nothing, and the box stayed ticked. The
+ * choice sits above the rows now, under the step's own words, and holds its place for the whole step.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the step's first and last moments at each size.
+ */
+describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    test(`at ${width}x${height}, holds its place from the step's first row to its last, and unticks where it was`, async () => {
+      const page = await browser.newPage({ viewport: { width, height } });
+      try {
+        await toTheAiStep(page);
+        await page.getByText("Anthropic", { exact: true }).click();
+        await page
+          .getByRole("tab", { name: "Use an API key", exact: true })
+          .click();
+        await page
+          .getByLabel("Anthropic API key", { exact: true })
+          .fill("a-key-for-this-test");
+        await page
+          .getByRole("button", { name: "Continue", exact: true })
+          .click();
+        await page.getByRole("heading", { name: "Finishing setup" }).waitFor();
+        const box = page.getByRole("checkbox");
+        await box.waitFor();
+        // The entrance animation settles before anything is measured.
+        await page.waitForTimeout(600);
+        /** Where the checkbox is in the window, and whether a click at its middle reaches it. */
+        const where = async () => {
+          const at = await box.boundingBox();
+          const reached = await page.evaluate(() => {
+            const found = document.querySelector(
+              '.usage-choice input[type="checkbox"]',
+            ) as HTMLInputElement;
+            const rect = found.getBoundingClientRect();
+            return (
+              document.elementFromPoint(
+                rect.left + rect.width / 2,
+                rect.top + rect.height / 2,
+              ) === found
+            );
+          });
+          return { x: at?.x, y: at?.y, reached };
+        };
+        const rows = () => page.locator(".steps > .step").count();
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        const keep = async (moment: string) => {
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/finishing-setup-${moment}-${width}x${height}.png`,
+            });
+        };
+
+        // The step's first moment: one row, setting up, and the choice already there to click.
+        await page
+          .getByRole("listitem", { name: "Setting up OpenBot" })
+          .waitFor();
+        const first = await where();
+        expect(await rows()).toBe(1);
+        expect(first.y).toBeGreaterThan(0);
+        expect(first.reached).toBe(true);
+        await keep("first-row");
+
+        // Setting up ends, and the rest of the rows arrive one after another.
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishSetUp: () => void } }
+          ).__fake.finishSetUp(),
+        );
+        await page.getByRole("listitem", { name: "Opening OpenBot" }).waitFor();
+        await page.waitForTimeout(600);
+        expect(await rows()).toBe(4);
+        await keep("last-row");
+        expect(await where()).toEqual(first);
+
+        // A click where the box was at the step's first moment unticks it.
+        await page.mouse.click((first.x ?? 0) + 6, (first.y ?? 0) + 6);
+        await page.waitForTimeout(200);
+        expect(
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as { __fake: { calls: string[] } }
+            ).__fake.calls.filter(
+              (call) => call === "plugin:openbot-desktop|set_usage_data",
+            ),
+          ),
+        ).toEqual(["plugin:openbot-desktop|set_usage_data"]);
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
+  }
+});
+
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */
 async function toStart(page: Page) {
   await open(page, "#start");
@@ -1268,7 +1420,8 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         lede: document.querySelector("main .lede")?.textContent ?? "",
         card: document.querySelector(".journey-time")?.textContent ?? "",
       }));
-      expect(said.heading).toBe("Starting OpenBot");
+      // This Start updates OpenBot, and its heading says so.
+      expect(said.heading).toBe("Updating OpenBot");
       expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
       expect(said.lede).not.toMatch(/minute|second|hour/i);
       expect(said.card).toMatch(/left/);
@@ -1311,6 +1464,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
             above: (words?.top ?? 0) - (card?.top ?? 0),
             below: (card?.bottom ?? 0) - (bar?.bottom ?? 0),
             time: time.textContent ?? "",
+            said: document.querySelector(".journey-said")?.textContent ?? "",
             cut: time.scrollWidth > time.clientWidth,
           };
         });
@@ -1340,9 +1494,11 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       await page.waitForTimeout(600);
       const usual = await measure();
       expect(Math.abs(usual.below - usual.above)).toBeLessThanOrEqual(2);
-      expect(usual.time).toMatch(
-        /left · 190\.9 MB of 944\.4 MB · \d+s so far$/,
-      );
+      // The bytes are said with the download they count; the time line is the bar's, the whole
+      // Start's (Windows K: "304.0 MB of 317.0 MB" read as the measure of a bar a third full).
+      expect(usual.time).toMatch(/left · \d+s so far$/);
+      expect(usual.time).not.toContain("MB");
+      expect(usual.said).toBe("Downloading the update · 190.9 MB of 944.4 MB");
       expect(usual.cut).toBe(false);
       // Every byte in, its last part unpacking, and fifteen minutes on: taking longer than usual.
       await emit({
@@ -1359,8 +1515,9 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       });
       await page.getByText(/Taking longer than usual/).waitFor();
       const slow = await measure();
-      expect(slow.time).toBe(
-        "Taking longer than usual, still working · 944.4 MB downloaded",
+      expect(slow.time).toBe("Taking longer than usual, still working");
+      expect(slow.said).toBe(
+        "Unpacking the update (5 of 5) · 944.4 MB downloaded",
       );
       expect(slow.cut).toBe(false);
       expect({ card: slow.card, row: slow.row }).toEqual({
@@ -1422,8 +1579,9 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         0,
       );
       const note = page.locator(".cannot-cancel");
+      // This Start updates OpenBot (`upgrade_due` answers a move), so it is said as the update.
       expect(await note.textContent()).toBe(
-        "You can't cancel this last step. Stopping it partway could leave OpenBot half started.",
+        "You can't cancel this last step. Stopping it partway could leave the update half done.",
       );
       expect((await note.boundingBox())?.height).toBe(40);
       // OpenBot updating itself, as on Windows G.

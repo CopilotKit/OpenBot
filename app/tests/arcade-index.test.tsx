@@ -4,14 +4,15 @@ import {
   sharedAccountsListedOn,
 } from "@/lib/plugins/listed";
 import type { PluginServer } from "@/lib/plugins/queries";
+import { appBody, type TodayServer } from "./apps-api";
 
 /**
- * The Connected accounts index lists brokered rows from either broker. A deployment holds rows from
- * only one provider, so the browser needs no provider switch: it only needs to recognise "brokered".
+ * The Connected accounts index lists apps from the directory whichever service it comes from. The
+ * browser needs no provider switch: an app's `source` says it came from the directory.
  */
 
-function server(overrides: Partial<PluginServer> & { id: string }) {
-  return {
+function server(overrides: Partial<TodayServer> & { id: string }) {
+  return appBody({
     title: "App",
     summary: "",
     vendor: "Arcade",
@@ -20,7 +21,7 @@ function server(overrides: Partial<PluginServer> & { id: string }) {
     authScheme: "OAUTH2",
     tools: [],
     ...overrides,
-  } as PluginServer;
+  });
 }
 
 const ids = (rows: PluginServer[]) => rows.map((row) => row.id);

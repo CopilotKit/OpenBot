@@ -38,7 +38,7 @@ import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { untitledLine } from "@/lib/channels/label";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -200,7 +200,7 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots. Reload the page.
+          Couldn't load your Bots. Try again in a moment.
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -368,9 +368,9 @@ function ThreadRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={open ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );
@@ -446,7 +446,7 @@ function RecentChats({
       >
         {channels.isPending ? null : channels.error ? (
           <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations. Reload the page.
+            Couldn't load your conversations. Try again in a moment.
           </p>
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">

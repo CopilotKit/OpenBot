@@ -346,6 +346,68 @@ async def test_a_provider_out_of_credit_is_told_as_that_never_as_sign_in_again(
     assert said in message
 
 
+def closed_port():
+    """A loopback port with nothing listening on it."""
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_a_model_address_with_nothing_listening_is_told_as_unreachable(
+    boundary, monkeypatch
+):
+    """Seen on OpenBot Desktop: an OpenAI-compatible base URL at host.docker.internal:48123 with
+    nothing listening. The harness log said `openai.APIConnectionError` ("All connection attempts
+    failed") and the person read only "The Bot stopped before it finished answering. Try again.",
+    which says nothing about the model or where to change it."""
+    port = closed_port()
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://synthetic-user:synthetic-secret@127.0.0.1:{port}/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    # Coded, so the server says it with the step that fits its edition.
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        f"OpenBot couldn't reach the AI model at 127.0.0.1:{port}. "
+        "Check that it's running and the address is right."
+    )
+    # The address is host and port only: never the credentials or the path a URL can carry.
+    assert "synthetic-secret" not in json.dumps(events)
+    assert not boundary["model"], "nothing answered, so nothing was asked"
+
+
+@pytest.mark.asyncio
+async def test_a_model_host_that_does_not_exist_is_told_the_same_way(boundary, monkeypatch):
+    # `.invalid` never resolves (RFC 2606), so this is a DNS failure and never leaves the machine.
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openbot-model.invalid:48123/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR"
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        "OpenBot couldn't reach the AI model at openbot-model.invalid:48123. "
+        "Check that it's running and the address is right."
+    )
+
+
+def test_a_model_that_never_answers_in_time_is_unreachable_too():
+    """A timeout is the third way an address can't be reached, and is told the same way."""
+    import openai
+
+    from src.tool_runtime import model_address, model_unreachable
+
+    request = httpx.Request("POST", "http://10.0.0.7:8080/v1/chat/completions")
+    timeout = openai.APITimeoutError(request=request)
+    assert model_unreachable(timeout)
+    assert model_address(timeout) == "10.0.0.7:8080"
+    # A provider that answered, with whatever status, is not unreachable: it said something.
+    refusal = openai.APIStatusError(
+        "Error code: 503", response=httpx.Response(503, request=request), body=None
+    )
+    assert not model_unreachable(refusal)
+
+
 def test_the_provider_is_named_by_who_serves_the_model(monkeypatch):
     from src.tool_runtime import provider_name
 
@@ -577,9 +639,9 @@ async def test_http_refusal_is_not_reported_as_tool_success(boundary):
 async def test_http_refusal_tells_the_model_the_deployments_reason(
     boundary, status, reply, expected
 ):
-    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`. The
-    # TypeScript LangGraph Bot passes that reason on (`agent-langgraph/src/tool-answer.ts`); without
-    # it the model knows only a status code, and cannot tell the person why or repair its call.
+    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`, and
+    # the harness passes that reason on: without it the model knows only a status code, and cannot
+    # tell the person why or repair its call.
     boundary["callback_status"] = status
     boundary["callback_body"] = reply
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
@@ -661,15 +723,19 @@ async def test_concurrent_requests_keep_tool_ownership_and_assertions_separate(
 
 
 @pytest.mark.asyncio
-async def test_undeclared_model_tool_is_refused_without_callback(boundary):
+async def test_undeclared_model_tool_is_handed_back_without_callback(boundary):
+    """A call to a tool this run was not offered is never run here, and never ends the run in an
+    error: it is handed back for the caller to answer, as a call the surface owns is."""
     boundary["force_call"] = "undeclared_tool"
     events = await run_protocol(
         run_input(["granted_lookup"], deployment=["granted_lookup", "undeclared_tool"]),
         allow_error=True,
     )
-    assert any(
-        e["type"] == "RUN_ERROR" and "not offered" in e["message"] for e in events
-    )
+    assert not any(e["type"] == "RUN_ERROR" for e in events)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert [
+        e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"
+    ] == ["undeclared_tool"]
     assert boundary["callback"] == []
 
 

@@ -15,7 +15,7 @@ import { byPosition } from "@/components/gallery/positions";
 import { Badge, GalleryFrame } from "@/components/gallery/frame";
 import { Button } from "@/components/ui/button";
 import type { Look } from "@/lib/copilot/coding-calls";
-import { asText, flaggedFailure } from "@/lib/plugins/tool-result";
+import { asText, cutOffStep, flaggedFailure } from "@/lib/plugins/tool-result";
 import { cn } from "@/lib/utils";
 import { ToolLine } from "./tool-line";
 
@@ -52,6 +52,8 @@ export function codingOutcome(
 ): CodingOutcome {
   if (result === undefined)
     return { state: arriving ? "running" : "stopped", text: "" };
+  // Cut off under way: it has no output of its own, and what the Bot was told is not one.
+  if (cutOffStep(result)) return { state: "stopped", text: "" };
   const answer = asText(result);
   const flagged = flaggedFailure(answer);
   const tagged = /^\s*<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/.exec(

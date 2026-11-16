@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   act,
   cleanup,
@@ -11,9 +11,19 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import type { ConversationModel, ModelCatalogue } from "@/lib/models/queries";
+import {
+  type ConversationModel,
+  type ModelCatalogue,
+  modelCatalogueQueryOptions,
+} from "@/lib/models/queries";
 import { useConversationModel, useDraftModel } from "@/lib/models/run-model";
 import { queryClient } from "@/query-client";
+import {
+  catalogueBody,
+  catalogueView,
+  modelChoiceConversation,
+  problemResponse,
+} from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
@@ -27,10 +37,11 @@ const { ModelPicker } = await import(
  * The composer's model and thinking effort picker, and the pick a conversation keeps on the server.
  *
  * THE HARNESS IS THIS REPOSITORY'S: `GlobalRegistrator` in `beforeAll`/`afterAll` and `cleanup` in
- * `afterEach`, as `composer-collapse.test.tsx` explains. `fetch` is a fake of
- * `GET`/`PUT /api/channels/:id/model` holding one `{ model, effort }` per conversation, and it
- * refuses what the server refuses: a model the catalogue does not offer, and an effort the model
- * does not accept. So a pick the picker should never send fails here as it would there.
+ * `afterEach`, as `composer-collapse.test.tsx` explains. `fetch` is a fake of the API's
+ * `GET`/`PUT .../people/me/model-choices/{conversationId}` holding one `{ model, effort }` per
+ * conversation, and it refuses what the server refuses: a model the catalogue does not offer, and an
+ * effort the model does not accept. So a pick the picker should never send fails here as it would
+ * there.
  */
 
 const catalogue: ModelCatalogue = {
@@ -70,16 +81,19 @@ const originalFetch = globalThis.fetch;
 let pendingWrite: Promise<void> | undefined;
 let saved: Record<string, ConversationModel> = {};
 let writes: ({ channelId: string } & ConversationModel)[] = [];
+/** What the server offers now: an admin narrowing the allowlist changes it under an open tab. */
+let offered: ModelCatalogue = catalogue;
 
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://localhost/" });
   globalThis.fetch = Object.assign(
     async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost/");
-      const match = /^\/api\/channels\/([^/]+)\/model$/.exec(url.pathname);
-      if (!match?.[1])
+      if (catalogueView(url) === "offered")
+        return Response.json(catalogueBody(offered));
+      const channelId = modelChoiceConversation(url.pathname);
+      if (!channelId)
         return Response.json({ error: "not served" }, { status: 404 });
-      const channelId = decodeURIComponent(match[1]);
       if (init?.method === "PUT") {
         const { model, effort } = JSON.parse(
           String(init.body),
@@ -89,19 +103,27 @@ beforeAll(() => {
           (option) => option.id === (model ?? catalogue.default),
         );
         if (!runs)
-          return Response.json(
-            { error: "That model isn't available. Pick another one." },
-            { status: 400 },
+          return problemResponse(
+            400,
+            "VALIDATION_ERROR",
+            "That model isn't available. Pick another one.",
           );
         if (effort !== null && !runs.efforts?.includes(effort))
-          return Response.json(
-            { error: `${runs.label} doesn't take that thinking effort.` },
-            { status: 400 },
+          return problemResponse(
+            400,
+            "VALIDATION_ERROR",
+            `${runs.label} doesn't take that thinking effort.`,
           );
         await pendingWrite;
         saved[channelId] = { model, effort };
       }
-      return Response.json(saved[channelId] ?? { model: null, effort: null });
+      // As the server answers a pick: one no longer offered reads as the default, and is kept.
+      const pick = saved[channelId] ?? { model: null, effort: null };
+      return Response.json(
+        pick.model && !offered.models.some((option) => option.id === pick.model)
+          ? { ...pick, model: null }
+          : pick,
+      );
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -112,6 +134,7 @@ afterEach(() => {
   saved = {};
   writes = [];
   pendingWrite = undefined;
+  offered = catalogue;
 });
 afterAll(async () => {
   await settleReactWork();
@@ -560,6 +583,97 @@ test("sending waits for the model save and refuses a failed save", async () => {
     await expect(refused).rejects.toThrow("save failed");
   });
   expect(saved["conversation-a"]).toEqual({ model: "gpt-4o", effort: null });
+});
+
+/**
+ * A conversation's composer notice and picker, wired as `channel-chat.tsx` wires them, with the
+ * catalogue read as it reads it, so the picker follows what the server offers now.
+ */
+function ConversationWithNotice({
+  onReady,
+}: {
+  onReady: (beforeSend: () => Promise<void>) => void;
+}) {
+  const models = useQuery(modelCatalogueQueryOptions());
+  const run = useConversationModel("conversation-a", models.data);
+  onReady(run.beforeSend);
+  return (
+    <>
+      {run.notice ? <p role="status">{run.notice}</p> : null}
+      <ModelPicker
+        catalogue={models.data}
+        onChange={run.choose}
+        saving={run.saving}
+        value={run.value}
+      />
+    </>
+  );
+}
+
+/*
+ * A person picks GPT-6 Sol; an admin takes it off the allowlist while their tab stays open. The
+ * server runs their next message on the default (the pick is kept for when Sol is allowed again),
+ * and the composer has to say so, and the picker has to stop saying Sol. It used to swap silently.
+ */
+test("a picked model an admin stops allowing is said in the composer when the next message is sent, and the picker follows", async () => {
+  saved["conversation-a"] = { model: "gpt-6-sol", effort: null };
+  let beforeSend: () => Promise<void> = async () => {};
+  const view = render(
+    <ConversationWithNotice onReady={(send) => (beforeSend = send)} />,
+    { wrapper },
+  );
+  await view.findByRole("combobox", { name: "Model: GPT-6 Sol" });
+  expect(view.queryByRole("status")).toBeNull();
+
+  offered = {
+    ...catalogue,
+    exposure: "allowed",
+    models: catalogue.models.filter((model) => model.id !== "gpt-6-sol"),
+  };
+  await act(() => beforeSend());
+  expect(view.getByRole("status").textContent).toBe(
+    "GPT-6 Sol isn't allowed any more, so this conversation now uses GPT-5.5. Pick another model to change it.",
+  );
+  expect(
+    await view.findByRole("combobox", {
+      name: "Model: GPT-5.5, thinking: Medium",
+    }),
+  ).toBeTruthy();
+  // Nothing was written: the pick stays on the server for when Sol is allowed again.
+  expect(writes).toEqual([]);
+
+  // Allowed again: the kept pick runs again, and there is nothing to say.
+  offered = catalogue;
+  await act(() => beforeSend());
+  await view.findByRole("combobox", { name: "Model: GPT-6 Sol" });
+  expect(view.queryByRole("status")).toBeNull();
+});
+
+test("a pick changed to the default somewhere else, with the model still offered, says nothing", async () => {
+  saved["conversation-a"] = { model: "gpt-6-sol", effort: null };
+  let beforeSend: () => Promise<void> = async () => {};
+  const view = render(
+    <ConversationWithNotice onReady={(send) => (beforeSend = send)} />,
+    { wrapper },
+  );
+  await view.findByRole("combobox", { name: "Model: GPT-6 Sol" });
+  // The same person picked the default in another tab.
+  saved["conversation-a"] = { model: null, effort: null };
+  await act(() => beforeSend());
+  await view.findByRole("combobox", { name: /^Model: GPT-5\.5/ });
+  expect(view.queryByRole("status")).toBeNull();
+
+  // And picking the default here says nothing either.
+  saved["conversation-a"] = { model: "gpt-6-sol", effort: null };
+  await act(() => beforeSend());
+  await view.findByRole("combobox", { name: "Model: GPT-6 Sol" });
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("combobox", { name: "Model: GPT-6 Sol" }));
+  const popup = await view.findByRole("dialog");
+  await user.click(within(popup).getByRole("option", { name: /^GPT-5\.5/ }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  await act(() => beforeSend());
+  expect(view.queryByRole("status")).toBeNull();
 });
 
 /**

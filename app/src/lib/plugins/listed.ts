@@ -1,3 +1,4 @@
+import type { PluginsProvider } from "./provider-vocabulary";
 import type { PluginServer } from "./queries";
 
 /*
@@ -7,11 +8,11 @@ import type { PluginServer } from "./queries";
  */
 
 /**
- * Whether a row came through a broker. A deployment only ever holds rows from one provider, so the
- * page needs to recognise "brokered", not to know which broker.
+ * Whether an app came from the directory. The page needs to recognise that, not to know which
+ * service the directory comes from.
  */
 const isBrokered = (server: PluginServer): boolean =>
-  server.provenance === "composio" || server.provenance === "arcade";
+  server.source === "directory";
 
 /**
  * The brokered apps this page lists, which is not every brokered row.
@@ -26,7 +27,7 @@ export function brokeredAccountsListedOn(
   return servers.filter(
     (server) =>
       isBrokered(server) &&
-      server.authScheme !== "NO_AUTH" &&
+      server.connectsWith !== "nothing" &&
       server.accountMode !== "shared" &&
       /* One that can only hold a shared account has nothing here for a person to connect. */
       !server.sharedOnly,
@@ -34,20 +35,23 @@ export function brokeredAccountsListedOn(
 }
 
 /**
- * The servers this page may list at all: none reached through Composio when the deployment has no
- * Composio key.
+ * The servers this page may list at all: none from a Composio directory when that directory isn't
+ * set up here (getAppSetup's `directoryAvailable` and `directoryProvider`).
  *
- * An app an administrator enabled while a key was set keeps its row after the key is removed, and
- * listing it offered a person an account they cannot connect, under a sentence about an environment
- * variable only an administrator can set. Without the broker there is nothing for them to decide.
+ * An app an administrator enabled while the directory was set up keeps its row after its key is
+ * removed, and listing it offered a person an account they cannot connect, under a sentence about an
+ * environment variable only an administrator can set. Without the directory there is nothing for
+ * them to decide. An Arcade directory's apps stay listed, each saying on its own row that an admin
+ * has to set connecting apps up.
  */
 export function serversListedFor(page: {
   servers: PluginServer[];
-  composioConfigured: boolean;
+  directoryAvailable: boolean;
+  directoryProvider: PluginsProvider;
 }): PluginServer[] {
-  return page.composioConfigured
+  return page.directoryAvailable || page.directoryProvider !== "composio"
     ? page.servers
-    : page.servers.filter((server) => server.provenance !== "composio");
+    : page.servers.filter((server) => !isBrokered(server));
 }
 
 /** Apps whose account is the organisation's, shown so a person knows a Bot does not act as them there. */
@@ -65,5 +69,5 @@ export function sharedAccountsListedOn(
  * needs no account reads On.
  */
 export function addedByUrlListedOn(servers: PluginServer[]): PluginServer[] {
-  return servers.filter((server) => server.provenance === "custom");
+  return servers.filter((server) => server.source === "address");
 }

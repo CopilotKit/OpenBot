@@ -59,10 +59,10 @@ function RouteComponent() {
   /*
    * The message goes in one commit after the intro, not with it. The conversation that replaces
    * this lands its first message the same way: its seed is swapped for the thread's own copy, a new
-   * row, and the scroller pins a newly arrived message of the person's near the top, with the end of
-   * the intro showing above it. Drawn in the first commit, the message is not "arrived" but simply
-   * there, and sits under the whole intro, a hand's width lower than the conversation puts it. A
-   * layout effect, so both commits land before the first paint.
+   * row, which the scroller takes for a message just sent. Arriving the same way here, it is placed
+   * by the same rule: under the whole intro while the conversation fits in the view (see
+   * `holdTheRoom` in `ui/message-scroller.tsx`), so nothing moves when the conversation replaces
+   * this. A layout effect, so both commits land before the first paint.
    */
   const [shown, setShown] = useState<readonly Message[]>([]);
   useLayoutEffect(() => {

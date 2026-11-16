@@ -1,16 +1,17 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { AuditEvent } from "@/components/audit/audit-cells";
-import { client } from "@/lib/client";
+import { previewCapabilityChanges } from "@/lib/api/generated/capabilities/capabilities";
+import type { CapabilityAnswer as ApiCapabilityAnswer } from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 import type { CapabilityChange, CapabilityChangesCheck } from "./translate";
 
-/** What the switches decide for one person, and which switch decided it. */
-export type CapabilityAnswer = {
-  allowed: boolean;
-  decidedBy: "default" | "organization" | "role" | "group";
-  /** The role or group that decided it. Empty otherwise. */
-  scopeId: string;
-};
+/**
+ * What the switches decide for one person, and which switch decided it: the API's
+ * `CapabilityAnswer`. `scopeId` is the role, the team's id or the directory group's name that
+ * decided it, and empty otherwise.
+ */
+export type CapabilityAnswer = ApiCapabilityAnswer;
 
 /** A person's own recent use of a permission they would lose, as the trail records it. */
 export type CapabilityActivity = {
@@ -36,7 +37,8 @@ export type PreviewPerson = {
   id: string;
   email: string;
   name: string | null;
-  role: "admin" | "user";
+  /** Their role as a member of the organization. */
+  role: "owner" | "admin" | "member";
   groups: string[];
   /** Each permission the changes touch, before and after. */
   capabilities: PreviewCapability[];
@@ -82,14 +84,14 @@ export function capabilityChangesPreviewQueryOptions(
 ) {
   return queryOptions({
     queryKey: capabilityChangeKeys.preview(changes),
-    queryFn: async (): Promise<CapabilityPreview> =>
-      (
-        await client("/api/admin/enterprise/capabilities/preview", {
-          method: "POST",
-          body: { changes },
-          fallback: "Couldn't work out who these changes affect.",
-        })
-      ).json(),
+    queryFn: ({ signal }): Promise<CapabilityPreview> =>
+      // An action that saves nothing: each ask is its own, so each gets its own key.
+      previewCapabilityChanges(
+        organizationId(),
+        { changes: [...changes] },
+        { "Idempotency-Key": idempotencyKey() },
+        { signal, fallback: "Couldn't work out who these changes affect." },
+      ) as Promise<CapabilityPreview>,
     retry: false,
   });
 }

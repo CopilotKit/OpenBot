@@ -14,7 +14,7 @@ import { authKeys } from "@/lib/auth/queries";
 import { browserKeys } from "@/lib/browser/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { learningKeys } from "@/lib/learning/queries";
-import { type PluginSkill, pluginKeys } from "@/lib/plugins/queries";
+import { type Skill, skillKeys } from "@/lib/skills/queries";
 import { Route as CapabilitiesRoute } from "@/routes/_authed/_app/capabilities.index";
 import { Route as CapabilitiesMemoryRoute } from "@/routes/_authed/_app/capabilities.memory";
 import { Route as CapabilitiesSkillsRoute } from "@/routes/_authed/_app/capabilities.skills";
@@ -42,17 +42,16 @@ const skill = (
   slug: string,
   title: string,
   ownerUserId: string | null,
-): PluginSkill => ({
+): Skill => ({
   id: slug,
   slug,
   ownerUserId,
   title,
   summary: `${title}, step by step.`,
   instructions: "Do it.",
-  origin: "manual",
-  installedBy: null,
   grantedTo: [],
   tools: [],
+  usableOnYourBots: ownerUserId !== null,
 });
 
 const refundOrder = {
@@ -90,15 +89,10 @@ function draw(
     role: "user",
   });
   if (written) {
-    client.setQueryData(pluginKeys.page(), {
-      catalogue: [],
-      servers: [],
-      skills: [
-        skill("weekly-report", "Weekly report", "me"),
-        skill("onboarding", "Onboarding", null),
-      ],
-      botsMayCallBack: true,
-    });
+    client.setQueryData(skillKeys.list(), [
+      skill("weekly-report", "Weekly report", "me"),
+      skill("onboarding", "Onboarding", null),
+    ]);
   }
   if (learning) {
     client.setQueryData(learningKeys.personal, {
@@ -110,7 +104,8 @@ function draw(
   client.setQueryData(learningKeys.review, {
     canReview: true,
     autoApprove: null,
-    sources: [],
+    approved: 0,
+    spaces: [],
   });
   client.setQueryData(browserKeys.state, { available: browser });
   const root = createRootRoute();
@@ -192,7 +187,7 @@ test("the skills you wrote and New skill stay when Learning can't be read", asyn
   const view = draw("team", { learning: false });
   await view.findByRole("heading", { name: "Skills" });
   await view.findByText(
-    "Couldn't load your Learning settings. Reload the page.",
+    "Couldn't load your Learning settings. Try again in a moment.",
   );
   const yours = section(view, "Your skills");
   expect(within(yours).getByText("Weekly report")).toBeTruthy();
@@ -204,7 +199,7 @@ test("in the personal edition too, the skills you wrote and New skill stay when 
   const view = draw("personal", { learning: false });
   await view.findByRole("heading", { name: "Skills" });
   await view.findByText(
-    "Couldn't load your Learning settings. Reload the page.",
+    "Couldn't load your Learning settings. Try again in a moment.",
   );
   const yours = section(view, "Your skills");
   expect(within(yours).getByText("Weekly report")).toBeTruthy();
@@ -215,14 +210,16 @@ test("in the personal edition too, the skills you wrote and New skill stay when 
 
 test("no empty state when the skills you wrote couldn't be read", async () => {
   const view = draw("team", { written: false });
-  await view.findByText("Couldn't load the skills you wrote. Reload the page.");
+  await view.findByText(
+    "Couldn't load the skills you wrote. Try again in a moment.",
+  );
   const yours = section(view, "Your skills");
   expect(within(yours).getByText("Refund order")).toBeTruthy();
   cleanup();
 
   const empty = draw("team", { written: false, learned: [] });
   await empty.findByText(
-    "Couldn't load the skills you wrote. Reload the page.",
+    "Couldn't load the skills you wrote. Try again in a moment.",
   );
   expect(empty.queryByText(/No skills yet/)).toBeNull();
 });

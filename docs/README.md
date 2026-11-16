@@ -4,11 +4,12 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
 
 - [Architecture](architecture.md): services, ports, browser governance, computers, components, plugins, knowledge, and security boundaries.
 - [Configuration](configuration.md): environment variables and tenant package YAML.
-- [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in and no Admin.
+- [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
+- [The API spec](../api/README.md): the REST API in OpenAPI and the live channels in AsyncAPI, the client generated from them, and how to change them.
 - [Bots](coworkers.md): durable Bot profiles, conversations, visibility, deletion, and external AG-UI registration.
 - [Approvals](approvals.md): which actions a Bot asks before, the order that decides it, and what an admin can close.
-- [Routines](routines.md): the one list of routines, goals and check-ins, the worker that fires them, and who they run as.
+- [Routines](routines.md): the one list of routines, goals and check-ins, how the server fires them, and who they run as.
 - [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.
 - [Public-web research](web-research.md): search and page reading through Parallel, Exa or Firecrawl.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:
@@ -18,11 +19,11 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
   - [Notion](plugins/notion.md)
   - [MCP servers added by URL](plugins/mcp-by-url.md)
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
-- [Kubernetes](../charts/openbot/README.md): the Helm chart, what a cluster needs before it, and the values that differ per cloud.
+- Kubernetes: the two Helm charts published with each release, `openbot-bundle` (OpenBot and Intelligence together, on one PostgreSQL server) and `openbot` (OpenBot alone, pointed at an Intelligence that already runs). Each chart's guide (`helm show readme`) covers what a cluster needs before it and the values that differ per cloud.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.
 - [Releases and upstream integration](upstream-upgrades.md): integrating upstream into customer source, kept separate from deploying an accepted release.
 - [Explicit local updates](local-updates.md): `bun scripts/update.ts local`, which updates a known source checkout at a maintenance boundary.
-- [Kubernetes release promotion](kubernetes-upgrades.md): `bun scripts/update.ts kubernetes`, which promotes a release through the Helm chart.
+- [Kubernetes release promotion](kubernetes-upgrades.md): `bun scripts/update.ts kubernetes`, which promotes a release through the `openbot` Helm chart.
 - [Installer runbook](installer-runbook.md): build an installer, release it, install it on a clean machine, and check that it is the build you meant.
 - [Windows desktop signing](windows-signing.md): protected Azure Key Vault signing and verification of the app and NSIS installer.
 - [Desktop install](desktop-install.md): the desktop app's setup flow, who owns each step, and the decisions behind it.

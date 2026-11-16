@@ -969,7 +969,25 @@ fn start_machine_with<H>(
     let started = match started {
         Ok(_) => format!("{MACHINE} started."),
         Err(error) if error.contains("already running") => {
-            format!("{MACHINE} was already running.")
+            match answers_over_ssh(&mut run, rootful) {
+                Ok(()) => format!("{MACHINE} was already running."),
+                Err(why) => {
+                    log::warn!(
+                        "[engine] {MACHINE} says it is running, but its engine does not answer \
+                         ({why}); stopping it and starting it again"
+                    );
+                    if let Err(error) = run(&["machine", "stop", MACHINE]) {
+                        return StepOutcome::stopped(Step::StartMachine, &error);
+                    }
+                    let held = target_is_windows.then(&hold_docker_pipe);
+                    let again = run(&["machine", "start", MACHINE]);
+                    drop(held);
+                    if let Err(error) = again {
+                        return StepOutcome::stopped(Step::StartMachine, &error);
+                    }
+                    format!("{MACHINE} was running but not answering, so it was started again.")
+                }
+            }
         }
         Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
     };
@@ -980,6 +998,32 @@ fn start_machine_with<H>(
         return StepOutcome::stopped(Step::StartMachine, &error);
     }
     StepOutcome::went(Step::StartMachine, started)
+}
+
+/**
+OpenBot's machine's engine answers over `podman`'s own connection, or why not.
+
+A machine can say it is running while nothing reaches it: on the EC2 Mac, with `gvproxy` gone, the
+VM kept running, `podman machine start` refused it as already running, and every Start and Retry
+stopped at once at "The software OpenBot runs on isn't running" until the machine was stopped by
+hand. Only stopping it and starting it again brings its forwarding back (see `running_machines`).
+*/
+fn answers_over_ssh(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    rootful: bool,
+) -> Result<(), String> {
+    let connection = connection_for(MACHINE, rootful);
+    let answer = run(&[
+        "--connection",
+        &connection,
+        "version",
+        "--format",
+        "{{.Server.APIVersion}}",
+    ])?;
+    if answer.trim().is_empty() {
+        return Err(format!("{connection} gave no server version"));
+    }
+    Ok(())
 }
 
 /// OpenBot's dead port rules removed, said in the log. Never stops the start: a machine whose rules
@@ -1518,7 +1562,13 @@ fn api_answers_in(
     }
 }
 
-fn machine_state(listing: &str, machine: &str) -> Result<Option<String>, String> {
+/// The machine `name`'s state as `podman machine inspect` says it ("running", "stopped",
+/// "starting"), or None when inspect does not list it or says none.
+pub fn machine_state_named(name: &str) -> Result<Option<String>, String> {
+    machine_state(&podman(&["machine", "inspect", name])?, name)
+}
+
+pub fn machine_state(listing: &str, machine: &str) -> Result<Option<String>, String> {
     let machines: Vec<Value> = serde_json::from_str(listing)
         .map_err(|error| format!("could not read podman machine inspect JSON: {error}"))?;
     Ok(machines
@@ -2003,6 +2053,79 @@ mod tests {
             .last()
             .unwrap()
             .contains(HOST_GATEWAY_CONFIG));
+    }
+
+    /**
+    The EC2 Mac: OpenBot's machine kept running with `gvproxy` gone, so nothing reached its engine.
+    `podman machine start` said it was already running, the start went on, and the back end stopped
+    at once at "The software OpenBot runs on isn't running" on every Start and Retry. A machine that
+    says it is running and does not answer is stopped and started again; one that answers is left.
+    */
+    #[test]
+    fn a_running_machine_that_does_not_answer_is_started_again() {
+        for (windows, answers_at_first) in [(false, false), (true, false), (false, true)] {
+            let inspect = serde_json::json!([{
+                "Name": "openbot",
+                "State": "running",
+                "UserModeNetworking": true,
+                "Rootful": true
+            }])
+            .to_string();
+            let mut calls = Vec::<String>::new();
+            let mut restarted = false;
+            let started = start_machine_with(
+                |args| {
+                    calls.push(args.join(" "));
+                    match args {
+                        ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                        ["machine", "start", "openbot"] if !restarted => {
+                            Err("Error: unable to start \"openbot\": already running".into())
+                        }
+                        ["machine", "start", "openbot"] => Ok(String::new()),
+                        ["machine", "stop", "openbot"] => {
+                            restarted = true;
+                            Ok(String::new())
+                        }
+                        ["--connection", _, "version", ..] if answers_at_first || restarted => {
+                            Ok("5.0.0\n".into())
+                        }
+                        ["--connection", _, "version", ..] => Err(
+                            "Cannot connect to Podman. Please verify your connection to the Linux system"
+                                .into(),
+                        ),
+                        ["machine", "ssh", "openbot", "timeout", "3", "getent", ..] => {
+                            Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                        }
+                        ["machine", "ssh", "openbot", ..] => Ok(String::new()),
+                        _ => Err(format!("unexpected args: {args:?}")),
+                    }
+                },
+                windows,
+                || (),
+            );
+            let case = format!("windows {windows}, answers {answers_at_first}");
+            assert!(started.ok, "{case}: {started:?}");
+            let stop = calls.iter().position(|call| call == "machine stop openbot");
+            if answers_at_first {
+                assert_eq!(stop, None, "{case}: {calls:?}");
+                continue;
+            }
+            let stop = stop.unwrap_or_else(|| panic!("{case}: never stopped: {calls:?}"));
+            assert!(
+                calls[stop + 1..]
+                    .iter()
+                    .any(|call| call == "machine start openbot"),
+                "{case}: {calls:?}"
+            );
+            // Asked through the connection of the engine it runs in.
+            assert!(
+                calls.iter().any(|call| call.starts_with(&format!(
+                    "--connection {} version",
+                    if windows { "openbot-root" } else { "openbot" }
+                ))),
+                "{case}: {calls:?}"
+            );
+        }
     }
 
     #[test]

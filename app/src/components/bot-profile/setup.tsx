@@ -58,10 +58,7 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  type AgentProfile,
-  agentCapabilitiesQueryOptions,
-} from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/agents/queries";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -311,11 +308,11 @@ function IsolatedRow({
   agent: AgentProfile;
   onSave: (isolated: boolean) => Promise<unknown>;
 }) {
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const available = capabilities?.isolationAvailable ?? false;
+  const available = capabilities?.isolatedBots ?? false;
   const allowed = mine?.capabilities.isolatedComputers !== false;
   const isPublic = agent.visibility === "public";
   // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.

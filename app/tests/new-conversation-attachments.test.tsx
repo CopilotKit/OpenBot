@@ -1,3 +1,12 @@
+import { answerBotsList, botPath } from "./bots-api";
+import {
+  attachmentPath,
+  CONVERSATIONS_PATH,
+  conversationOf,
+  conversationPath,
+  problem,
+  ROUTE_PATH,
+} from "./conversations-api";
 import "./home-fallback-routing.fixture";
 
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
@@ -28,6 +37,9 @@ import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { queryClient } from "@/query-client";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 import { Route as HomeRoute } from "@/routes/_authed/_app/index";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -40,8 +52,9 @@ import { settleReactWork } from "./settle-react-work";
  *
  * Everything below the HTTP boundary is real: the routes, the composer, the start sequence, the
  * hand-over to `ChannelChat` and the run request. Only `fetch` is a fixture, answering the upload,
- * withdraw and discard routes as `POST /api/channels/:id/attachments`, `DELETE /api/attachments/:id`
- * and `DELETE /api/channels/:id?discardFailedStart=true` do.
+ * withdraw and discard operations as the API does: `POST /conversations/:id/attachments`,
+ * `DELETE /attachments/:id` and `DELETE /conversations/:id?discardFailedStart=true`, under
+ * `/api/v2/organizations/default`.
  */
 
 const NativeResponse = globalThis.Response;
@@ -112,53 +125,64 @@ beforeAll(() => {
       );
       const method =
         init?.method ?? (input instanceof Request ? input.method : "GET");
-      if (url.pathname === "/api/channels" && method === "POST") {
+      if (url.pathname === CONVERSATIONS_PATH && method === "POST") {
         trail.push("create");
-        return NativeResponse.json({ channel }, { status: 201 });
-      }
-      if (url.pathname === `/api/channels/${channel.id}/attachments`) {
-        const file = (init?.body as FormData | undefined)?.get("file") as File;
-        trail.push(`upload ${file.name}`);
-        if (file.name === REFUSED)
-          return NativeResponse.json({ error: REFUSAL }, { status: 415 });
-        uploads += 1;
         return NativeResponse.json(
-          { id: `att-${uploads}`, name: file.name, mimeType: "text/plain" },
+          { conversation: conversationOf(channel) },
           { status: 201 },
         );
       }
-      if (url.pathname.startsWith("/api/attachments/") && method === "DELETE") {
+      if (url.pathname === conversationPath(channel.id, "/attachments")) {
+        const file = (init?.body as FormData | undefined)?.get("file") as File;
+        trail.push(`upload ${file.name}`);
+        if (file.name === REFUSED) return problem(415, REFUSAL);
+        uploads += 1;
+        return NativeResponse.json(
+          {
+            id: `att-${uploads}`,
+            name: file.name,
+            mimeType: "text/plain",
+            sizeBytes: file.size,
+          },
+          { status: 201 },
+        );
+      }
+      if (url.pathname.startsWith(attachmentPath("")) && method === "DELETE") {
         trail.push(`withdraw ${url.pathname.split("/").at(-1)}`);
         return new NativeResponse(null, { status: 204 });
       }
-      if (url.pathname.startsWith("/api/attachments/"))
+      // Where the transcript loads a sent file from.
+      if (url.pathname.startsWith(attachmentPath("")))
         return new NativeResponse(null, { status: 200 });
       if (
-        url.pathname === `/api/channels/${channel.id}` &&
+        url.pathname === conversationPath(channel.id) &&
         method === "DELETE"
       ) {
         trail.push(`discard ${url.searchParams.get("discardFailedStart")}`);
         return new NativeResponse(null, { status: 204 });
       }
-      if (url.pathname === "/api/route")
+      if (url.pathname === ROUTE_PATH)
         return NativeResponse.json({
-          agentId: BOT,
+          botId: BOT,
           name: bot.name,
           reason: "chosen",
           fallback: false,
           viaMention: false,
         });
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [bot] });
-      if (url.pathname === `/api/agents/${BOT}`)
-        return NativeResponse.json({ agent: bot });
-      if (url.pathname === `/api/plugins/for/${BOT}`)
-        return NativeResponse.json({ tools: [], skills: [] });
-      if (url.pathname === `/api/components/for-agent/${BOT}`)
-        return NativeResponse.json({ components: [] });
-      if (url.pathname === "/api/voice/sessions")
+      const bots = answerBotsList(url, init, { visible: [bot] });
+      if (bots) return bots;
+      if (url.pathname === botPath(BOT))
+        return NativeResponse.json({ bot: bot });
+      if (url.pathname === botGrantsPath(BOT)) return botGrantsResponse();
+      if (url.pathname === botComponentsPath(BOT))
+        return botComponentsResponse();
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (url.pathname === "/api/admin/enterprise/me")
+      if (url.pathname === MY_CAPABILITIES_PATH)
         return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
@@ -184,10 +208,15 @@ beforeAll(() => {
           { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
         ]);
       }
-      if (/\/api\/channels\/[^/]+(\/(activity|busy|read))?$/.test(url.pathname))
-        return method === "GET"
-          ? NativeResponse.json({ channel })
-          : new NativeResponse(null, { status: 204 });
+      if (url.pathname === conversationPath(channel.id) && method === "GET")
+        return NativeResponse.json({ conversation: conversationOf(channel) });
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy|mark-read)$/.test(
+          url.pathname,
+        ) &&
+        method === "POST"
+      )
+        return new NativeResponse(null, { status: 204 });
       if (/\/threads\/[^/]+(\/messages)?$/.test(url.pathname))
         return NativeResponse.json({ messages: [] });
       throw new Error(`Unexpected fixture request: ${method} ${url.pathname}`);

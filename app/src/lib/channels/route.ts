@@ -1,4 +1,6 @@
-import { tryClient } from "@/lib/client";
+import { routeConversationMessage } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 /**
  * Which coworker a message should go to.
@@ -53,31 +55,22 @@ export async function routeMessage(
   skillSlugs: readonly string[] = [],
 ): Promise<RoutingDecision> {
   const asked = routingText(text);
-  const response = await tryClient("/api/route", {
-    method: "POST",
-    body: {
-      text: asked,
-      ...(agentId ? { agentId } : {}),
-      ...(skillSlugs.length ? { skillSlugs } : {}),
-    },
-  });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: unknown;
-      names?: unknown;
-    } | null;
-    const message =
-      typeof body?.error === "string" ? body.error : "Couldn't pick a Bot.";
-    if (
-      response.status === 409 &&
-      Array.isArray(body?.names) &&
-      body.names.every((name) => typeof name === "string")
-    ) {
-      throw new CoworkerRoutingRefusedError(
-        `${message} ${body.names.join(", ")}. Choose one with @.`,
-      );
-    }
-    throw new Error(message);
+  try {
+    const { botId, ...routed } = await routeConversationMessage(
+      organizationId(),
+      {
+        text: asked,
+        ...(agentId ? { botId: agentId } : {}),
+        ...(skillSlugs.length ? { skillSlugs: [...skillSlugs] } : {}),
+      },
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Couldn't pick a Bot." },
+    );
+    return { ...routed, agentId: botId };
+  } catch (error) {
+    // More than one Bot has the name the message used. The server's sentence names them.
+    if (error instanceof ClientError && error.code === "BOT_NAME_AMBIGUOUS")
+      throw new CoworkerRoutingRefusedError(error.message);
+    throw error;
   }
-  return (await response.json()) as RoutingDecision;
 }

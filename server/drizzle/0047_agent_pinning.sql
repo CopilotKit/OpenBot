@@ -1,1 +1,0 @@
-ALTER TABLE "agent_preferences" ADD COLUMN "pinned_at" timestamp with time zone;

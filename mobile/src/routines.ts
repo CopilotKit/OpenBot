@@ -1,4 +1,4 @@
-import type { RoutineStatus } from "./api";
+import type { RoutineRunStatus as RoutineStatus } from "./api";
 import { colors } from "./ui";
 
 /** Run history in the words the routine page uses: Running, Succeeded, Failed. */

@@ -1,0 +1,823 @@
+# Model connections: the vault of credentials, the Bots' model key, the model catalogue and each conversation's model choice.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/credentials:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Credentials]
+      operationId: listCredentials
+      summary: List the credentials in the vault
+      description: >-
+        Return one page of the credentials the organization's vault keeps,
+        live and revoked, oldest first. Each organization has its own vault,
+        and another organization's credentials are never listed. A credential
+        says what it is for and whether it is live, and never holds its
+        secret: nothing in the API reads a secret back out. Only an
+        administrator of the organization may list them. A missing cursor
+        starts at the
+        first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [credentials:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of credentials.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialPage'
+              examples:
+                modelKey:
+                  $ref: '#/components/examples/CredentialPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Credentials]
+      operationId: createCredential
+      summary: Add a credential to the vault
+      description: >-
+        Encrypt a secret and keep it in the organization's vault under one
+        key: a kind, a
+        provider and a key id. A key holds one live credential, so adding one
+        for a key that already has one replaces it, and the one it replaces is
+        revoked in the same write. A model key sent without a key id is filed
+        under the name OpenBot's own Bots read (getModelKey). The secret is
+        write-only: no answer includes it, now or later. Recorded on the audit
+        trail. Only an administrator of the organization may add one.
+      security:
+        - webSession: []
+        - appOAuth: [credentials:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialInput'
+            examples:
+              modelKey:
+                value:
+                  kind: model
+                  provider: openai
+                  secret: sk-example
+      responses:
+        '201':
+          description: The credential, as kept. Never its secret.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+              examples:
+                modelKey:
+                  $ref: '#/components/examples/CredentialExample'
+        '400':
+          $ref: '#/components/responses/InvalidCredential'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/credentials/{credentialId}/revoke:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/CredentialId'
+    post:
+      tags: [Credentials]
+      operationId: revokeCredential
+      summary: Revoke a credential
+      description: >-
+        Stop a live credential being used, and keep its record. Nothing reads
+        a revoked credential again. Recorded on the audit trail. Only an
+        administrator of the organization may revoke one. One that does not
+        exist, is in another organization's vault, or is revoked already, is
+        not found.
+      security:
+        - webSession: []
+        - appOAuth: [credentials:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The credential, revoked. Never its secret.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+              examples:
+                revoked:
+                  $ref: '#/components/examples/RevokedCredentialExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/CredentialNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/model-key:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Credentials]
+      operationId: getModelKey
+      summary: Read where the Bots find their model key
+      description: >-
+        Return the provider OpenBot's own Bots run on, the key id their model
+        key is filed under in the organization's vault, and whether a live key
+        is kept there. Never the key. A model key added without a key id is
+        filed here. Only an administrator of the organization may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [credentials:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: Where the Bots find their model key, and whether one is kept there.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelKey'
+              examples:
+                kept:
+                  $ref: '#/components/examples/ModelKeyExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ModelKeyNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/model-catalogue:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Models]
+      operationId: getModelCatalogue
+      summary: Read the models Bots can run on
+      description: >-
+        Return the models a person may pick for a conversation, with how hard
+        each can think, the one a run uses when nobody picked, and who serves
+        them. The models come from whatever serves OpenBot's model, the
+        provider or a gateway in front of it, read in the background, and are
+        narrowed to the ones an administrator allowed. With view=all, every
+        model listed before that narrowing, for an administrator choosing
+        which to allow. When the listing can't be read, the catalogue holds
+        the deployment's own model and nothing to pick.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [model-catalogue:read]
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ModelCatalogueView'
+      responses:
+        '200':
+          description: The models Bots can run on.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelCatalogue'
+              examples:
+                offered:
+                  $ref: '#/components/examples/ModelCatalogueExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/ConversationId'
+    get:
+      tags: [Models]
+      operationId: getModelChoice
+      summary: Read the model a person chose for a conversation
+      description: >-
+        Return the model and thinking effort a person chose for one of their
+        conversations, each null for the default. Null too while the choice
+        can't be used: the model is no longer offered, or the deployment moved
+        to another provider. The choice is kept for when it can be used again.
+        Only the person themselves may read it.
+      security:
+        - webSession: []
+        - appOAuth: [model-choices:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's choice, as a run in the conversation reads it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelChoice'
+              examples:
+                chosen:
+                  $ref: '#/components/examples/ModelChoiceExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/ConversationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Models]
+      operationId: replaceModelChoice
+      summary: Choose the model for a conversation
+      description: >-
+        Set the model and thinking effort a person's runs in one of their
+        conversations answer on, or null either to go back to the default. The
+        model must be one the catalogue offers (getModelCatalogue), and the
+        effort one that model takes. Every later run in the conversation reads
+        it, from any device. Only the person themselves may choose, and only
+        while choosing a model is on.
+      security:
+        - webSession: []
+        - appOAuth: [model-choices:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelChoiceInput'
+            examples:
+              chosen:
+                value:
+                  model: gpt-6.1-pro
+                  effort: xhigh
+              defaults:
+                value:
+                  model: null
+                  effort: null
+      responses:
+        '200':
+          description: The person's choice, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelChoice'
+              examples:
+                chosen:
+                  $ref: '#/components/examples/ModelChoiceExample'
+        '400':
+          $ref: '#/components/responses/InvalidModelChoice'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ModelChoiceForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/ConversationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    CredentialId:
+      name: credentialId
+      in: path
+      required: true
+      description: The credential's id.
+      schema:
+        type: string
+        format: uuid
+      example: 3b9a5f8e-6c1d-4e2a-9f47-1d2c3b4a5e6f
+    ModelCatalogueView:
+      name: view
+      in: query
+      description: >-
+        offered, the default: the models people may pick, narrowed to the
+        ones an administrator allowed. all: every model the provider or
+        gateway lists, before that narrowing, for an administrator choosing
+        which to allow. Only an administrator may ask for all.
+      schema:
+        type: string
+        enum: [offered, all]
+        default: offered
+  schemas:
+    CredentialKind:
+      type: string
+      description: >-
+        What a credential is for. model: a key OpenBot's Bots call a model
+        with. connector: an app's key. mcp: a token for an app's server.
+        agent: a key for a company's own agent. mcp_oauth_client: the
+        organization's registration with an app. mcp_user_token: one person's
+        sign-in to an app, kept when they connected it.
+      enum:
+        - model
+        - connector
+        - agent
+        - mcp
+        - mcp_oauth_client
+        - mcp_user_token
+    Credential:
+      type: object
+      description: >-
+        A credential in the organization's vault as the API shows it: what it
+        is for and
+        whether it is live. Never its secret, which only ever goes in.
+      required: [id, kind, provider, keyId, metadata, createdAt, revokedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/CredentialKind'
+        provider:
+          type: string
+          description: >-
+            Who the secret is for: a model provider such as openai, an app, or
+            an app's server.
+        keyId:
+          type: string
+          description: >-
+            The name it is kept under. A key holds one live credential at a
+            time.
+        metadata:
+          type: object
+          additionalProperties: true
+          description: What was said about it when it was added. Never secret.
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When it was revoked. Null while it is live.
+    CredentialPage:
+      type: object
+      required: [credentials, nextCursor]
+      properties:
+        credentials:
+          type: array
+          description: Oldest first, and by id among credentials added at the same moment.
+          items:
+            $ref: '#/components/schemas/Credential'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    CredentialInput:
+      type: object
+      additionalProperties: false
+      required: [kind, provider, secret]
+      properties:
+        kind:
+          type: string
+          description: >-
+            model, connector or mcp. The other kinds are written by what they
+            belong to: an app's registration when it is added, a person's
+            sign-in when they connect it.
+          enum: [model, connector, mcp]
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: >-
+            Who the secret is for: for a model key, the provider the Bots run
+            on (getModelKey). Trimmed.
+        keyId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: >-
+            The name to keep it under. Required, except for a model key, which
+            is filed under the name the Bots read (getModelKey). Trimmed.
+        metadata:
+          type: object
+          maxProperties: 20
+          additionalProperties:
+            type: string
+            maxLength: 1000
+          description: What to say about it. Never secret. Empty when left out.
+        secret:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          writeOnly: true
+          description: >-
+            The secret itself. Encrypted before it is kept, and never sent
+            back: no answer includes it, now or later.
+    ModelKey:
+      type: object
+      description: >-
+        Where OpenBot's own Bots find their model key in the vault, and
+        whether one is kept there. Never the key.
+      required: [provider, keyId, set]
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic]
+          description: The provider the Bots run on.
+        keyId:
+          type: string
+          description: The name the key is kept under.
+        set:
+          type: boolean
+          description: Whether a live model key is kept under that name.
+    ModelOption:
+      type: object
+      description: One model a Bot can run on.
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          description: What a run sends upstream.
+        label:
+          type: string
+          description: What a model picker shows.
+        vendor:
+          type: string
+          description: >-
+            Who makes it, as a brand id such as openai or anthropic. Absent
+            for a gateway's own alias, which names no maker.
+        efforts:
+          type: array
+          description: >-
+            How hard it can be asked to think, weakest first, such as none,
+            minimal, low, medium, high, xhigh and max. Absent when it takes no
+            effort, or nothing says which it takes.
+          items:
+            type: string
+        defaultEffort:
+          type: string
+          description: The effort it thinks at when none is sent, when its provider says.
+    ModelCatalogue:
+      type: object
+      description: The models Bots can run on, and which one a run uses by default.
+      required: [provider, source, exposure, default, models, choosable, listed]
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic]
+          description: >-
+            The provider prefix the model allowlist names models with
+            (provider/model). Not who serves the models: that is source.
+        source:
+          type: string
+          enum: [openai, anthropic, google, xai, gateway, chatgpt, claude]
+          description: >-
+            Who serves the models: a provider's own API, an OpenAI-compatible
+            gateway in front of one, or a ChatGPT or Claude plan.
+        exposure:
+          type: string
+          enum: [all, allowed]
+          description: >-
+            Who decides what people may pick. all: one person on their own
+            machine, offered every model listed. allowed: a team, offered the
+            models an administrator allowed.
+        default:
+          type: string
+          description: What a run uses when nobody picked. Always one of models.
+        models:
+          type: array
+          description: Newest first.
+          items:
+            $ref: '#/components/schemas/ModelOption'
+        choosable:
+          type: boolean
+          description: >-
+            Whether people have anything to pick. False until an administrator
+            allows a model in a team, or while the listing can't be read.
+        listed:
+          type: boolean
+          description: >-
+            Whether the listing was read. False means only the deployment's own
+            model is known.
+    ModelChoice:
+      type: object
+      description: >-
+        The model and thinking effort a person chose for one conversation.
+        Null model: the default model. Null effort: none is sent, so the model
+        thinks on its own default.
+      required: [model, effort]
+      properties:
+        model:
+          type: [string, 'null']
+        effort:
+          type: [string, 'null']
+    ModelChoiceInput:
+      type: object
+      additionalProperties: false
+      required: [model, effort]
+      properties:
+        model:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: A model the catalogue offers, or null for the default. Trimmed.
+        effort:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 40
+          pattern: \S
+          description: >-
+            An effort the model takes, or null for its own. Trimmed, and read
+            in lower case.
+  responses:
+    InvalidCredential:
+      description: >-
+        A field is missing or out of bounds, a connector or app token was sent
+        without a key id, or a name or a note holds text that can't be kept.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            invalid:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Credential input is invalid.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CredentialNotFound:
+      description: >-
+        No live credential has that id: it never existed or is revoked
+        already. Or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/credential-not-found
+                title: Credential not found.
+                status: 404
+                detail: Credential was not found or already revoked
+                code: CREDENTIAL_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CredentialsUnavailable:
+      description: This OpenBot keeps no vault.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noVault:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: Credential storage is not configured.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    ModelKeyNotFound:
+      description: >-
+        This OpenBot's Bots don't read a model key from the vault. Or the
+        organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            none:
+              value:
+                type: https://open.bot/errors/model-key-not-found
+                title: Model key not found.
+                status: 404
+                detail: The Bots here don't read a model key from the vault.
+                code: MODEL_KEY_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidModelChoice:
+      description: >-
+        The body is malformed, the model isn't one the catalogue offers, or
+        the model can't think at that effort.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notOffered:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That model isn't available. Pick another one.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            effort:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That model can't think at that level. Pick another one.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ModelChoiceForbidden:
+      description: >-
+        The conversation is somebody else's choice to make, an administrator
+        turned choosing a model off, or the caller may not use Bots.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can choose the model for their conversations.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            turnedOff:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Choosing a model is turned off. Ask an admin to turn it on.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    CredentialExample:
+      summary: The Bots' model key.
+      value:
+        id: 3b9a5f8e-6c1d-4e2a-9f47-1d2c3b4a5e6f
+        kind: model
+        provider: openai
+        keyId: openai-api-key
+        metadata: {}
+        createdAt: '2026-11-14T09:00:00.000Z'
+        revokedAt: null
+    RevokedCredentialExample:
+      summary: A revoked app key.
+      value:
+        id: 8d2e4c6a-1b3f-4a5e-9c7d-2f1e3d4c5b6a
+        kind: connector
+        provider: slack
+        keyId: slack-bot-token
+        metadata: {}
+        createdAt: '2026-11-01T09:00:00.000Z'
+        revokedAt: '2026-11-14T09:30:00.000Z'
+    CredentialPageExample:
+      summary: The Bots' model key and a revoked app key.
+      value:
+        credentials:
+          - id: 8d2e4c6a-1b3f-4a5e-9c7d-2f1e3d4c5b6a
+            kind: connector
+            provider: slack
+            keyId: slack-bot-token
+            metadata: {}
+            createdAt: '2026-11-01T09:00:00.000Z'
+            revokedAt: '2026-11-14T09:30:00.000Z'
+          - id: 3b9a5f8e-6c1d-4e2a-9f47-1d2c3b4a5e6f
+            kind: model
+            provider: openai
+            keyId: openai-api-key
+            metadata: {}
+            createdAt: '2026-11-14T09:00:00.000Z'
+            revokedAt: null
+        nextCursor: null
+    ModelKeyExample:
+      summary: An OpenAI key, kept.
+      value:
+        provider: openai
+        keyId: openai-api-key
+        set: true
+    ModelCatalogueExample:
+      summary: Three models an administrator allowed.
+      value:
+        provider: openai
+        source: openai
+        exposure: allowed
+        default: gpt-6.1-terra
+        models:
+          - id: gpt-6.1-terra
+            label: GPT-6.1 Terra
+            vendor: openai
+            efforts: [low, medium, high]
+            defaultEffort: medium
+          - id: gpt-6.1-pro
+            label: GPT-6.1 Pro
+            vendor: openai
+            efforts: [medium, high, xhigh]
+            defaultEffort: high
+          - id: gpt-6.1-mini
+            label: GPT-6.1 Mini
+            vendor: openai
+        choosable: true
+        listed: true
+    ModelChoiceExample:
+      summary: A model and effort chosen.
+      value:
+        model: gpt-6.1-pro
+        effort: xhigh

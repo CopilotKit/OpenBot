@@ -144,6 +144,58 @@ mod logging_file {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// The tokens an OpenBot that runs elsewhere gives this app: an access token (`oba_`) and a
+    /// refresh token (`obr_`). Neither reaches the file, however the line carries it, and the line
+    /// still says what happened.
+    #[test]
+    fn an_openbot_access_or_refresh_token_in_a_line_is_redacted_in_the_file() {
+        let folder = temp_root("log-redact-openbot");
+        let logger = logger_in(&folder, MAX_FILE_BYTES, KEPT_FILES);
+        // Short and all one case, so no general rule catches them: only the prefix says token.
+        let access = fake("oba_", "kq7m", 3);
+        let refresh = fake("obr_", "zt4w", 3);
+        // As the real ones are: 43 characters of base64url after the prefix.
+        let long_access = fake("oba_", "Ab3_x-Q", 6);
+        let long_refresh = fake("obr_", "Zq9-k_L", 6);
+        info(
+            logger.as_ref(),
+            "openbot_desktop_lib::connected::relay",
+            &format!("[relay] OpenBot refused {access} for GET /api/me"),
+        );
+        info(
+            logger.as_ref(),
+            "openbot_desktop_lib::connected::sign_in",
+            &format!("[connect] the refresh with {refresh} answered 400 invalid_grant"),
+        );
+        logger.log(
+            &log::Record::builder()
+                .level(log::Level::Warn)
+                .target("reqwest::async_impl::client")
+                .args(format_args!(
+                    "request failed: {long_access} then {long_refresh} at https://openbot.example.com/api/v2/bots"
+                ))
+                .build(),
+        );
+        let written = current(&folder);
+        for token in [&access, &refresh, &long_access, &long_refresh] {
+            assert!(!written.contains(token.as_str()), "{written}");
+        }
+        assert!(!written.contains("oba_") && !written.contains("obr_"), "{written}");
+        assert!(
+            written.contains("[relay] OpenBot refused [redacted] for GET /api/me"),
+            "{written}"
+        );
+        assert!(
+            written.contains("[connect] the refresh with [redacted] answered 400 invalid_grant"),
+            "{written}"
+        );
+        assert!(
+            written.contains("https://openbot.example.com/api/v2/bots"),
+            "{written}"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
     /// The folder never holds more than the current file and `kept` set-aside ones, the oldest
     /// going first, whatever earlier sessions left there.
     #[test]

@@ -16,6 +16,8 @@ const BUSY =
   "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.";
 const MARKETPLACE =
   "OpenBot's backend needs its marketplace licence before it can capture. Retrying; nothing is lost.";
+/** What the CopilotKit runtime answers `trajectory/connect` with when it cannot reach Intelligence. */
+const COULD_NOT_CONNECT = "Could not connect to Intelligence";
 
 function body(status: number, code: string, message = "m") {
   return { status, body: { code, message } };
@@ -110,12 +112,19 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
   });
 
   test("row 8: could not connect to OpenBot's backend is retried", () => {
-    const b = body(
-      502,
-      "CONNECTION_FAILED",
-      "Could not connect to OpenBot's back end",
-    );
+    // The sentence as the CopilotKit runtime writes it (`trajectory/connect`), with the status it sends.
+    const b = body(502, "CONNECTION_FAILED", COULD_NOT_CONNECT);
     expect(retry(classifyGrantError(b.status, b.body)).reason).toBe(BUSY);
+  });
+
+  test("row 8: it is the sentence that makes it a retry, whatever the status", () => {
+    // Row 10 holds a rejected request on a 4xx. Not being able to connect is never that: it is
+    // retried on the sentence alone, which the row once looked for in words nothing sends.
+    const b = body(400, "CONNECTION_FAILED", COULD_NOT_CONNECT);
+    expect(retry(classifyGrantError(b.status, b.body)).reason).toBe(BUSY);
+    // The same code and status with another sentence is still row 10's.
+    const other = body(400, "CONNECTION_FAILED", "Something else was wrong");
+    hold(classifyGrantError(other.status, other.body));
   });
 
   test("row 9: an invalid grant is held", () => {

@@ -4,43 +4,59 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/agents/queries";
-import { client } from "@/lib/client";
+import type {
+  TeamBotAudience,
+  TeamBotConsentAnswerDecision,
+  TeamBot as TeamBotModel,
+} from "@/lib/api/generated/model";
+import {
+  answerTeamBotConsent,
+  assignTeamBot,
+  clearTeamBotConsents,
+  listTeamBots,
+  publishTeamBot,
+  unassignTeamBot,
+  unpublishTeamBot,
+} from "@/lib/api/generated/team-bots/team-bots";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
 
-/** A published Team Bot as this person sees it. Audience fields only for its owner and admins. */
-export type TeamBot = {
-  id: string;
-  name: string;
-  title: string;
-  roleDescription: string;
-  mine: boolean;
-  audience: "team" | "people";
-  publishedAt: string;
-  /** An administrator put it in this person's sidebar; they cannot hide it. */
-  assigned: boolean;
-  /** False while its name or description would leave teammates unable to see it. */
-  visibleToTeam: boolean;
-  people?: string[];
-  groups?: string[];
-  assignments?: string[];
-};
-export type TeamBotsData = {
-  teamBots: TeamBot[];
-  /** This person's own Bots that are not published yet. */
-  publishable: { id: string; name: string; title: string }[];
-};
+/**
+ * A published Team Bot as this person sees it: the API's `TeamBot`. Who it reaches (`people`,
+ * `groups`, `assignedGroups`) is there only for its owner and admins.
+ */
+export type TeamBot = TeamBotModel;
 
 export const teamBotKeys = { all: ["team-bots"] as const };
+
+/** A fresh key for each write a person asks for, as `once` in lib/agents/mutations.ts. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+/**
+ * Every Team Bot this person may use or manages, page by page to the end. A repeated cursor ends
+ * the list, as `everyBot` in lib/agents/queries.ts does.
+ */
+async function everyTeamBot(): Promise<TeamBot[]> {
+  const teamBots: TeamBot[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await listTeamBots(
+      organizationId(),
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+      { fallback: "Team Bots could not be loaded." },
+    );
+    teamBots.push(...page.teamBots);
+    if (cursor) seen.add(cursor);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor && !seen.has(cursor));
+  return teamBots;
+}
 
 export function teamBotsQueryOptions() {
   return queryOptions({
     queryKey: teamBotKeys.all,
-    queryFn: async (): Promise<TeamBotsData> => {
-      const response = await client("/api/team-bots", {
-        fallback: "Team Bots could not be loaded.",
-      });
-      return (await response.json()) as TeamBotsData;
-    },
+    queryFn: (): Promise<TeamBot[]> => everyTeamBot(),
   });
 }
 
@@ -48,9 +64,6 @@ export function teamBotsQueryOptions() {
 export function teamBotLink(botId: string, origin = window.location.origin) {
   return `${origin}/channel/new?agent=${encodeURIComponent(botId)}`;
 }
-
-const path = (botId: string, rest = "") =>
-  `/api/team-bots/${encodeURIComponent(botId)}${rest}`;
 
 /** Any change to who can see a Bot changes the roster too. */
 const refresh = (queryClient: QueryClient) =>
@@ -63,14 +76,15 @@ export function publishTeamBotMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: {
       botId: string;
-      audience: "team" | "people";
+      audience: TeamBotAudience;
       emails: string[];
+      /** Directory groups a Bot was published to before there were teams, kept as they are. */
       groups: string[];
+      /** The teams to publish to, by each team's id. */
+      teams: string[];
     }) => {
-      const { botId, ...body } = input;
-      await client(path(botId, "/publication"), {
-        method: "PUT",
-        body,
+      const { botId, ...publication } = input;
+      await publishTeamBot(organizationId(), botId, publication, once(), {
         fallback: "The Bot could not be published.",
       });
     },
@@ -87,8 +101,7 @@ export function publishTeamBotMutationOptions(queryClient: QueryClient) {
 export function unpublishTeamBotMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (botId: string) => {
-      await client(path(botId, "/publication"), {
-        method: "DELETE",
+      await unpublishTeamBot(organizationId(), botId, once(), {
         fallback: "The Bot could not be unpublished.",
       });
     },
@@ -103,26 +116,16 @@ export function assignTeamBotMutationOptions(queryClient: QueryClient) {
       group: string;
       remove?: boolean;
     }) => {
-      await client(
-        input.remove
-          ? path(input.botId, `/assignments/${encodeURIComponent(input.group)}`)
-          : path(input.botId, "/assignments"),
-        {
-          method: input.remove ? "DELETE" : "POST",
-          ...(input.remove ? {} : { body: { group: input.group } }),
-          fallback: "The assignment could not be saved.",
-        },
-      );
+      const write = input.remove ? unassignTeamBot : assignTeamBot;
+      await write(organizationId(), input.botId, input.group, once(), {
+        fallback: "The assignment could not be saved.",
+      });
     },
     onSettled: () => refresh(queryClient),
   });
 }
 
-export type TeamBotConsentDecision =
-  | "allow_once"
-  | "allow_always"
-  | "allow_all_team_bots"
-  | "skip";
+export type TeamBotConsentDecision = TeamBotConsentAnswerDecision;
 
 export function teamBotConsentMutationOptions() {
   return mutationOptions({
@@ -131,11 +134,13 @@ export function teamBotConsentMutationOptions() {
       serverId: string;
       decision: TeamBotConsentDecision;
     }) => {
-      await client(path(input.botId, "/consents"), {
-        method: "POST",
-        body: { serverId: input.serverId, decision: input.decision },
-        fallback: "Your answer could not be saved.",
-      });
+      await answerTeamBotConsent(
+        organizationId(),
+        input.botId,
+        { serverId: input.serverId, decision: input.decision },
+        once(),
+        { fallback: "Your answer could not be saved." },
+      );
     },
   });
 }
@@ -143,8 +148,7 @@ export function teamBotConsentMutationOptions() {
 export function clearTeamBotConsentsMutationOptions() {
   return mutationOptions({
     mutationFn: async () => {
-      await client("/api/team-bots/consents", {
-        method: "DELETE",
+      await clearTeamBotConsents(organizationId(), "me", once(), {
         fallback: "Your connector preferences could not be cleared.",
       });
     },

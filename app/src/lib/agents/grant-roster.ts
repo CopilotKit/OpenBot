@@ -2,9 +2,9 @@
  * Which Bots a connector screen draws a row for, when the rows are one app's or one tool's grants.
  *
  * THE RULE `handoffRoster` STATES FOR THE HANDOFF PANEL, AFTER THE SAME MISTAKE. The roster is
- * `GET /api/agents`, which drops every Bot the signed-in person has hidden. A tool's `grantedTo` is
- * not filtered by hiding at all, because hiding is a per-person display preference, one row per user
- * in `agent_preferences`, and not a fact about the Bot.
+ * the API's `listBots`, which drops every Bot the signed-in person has hidden. A tool's
+ * `grantedTo` is not filtered by hiding at all, because hiding is a per-person display preference,
+ * one row per user in `agent_preferences`, and not a fact about the Bot.
  *
  * So an administrator who tidied a Bot off their own roster stopped being shown it on the Plugins
  * screens. Its row went from By Bot and from every tool's switches, the counts above read "3 of 2
@@ -17,9 +17,9 @@
  *    the one thing a grant screen must not have.
  */
 export function grantRoster<T extends { id: string }>(input: {
-  /** `GET /api/agents`: everybody this person can see and has not hidden. */
+  /** `listBots`: everybody this person can see and has not hidden. */
   roster: readonly T[];
-  /** `GET /api/agents?hidden=true`: the ones this person has hidden from that roster. */
+  /** `listBots` with `hidden=true`: the ones this person has hidden from that roster. */
   hidden: readonly T[];
   /** The Bot ids holding any grant this screen shows, exactly as the server reports them. */
   holders: Iterable<string>;

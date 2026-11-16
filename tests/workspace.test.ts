@@ -28,14 +28,13 @@ function packagesStartedBy(script: string, workspaces: string[]): string[] {
 }
 
 describe("OpenBot workspace", () => {
-  test("defines the app, server, worker, shared, toolkit and extension packages", () => {
+  // The clients and what they share. The server and the worker run from the published OpenBot
+  // images (backend-images.env).
+  test("defines the app, shared and extension packages, and no back end", () => {
     const manifest = rootManifest();
     const names: Record<string, string> = {
       app: "app",
-      server: "server",
-      worker: "worker",
       shared: "@openbot/shared",
-      toolkit: "@openbot/toolkit",
       extension: "@openbot/recorder-extension",
     };
 
@@ -47,15 +46,15 @@ describe("OpenBot workspace", () => {
     }
   });
 
-  test("dev starts the app and the server, and not the routines worker", () => {
+  test("dev starts the app", () => {
     const manifest = rootManifest();
 
     expect(
       packagesStartedBy(manifest.scripts.dev, manifest.workspaces),
-    ).toEqual(["app", "server"]);
+    ).toEqual(["app"]);
   });
 
-  test("build still covers every workspace, including the worker", () => {
+  test("build covers every workspace", () => {
     const manifest = rootManifest();
 
     expect(

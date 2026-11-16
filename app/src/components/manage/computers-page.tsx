@@ -3,6 +3,7 @@ import {
   IconAlertTriangle,
   IconBolt,
   IconDeviceDesktop,
+  IconDeviceDesktopOff,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -36,8 +37,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
 import {
   type HostAccessPendingOperation,
@@ -52,7 +55,10 @@ import {
   type ComputerProfile,
   computerFleetQueryOptions,
 } from "@/lib/computers/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useNoBotComputers,
+} from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
@@ -66,6 +72,29 @@ function rowId(computer: ComputerProfile): string {
  */
 function isOwnBrowser(computer: ComputerProfile): boolean {
   return computer.botId !== undefined && isPersonBrowserId(computer.botId);
+}
+
+/**
+ * What a confirmation is about, kept while its dialog closes.
+ *
+ * The dialog fades out after Cancel or Reset it, and its words are drawn on every frame of that.
+ * Cleared on close, the row went with it, and the title fell back to its words for no row: "Reset the
+ * computer?" flashed up as the dialog left after "Reset Fernhill Guide's browser?" was answered. So
+ * closing only closes, and what the dialog names is replaced the next time it asks.
+ */
+function useConfirmation() {
+  const [asking, setAsking] = useState<{
+    about: ComputerProfile;
+    open: boolean;
+  } | null>(null);
+  return {
+    /** The row asked about, still named while the dialog closes. */
+    about: asking?.about ?? null,
+    open: asking?.open === true,
+    ask: (about: ComputerProfile) => setAsking({ about, open: true }),
+    close: () =>
+      setAsking((current) => (current ? { ...current, open: false } : null)),
+  };
 }
 
 /**
@@ -97,10 +126,11 @@ export function ComputersPage({
   /** The row currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
   /** Reset deletes the browser profiles, so it requires confirmation. */
-  const [confirming, setConfirming] = useState<ComputerProfile | null>(null);
+  const reset = useConfirmation();
+  const confirming = reset.about;
   /** Updating restarts a running computer mid-task, so it is confirmed too. */
-  const [confirmingUpdate, setConfirmingUpdate] =
-    useState<ComputerProfile | null>(null);
+  const update = useConfirmation();
+  const confirmingUpdate = update.about;
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
   /*
@@ -111,13 +141,23 @@ export function ComputersPage({
   const clearing = useClearBrowserData(clearOwnBrowser);
 
   // Every computer is an admin's to list. On one Bot's page a person who isn't an admin has only folders.
-  const admin = useQuery(currentUserQueryOptions()).data?.role === "admin";
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
+  /*
+   * An OpenBot with no computers for Bots has no list to read: the server refuses it, and "Couldn't
+   * load the computers. Reload the page." sent a person to retry what can never work. So the list
+   * waits until the deployment has said whether there are computers, and is not asked for where
+   * there are none.
+   */
+  const noComputers = useNoBotComputers();
   const fleet = useQuery({
     ...computerFleetQueryOptions(),
-    enabled: agentId === undefined || admin,
+    enabled: (agentId === undefined || admin) && noComputers === false,
   });
   const hostAccess = useQuery(hostAccessQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const setState = useMutation(setComputerStateMutationOptions(queryClient));
   const requestGrant = useMutation(
     requestHostFolderGrantMutationOptions(queryClient),
@@ -139,7 +179,7 @@ export function ComputersPage({
    * instead, because the top of this page is a long scroll away from them.
    */
   const problem = fleet.error
-    ? "Couldn't load the computers. Reload the page."
+    ? "Couldn't load the computers. Try again in a moment."
     : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message
@@ -156,8 +196,8 @@ export function ComputersPage({
     action: "stop" | "reset" | "update",
   ) => {
     setBusy(rowId(computer));
-    setConfirming(null);
-    setConfirmingUpdate(null);
+    reset.close();
+    update.close();
     setState.mutate(
       {
         action,
@@ -294,7 +334,7 @@ export function ComputersPage({
                 : "Its computer"
               : personal
                 ? "Your Bots' browsers"
-                : "Computers in this deployment"
+                : "Computers in this organization"
           }
         >
           {setState.error ? (
@@ -305,7 +345,15 @@ export function ComputersPage({
               {setState.error.message}
             </p>
           ) : null}
-          {computers === null && problem ? (
+          {noComputers ? (
+            <PageEmpty
+              icon={IconDeviceDesktopOff}
+              title="No computers for Bots"
+            >
+              Bots can't browse or run commands on this OpenBot. Set up
+              computers for Bots, and they show up here.
+            </PageEmpty>
+          ) : computers === null && problem ? (
             <PageEmpty
               icon={IconAlertTriangle}
               title="Couldn't load the list"
@@ -347,7 +395,7 @@ export function ComputersPage({
                       {computer.updateAvailable ? (
                         <Button
                           disabled={busy === rowId(computer)}
-                          onClick={() => setConfirmingUpdate(computer)}
+                          onClick={() => update.ask(computer)}
                           size="sm"
                           variant="outline"
                         >
@@ -377,7 +425,7 @@ export function ComputersPage({
                       ) : (
                         <Button
                           disabled={busy === rowId(computer)}
-                          onClick={() => setConfirming(computer)}
+                          onClick={() => reset.ask(computer)}
                           size="sm"
                           variant="outline"
                         >
@@ -402,9 +450,9 @@ export function ComputersPage({
        */}
       <Dialog
         onOpenChange={(open) => {
-          if (!open) setConfirming(null);
+          if (!open) reset.close();
         }}
-        open={confirming !== null}
+        open={reset.open}
       >
         <DialogContent>
           <DialogHeader>
@@ -425,22 +473,20 @@ export function ComputersPage({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              onClick={() => setConfirming(null)}
-              size="sm"
-              variant="ghost"
-            >
+            <Button onClick={reset.close} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
-              disabled={confirming !== null && busy === rowId(confirming)}
+              disabled={
+                reset.open && confirming !== null && busy === rowId(confirming)
+              }
               onClick={() => {
                 if (confirming) void run(confirming, "reset");
               }}
               size="sm"
               variant="destructive"
             >
-              {confirming !== null && busy === rowId(confirming)
+              {reset.open && confirming !== null && busy === rowId(confirming)
                 ? "Resetting…"
                 : "Reset it"}
             </Button>
@@ -456,9 +502,9 @@ export function ComputersPage({
 
       <Dialog
         onOpenChange={(open) => {
-          if (!open) setConfirmingUpdate(null);
+          if (!open) update.close();
         }}
-        open={confirmingUpdate !== null}
+        open={update.open}
       >
         <DialogContent>
           <DialogHeader>
@@ -472,23 +518,23 @@ export function ComputersPage({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              onClick={() => setConfirmingUpdate(null)}
-              size="sm"
-              variant="ghost"
-            >
+            <Button onClick={update.close} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
               disabled={
-                confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+                update.open &&
+                confirmingUpdate !== null &&
+                busy === rowId(confirmingUpdate)
               }
               onClick={() => {
                 if (confirmingUpdate) void run(confirmingUpdate, "update");
               }}
               size="sm"
             >
-              {confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+              {update.open &&
+              confirmingUpdate !== null &&
+              busy === rowId(confirmingUpdate)
                 ? "Updating…"
                 : "Update it"}
             </Button>
@@ -496,7 +542,8 @@ export function ComputersPage({
         </DialogContent>
       </Dialog>
 
-      {agentId && !admin ? null : personal ? (
+      {/* What Stop, Reset and Update do, which is about computers: not said where there are none. */}
+      {(agentId && !admin) || noComputers ? null : personal ? (
         <p className="mt-4 text-muted-foreground text-sm">
           <strong>Stop browser</strong> closes a browser and keeps its sign-ins.
           It starts again the next time it's needed. <strong>Reset</strong>{" "}

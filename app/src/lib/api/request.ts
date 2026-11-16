@@ -5,12 +5,8 @@
  * body the spec gives it. It sends them through `clientRequest` in lib/client.ts, so a generated call
  * carries the session the way every other request in the app does, and a refusal reaches a screen as
  * the same `ClientError` with the server's own sentence, or the `fallback` the caller named.
- *
- * Until the server answers at the API's addresses, `servedToday` sends an operation to the
- * route that answers it now and puts the answer in the API's shape.
  */
 import { clientRequest } from "@/lib/client";
-import { servedToday } from "./served-today";
 
 /** What a caller of a generated function may add to the request it makes. */
 export type ApiRequestOptions = RequestInit & {
@@ -19,16 +15,33 @@ export type ApiRequestOptions = RequestInit & {
    * `client`'s fallback does.
    */
   fallback?: string;
+  /**
+   * The response a success arrived in, before its body is read: for an operation whose answer says
+   * something in a header the generated function does not return, such as how much of the audit
+   * trail an export holds.
+   */
+  onResponse?: (response: Response) => void;
 };
 
 /**
- * The organization every request is in.
- *
- * Until multi-organization lands an install has exactly one, and the API addresses it as `default`
- * (api/openapi.yaml, `OrganizationId`). When a person can belong to several, this becomes the one
- * they are working in.
+ * The answers the spec declares that are not JSON, read as text: the audit trail's CSV export. Any
+ * other success that is not JSON is still a failed request.
  */
-export const ORGANIZATION_ID = "default";
+const TEXT_ANSWERS = ["text/csv"];
+
+/**
+ * The organization a request is addressed to: the one the person is working in
+ * (lib/organizations/current.ts). Called where the request is made, never kept, so a request made
+ * after a switch goes to the organization the person switched to.
+ */
+export { organizationId } from "@/lib/organizations/current";
+
+/**
+ * The organization every install has. What the deployment itself offers (how people sign in, what it
+ * can do) is asked of it, because that is asked before anybody has signed in, when the organization
+ * a person works in is not known yet.
+ */
+export const DEPLOYMENT_ORGANIZATION = "default";
 
 /**
  * A key for one write, so a retry of the same write is recognised as the same one.
@@ -48,14 +61,18 @@ export async function apiRequest<T>(
   url: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const { fallback, ...init } = options;
-  const today = servedToday(url, init.method);
-  const response = await clientRequest(today?.path ?? url, init, fallback);
+  const { fallback, onResponse, ...init } = options;
+  const response = await clientRequest(url, init, fallback);
+  onResponse?.(response);
   if (response.status === 204) return undefined as T;
+  const type = response.headers.get("content-type") ?? "";
+  if (TEXT_ANSWERS.some((answer) => type.startsWith(answer))) {
+    return (await response.text()) as T;
+  }
   // A success that is not JSON is a failed request, as `client` treats it.
   const body = (await response.json().catch(() => null)) as unknown;
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new Error(fallback ?? "That request failed.");
   }
-  return (today ? today.answer(body) : body) as T;
+  return body as T;
 }

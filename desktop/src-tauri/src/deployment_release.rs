@@ -93,7 +93,7 @@ pub fn latest_url(policy: &Distribution) -> String {
 ///
 /// A deployment that is there keeps its release: Install and Repair never change it. Moving it to
 /// this app's own release is Start's job (see `upgrade`), with its backup and its way back. Only a
-/// new deployment, one from before the server and worker were Compose services
+/// new deployment, one from before the server was a Compose service
 /// (`deployment::predates_containers`, which this app cannot run), or one of the other kind
 /// (pinned or followed) that never finished laying out gets a fresh release: the one a pinned build
 /// was cut with, otherwise the latest the distribution has published, or this app's own release
@@ -240,11 +240,7 @@ mod tests {
             resolve_version_with(&root, None, &own.version, || Ok("v1.0.0".into())).unwrap();
         assert_eq!(version, "v1.0.1");
         // Laid out as Install lays it out, Start has nothing to move.
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
         deployment::record(&root, &version, false).unwrap();
         assert_eq!(crate::upgrade::due(&root, &own), None);

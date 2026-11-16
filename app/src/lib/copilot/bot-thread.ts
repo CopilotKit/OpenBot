@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { tryClient } from "@/lib/client";
+import {
+  createConversationThread,
+  getConversationThread,
+} from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { newId } from "../new-id";
 
 /**
@@ -45,15 +50,27 @@ function remember(agentId: string, threadId: string): void {
   }
 }
 
-async function mint(): Promise<string | null> {
+/** A thread's id, and the id live updates about it carry when the server said one. */
+type Minted = { threadId: string; liveThreadId: string | undefined };
+
+async function mint(): Promise<Minted | null> {
   try {
-    const response = await tryClient("/api/threads/mint", { method: "POST" });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { threadId?: unknown };
-    return typeof body.threadId === "string" ? body.threadId : null;
+    const made = await createConversationThread(organizationId(), {
+      "Idempotency-Key": idempotencyKey(),
+    });
+    return typeof made.threadId === "string"
+      ? { threadId: made.threadId, liveThreadId: liveIdOf(made) }
+      : null;
   } catch {
     return null;
   }
+}
+
+/** The id live updates carry for a thread, when the answer about it names one. */
+function liveIdOf(answer: { liveThreadId?: unknown }): string | undefined {
+  return typeof answer.liveThreadId === "string" && answer.liveThreadId
+    ? answer.liveThreadId
+    : undefined;
 }
 
 /**
@@ -63,32 +80,31 @@ async function mint(): Promise<string | null> {
  * 400 or a 502 (or the request simply throwing) means the question was asked and failed to get a
  * clean answer.
  */
-async function checkKnown(
-  threadId: string,
-): Promise<{ known: boolean | undefined; unavailable: boolean }> {
+async function checkKnown(threadId: string): Promise<{
+  known: boolean | undefined;
+  unavailable: boolean;
+  liveThreadId?: string;
+}> {
   try {
-    const response = await tryClient(
-      `/api/threads/${encodeURIComponent(threadId)}`,
-    );
-    if (response.status === 404) {
-      // The route itself is absent, which is what an unconfigured reader looks like server-side.
-      // Behave exactly as this hook did before the check existed: nothing was learned, nothing
-      // changes.
+    const status = await getConversationThread(organizationId(), threadId);
+    if (typeof status.known !== "boolean") {
+      // An answer that does not carry the shape this hook asked for is not an answer either.
+      return { known: undefined, unavailable: true };
+    }
+    return {
+      known: status.known,
+      unavailable: false,
+      liveThreadId: liveIdOf(status),
+    };
+  } catch (error) {
+    // Not found is this deployment having no way to check, which is what an unconfigured reader
+    // looks like. Behave exactly as this hook did before the check existed: nothing was learned,
+    // nothing changes.
+    if (error instanceof ClientError && error.status === 404)
       return { known: undefined, unavailable: false };
-    }
-    if (!response.ok) {
-      // A 400 means the remembered id was not even a plausible thread id; a 502 means the check
-      // itself failed to reach Intelligence. Either way there is no clean answer, and the safer
-      // read is "unknown" rather than "gone" — see threadToUse for why.
-      return { known: undefined, unavailable: true };
-    }
-    const body = (await response.json()) as { known?: unknown };
-    if (typeof body.known !== "boolean") {
-      // A 200 that does not carry the shape this hook asked for is not an answer either.
-      return { known: undefined, unavailable: true };
-    }
-    return { known: body.known, unavailable: false };
-  } catch {
+    // A 400 means the remembered id was not even a plausible thread id; a 502 means the check
+    // itself failed to reach Intelligence. Either way there is no clean answer, and the safer
+    // read is "unknown" rather than "gone" — see threadToUse for why.
     return { known: undefined, unavailable: true };
   }
 }
@@ -119,6 +135,12 @@ export type BotThread = {
    * stuck with. */
   threadId: string | undefined;
   /**
+   * The id live updates about this thread carry, when the server has said what it is. It is the
+   * thread's own id in the organization `default`. Unknown, the chat listens for its own id, as
+   * it always has (lib/copilot/live-thread-updates.ts).
+   */
+  liveThreadId: string | undefined;
+  /**
    * `"unavailable"` means the check that guards a remembered thread failed to get a clean answer,
    * so this render is going ahead on a thread id that history may or may not still exist for and
    * nobody can currently say which. `"ready"` covers every case where that question was either
@@ -136,6 +158,9 @@ export type BotThread = {
  */
 export function useBotThread(agentId: string): BotThread {
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
+  const [liveThreadId, setLiveThreadId] = useState<string | undefined>(
+    undefined,
+  );
   const [history, setHistory] = useState<"ready" | "unavailable">("ready");
   // Mirrors the effect's own `current` flag so `startNew` — which runs from an event handler, not
   // from the effect — can tell whether it is still safe to touch state: the agent may have changed
@@ -155,6 +180,7 @@ export function useBotThread(agentId: string): BotThread {
     // A new agent resolves from scratch, so any earlier `startNew` no longer speaks for this one.
     startedNewRef.current = false;
     setThreadId(undefined);
+    setLiveThreadId(undefined);
     setHistory("ready");
 
     const adoptFresh = () => {
@@ -164,8 +190,10 @@ export function useBotThread(agentId: string): BotThread {
         if (!current) return;
         // Falling back to one made here keeps the chat working when the deployment cannot be
         // asked; it is simply a thread nothing can later attribute.
-        const next = minted ?? newId();
-        if (minted) remember(agentId, minted);
+        const next = minted?.threadId ?? newId();
+        if (minted) remember(agentId, minted.threadId);
+        // Together with the thread, so the chat never listens for one thread under another's id.
+        setLiveThreadId(minted?.liveThreadId);
         setThreadId(next);
         setHistory("ready");
       });
@@ -187,6 +215,7 @@ export function useBotThread(agentId: string): BotThread {
           known: outcome.known,
         });
         if (decision === "remembered") {
+          setLiveThreadId(outcome.liveThreadId);
           setThreadId(existing);
           setHistory(outcome.unavailable ? "unavailable" : "ready");
         } else {
@@ -225,11 +254,12 @@ export function useBotThread(agentId: string): BotThread {
        * asked for.
        */
       startedNewRef.current = true;
-      remember(agentId, minted);
-      setThreadId(minted);
+      remember(agentId, minted.threadId);
+      setLiveThreadId(minted.liveThreadId);
+      setThreadId(minted.threadId);
       setHistory("ready");
     });
   }, [agentId]);
 
-  return { threadId, history, startNew };
+  return { threadId, liveThreadId, history, startNew };
 }

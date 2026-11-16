@@ -5,6 +5,16 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryList, RememberFact } from "@/components/memory/memories";
+import { answerBotsList } from "./bots-api";
+import {
+  MEMORY,
+  memoryBody,
+  memoryContract,
+  page,
+  problem,
+  requestOf,
+  served,
+} from "./learning-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Memory: what the person's Bots know about them, and which Bot learned it. */
@@ -21,21 +31,14 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const memory = (overrides: Record<string, unknown>) => ({
-  id: "m1",
-  content: "I prefer mornings.",
-  provenance: "You told a Bot",
-  sourceId: null,
-  enabled: true,
-  reviewState: "confirmed",
-  formedBy: "person",
-  formedByAgentId: null,
-  sourceApp: null,
-  sourceLink: null,
-  observedAt: null,
-  updatedAt: "2026-10-09T10:00:00Z",
-  ...overrides,
-});
+const memory = (overrides: Record<string, unknown>) =>
+  memoryBody({
+    id: "m1",
+    content: "I prefer mornings.",
+    provenance: "You told a Bot",
+    updatedAt: "2026-10-09T10:00:00Z",
+    ...overrides,
+  });
 
 const writes: { request: string; body: unknown }[] = [];
 /** A refusal the server gives the next write, or none. */
@@ -44,38 +47,42 @@ function serving() {
   writes.length = 0;
   refuseWrite = null;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const method = init?.method ?? "GET";
-    if (method !== "GET") {
+    const request = requestOf(input, init);
+    if (request.method !== "GET") {
       writes.push({
-        request: `${method} ${url}`,
-        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        request: `${request.method} ${request.path}`,
+        body: request.body,
       });
       if (refuseWrite) {
-        const error = refuseWrite;
+        const detail = refuseWrite;
         refuseWrite = null;
-        return Response.json({ error }, { status: 400 });
+        return problem(400, detail, "VALIDATION_ERROR");
       }
-      return Response.json({ ok: true });
+      if (request.method === "POST" && request.path === MEMORY.memories)
+        return served(
+          memoryContract.CreateMemoryResponse,
+          memory({ id: "m3", content: request.body?.content }),
+          201,
+        );
+      return problem(404, "This memory could not be found.", "NOT_FOUND");
     }
-    if (url.startsWith("/api/agents")) {
-      return Response.json({
-        agents: [{ id: "expenses", name: "Expenses", mine: true }],
-      });
-    }
-    return Response.json({
-      memories: [
+    const bots = answerBotsList(input, init, {
+      visible: [{ id: "expenses", name: "Expenses", mine: true }],
+    });
+    if (bots) return bots;
+    if (request.path === MEMORY.memories)
+      return page(memoryContract.ListMemoriesResponse, "memories", [
         memory({}),
         memory({
           id: "m2",
           content: "Receipts go to finance@.",
           formedBy: "bot",
-          formedByAgentId: "expenses",
+          formedByBotId: "expenses",
           sourceApp: "Gmail",
           reviewState: "unreviewed",
         }),
-      ],
-    });
+      ]);
+    return problem(404, "Not found.", "NOT_FOUND");
   }) as unknown as typeof fetch;
 }
 
@@ -109,7 +116,7 @@ test("remembering a fact saves it", async () => {
   fireEvent.click(view.getByRole("button", { name: "Remember" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "POST /api/memory",
+      request: `POST ${MEMORY.memories}`,
       body: { content: "I work from Lisbon." },
     }),
   );
@@ -128,6 +135,17 @@ test("each memory's switch is named for the memory it turns on or off", async ()
       name: "Use this memory: Receipts go to finance@.",
     }),
   ).toBeTruthy();
+});
+
+// Seen live: the dialog's only line under its title was the memory's provenance, "You".
+test("Edit memory says what the dialog is for", async () => {
+  serving();
+  const view = draw(<MemoryList />);
+  await view.findByText("I prefer mornings.");
+  fireEvent.click(view.getAllByRole("button", { name: "Edit" })[0]!);
+  const dialog = await view.findByRole("dialog");
+  expect(dialog.textContent).toContain("Change what your Bots remember.");
+  expect(view.queryByText("You told a Bot", { exact: true })).toBeNull();
 });
 
 test("reopening Remember a fact after a failure starts clean", async () => {

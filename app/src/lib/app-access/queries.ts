@@ -1,5 +1,16 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { everyPage } from "@/lib/api/every-page";
+import { listAppAccessRequests } from "@/lib/api/generated/app-access-requests/app-access-requests";
+import {
+  getBotApp,
+  listBotApps,
+  listGiveableApps,
+} from "@/lib/api/generated/bot-grants/bot-grants";
+import type {
+  AppAccessRequest as ApiAppAccessRequest,
+  BotApp,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * What each work app is for the person looking, on one Bot, and the requests they file when only an
@@ -36,13 +47,14 @@ export type AppAccessState =
   | "owner_grantable";
 
 /**
- * Why an app is switched off. `absent` — nobody switched it on here. `composio_unconfigured` — a
- * brokered app (Composio or Arcade) on a deployment with no key for its broker. The other three — a scheme the server cannot
- * read, an OAuth client nobody registered, a token nobody pasted — are a set-up left unfinished.
+ * Why an app is switched off. `absent` — nobody switched it on here. `directory_unavailable` — an
+ * app from the directory on an OpenBot whose directory isn't set up. The other three — a scheme the
+ * server cannot read, an OAuth client nobody registered, a token nobody pasted — are a set-up left
+ * unfinished.
  */
 export type AppUnavailable =
   | "absent"
-  | "composio_unconfigured"
+  | "directory_unavailable"
   | "scheme_unreadable"
   | "oauth_client_missing"
   | "token_missing";
@@ -56,14 +68,12 @@ export type AppAccess = {
   /** The app's own name — "Gmail", never a humanised server id. */
   displayName: string;
   logo: string | null;
-  /** A brokered app names its broker; a catalogue or custom app is reached directly. */
-  provider: "composio" | "arcade" | "catalogue" | "custom";
+  /** Where the app comes from: OpenBot's catalogue, a server added by its address, or the directory. */
+  source: "catalogue" | "address" | "directory";
   /** Whose account calls land in: each person's own, one team account, or nobody's. */
   account: "personal" | "shared" | "deployment";
-  /** How the account is connected: this deployment's OAuth flow, a broker's consent, or a key form. */
+  /** How the account is connected: OpenBot's own sign-in, the directory's sign-in, or a key form. */
   connect: "oauth" | "consent" | "key" | null;
-  authScheme: string | null;
-  accountMode: "personal" | "shared" | null;
   state: AppAccessState;
   /** Why the app is switched off, when state is "disabled"; null otherwise. */
   unavailable: AppUnavailable | null;
@@ -138,6 +148,50 @@ export const appAccessKeys = {
   giveable: ["plugins", "app-access", "giveable"] as const,
 };
 
+/** One app on a Bot as the API answers it (getBotApp, listBotApps), in the words the screens read. */
+export function appAccessOf(app: BotApp): AppAccess {
+  return {
+    key: app.id,
+    displayName: app.title,
+    logo: app.logo,
+    source: app.source,
+    account: app.account,
+    connect: app.connect,
+    state: app.state,
+    unavailable: app.unavailable,
+    accountHolder: app.accountHolder,
+    asksFirst: app.asksFirst,
+    granted: app.granted,
+    ownerGrants: app.ownerGrants,
+    givenByOwner: app.givenByOwner,
+    needsConnect: app.needsConnect,
+    connectedAt: app.connectedAt,
+    requestKind: app.requestKind,
+    request: app.pendingRequest,
+  };
+}
+
+/** A request for an app as the API answers it, in the words the inbox reads. */
+export function accessRequestOf(
+  request: ApiAppAccessRequest,
+): AppAccessRequest {
+  return {
+    id: request.id,
+    appKey: request.appId,
+    appTitle: request.appTitle,
+    kind: request.kind,
+    status: request.status,
+    agentId: request.botId,
+    botName: request.botName,
+    requestedBy: request.requestedBy,
+    requesterEmail: request.requesterEmail,
+    requesterName: request.requesterName,
+    createdAt: request.createdAt,
+    resolvedAt: request.resolvedAt,
+    resolvedBy: request.resolvedBy,
+  };
+}
+
 /** An app this person could give their own Bots. */
 export type GiveableApp = Pick<
   AppAccess,
@@ -152,10 +206,24 @@ export type GiveableApp = Pick<
 export function giveableAppsQueryOptions() {
   return queryOptions({
     queryKey: appAccessKeys.giveable,
-    queryFn: (): Promise<GiveableApp[]> =>
-      client("/api/plugins/giveable", "apps", {
-        fallback: "Couldn't load your apps.",
-      }),
+    queryFn: async ({ signal }): Promise<GiveableApp[]> => {
+      const options = { signal, fallback: "Couldn't load your apps." };
+      const apps = await everyPage(async (cursor) => {
+        const page = await listGiveableApps(
+          organizationId(),
+          "me",
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          options,
+        );
+        return { items: page.apps, nextCursor: page.nextCursor };
+      });
+      return apps.map((app) => ({
+        key: app.id,
+        displayName: app.title,
+        logo: app.logo,
+        account: app.account,
+      }));
+    },
   });
 }
 
@@ -163,10 +231,22 @@ export function giveableAppsQueryOptions() {
 export function botAppsQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: appAccessKeys.bot(agentId),
-    queryFn: (): Promise<AppAccess[]> =>
-      client(`/api/plugins/for/${encodeURIComponent(agentId)}/apps`, "apps", {
+    queryFn: async ({ signal }): Promise<AppAccess[]> => {
+      const options = {
+        signal,
         fallback: "This Bot's apps could not be loaded.",
-      }),
+      };
+      const apps = await everyPage(async (cursor) => {
+        const page = await listBotApps(
+          organizationId(),
+          agentId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          options,
+        );
+        return { items: page.apps, nextCursor: page.nextCursor };
+      });
+      return apps.map(appAccessOf);
+    },
   });
 }
 
@@ -177,11 +257,12 @@ export function botAppsQueryOptions(agentId: string) {
 export function botAppQueryOptions(agentId: string, app: string) {
   return queryOptions({
     queryKey: appAccessKeys.app(agentId, app),
-    queryFn: (): Promise<AppAccess> =>
-      client(
-        `/api/plugins/for/${encodeURIComponent(agentId)}/apps/${encodeURIComponent(app)}`,
-        "app",
-        { fallback: `What ${app} is for this Bot could not be loaded.` },
+    queryFn: async ({ signal }): Promise<AppAccess> =>
+      appAccessOf(
+        await getBotApp(organizationId(), agentId, app, {
+          signal,
+          fallback: `What ${app} is for this Bot could not be loaded.`,
+        }),
       ),
   });
 }
@@ -194,12 +275,31 @@ export function botAppQueryOptions(agentId: string, app: string) {
 export function appAccessInboxQueryOptions(enabled: boolean, app?: string) {
   return queryOptions({
     queryKey: appAccessKeys.inbox(app),
-    queryFn: async (): Promise<AppAccessInbox> => {
-      const query = app ? `?app=${encodeURIComponent(app)}` : "";
-      const response = await client(`/api/plugins/access-requests${query}`, {
+    queryFn: async ({ signal }): Promise<AppAccessInbox> => {
+      const options = {
+        signal,
         fallback: "Access requests could not be loaded.",
+      };
+      const requests = await everyPage(async (cursor) => {
+        const page = await listAppAccessRequests(
+          organizationId(),
+          {
+            limit: 100,
+            ...(app ? { appId: app } : {}),
+            ...(cursor ? { cursor } : {}),
+          },
+          options,
+        );
+        return { items: page.appAccessRequests, nextCursor: page.nextCursor };
       });
-      return response.json();
+      // The count per app, from the requests read: every app's when no app is named.
+      const byApp: Record<string, number> = {};
+      for (const request of requests)
+        byApp[request.appId] = (byApp[request.appId] ?? 0) + 1;
+      return {
+        requests: requests.map(accessRequestOf),
+        counts: { total: requests.length, byApp },
+      };
     },
     enabled,
   });

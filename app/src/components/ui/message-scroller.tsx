@@ -75,14 +75,38 @@ function MessageScrollerViewport({
  * Observed rather than computed, because the spacer is the scroller's: it writes the spacer's
  * height and `hidden` itself, and this only reads them. A mutation observer runs before the next
  * frame is painted, so the least height is in place before anything can scroll to the end.
+ *
+ * NO ROOM WHILE THE WHOLE CONVERSATION FITS IN THE VIEW. Room is what lets the scroller lift a turn
+ * above where it sits, and in a conversation that fits there is nothing to make room for: the reply
+ * already has the empty view below the question to grow into. Given the room anyway, the first
+ * question was lifted under a Bot's introduction, which went half under the header, and a short
+ * answer left the room standing empty below it. So when a turn is lifted while everything fits, its
+ * room is held at nothing, decided once for that turn, and the scroller's lift lands where the
+ * conversation already is. The scroller lifts the turn again on every resize, and without room that
+ * goes only as far as the reply reaches: once the reply outgrows the view, the question rises as the
+ * reply needs the space, until it is where the lift would have put it, and from there the reply is
+ * followed as after any lift. A conversation already taller than the view gets its room as before.
  */
 function holdTheRoom(content: HTMLDivElement): () => void {
   const spacer = content.querySelector<HTMLElement>(
     ":scope > [data-message-scroller-spacer]",
   );
   if (!spacer) return () => {};
+  /** The turn the room was last decided for, and whether it gets any. */
+  let decided: { turn: Element | null; room: boolean } | null = null;
   const hold = () => {
-    if (spacer.hidden) return;
+    if (spacer.hidden) {
+      decided = null;
+      return;
+    }
+    const turn = lastAnchor(content);
+    if (decided === null || decided.turn !== turn) {
+      decided = { turn, room: !fitsInView(content, spacer) };
+    }
+    if (!decided.room) {
+      if (spacer.style.height !== "0px") spacer.style.height = "0px";
+      return;
+    }
     const end =
       spacer.getBoundingClientRect().bottom -
       content.getBoundingClientRect().top +
@@ -95,6 +119,33 @@ function holdTheRoom(content: HTMLDivElement): () => void {
     attributeFilter: ["hidden", "style"],
   });
   return () => observer.disconnect();
+}
+
+/** The newest row a turn can be lifted to: the scroller lifts the newest one it finds. */
+function lastAnchor(content: HTMLElement): Element | null {
+  const anchors = content.querySelectorAll(
+    ':scope > [data-scroll-anchor="true"]',
+  );
+  return anchors[anchors.length - 1] ?? null;
+}
+
+/** Whether everything in the conversation, without any room, is within the height of the view. */
+function fitsInView(content: HTMLElement, spacer: HTMLElement): boolean {
+  const viewport = content.parentElement;
+  if (!viewport) return false;
+  const top = content.getBoundingClientRect().top;
+  let bottom = 0;
+  for (const child of content.children) {
+    if (child === spacer) continue;
+    // A `display: contents` block has no box of its own; its children are the rows.
+    const boxes =
+      getComputedStyle(child).display === "contents" ? child.children : [child];
+    for (const box of boxes)
+      bottom = Math.max(bottom, box.getBoundingClientRect().bottom - top);
+  }
+  const end =
+    bottom + (Number.parseFloat(getComputedStyle(content).paddingBottom) || 0);
+  return end <= viewport.clientHeight + 0.5;
 }
 
 function MessageScrollerContent({

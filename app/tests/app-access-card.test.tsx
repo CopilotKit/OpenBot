@@ -37,6 +37,7 @@ import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { REFUSAL_MARKER } from "@/lib/plugins/tool-result";
 import { appAccess } from "./app-access-fixture";
+import { botAppPath, botAppResponse } from "./bot-grants-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -70,7 +71,7 @@ function serving(live: AppAccess | null) {
     asked.push(url);
     if (url.includes("/apps/"))
       return live
-        ? Response.json({ app: live })
+        ? botAppResponse(live)
         : Response.json({ error: "nope" }, { status: 500 });
     if (url.includes("/api/plugins/connections"))
       return Response.json({ connections: [], redirectUri: null });
@@ -126,7 +127,7 @@ test("asks about the app on the Bot that refused, not on another", async () => {
   const asked = serving(appAccess({ state: "not_connected" }));
   mount(<AppAccessCard prompt={prompt()} />);
   await waitFor(() =>
-    expect(asked).toContain("/api/plugins/for/expenses/apps/composio-gmail"),
+    expect(asked).toContain(botAppPath("expenses", "composio-gmail")),
   );
 });
 
@@ -156,7 +157,6 @@ test("a Shared app with no team account: Request access, not a sentence", async 
     appAccess({
       state: "shared_not_connected",
       account: "shared",
-      accountMode: "shared",
       requestKind: "connect_shared",
     }),
   );
@@ -273,7 +273,6 @@ test("a Shared app whose audience is not approved: says so, with nothing to pres
     appAccess({
       state: "shared_not_approved",
       account: "shared",
-      accountMode: "shared",
     }),
   );
   const view = mount(<AppAccessCard prompt={prompt({ reason: "access" })} />);
@@ -305,7 +304,7 @@ test("an older refusal that names no Bot asks about the Bot the surface declared
   );
   const drawn = await card(view);
   expect(drawn.getAttribute("data-state")).toBe("not_connected");
-  expect(asked).toContain("/api/plugins/for/travel/apps/composio-gmail");
+  expect(asked).toContain(botAppPath("travel", "composio-gmail"));
 });
 
 test("with no Bot to ask about at all, it is the Connect card it always was", async () => {
@@ -421,7 +420,7 @@ describe("carrying the task on once the app is ready", () => {
   function servingNow(state: { live: AppAccess }) {
     global.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/apps/")) return Response.json({ app: state.live });
+      if (url.includes("/apps/")) return botAppResponse(state.live);
       if (url.includes("/api/plugins/connections"))
         return Response.json({ connections: [], redirectUri: null });
       return Response.json({});

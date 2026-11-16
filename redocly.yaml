@@ -1,4 +1,5 @@
-# Lint for OpenBot's API spec. Run with `bun run api:lint`; CI runs the same command.
+# Lint for OpenBot's API specs: the REST API (api/openapi.yaml, OpenAPI) and the live channels
+# (api/asyncapi.yaml, AsyncAPI). Run with `bun run api:lint`; CI runs the same command.
 #
 # Redocly's recommended rules, every warning raised to an error so a pull request cannot add one, plus
 # OpenBot's own conventions (api/redocly/rules.mjs), which are CopilotKit Intelligence's v2 conventions
@@ -6,6 +7,14 @@
 apis:
   openbot:
     root: api/openapi.yaml
+  # The WebSocket channels. Redocly checks the file against the AsyncAPI 3.1 schema, WebSocket
+  # bindings included, and that every reference resolves; the rules below are the AsyncAPI ones.
+  # The OpenAPI rules further down only ever run on an OpenAPI file.
+  openbot-live:
+    root: api/asyncapi.yaml
+    rules:
+      channels-kebab-case: error
+      no-channel-trailing-slash: error
 
 plugins:
   - ./api/redocly/rules.mjs
@@ -46,7 +55,10 @@ rules:
   paths-kebab-case: error
   no-ambiguous-paths: error
   path-not-include-query: error
-  no-http-verbs-in-paths: error
+  # Whole words only: a verb inside a word ("put" in computers) is not a verb in the path.
+  no-http-verbs-in-paths:
+    severity: error
+    splitIntoWords: true
   tag-description: error
   info-license: error
   info-license-strict: error

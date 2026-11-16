@@ -118,6 +118,11 @@ fn main() {
     }
     match joined.as_str() {
         "compose version" => println!("Docker Compose synthetic"),
+        // Start looks for a `migrate` or `worker` container an earlier release left. None here.
+        value
+            if value.starts_with(
+                "ps --all --quiet --filter label=com.docker.compose.project=",
+            ) && value.contains(" --filter label=com.docker.compose.service=") => {}
         "compose ps --format {{.Ports}}" => {
             if SCENARIO == "harness" {
                 println!("127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp");

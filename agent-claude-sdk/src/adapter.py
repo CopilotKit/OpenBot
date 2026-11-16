@@ -20,9 +20,11 @@ result cut (`_pump`).
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import get_args
@@ -63,6 +65,125 @@ AG_UI_TOOL_PREFIX = "mcp__ag_ui__"
 # `puppeteer` server").
 AG_UI_TOOLS = f"{AG_UI_TOOL_PREFIX}*"
 
+# The most characters a tool's name may have at the model provider, Anthropic's limit.
+#
+# Claude Code names each of OpenBot's tools `mcp__ag_ui__<name>`, so a name over 52 characters goes
+# past it. An app's actions are named `mcp__<app>__<ACTION>`, and many are that long:
+# `mcp__composio-slack__SLACK_FETCH_CONVERSATION_HISTORY` is 53 before the prefix. Such a tool
+# cannot be loaded or called, and a request that carries it is refused.
+TOOL_NAME_LIMIT = 64
+
+
+def callable_name(name):
+    """The name a tool is given in Claude Code: its own when it fits, otherwise cut and ended with a
+    short hash of the whole, so two long names that share a start never meet.
+
+    The same name always gives the same answer, so a call is named back to the tool it is
+    (`offered_names`) on every run.
+    """
+    room = TOOL_NAME_LIMIT - len(AG_UI_TOOL_PREFIX)
+    if len(name) <= room:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{name[: room - len(digest) - 1].rstrip('_')}_{digest}"
+
+
+def offered_names(tool_names):
+    """The name each tool is offered by, keyed by the name Claude Code calls it, where they differ."""
+    return {
+        callable_name(name): name for name in tool_names if callable_name(name) != name
+    }
+
+
+# Where Claude Code reads that an MCP tool loads with the session rather than behind its tool
+# search (code.claude.com/docs/en/mcp, "Mark a tool to load upfront or stay deferred").
+ALWAYS_LOAD = "anthropic/alwaysLoad"
+
+
+def loaded_upfront(input_data):
+    """The tools Claude Code is to hold from the start of the session instead of finding them.
+
+    Claude Code defers every MCP tool behind `ToolSearch`, OpenBot's own included, so a Bot searched
+    before it could remember a fact or draw a chart, and searched again on a follow-up for the very
+    app action it had just used. Loaded upfront:
+    - OpenBot's own tools, the ones not named after an app (`mcp__<app>__<ACTION>`): a Bot's memory,
+      its routines, its questions to the person, its computer and the components it draws. Few, and
+      used on most turns.
+    - Every tool this conversation has already called: what a follow-up is most likely to need.
+    - Every tool OpenBot's own search found in this conversation (`found`).
+
+    An app's other actions, the hundreds, stay behind the search.
+    """
+    names = {tool.name for tool in input_data.tools or []}
+    called = {
+        call.function.name
+        for message in input_data.messages or []
+        if getattr(message, "role", None) == "assistant"
+        for call in getattr(message, "tool_calls", None) or []
+    }
+    return {
+        name
+        for name in names
+        if not name.startswith("mcp__") or name in called or name in found(input_data)
+    }
+
+
+# The first line of every answer OpenBot's `search_tools` gives, naming the tools it found.
+TOOLS_FOUND_LINE = "Tools found:"
+
+
+def found(input_data):
+    """The tools OpenBot's own search found in this conversation, read from its answers' first line.
+
+    The model was told it can call them from its next step; held behind Claude Code's ToolSearch, it
+    had to search for each a second time first.
+    """
+    names = set()
+    for message in input_data.messages or []:
+        if getattr(message, "role", None) != "tool":
+            continue
+        content = getattr(message, "content", None)
+        if not isinstance(content, str):
+            continue
+        # A replayed answer may arrive JSON-encoded once more.
+        if content.startswith('"'):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                continue
+        first = content.split("\n", 1)[0]
+        if first.startswith(TOOLS_FOUND_LINE):
+            names.update(
+                name.strip() for name in first[len(TOOLS_FOUND_LINE) :].split(",") if name.strip()
+            )
+    return names
+
+
+def _loaded_upfront_in(server_config, names):
+    """The `ag_ui` server with `ALWAYS_LOAD` set on the tools named, by their callable names.
+
+    The SDK builds a tool's `_meta` from its annotations and has no field for this, so the server's
+    own tool listing is wrapped and the flag added to what it lists. A server built some other way
+    is left as it is, and every tool stays behind the search, as before.
+    """
+    server = server_config.get("instance")
+    entry = server.get_request_handler("tools/list") if hasattr(server, "get_request_handler") else None
+    if entry is None or not names:
+        if names:
+            logger.warning("Could not mark tools to load upfront; every tool stays behind ToolSearch.")
+        return server_config
+    listed = entry.handler
+
+    async def listing(context, params):
+        result = await listed(context, params)
+        for tool in result.tools:
+            if tool.name in names:
+                tool.meta = {**(tool.meta or {}), ALWAYS_LOAD: True}
+        return result
+
+    server.add_request_handler("tools/list", entry.params_type, listing)
+    return server_config
+
 # How large a result of one of OpenBot's tools Claude Code keeps in the conversation, in characters.
 #
 # Claude Code keeps a tool result over 50,000 characters out of the conversation: it saves it to a
@@ -75,6 +196,23 @@ AG_UI_TOOLS = f"{AG_UI_TOOL_PREFIX}*"
 # tokens at the four characters a token it counts), so a result is never cut there and kept here.
 # A replay holds no result longer than this either (`RESULT_CHARS` in `replay`).
 INLINE_RESULT_CHARS = RESULT_CHARS
+
+# How many times Claude Code retries a failed API request on its own (code.claude.com/docs/en/errors:
+# `CLAUDE_CODE_MAX_RETRIES`, 10 by default, lowered "to surface failures faster in scripts").
+#
+# A delegated task's turn is retried by the server, which sorts the failure first and waits as long
+# as the provider asked. Under that, Claude Code's own ten retries multiply the server's and spend
+# the task's time before the server hears of the failure at all. So a run the server says it
+# retries itself (`forwardedProps.openbotSendOnce`) starts its query with none, and the failure is
+# handed back. Every other run keeps Claude Code's own retries.
+MAX_RETRIES = "CLAUDE_CODE_MAX_RETRIES"
+
+
+def sends_once(forwarded_props) -> bool:
+    """Whether the server retries this run itself, and so wants each request sent once."""
+    props = forwarded_props if isinstance(forwarded_props, dict) else {}
+    return props.get("openbotSendOnce") is True
+
 
 # Claude Code's switch for a model ID it does not know (code.claude.com/docs/en/env-vars).
 #
@@ -112,6 +250,21 @@ READ_TOOL = "Read"
 # tool offered. It runs nothing and reaches nothing outside the session: what it finds is a tool the
 # run was already given, called through OpenBot as before.
 TOOL_SEARCH = "ToolSearch"
+
+# Claude Code's switch for that search (code.claude.com/docs/en/env-vars, `ENABLE_TOOL_SEARCH`).
+#
+# The Claude Code this harness ships (2.1.259) searches by default only when it talks to Anthropic's
+# own API. With `ANTHROPIC_BASE_URL` set, a gateway or a proxy in front of the same API, it leaves
+# the search off unless this is set, and loads every tool it holds upfront
+# (code.claude.com/docs/en/mcp, "Tool search through a gateway": on by default behind one only from
+# 2.1.304). Measured live on one task across three apps, through a proxy that passes every request
+# on to Anthropic unchanged: each request carried 108 to 118 whole tool definitions and 109K to
+# 150K input tokens, and `ToolSearch` was in none of them. Straight to Anthropic's API the same
+# task carried 39 to 61 and 24K to 106K. A deployment behind a gateway is the proxy's shape.
+# Set to `true`, the search is on wherever the model can use it. A gateway has to pass on
+# the `defer_loading` field, `tool_reference` blocks and the `anthropic-beta` header for it; one
+# that cannot is run with `ENABLE_TOOL_SEARCH=false` in this container's environment, which stands.
+ENABLE_TOOL_SEARCH = "ENABLE_TOOL_SEARCH"
 
 # What a full Bot is told `Read` is for. Its own description says it reads any file on "the local
 # filesystem", and the person calls the computer's tool "Read file": asked to read a file on its
@@ -162,6 +315,58 @@ class ModelRefusedError(Exception):
     coded `OPENBOT_MODEL_REFUSED`, and the server says it in words
     (server/src/agents/provider-refusal.ts).
     """
+
+
+class ModelUnreachableError(Exception):
+    """Nothing answered at the model's address: the connection was refused, the host doesn't
+    exist, or nothing answered in time. No provider said anything, so it is not a refusal.
+
+    FOUND ON OPENBOT DESKTOP: a base URL with nothing listening at it. Claude Code says so in its
+    own words, which went on as a refusal, and the person read that the provider "turned down the
+    request". It ends the run coded `OPENBOT_MODEL_UNREACHABLE`, and the server puts the step that
+    fits its edition in place of the second sentence.
+    """
+
+
+# Claude Code's own account of a request that never reached the API, as 2.1.259 (claude-agent-sdk
+# 0.2.152) writes it: "API Error: " and then "Connection refused — a firewall or proxy may be blocking
+# it (ConnectionRefused)", "Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+# "No internet route — …", "Unable to connect to API (…)" or "Request timed out. …". Not a dropped
+# connection ("Connection dropped"), which reached the API, and not a certificate or a proxy the
+# person has to fix ("Unable to connect to API: SSL …", "Couldn't connect through your proxy").
+UNREACHED = re.compile(
+    r"^API Error: (?:Connection refused\b|Can't reach the API server\b|No internet route\b"
+    r"|Unable to connect to API\b(?!:)|Request timed out\b)"
+)
+
+
+def model_address():
+    """Where Claude Code reaches the model, as host and port.
+
+    Nothing else of the URL: a base URL can carry a user and password, and some gateways put a key
+    in the path. Claude Code reads `ANTHROPIC_BASE_URL` from this container's environment.
+    """
+    from urllib.parse import urlsplit
+
+    base = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+    try:
+        parts = urlsplit(base)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    shown = f"[{host}]" if ":" in host else host
+    return f"{shown}:{port}" if port else shown
+
+
+def unreachable_message(address):
+    """The same sentence agent-langgraph-agui ends its run with (`unreachable_message`)."""
+    at = f" at {address}" if address else ""
+    return (
+        f"OpenBot couldn't reach the AI model{at}. "
+        "Check that it's running and the address is right."
+    )
 
 
 def refusal_text(message):
@@ -476,18 +681,24 @@ def _results_kept_inline(input_data):
     tools = []
     for tool in input_data.tools or []:
         try:
-            tools.append(convert_agui_tool_to_claude_sdk(tool))
+            converted = convert_agui_tool_to_claude_sdk(tool)
         except Exception as error:  # Upstream leaves out a tool it cannot convert, and so does this.
             logger.warning("Failed to convert tool: %s", error)
+            continue
+        # Named to fit the provider's limit once Claude Code puts its prefix on (`callable_name`).
+        tools.append(replace(converted, name=callable_name(converted.name)))
     if input_data.state is not None:
         tools.append(create_state_management_tool())
-    return create_sdk_mcp_server(
-        "ag_ui",
-        "1.0.0",
-        tools=[
-            replace(tool, annotations=ToolAnnotations(maxResultSizeChars=INLINE_RESULT_CHARS))
-            for tool in tools
-        ],
+    return _loaded_upfront_in(
+        create_sdk_mcp_server(
+            "ag_ui",
+            "1.0.0",
+            tools=[
+                replace(tool, annotations=ToolAnnotations(maxResultSizeChars=INLINE_RESULT_CHARS))
+                for tool in tools
+            ],
+        ),
+        {callable_name(name) for name in loaded_upfront(input_data)},
     )
 
 
@@ -574,6 +785,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         # is the one prop it honours. Every query is built here, so a choice changed between runs
         # starts the next query on it.
         chosen = run_model(input_data.forwarded_props) if input_data else None
+        once = sends_once(input_data.forwarded_props) if input_data else False
         if self._model_only and input_data:
             # The model endpoint accepts prompts and caller-owned tools, never SDK
             # configuration or an ungoverned state-management tool.
@@ -585,6 +797,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
         options.env = {**(options.env or {}), UNKNOWN_MODEL_WINDOW: "1"}
+        if once:
+            options.env[MAX_RETRIES] = "0"
         options.max_buffer_size = MESSAGE_BUFFER_BYTES
         if not self._model_only and input_data:
             # The model endpoint gets its instructions in context. A full Bot gets its standing
@@ -595,6 +809,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     options.system_prompt, instructions
                 )
         tool_names = {tool.name for tool in input_data.tools} if input_data else set()
+        # The name each tool is offered by, for one Claude Code calls by a name cut to fit.
+        by_callable = offered_names(tool_names)
         # Upstream allows each `ag_ui` tool by name, and the SDK passes the list to Claude Code as
         # one `--allowedTools` argument, so it grew with every tool a Bot holds. A Bot offered all
         # of HubSpot, Notion and Calendar is offered hundreds. The `ag_ui` server holds exactly this
@@ -613,8 +829,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
 
         async def client_result(input_data, tool_use_id, context):
             turn = self._turns.get(thread_id)
-            name = input_data.get("tool_name", "")
-            if name.removeprefix("mcp__ag_ui__") not in tool_names:
+            name = input_data.get("tool_name", "").removeprefix(AG_UI_TOOL_PREFIX)
+            if by_callable.get(name, name) not in tool_names:
                 return {}
             if turn is None or turn.cancelled:
                 raise asyncio.CancelledError("The client tool query was cancelled")
@@ -659,7 +875,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 for name, server in options.mcp_servers.items()
                 if name == "ag_ui"
             }
-            offered = {f"{AG_UI_TOOL_PREFIX}{name}" for name in tool_names}
+            offered = {f"{AG_UI_TOOL_PREFIX}{callable_name(name)}" for name in tool_names}
 
             async def only_offered(input_data, tool_use_id, context):
                 if input_data.get("tool_name") in offered:
@@ -690,6 +906,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # And `ToolSearch`, which only finds and loads the definitions of the tools this run
             # already holds (see `TOOL_SEARCH`).
             options.tools = [READ_TOOL, TOOL_SEARCH]
+            # On behind a gateway too, unless whoever runs this container chose otherwise. The SDK
+            # lays `options.env` over the container's own environment, so theirs is read here.
+            if not (os.environ.get(ENABLE_TOOL_SEARCH) or "").strip():
+                options.env[ENABLE_TOOL_SEARCH] = "true"
             # After the Bot's own instructions, which come first.
             prompt = options.system_prompt
             options.system_prompt = (
@@ -740,6 +960,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     raise ModelAuthenticationError(
                         "Sign in to your model provider again."
                     )
+                if (
+                    isinstance(message, AssistantMessage)
+                    and message.error
+                    and UNREACHED.match(refusal_text(message))
+                ):
+                    # Claude Code's own words stay here, in the log: the sentence replaces them.
+                    logger.warning("The model couldn't be reached: %s", refusal_text(message))
+                    raise ModelUnreachableError(unreachable_message(model_address()))
                 if isinstance(message, AssistantMessage) and message.error:
                     raise ModelRefusedError(refusal_text(message))
                 if (
@@ -903,6 +1131,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     if isinstance(error, ModelAuthenticationError)
                     else "OPENBOT_MODEL_REFUSED"
                     if isinstance(error, ModelRefusedError)
+                    else "OPENBOT_MODEL_UNREACHABLE"
+                    if isinstance(error, ModelUnreachableError)
                     else None,
                 )
             )
@@ -925,8 +1155,49 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     await super().clear_session(input_data.thread_id)
             await turn.queue.put(None)
 
+    @staticmethod
+    def _named_as_offered(event, turn):
+        """An event naming a call by the name it was offered by, not the one cut to fit Claude Code.
+
+        Upstream names a call after the tool Claude Code called, `mcp__ag_ui__` taken off, which for a
+        long name is the cut one (`callable_name`). The server answers a call by the name it offered,
+        and the conversation keeps the history the turn ends with, so both are named back.
+        """
+        by_callable = offered_names(turn.tool_names)
+        if not by_callable:
+            return event
+        if event.type == EventType.TOOL_CALL_START and event.tool_call_name in by_callable:
+            return event.model_copy(
+                update={"tool_call_name": by_callable[event.tool_call_name]}
+            )
+        if event.type != EventType.MESSAGES_SNAPSHOT:
+            return event
+
+        def named(call):
+            name = call.function.name
+            if name not in by_callable:
+                return call
+            return call.model_copy(
+                update={"function": call.function.model_copy(update={"name": by_callable[name]})}
+            )
+
+        return event.model_copy(
+            update={
+                "messages": [
+                    message.model_copy(
+                        update={"tool_calls": [named(call) for call in message.tool_calls]}
+                    )
+                    if getattr(message, "role", None) == "assistant"
+                    and getattr(message, "tool_calls", None)
+                    else message
+                    for message in event.messages
+                ]
+            }
+        )
+
     async def _pump_query(self, input_data, turn, fit_results=False):
         async for event in self._run_query(input_data, fit_results=fit_results):
+            event = self._named_as_offered(event, turn)
             if event.type == EventType.RUN_ERROR and turn.authentication_failed:
                 event = event.model_copy(
                     update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
@@ -982,10 +1253,20 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 and bool(input_data.messages)
                 and input_data.messages[-1].role == "user"
             )
+            # A full Bot's query is replaced the same way when it is sent a tool it does not hold:
+            # what OpenBot's own search found for it. FOUND ON WINDOWS: a Bot on this harness,
+            # registered as an ordinary endpoint, searched with `search_tools`, was told it could
+            # call SLACK_SEND_MESSAGE from its next step, and was sent it; the resumed query did not
+            # hold it, so Claude Code's ToolSearch found "No matching deferred tools" and the call
+            # was "No such tool available". The Bot posted with another tool, or not at all.
+            incoming = {tool.name for tool in input_data.tools}
             replaced = answer_only or person_spoke or (
-                self._model_only
-                and turn is not None
-                and {tool.name for tool in input_data.tools} != turn.tool_names
+                turn is not None
+                and (
+                    incoming != turn.tool_names
+                    if self._model_only
+                    else bool(incoming - turn.tool_names)
+                )
             )
             if replaced:
                 await self.interrupt(thread_id)

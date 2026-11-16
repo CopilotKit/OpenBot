@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { GuidanceBacktestField } from "@/components/approvals/guidance-backtest";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
+import { TeamPage, YourOwnApprovals } from "@/components/edition/for-a-team";
 import {
   PageCard,
   PageSection,
@@ -42,7 +43,7 @@ import {
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/approvals_/guidance")({
-  component: ReviewerGuidancePage,
+  component: ReviewerGuidancePageInEveryEdition,
 });
 
 const BACK = {
@@ -250,5 +251,19 @@ function ReviewerGuidancePage() {
         </DialogContent>
       </Dialog>
     </PageShell>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function ReviewerGuidancePageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Tell the reviewer what your organization needs a person for, or what is routine. It reads your guidance with every action it checks. Nothing changes until you save."
+      backButton={BACK}
+      more={<YourOwnApprovals />}
+      title="Guidance for auto-review"
+    >
+      <ReviewerGuidancePage />
+    </TeamPage>
   );
 }

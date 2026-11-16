@@ -92,6 +92,8 @@ const RECORDS: ComponentRecord[] = ALL.map((spec) => ({
   hasUnpublishedChanges: false,
   withheldFrom: [],
   functions: [],
+  draftSource: null,
+  source: null,
 }));
 
 function draw(

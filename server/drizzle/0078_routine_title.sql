@@ -1,1 +1,0 @@
-ALTER TABLE "routines" ADD COLUMN "title" text;

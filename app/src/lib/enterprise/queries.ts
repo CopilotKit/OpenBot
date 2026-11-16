@@ -1,50 +1,54 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  getPersonCapabilities,
+  listCapabilities,
+} from "@/lib/api/generated/capabilities/capabilities";
+import { getCheckInUsage } from "@/lib/api/generated/check-ins/check-ins";
+import type {
+  NetworkPolicy as ApiNetworkPolicy,
+  BotCheckInUsage,
+  Capability,
+  CapabilityId,
+  CheckInUsage,
+  EgressRule as EgressRuleEntry,
+  NetworkMode as NetworkModeName,
+  NetworkPolicyScopeKind,
+} from "@/lib/api/generated/model";
+import {
+  listNetworkPolicies,
+  replayNetworkPolicy,
+} from "@/lib/api/generated/network-policies/network-policies";
+import {
+  getModelUsage,
+  getOrganizationSettings,
+  listComputerActions,
+} from "@/lib/api/generated/organization-settings/organization-settings";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 
-export type CapabilityKey =
-  | "useBots"
-  | "cloudBrowser"
-  | "cloudNetwork"
-  | "cloudComputer"
-  | "localComputer"
-  | "customRules"
-  | "passwordManager"
-  | "slackTeams"
-  | "teamBots"
-  | "ownerApps"
-  | "isolatedComputers"
-  | "proactive";
+/** A permission switch's id: the API's `CapabilityId`. */
+export type CapabilityKey = CapabilityId;
 
-/** One switch as the server stored it at each scope. `null` means no row: the scope inherits. */
-export type CapabilitySetting = {
+/**
+ * One switch as the server stored it at each scope: the API's `Capability`, under the name the
+ * screens know its id by. `null` means no row: the scope inherits. `roles` is by member role,
+ * `teams` by team id (a team that sets nothing is absent), and `groups` by directory group name, for
+ * the rules made before there were teams.
+ */
+export type CapabilitySetting = Omit<Capability, "id" | "teams"> & {
   capability: CapabilityKey;
-  title: string;
-  description: string;
-  default: boolean;
-  organization: boolean | null;
-  roles: Partial<Record<"admin" | "user", boolean>>;
-  groups: Record<string, boolean>;
+  teams: Record<string, boolean>;
 };
 
 /** One allowlist entry. Either kind can name ports (`443`, `5432,8000-8100`); without them, every port. */
-export type EgressRule =
-  | { type: "domain"; value: string; ports?: string }
-  | { type: "cidr"; value: string; ports?: string };
+export type EgressRule = EgressRuleEntry;
 
-export type NetworkMode =
-  | "allow_all"
-  | "defaults_plus_allowlist"
-  | "allowlist_only";
+export type NetworkMode = NetworkModeName;
 
-export type NetworkPolicy = {
-  scopeKind: "organization" | "group";
-  scopeId: string;
-  mode: NetworkMode;
-  rules: EgressRule[];
-  locked: boolean;
-  updatedBy: string | null;
-  updatedAt: string;
-};
+/** Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name). */
+export type NetworkScopeKind = NetworkPolicyScopeKind;
+
+/** One network policy: the API's `NetworkPolicy`, without its address. */
+export type NetworkPolicy = Omit<ApiNetworkPolicy, "id">;
 
 export type EnterpriseSettings = {
   ssoRequired: boolean;
@@ -124,38 +128,13 @@ export type CheckInSkipReason =
  * `items` are the ones raised in the window, by where each stands now, so `raised` is the sum of the
  * other four. `acceptance` is started out of started and hidden, null until somebody answered one.
  */
-export type BotCheckInMetrics = {
-  agentId: string;
-  name: string;
-  avatarSeed: string;
-  /** People whose check-ins with this Bot are on now. */
-  peopleOn: number;
-  runs: {
-    quiet: number;
-    raised: number;
-    failed: number;
-    skipped: Record<CheckInSkipReason, number>;
-  };
-  items: {
-    raised: number;
-    started: number;
-    hidden: number;
-    cleared: number;
-    open: number;
-  };
-  acceptance: number | null;
-  /** This Bot's items that a ping carried. */
-  pinged: number;
-};
+export type BotCheckInMetrics = BotCheckInUsage;
 
-export type CheckInMetrics = {
-  days: 7 | 30;
-  /** The daily cap in force. */
-  dailyRuns: number;
-  bots: BotCheckInMetrics[];
-  /** One ping folds every Bot's items for a person, so pings are counted for everybody at once. */
-  pings: { sent: number; itemsPerPing: number | null };
-};
+/**
+ * How check-ins are going: the API's `CheckInUsage`. `dailyRuns` is the daily cap in force. One
+ * ping folds every Bot's items for a person, so `pings` are counted for everybody at once.
+ */
+export type CheckInMetrics = CheckInUsage;
 
 export const enterpriseKeys = {
   all: ["enterprise"] as const,
@@ -164,7 +143,7 @@ export const enterpriseKeys = {
     ["enterprise", "model-usage", { days }] as const,
   actions: () => ["enterprise", "actions"] as const,
   /*
-   * Under the enterprise root although the route is `/api/admin/proactive`: who has check-ins on and
+   * Under the enterprise root although the numbers are check-ins' own: who has check-ins on and
    * the cap in force both move when a switch or a setting is saved, and every enterprise write
    * invalidates this root.
    */
@@ -176,7 +155,7 @@ export const enterpriseKeys = {
 
 /** A network policy as the dialog holds it, not yet saved. */
 export type NetworkCandidate = {
-  scopeKind: "organization" | "group";
+  scopeKind: NetworkScopeKind;
   scopeId: string;
   mode: NetworkMode;
   rules: EgressRule[];
@@ -218,61 +197,135 @@ export type NetworkReplayReport = {
 export function networkReplayQueryOptions(candidate: NetworkCandidate) {
   return queryOptions({
     queryKey: enterpriseKeys.networkReplay(candidate),
-    queryFn: (): Promise<NetworkReplayReport> =>
-      client("/api/admin/enterprise/network/replay", "report", {
-        method: "POST",
-        body: candidate,
-        fallback: "Couldn't check this list against recent page visits.",
-      }),
+    queryFn: ({ signal }): Promise<NetworkReplayReport> =>
+      // An action that saves nothing: each ask is its own, so each gets its own key.
+      replayNetworkPolicy(
+        organizationId(),
+        candidate,
+        { "Idempotency-Key": idempotencyKey() },
+        {
+          signal,
+          fallback: "Couldn't check this list against recent page visits.",
+        },
+      ),
   });
 }
 
+/** Every page of a list, for a screen that shows all of it. */
+async function everyPage<T>(
+  read: (cursor: string | undefined) => Promise<{
+    items: T[];
+    nextCursor: string | null;
+  }>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await read(cursor);
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return items;
+}
+
+const OVERVIEW_FALLBACK = "Could not load enterprise controls";
+
+/**
+ * The admin's settings screens, read as one: the organization's settings with what goes beside them,
+ * every permission switch, and every network policy, from the API's three resources.
+ */
 export function enterpriseOverviewQueryOptions() {
   return queryOptions({
     queryKey: enterpriseKeys.overview(),
-    queryFn: async (): Promise<EnterpriseOverview> =>
-      (
-        await client("/api/admin/enterprise", {
-          fallback: "Could not load enterprise controls",
-        })
-      ).json(),
+    queryFn: async ({ signal }): Promise<EnterpriseOverview> => {
+      const options = { signal, fallback: OVERVIEW_FALLBACK };
+      const [settings, capabilities, network] = await Promise.all([
+        getOrganizationSettings(organizationId(), options),
+        everyPage(async (cursor) => {
+          const page = await listCapabilities(
+            organizationId(),
+            { limit: 100, ...(cursor ? { cursor } : {}) },
+            options,
+          );
+          return { items: page.capabilities, nextCursor: page.nextCursor };
+        }),
+        everyPage(async (cursor) => {
+          const page = await listNetworkPolicies(
+            organizationId(),
+            { limit: 100, ...(cursor ? { cursor } : {}) },
+            options,
+          );
+          return { items: page.networkPolicies, nextCursor: page.nextCursor };
+        }),
+      ]);
+      const { context, ...values } = settings;
+      return {
+        capabilities: capabilities.map(({ id, teams, ...capability }) => ({
+          capability: id,
+          ...capability,
+          teams: teams ?? {},
+        })),
+        settings: values,
+        groups: context.directoryGroups,
+        network: network.map(({ id: _id, ...policy }) => policy),
+        defaultDestinations: context.defaultDestinations,
+        mcpServers: context.apps,
+        builtInModel: context.builtInModel,
+        scim: context.scim,
+        otel: context.otel,
+        actionRecordRetentionDays: context.actionRecordRetentionDays,
+      };
+    },
   });
 }
 
 export function modelUsageQueryOptions(days = 30) {
   return queryOptions({
     queryKey: enterpriseKeys.modelUsage(days),
-    queryFn: async (): Promise<{
+    queryFn: async ({
+      signal,
+    }): Promise<{
       summary: ModelUsageSummary[];
       recent: ModelUsageRow[];
-    }> =>
-      (
-        await client(`/api/admin/enterprise/models/usage?days=${days}`, {
-          fallback: "Could not load model usage",
-        })
-      ).json(),
+    }> => {
+      const usage = await getModelUsage(
+        organizationId(),
+        { days },
+        { signal, fallback: "Could not load model usage" },
+      );
+      return {
+        // The server names how each model is known with one of three words.
+        summary: usage.summary as ModelUsageSummary[],
+        recent: usage.recent,
+      };
+    },
   });
 }
 
 export function checkInMetricsQueryOptions(days: 7 | 30) {
   return queryOptions({
     queryKey: enterpriseKeys.checkIns(days),
-    queryFn: async (): Promise<CheckInMetrics> =>
-      (
-        await client(`/api/admin/proactive?days=${days}`, {
-          fallback: "Couldn't load check-ins",
-        })
-      ).json(),
+    queryFn: ({ signal }): Promise<CheckInMetrics> =>
+      getCheckInUsage(
+        organizationId(),
+        { days },
+        { signal, fallback: "Couldn't load check-ins" },
+      ),
   });
 }
 
+/** The newest 50 recorded commands: the first page of the API's list. */
 export function actionRecordsQueryOptions() {
   return queryOptions({
     queryKey: enterpriseKeys.actions(),
-    queryFn: (): Promise<ActionRecord[]> =>
-      client("/api/admin/enterprise/actions?limit=50", "actions", {
-        fallback: "Could not load recorded actions",
-      }),
+    queryFn: async ({ signal }): Promise<ActionRecord[]> =>
+      (
+        await listComputerActions(
+          organizationId(),
+          { limit: 50 },
+          { signal, fallback: "Could not load recorded actions" },
+        )
+      ).computerActions,
   });
 }
 
@@ -284,20 +337,17 @@ export type MyCapabilities = {
 };
 
 /**
- * What this person may use, which is not an administrator's read.
- *
- * `/me` sits under the enterprise ADMIN prefix and is deliberately the one route there that any
- * signed-in person may call: the switches decide what the app offers them, so the app has to be
- * able to ask. Everything else behind that prefix requires an administrator.
+ * What this person may use, which is not an administrator's read: the API's `people/me/capabilities`,
+ * which anybody signed in may ask about themselves. The switches decide what the app offers them, so
+ * the app has to be able to ask.
  */
 export function myCapabilitiesQueryOptions() {
   return queryOptions({
     queryKey: ["enterprise", "me"] as const,
-    queryFn: async (): Promise<MyCapabilities> =>
-      (
-        await client("/api/admin/enterprise/me", {
-          fallback: "Couldn't load what OpenBot allows.",
-        })
-      ).json(),
+    queryFn: ({ signal }): Promise<MyCapabilities> =>
+      getPersonCapabilities(organizationId(), "me", {
+        signal,
+        fallback: "Couldn't load what OpenBot allows.",
+      }),
   });
 }

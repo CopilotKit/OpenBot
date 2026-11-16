@@ -41,15 +41,16 @@ import {
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
   type GrantedPlugins,
-  pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 import { toolName } from "@/lib/plugins/tool-words";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -179,7 +180,7 @@ function YourApps({ agent }: { agent: AgentProfile }) {
       ) : null}
       {giveable.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your apps. Reload the page.
+          Couldn't load your apps. Try again in a moment.
         </p>
       ) : rows.length === 0 ? (
         <PageEmpty
@@ -249,23 +250,21 @@ function YourApps({ agent }: { agent: AgentProfile }) {
 }
 
 /**
- * Your own skills, one switch each. Only on your own Bot: the server lets a person put their own
- * skill on a Bot they own, and neither half alone is enough.
+ * Your skills, one switch each. Only on your own Bot: the server lets a person put a skill on a Bot
+ * they own when the skill is their own or granted to a team they are in, and neither half alone is
+ * enough.
  *
- * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS PAGE; WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
- * GRANTS (`GET /api/plugins/for/:agentId`, the read "What it can use" draws from too). That read is
+ * WHICH SKILLS ARE YOURS COMES FROM THE SKILLS LIST (`listSkills`, its `usableOnYourBots`); WHETHER THIS BOT CARRIES ONE, FROM THE BOT'S OWN
+ * GRANTS (listBotGrants, the read "What it can use" draws from too). That read is
  * where the personal edition gives a Bot every skill the first time it is listed, so it is what
  * gives a Bot made a moment ago its skills. The skills page, read alongside it or earlier, still said
  * the Bot had none, and every switch was drawn off until the page was opened again.
  */
 function YourSkills({ agentId }: { agentId: string }) {
-  const me = useQuery(currentUserQueryOptions()).data;
-  const page = useQuery(pluginsPageQueryOptions());
+  const page = useQuery(skillListQueryOptions());
   const held = useQuery(agentPluginsQueryOptions(agentId));
   const grant = useMutation(setPluginGrantMutationOptions(queryClient));
-  const skills = (page.data?.skills ?? []).filter(
-    (skill) => me && skill.ownerUserId === me.id,
-  );
+  const skills = (page.data ?? []).filter((skill) => skill.usableOnYourBots);
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
   return (
     <PageSection
@@ -279,7 +278,7 @@ function YourSkills({ agentId }: { agentId: string }) {
       ) : null}
       {page.isPending || held.isPending ? null : page.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your skills. Reload the page.
+          Couldn't load your skills. Try again in a moment.
         </p>
       ) : skills.length === 0 ? (
         <PageEmpty
@@ -296,7 +295,7 @@ function YourSkills({ agentId }: { agentId: string }) {
           icon={IconBox}
           title="No skills yet"
         >
-          Skills you write show up here.
+          Skills you write, and skills an admin gives your team, show up here.
         </PageEmpty>
       ) : (
         <PageRows>
@@ -343,7 +342,7 @@ function YourSkills({ agentId }: { agentId: string }) {
  * READ-ONLY FOR GRANTS, NOT FOR THE PERSON'S OWN PART. Apps are granted by an administrator, who gets
  * a link to where that is decided — or, on a Bot you own, by you, under Your apps above. But a Bot that holds Gmail is no use to somebody who has not
  * connected their Gmail, and this list used to say "Gmail · 4 tools" to everybody alike — so each
- * app now says what it is for the person reading (`GET /api/plugins/for/:agentId/apps`) with the one
+ * app now says what it is for the person reading (listBotApps) with the one
  * thing they can do about it: Connect, Reconnect, Request access, or Requested. The state is the
  * server's and is drawn as it comes; see `AppAccessAction`.
  *
@@ -384,11 +383,11 @@ function Granted({
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load what this Bot can use. Reload the page.
+        Couldn't load what this Bot can use. Try again in a moment.
       </p>
     );
   }
-  const admin = me?.role === "admin";
+  const admin = isOrganizationAdmin(me?.role);
   const tools = connectorTools(plugins.data);
   const states = apps.data ?? [];
   /*
@@ -415,7 +414,8 @@ function Granted({
     >
       {kind === "apps" && apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't check whether each app is ready for you. Reload the page.
+          Couldn't check whether each app is ready for you. Try again in a
+          moment.
         </p>
       ) : null}
       {count === 0 && kind === "skills" ? (

@@ -1,8 +1,8 @@
 //! Owner approval is collected by native dialogs, never by an app/tool-provided answer.
 use openbot_desktop_lib::host_access::{
     command_approval, ApprovedFolder, ChooseFolderPrompt, CommandApproval, CommandPolicy,
-    CommandPrompt, HostAccessError, HostAccessResult, HostApprovalUi, LocalCommandAllowList,
-    WritePrompt,
+    CommandPrompt, HostAccessError, HostAccessResult, HostApprovalUi, LapsedAction, LapsedApproval,
+    LocalCommandAllowList, WritePrompt,
 };
 use openbot_desktop_lib::paths;
 use std::path::Path;
@@ -84,6 +84,25 @@ fn command_message(
     )
 }
 
+/// The notice shown when the person allowed an action after OpenBot had stopped waiting for the
+/// answer: its title and its text.
+fn lapsed_notice(bot: &str, action: LapsedAction) -> (&'static str, String) {
+    match action {
+        LapsedAction::Command => (
+            "This command didn't run",
+            format!(
+                "OpenBot stopped waiting for your answer, so {bot}'s command didn't run. Ask {bot} again to run it."
+            ),
+        ),
+        LapsedAction::FileChange => (
+            "This file wasn't changed",
+            format!(
+                "OpenBot stopped waiting for your answer, so {bot}'s change wasn't made. Ask {bot} again to make it."
+            ),
+        ),
+    }
+}
+
 /// What the person pressed on the three-button command dialog. The plugin reports custom buttons by
 /// their label; anything else, including a plain Yes or No, is a denial.
 #[derive(Debug, PartialEq, Eq)]
@@ -120,9 +139,7 @@ impl<R: tauri::Runtime> NativeApproval<R> {
             .get_webview_window("main")
             .ok_or_else(|| refused("The local OpenBot window is closed."))?;
         window.show().map_err(|error| refused(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| refused(error.to_string()))?;
+        crate::focus(&window, "a Bot asks to use this computer");
         Ok(window)
     }
 
@@ -132,9 +149,7 @@ impl<R: tauri::Runtime> NativeApproval<R> {
             .get_webview_window("main")
             .ok_or_else(|| refused("The local OpenBot window is closed."))?;
         window.show().map_err(|error| refused(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| refused(error.to_string()))?;
+        crate::focus(&window, "a Bot asks to use this computer");
         let allowed = self
             .0
             .dialog()
@@ -163,9 +178,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
             .get_webview_window("main")
             .ok_or_else(|| refused("The local OpenBot window is closed."))?;
         window.show().map_err(|error| refused(error.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|error| refused(error.to_string()))?;
+        crate::focus(&window, "a Bot asks to use this computer");
         let picked = self
             .0
             .dialog()
@@ -258,11 +271,45 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
             CommandChoice::Deny => Err(refused(DECLINED)),
         }
     }
+
+    fn approval_lapsed(&self, notice: &LapsedApproval) {
+        let bot = bot_label(notice.bot_name.as_deref(), &notice.bot_id);
+        let (title, message) = lapsed_notice(&bot, notice.action);
+        let mut dialog = self
+            .0
+            .dialog()
+            .message(message)
+            .title(title)
+            .kind(MessageDialogKind::Info)
+            .buttons(MessageDialogButtons::Ok);
+        if let Some(window) = self.0.get_webview_window("main") {
+            dialog = dialog.parent(&window);
+        }
+        // Waited for, like any dialog here: the next one is shown when this one is closed, never
+        // on top of it (`prompt_turn` in `host_access.rs`).
+        dialog.blocking_show();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_late_allow_says_nothing_ran_and_names_the_bot() {
+        let (title, message) = lapsed_notice("Research Bot", LapsedAction::Command);
+        assert_eq!(title, "This command didn't run");
+        assert!(
+            message.contains("Research Bot's command didn't run"),
+            "{message}"
+        );
+        let (title, message) = lapsed_notice("Research Bot", LapsedAction::FileChange);
+        assert_eq!(title, "This file wasn't changed");
+        assert!(
+            message.contains("Research Bot's change wasn't made"),
+            "{message}"
+        );
+    }
 
     #[test]
     fn only_a_named_button_allows_a_command() {
