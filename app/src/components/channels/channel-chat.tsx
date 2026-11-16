@@ -836,6 +836,16 @@ export function ChannelChat({
    */
   /* The read below, for a turn that ends without the roster saying so: see `carryingOn`. */
   const pullHistoryRef = useRef<(() => void) | null>(null);
+  /*
+   * NOT WHILE THIS TAB'S OWN TURN IS GOING. A Bot's line said here from elsewhere can land while a
+   * turn of this tab's is still reaching it: a task the Bot handed off finishes and its result is
+   * said the moment the turn lets go of the conversation, before the turn's last events are here.
+   * Merged in then, the line was gone again when the turn ended, because a run ends by handing back
+   * the thread as it saw it (ag-ui-langgraph sends that snapshot on every run), and the conversation
+   * showed the task's card as Done with no result under it until it was opened again. So that read
+   * waits for the turn to be over, and the turn's end asks for it (`say`).
+   */
+  const readAfterTurn = useRef(false);
   useEffect(() => {
     const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
@@ -882,6 +892,13 @@ export function ChannelChat({
         // Nor while a run of a turn going on in a chat that closed is joined: see `rejoining`.
         await rejoining.current;
         if (!isCurrent()) return;
+        // Nor while this tab's own turn is going: read when it ends. See `readAfterTurn`.
+        const ownTurnGoing = () => {
+          if (turnsRef.current === 0) return false;
+          readAfterTurn.current = true;
+          return true;
+        };
+        if (ownTurnGoing()) return;
         let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
@@ -893,6 +910,8 @@ export function ChannelChat({
             runtimeAgentId,
           );
           if (!isCurrent()) return;
+          // A turn of this tab's began while the read was out: it is read again once that ends.
+          if (ownTurnGoing()) return;
           if (stored.availability === "unavailable") {
             // Only an exhausted refresh with no successful read is a failure to announce. Keep the
             // last known ready notice when the store already answered this refresh cycle.
@@ -1560,6 +1579,11 @@ export function ChannelChat({
       // does not, and the last turn out is what takes the roster's working indicator down.
       if (turnsRef.current === 0) {
         void setChannelBusy({ channelId: channel.id, busy: false });
+        // A Bot's line said here while the turn went on is read now that it is over.
+        if (readAfterTurn.current) {
+          readAfterTurn.current = false;
+          pullHistoryRef.current?.();
+        }
       }
       turnTokens.current.delete(turn);
       // And the conversation open now, if the person came back, reads what this turn stored.
