@@ -43,6 +43,8 @@ pub enum Kind {
     TooOld,
     SignInCancelled,
     SignInFailed,
+    /// Signed in, and then the OpenBot refused the new sign-in on the app's screens (401 or 403).
+    AccessRefused,
     SessionEnded,
     CredentialStore,
 }
@@ -57,6 +59,7 @@ impl Kind {
             Kind::TooOld => "too-old",
             Kind::SignInCancelled => "sign-in-cancelled",
             Kind::SignInFailed => "sign-in-failed",
+            Kind::AccessRefused => "access-refused",
             Kind::SessionEnded => "session-ended",
             Kind::CredentialStore => "credential-store",
         }
@@ -85,6 +88,10 @@ impl Kind {
             Kind::SignInCancelled => "Sign-in didn't finish. Try again when you're ready.".into(),
             Kind::SignInFailed => format!(
                 "OpenBot couldn't sign you in at {host}. Try again, or ask whoever runs your OpenBot."
+            ),
+            Kind::AccessRefused => format!(
+                "You signed in, but the OpenBot at {host} didn't let this app in. Ask whoever runs \
+                 it to give you access, then sign in again."
             ),
             Kind::SessionEnded => {
                 format!("Your sign-in to {host} has ended. Sign in again to keep going.")
@@ -119,6 +126,7 @@ pub fn kind_of(problem: &Problem) -> Option<Kind> {
         Kind::TooOld,
         Kind::SignInCancelled,
         Kind::SignInFailed,
+        Kind::AccessRefused,
         Kind::SessionEnded,
         Kind::CredentialStore,
     ]
@@ -203,6 +211,16 @@ mod tests {
         assert_eq!(
             Kind::TooOld.said("127.0.0.1:4000"),
             "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser."
+        );
+        let refused = Kind::AccessRefused.problem("openbot.example.com", "answered 403");
+        assert_eq!(kind_of(&refused), Some(Kind::AccessRefused));
+        assert_eq!(
+            serde_json::to_value(&refused).unwrap()["kind"],
+            "access-refused"
+        );
+        assert_eq!(
+            refused.said,
+            "You signed in, but the OpenBot at openbot.example.com didn't let this app in. Ask whoever runs it to give you access, then sign in again."
         );
     }
 

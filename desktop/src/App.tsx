@@ -9,6 +9,7 @@ import {
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
+import { handover } from "./handover";
 import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
@@ -368,6 +369,21 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   }, [engineReady, installationReady]);
   const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
+  /*
+   * A Start that sent the window to OpenBot (`handover.ts`): Starting stays on screen, as it was,
+   * until OpenBot's page replaces it. `returning` is the screen it was: a first run's Finishing setup
+   * or a return's Starting OpenBot, decided before this Start recorded the installation as launched.
+   */
+  const [handingOver, setHandingOver] = useState<{ returning: boolean } | null>(
+    null,
+  );
+  const handoverHeld = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
+    },
+    [],
+  );
   const visibleSetupStep: SetupStep | null =
     checkingResume || blockerFailure || blocker || running
       ? null
@@ -923,7 +939,10 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       } else {
         await invoke("start_stack", startWith);
       }
-      setSteps((current) => settleProgress(current));
+      const returnedTo = savedLaunch.current === installationKey;
+      const noticed = Boolean(outcome?.notice || intelligence.notice);
+      // Not settled when it hands over: Starting stays on screen as it was, its last row running.
+      if (noticed) setSteps((current) => settleProgress(current));
       setRunning(true);
       setRecoveryFailure(null);
       startedAfterReinstall.current = false;
@@ -934,16 +953,26 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setRefreshIntelligence(false);
       // An upgrade that did not happen is said on the running screen first; Show OpenBot hands over.
       // So is a back end that runs the release it had because its own update did not finish.
-      if (outcome?.notice || intelligence.notice) {
+      if (noticed) {
         // The notice says what the rows would: it is the one thing on the screen.
         setSteps([]);
         setReleaseNotice(outcome?.notice ?? null);
         setBackEndNotice(intelligence.notice ?? null);
         return "started";
       }
+      // Straight from Starting to OpenBot, after an update as after any Start: the running screen
+      // only if this page is still here once OpenBot's page had time to replace it (`handover.ts`).
+      setHandingOver({ returning: returnedTo });
       await invoke("show_openbot");
-      return "started";
+      if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
+      handoverHeld.current = setTimeout(() => {
+        handoverHeld.current = null;
+        setSteps((current) => settleProgress(current));
+        setHandingOver(null);
+      }, handover.holdMs);
+      return "opening";
     } catch (error) {
+      setHandingOver(null);
       recoverFromStart(error);
       // Refused until OpenBot is installed again, which the window now does by itself and then
       // starts. Only once: refused again straight after that install, it is a failure.
@@ -1489,7 +1518,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   // restart: said under the rows.
   const handOff = engineNow(steps);
 
-  if (!running && returningToInstallation && !refreshIntelligence) {
+  // Handing over to OpenBot: Starting, as it was, in place of the running screen.
+  const starting = !running || handingOver !== null;
+  const returning = handingOver?.returning ?? returningToInstallation;
+
+  if (starting && returning && !refreshIntelligence) {
     return (
       <main>
         <div className="sheet connection-sheet">
@@ -1570,11 +1603,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * and valid. While a CLI call runs, Cancel is the only control; leaving is offered only once
    * nothing runs.
    */
-  if (!running) {
+  if (starting) {
     return (
       <main>
         <div className="sheet connection-sheet">
-          {!returningToInstallation && <Sections at="Start" />}
+          {!returning && <Sections at="Start" />}
           {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
           <h1>Finishing setup</h1>
           <p className="lede">
@@ -1585,7 +1618,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           {/* The last thing setup asks: whether to share usage data. Above the rows, which come one
               at a time: under them, on Windows K, the box moved down 147 px while a person could
               click it, and a click aimed at it missed. */}
-          {!returningToInstallation && <UsageDataChoice />}
+          {!returning && <UsageDataChoice />}
           {freshInstall || (
             <LocalIntelligence
               sequence={local}

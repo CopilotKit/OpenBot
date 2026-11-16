@@ -25,6 +25,7 @@ function offerFor(kind: string | null | undefined): Offer {
       return "browser";
     case "sign-in-cancelled":
     case "sign-in-failed":
+    case "access-refused":
     case "session-ended":
       return "sign-in";
     default:

@@ -1462,6 +1462,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
             above: (words?.top ?? 0) - (card?.top ?? 0),
             below: (card?.bottom ?? 0) - (bar?.bottom ?? 0),
             time: time.textContent ?? "",
+            said: document.querySelector(".journey-said")?.textContent ?? "",
             cut: time.scrollWidth > time.clientWidth,
           };
         });
@@ -1491,9 +1492,11 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       await page.waitForTimeout(600);
       const usual = await measure();
       expect(Math.abs(usual.below - usual.above)).toBeLessThanOrEqual(2);
-      expect(usual.time).toMatch(
-        /left · 190\.9 MB of 944\.4 MB · \d+s so far$/,
-      );
+      // The bytes are said with the download they count; the time line is the bar's, the whole
+      // Start's (Windows K: "304.0 MB of 317.0 MB" read as the measure of a bar a third full).
+      expect(usual.time).toMatch(/left · \d+s so far$/);
+      expect(usual.time).not.toContain("MB");
+      expect(usual.said).toBe("Downloading the update · 190.9 MB of 944.4 MB");
       expect(usual.cut).toBe(false);
       // Every byte in, its last part unpacking, and fifteen minutes on: taking longer than usual.
       await emit({
@@ -1510,8 +1513,9 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       });
       await page.getByText(/Taking longer than usual/).waitFor();
       const slow = await measure();
-      expect(slow.time).toBe(
-        "Taking longer than usual, still working · 944.4 MB downloaded",
+      expect(slow.time).toBe("Taking longer than usual, still working");
+      expect(slow.said).toBe(
+        "Unpacking the update (5 of 5) · 944.4 MB downloaded",
       );
       expect(slow.cut).toBe(false);
       expect({ card: slow.card, row: slow.row }).toEqual({

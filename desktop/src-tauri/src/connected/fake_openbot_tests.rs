@@ -53,8 +53,12 @@ pub enum Shape {
     MetadataElsewhere,
     /// Every address redirects to the same path at another address.
     RedirectsTo(String),
-    /// Signs the app in, and then refuses the token on `/api/copilotkit/info`.
-    MeRefuses,
+    /// Signs the app in, and then answers this status on `/api/copilotkit/info` to the new token:
+    /// 401 or 403 when it does not let the app in, 404 when its release does not serve that
+    /// address.
+    InfoAnswers(u16),
+    /// Its revocation endpoint fails with a 500 whatever it is sent.
+    RevokeBroken,
 }
 
 const SCOPES: [&str; 4] = ["openid", "profile", "offline_access", "openbot"];
@@ -86,10 +90,15 @@ struct State {
     seen: Vec<Seen>,
     codes: HashMap<String, Code>,
     access: HashSet<String>,
+    /// The refresh token each access token was issued with, as the real one keeps it (an access
+    /// token's `refreshId`), so revoking a refresh token ends the access tokens issued with it.
+    issued_with: HashMap<String, String>,
     /// Every refresh token ever issued, and whether it is the current one.
     refresh: HashMap<String, bool>,
     token_requests: Vec<HashMap<String, String>>,
     revoke_requests: Vec<HashMap<String, String>>,
+    /// For each revocation request, whether it ended a token that still worked.
+    revoke_ended: Vec<bool>,
     token_delay: Duration,
 }
 
@@ -211,6 +220,13 @@ impl FakeOpenBot {
 
     pub fn revoke_requests(&self) -> Vec<HashMap<String, String>> {
         self.state.lock().unwrap().revoke_requests.clone()
+    }
+
+    /// For each revocation request, in order, whether it ended a token that still worked. A
+    /// `false` is a request for a token that was already over: RFC 7009 answers it 200, and the
+    /// real OpenBot answers it 400 `invalid_request`.
+    pub fn revoke_ended(&self) -> Vec<bool> {
+        self.state.lock().unwrap().revoke_ended.clone()
     }
 
     /// Access tokens and current refresh tokens that still work.
@@ -506,6 +522,7 @@ async fn answer(
             let access = format!("oba_{}", random());
             let refresh = format!("obr_{}", random());
             state.access.insert(access.clone());
+            state.issued_with.insert(access.clone(), refresh.clone());
             state.refresh.insert(refresh.clone(), true);
             json(
                 StatusCode::OK,
@@ -518,31 +535,71 @@ async fn answer(
                 }),
             )
         }
+        /*
+         * RFC 7009, as the real one (Better Auth's OAuth provider) answers it on the points the app
+         * relies on: a form-encoded body with `token`, and `client_id` for a public client (401
+         * `invalid_client` without it, 400 `invalid_request` without a token). `token_type_hint`
+         * is a hint: an unknown one is ignored. Revoking a refresh token also ends the access
+         * tokens issued with it (RFC 7009 §2.1; the real one deletes them by `refreshId`).
+         *
+         * A well-formed request for a token that is already over answers 200 here, as RFC 7009
+         * §2.2 says. The real one answers 400 `invalid_request` to it today, so the app must never
+         * send one: `revoke_ended` records, for each request, whether it ended a live token.
+         */
         ("POST", "/api/auth/oauth2/revoke") => {
+            let encoded = headers.iter().any(|(name, value)| {
+                name == "content-type" && value.starts_with("application/x-www-form-urlencoded")
+            });
             let body = request.into_body().collect().await.unwrap().to_bytes();
             let sent = form(&body);
             let mut state = state.lock().unwrap();
             state.revoke_requests.push(sent.clone());
-            if sent.get("client_id").map(String::as_str) != Some(CLIENT_ID) {
-                return Ok(oauth_error(
-                    "invalid_client",
-                    "client_id is required in the body",
+            if shape == Shape::RevokeBroken {
+                state.revoke_ended.push(false);
+                return Ok(json(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({ "error": "server_error" }),
                 ));
             }
-            if let Some(token) = sent.get("token") {
-                state.access.remove(token);
-                if let Some(current) = state.refresh.get_mut(token) {
-                    *current = false;
-                }
+            if sent.get("client_id").map(String::as_str) != Some(CLIENT_ID) {
+                state.revoke_ended.push(false);
+                return Ok(json(
+                    StatusCode::UNAUTHORIZED,
+                    serde_json::json!({
+                        "error": "invalid_client",
+                        "error_description": "missing required credentials",
+                    }),
+                ));
             }
-            // RFC 7009 §2.2: 200 whether or not the token was known.
+            let token = sent.get("token").map(String::as_str).unwrap_or("");
+            if !encoded || token.is_empty() {
+                state.revoke_ended.push(false);
+                return Ok(oauth_error("invalid_request", "a token is required"));
+            }
+            let mut ended = state.access.remove(token);
+            if state.refresh.get(token) == Some(&true) {
+                state.refresh.insert(token.to_owned(), false);
+                let issued: Vec<String> = state
+                    .issued_with
+                    .iter()
+                    .filter(|(_, refresh)| refresh.as_str() == token)
+                    .map(|(access, _)| access.clone())
+                    .collect();
+                for access in issued {
+                    state.access.remove(&access);
+                }
+                ended = true;
+            }
+            state.revoke_ended.push(ended);
             json(StatusCode::OK, serde_json::json!({}))
         }
-        ("GET", "/api/copilotkit/info") => match authorized {
-            Some(_) if shape != Shape::MeRefuses => {
-                json(StatusCode::OK, serde_json::json!({ "id": "person-1" }))
-            }
-            _ => refused(),
+        ("GET", "/api/copilotkit/info") => match (authorized, &shape) {
+            (Some(_), Shape::InfoAnswers(status)) => json(
+                StatusCode::from_u16(*status).unwrap(),
+                serde_json::json!({ "error": "refused" }),
+            ),
+            (Some(_), _) => json(StatusCode::OK, serde_json::json!({ "id": "person-1" })),
+            (None, _) => refused(),
         },
         (_, "/api/v2/echo") => {
             if authorized.is_none() {

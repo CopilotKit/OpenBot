@@ -40,8 +40,10 @@ import { organizationsOnly } from "@/lib/organizations/guard";
 import {
   type OrganizationMemberSummary,
   organizationMembersQueryOptions,
+  ownOrganizationsQueryOptions,
   type ReceivedInvitation,
   receivedInvitationQueryOptions,
+  receivedInvitationsQueryOptions,
   type SentInvitation,
 } from "@/lib/organizations/queries";
 import {
@@ -193,6 +195,14 @@ let server: {
   delivery: "emailed" | "link";
   /** What the next write is refused with, when it is. */
   refusal: { status: number; detail: string } | null;
+  /**
+   * What every read of the person's own organizations or invitations is answered with instead,
+   * when it is: a refusal, or the answer of a server that has no such address.
+   */
+  ownRefusal: {
+    of: "organizations" | "invitations";
+    answer: () => Response;
+  } | null;
 };
 /** Every request, in order, and each write's body and whether it carried an Idempotency-Key. */
 let requests: string[] = [];
@@ -249,6 +259,13 @@ async function answer(
       localEvaluation: server.edition === "personal",
       edition: server.edition,
     });
+
+  if (
+    server.ownRefusal &&
+    method === "GET" &&
+    path.startsWith(`/api/v2/people/me/${server.ownRefusal.of}`)
+  )
+    return server.ownRefusal.answer();
 
   if (path === "/api/v2/people/me/organizations" && method === "GET")
     return Response.json({
@@ -430,6 +447,7 @@ beforeEach(() => {
     received: [],
     delivery: "link",
     refusal: null,
+    ownRefusal: null,
   };
   requests = [];
   writes = [];
@@ -496,6 +514,10 @@ async function open(start: string) {
       at("/settings/organization", OrganizationSettingsPage),
       at("/invitations", InvitationsPage),
       at("/invitations/$invitationId", LinkedInvitation),
+      at("/bots", () => <p>Bots</p>),
+      at("/routines", () => <p>Routines</p>),
+      at("/skills", () => <p>Skills</p>),
+      at("/connections", () => <p>Connections</p>),
     ]),
   });
   const view = render(
@@ -608,6 +630,123 @@ describe("reading", () => {
       await queryClient.fetchQuery(receivedInvitationQueryOptions("inv_1")),
     ).toMatchObject({ id: "inv_1", status: "canceled" });
   });
+
+  /** What a read answers: its value, or the sentence it failed with. */
+  async function outcome<T>(read: () => Promise<T>) {
+    try {
+      return { value: await read() };
+    } catch (error) {
+      return { failed: (error as Error).message };
+    }
+  }
+
+  /** A server that has no such address: the API's own not found, with nothing to say. */
+  const NO_SUCH_ADDRESS = () =>
+    new Response(JSON.stringify({ status: 404, code: "NOT_FOUND" }), {
+      status: 404,
+      headers: { "content-type": "application/problem+json" },
+    });
+  /** What an app's sign-in without the permission is told, as the API says it. */
+  const NOT_ALLOWED =
+    "This sign-in can't see your organizations. Sign in again and allow it.";
+  const REFUSALS: [string, () => Response][] = [
+    [
+      "a sign-in not allowed to see them",
+      () => problem(403, "PERMISSION_DENIED", NOT_ALLOWED),
+    ],
+    [
+      "an organization the request named that the person is not in",
+      () =>
+        problem(
+          404,
+          "ORGANIZATION_NOT_FOUND",
+          "Couldn't find that organization.",
+        ),
+    ],
+    [
+      "an expired sign-in",
+      () =>
+        problem(
+          401,
+          "AUTH_UNAUTHENTICATED",
+          "Your sign-in has expired. Sign in again.",
+        ),
+    ],
+  ];
+
+  test("a refusal of the person's invitations is a failure in the server's sentence, never an empty list", async () => {
+    for (const [, answer] of REFUSALS) {
+      server.ownRefusal = { of: "invitations", answer };
+      queryClient.clear();
+      const read = await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationsQueryOptions()),
+      );
+      expect(read).toEqual({
+        failed: ((await answer().json()) as { detail: string }).detail,
+      });
+    }
+    // An OpenBot that keeps one organization has no such address, and so no invitations.
+    server.ownRefusal = { of: "invitations", answer: NO_SUCH_ADDRESS };
+    queryClient.clear();
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationsQueryOptions()),
+      ),
+    ).toEqual({ value: [] });
+  });
+
+  test("a refusal of the person's organizations is a failure, and only an OpenBot without the address keeps one organization", async () => {
+    for (const [name, answer] of REFUSALS) {
+      // Not signed in is an answer there, as it is for who is signed in.
+      if (name === "an expired sign-in") continue;
+      server.ownRefusal = { of: "organizations", answer };
+      queryClient.clear();
+      setCurrentOrganization(undefined);
+      const read = await outcome(() =>
+        queryClient.fetchQuery(ownOrganizationsQueryOptions()),
+      );
+      expect(read).toEqual({
+        failed: ((await answer().json()) as { detail: string }).detail,
+      });
+    }
+    server.ownRefusal = { of: "organizations", answer: NO_SUCH_ADDRESS };
+    queryClient.clear();
+    setCurrentOrganization(undefined);
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(ownOrganizationsQueryOptions()),
+      ),
+    ).toEqual({
+      value: { organizations: [], canCreate: false, currentId: "default" },
+    });
+  });
+
+  test("an invitation's page is not found only when the invitation is not, and a refusal is a failure", async () => {
+    server.ownRefusal = {
+      of: "invitations",
+      answer: () =>
+        problem(
+          404,
+          "ORGANIZATION_NOT_FOUND",
+          "Couldn't find that organization.",
+        ),
+    };
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationQueryOptions("inv_1")),
+      ),
+    ).toEqual({ failed: "Couldn't find that organization." });
+    server.ownRefusal = {
+      of: "invitations",
+      answer: () => problem(403, "PERMISSION_DENIED", NOT_ALLOWED),
+    };
+    queryClient.clear();
+    expect(
+      await outcome(() =>
+        queryClient.fetchQuery(receivedInvitationQueryOptions("inv_1")),
+      ),
+    ).toEqual({ failed: NOT_ALLOWED });
+  });
 });
 
 describe("the account menu", () => {
@@ -646,6 +785,98 @@ describe("the account menu", () => {
     await waitFor(() =>
       expect(app.router.state.location.pathname).toBe("/invitations"),
     );
+  });
+
+  test("invitations it could not read are offered without a count, never as none, and their page says why", async () => {
+    server.received = [received("inv_1", "pending")];
+    server.ownRefusal = {
+      of: "invitations",
+      answer: () =>
+        problem(
+          403,
+          "PERMISSION_DENIED",
+          "This sign-in can't see your organizations. Sign in again and allow it.",
+        ),
+    };
+    const app = await open("/");
+    const menu = await app.openAccountMenu();
+    const entry = await within(menu).findByRole("menuitem", {
+      name: /Invitations/,
+    });
+    expect(entry.querySelector("[data-slot=invitations-waiting]")).toBe(null);
+    await app.person.click(entry);
+    // After the one retry every read gets (query-client.ts).
+    expect(
+      (await app.view.findByRole("alert", undefined, { timeout: 5_000 }))
+        .textContent,
+    ).toBe(
+      "This sign-in can't see your organizations. Sign in again and allow it.",
+    );
+    expect(app.view.queryByText("No invitations")).toBe(null);
+  });
+
+  test("on the invitations page no destination in the sidebar is marked as the one open", async () => {
+    server.received = [received("inv_1", "pending")];
+    const app = await open("/bots");
+    const marked = () =>
+      [
+        ...app.view.container.querySelectorAll(
+          "[data-sidebar=footer] a[data-status=active], [data-sidebar=footer] [aria-current=page]",
+        ),
+      ].map((link) => link.textContent?.trim());
+    await waitFor(() => expect(marked()).toEqual(["Bots"]));
+    const menu = await app.openAccountMenu();
+    await app.person.click(
+      await within(menu).findByRole("menuitem", { name: /Invitations/ }),
+    );
+    await waitFor(() =>
+      expect(app.router.state.location.pathname).toBe("/invitations"),
+    );
+    await waitFor(() => expect(marked()).toEqual([]));
+    // Nor is any row drawn as if it were, by focus or by the pointer the menu left over it.
+    const bots = app.view.getByRole("link", { name: /^Bots/ });
+    expect(document.activeElement).not.toBe(bots);
+  });
+
+  test("coming back to the window, which stayed shown, picks up a membership and an invitation made elsewhere", async () => {
+    const app = await open("/");
+    let menu = await app.openAccountMenu();
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(2);
+    expect(within(menu).queryByRole("menuitem", { name: /Invitations/ })).toBe(
+      null,
+    );
+    await app.person.keyboard("{Escape}");
+
+    // In the browser beside it: she joined Acme Research, and Lee invited her somewhere else.
+    server.organizations.push({ ...RESEARCH, role: "member", personal: false });
+    server.received = [received("inv_2", "pending")];
+    const before = requests.length;
+    // OpenBot Desktop's window is focused again. Nothing was ever hidden.
+    expect(document.visibilityState).toBe("visible");
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() =>
+      expect(requests.slice(before)).toEqual(
+        expect.arrayContaining([
+          "GET /api/v2/people/me/organizations",
+          "GET /api/v2/people/me/invitations",
+        ]),
+      ),
+    );
+
+    menu = await app.openAccountMenu();
+    await waitFor(() =>
+      expect(
+        within(menu)
+          .getAllByRole("menuitemradio")
+          .map((choice) => choice.textContent),
+      ).toEqual(["Dana's organization", "Acme", "Acme Research"]),
+    );
+    const entry = await within(menu).findByRole("menuitem", {
+      name: /Invitations/,
+    });
+    expect(
+      entry.querySelector("[data-slot=invitations-waiting]")?.textContent,
+    ).toBe("1, 1 waiting");
   });
 
   test("the personal edition has no organization settings and no invitations, in the menu or in Settings", async () => {
