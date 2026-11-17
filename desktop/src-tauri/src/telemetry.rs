@@ -101,6 +101,20 @@ pub struct Telemetry {
     session_last_step_viewed: Mutex<Option<Step>>,
     flush_lock: Mutex<()>,
     client: Client,
+    /// What this launch found about the version that ran before it, for `observe_launch` once.
+    launch: Mutex<Option<LaunchSeen>>,
+}
+
+/// The version that last ran, as this launch found it in the saved state.
+#[derive(Debug, Clone)]
+struct LaunchSeen {
+    /// The version the state says last ran: its own record, or for a state saved before there was
+    /// one, the newest event it still holds.
+    previous: Option<AppVersion>,
+    /// The state was saved by a version that kept no record of itself (1.0.3 and before).
+    legacy: bool,
+    /// An update this app ran itself ended at this launch, and has said so.
+    update_ended: bool,
 }
 
 impl Telemetry {
@@ -121,13 +135,29 @@ impl Telemetry {
         }
 
         fs::create_dir_all(data_dir.as_ref())?;
-        let mut state = if state_path.exists() {
+        let existed = state_path.exists();
+        let mut state = if existed {
             let state = serde_json::from_slice::<PersistedState>(&fs::read(&state_path)?)?;
             state.validate()?;
             state
         } else {
             PersistedState::new(new_uuid())
         };
+
+        // The version that ran before this one, read before this launch adds anything of its own.
+        let legacy = existed && state.last_run_version.is_none();
+        let previous = state.last_run_version.clone().or_else(|| {
+            legacy
+                .then(|| {
+                    state
+                        .queue
+                        .last()
+                        .map(|event| event.context.app_version.clone())
+                })
+                .flatten()
+        });
+        state.last_run_version = Some(context.app_version.clone());
+        let mut update_ended = false;
 
         if !state.activated {
             if let Some(step) = state.last_step.take() {
@@ -141,6 +171,7 @@ impl Telemetry {
         // or still the one it was moving from.
         if let Some(update) = state.update.take() {
             if let Some(ended) = update.ended(&context.app_version) {
+                update_ended = true;
                 state.push_bounded(
                     Event::new(ended, context.clone()),
                     normalized_max_queue(config.max_queue),
@@ -157,7 +188,87 @@ impl Telemetry {
             session_last_step_viewed: Mutex::new(None),
             flush_lock: Mutex::new(()),
             client: client()?,
+            launch: Mutex::new(Some(LaunchSeen {
+                previous,
+                legacy,
+                update_ended,
+            })),
         }))
+    }
+
+    /**
+    The first launch of a new version says the update that brought it, once: `update_completed` from
+    the version that last ran to this one, marked `observed_at_first_launch`. This is how a move from
+    a version that never said its own updates (1.0.3) is seen at all.
+
+    `installed` is the release of the installation on this computer, if there is one. It names the
+    version that last ran when the saved state predates that record. When it is that older version,
+    the installation is still to be moved to this release, so the update is said only once the move
+    has gone through (`installation_settled`); a move that is put back or fails says
+    `update_restored` or `update_failed` instead, and this one is never said. An update this app ran
+    itself already ended with its own `update_completed` at this launch, and is not said twice.
+    Called once a launch; with usage data off it records nothing.
+    */
+    pub fn observe_launch(&self, installed: Option<AppVersion>) {
+        let Some(seen) = self.launch.lock().ok().and_then(|mut seen| seen.take()) else {
+            return;
+        };
+        if seen.update_ended {
+            return;
+        }
+        let Some(previous) = seen
+            .previous
+            .or_else(|| seen.legacy.then(|| installed.clone()).flatten())
+        else {
+            return;
+        };
+        let Ok(context) = self.context.lock().map(|context| context.clone()) else {
+            return;
+        };
+        if previous == context.app_version {
+            return;
+        }
+        let Ok(mut guard) = self.state.lock() else {
+            return;
+        };
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let observed = FirstLaunch {
+            from_version: previous.clone(),
+            to_version: context.app_version.clone(),
+        };
+        if installed.as_ref() == Some(&previous) {
+            state.first_launch = Some(observed);
+        } else {
+            state.push_bounded(
+                Event::new(observed.completed(), context),
+                normalized_max_queue(self.config.max_queue),
+            );
+        }
+        let _ = write_state(&self.state_path, state);
+    }
+
+    /// The installation is on this release: moved to it, or found already there. A first launch
+    /// waiting on it says its update now (`observe_launch`).
+    pub fn installation_settled(&self) {
+        let Ok(context) = self.context.lock().map(|context| context.clone()) else {
+            return;
+        };
+        let Ok(mut guard) = self.state.lock() else {
+            return;
+        };
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let Some(observed) = state.first_launch.take() else {
+            return;
+        };
+        state.push_bounded(
+            Event::new(observed.completed(), context),
+            normalized_max_queue(self.config.max_queue),
+        );
+        let _ = write_state(&self.state_path, state);
     }
 
     fn disabled(state_path: PathBuf, context: Context, config: Config) -> Result<Self> {
@@ -169,6 +280,7 @@ impl Telemetry {
             session_last_step_viewed: Mutex::new(None),
             flush_lock: Mutex::new(()),
             client: client()?,
+            launch: Mutex::new(None),
         })
     }
 
@@ -327,6 +439,14 @@ impl Telemetry {
                 state.update = None;
             }
             _ => {}
+        }
+        // A move of the installation that was put back or failed says so itself: the first launch
+        // waiting on it says nothing.
+        if matches!(
+            data,
+            EventData::UpdateRestored { .. } | EventData::UpdateFailed { .. }
+        ) {
+            state.first_launch = None;
         }
 
         match &data {
@@ -765,6 +885,31 @@ pub struct PersistedState {
     /// An update started and not yet ended, for the launch after its restart to end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update: Option<PendingUpdate>,
+    /// The version that ran last, so the first launch of another one can say the update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_version: Option<AppVersion>,
+    /// A first launch's update waiting on the installation's move to this release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_launch: Option<FirstLaunch>,
+}
+
+/// An update seen by the first launch of the version it brought: from the version that last ran.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirstLaunch {
+    pub from_version: AppVersion,
+    pub to_version: AppVersion,
+}
+
+impl FirstLaunch {
+    fn completed(self) -> EventData {
+        EventData::UpdateCompleted {
+            from_version: self.from_version,
+            to_version: self.to_version,
+            duration_ms: None,
+            observed_at_first_launch: true,
+        }
+    }
 }
 
 /// OpenBot updating itself: the version it moves from and to, and when its download began.
@@ -786,7 +931,8 @@ impl PendingUpdate {
             Some(EventData::UpdateCompleted {
                 from_version: self.from_version,
                 to_version: self.to_version,
-                duration_ms,
+                duration_ms: Some(duration_ms),
+                observed_at_first_launch: false,
             })
         } else if *launched == self.from_version {
             Some(EventData::UpdateFailed {
@@ -811,6 +957,8 @@ impl PersistedState {
             last_step: None,
             queue: Vec::new(),
             update: None,
+            last_run_version: None,
+            first_launch: None,
         }
     }
 
@@ -1008,11 +1156,16 @@ pub enum EventData {
         to_version: AppVersion,
     },
     /// The first launch after an update is the version it was moving to, `duration_ms` after its
-    /// download began.
+    /// download began. `observed_at_first_launch` is an update this app did not run itself, seen by
+    /// the first launch of a new version from the version that last ran (`observe_launch`), with no
+    /// duration to give.
     UpdateCompleted {
         from_version: AppVersion,
         to_version: AppVersion,
-        duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        observed_at_first_launch: bool,
     },
     /// An update stopped, `duration_ms` after it began, for a closed reason. Said by the version
     /// that saw it fail, or by the first launch after it when that is still `from_version`.
@@ -1629,7 +1782,8 @@ pub fn schema_json() -> serde_json::Value {
             "update_completed": {
                 "from_version": { "pattern": APP_VERSION_PATTERN },
                 "to_version": { "pattern": APP_VERSION_PATTERN },
-                "duration_ms": "u64"
+                "duration_ms": "option_u64",
+                "observed_at_first_launch": "bool"
             },
             "update_failed": {
                 "from_version": { "pattern": APP_VERSION_PATTERN },
@@ -2228,7 +2382,14 @@ mod tests {
             EventData::UpdateCompleted {
                 from_version: AppVersion::parse("1.0.4").unwrap(),
                 to_version: AppVersion::parse("1.1.0").unwrap(),
-                duration_ms: 61_000,
+                duration_ms: Some(61_000),
+                observed_at_first_launch: false,
+            },
+            EventData::UpdateCompleted {
+                from_version: AppVersion::parse("1.0.3").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+                duration_ms: None,
+                observed_at_first_launch: true,
             },
             EventData::UpdateFailed {
                 from_version: AppVersion::parse("1.0.4").unwrap(),
@@ -2356,6 +2517,8 @@ mod tests {
                 context("1.2.3", Engine::None),
             )],
             update: None,
+            last_run_version: None,
+            first_launch: None,
         };
         fs::write(state_path(&dir), serde_json::to_vec_pretty(&state).unwrap()).unwrap();
 
@@ -3072,6 +3235,130 @@ mod tests {
         )
         .unwrap();
         off.record(started).unwrap();
+        assert!(off.snapshot().is_err());
+        assert!(!state_path(&dir).exists());
+    }
+
+    /// The state file exactly as OpenBot 1.0.3 saved it: no record of the version that ran.
+    fn saved_by_1_0_3(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            state_path(dir),
+            serde_json::json!({
+                "schema_version": 1,
+                "install_id": "2f0c6e6a-4d1b-4c3e-9b8a-7d5e4f3a2b1c",
+                "activated": true,
+                "last_step": null,
+                "queue": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    fn first_launch_completions(telemetry: &Telemetry) -> Vec<serde_json::Value> {
+        sent(telemetry)
+            .into_iter()
+            .filter(|event| event["kind"] == "update_completed")
+            .collect()
+    }
+
+    /**
+    The move from a version that never said it updated (1.0.3 to 1.1.0) is seen by the first launch
+    of the new version: one `update_completed`, from the version that last ran to this one, marked as
+    observed at first launch. The installation 1.0.3 left says which version that was, and it is said
+    once its move to this release has gone through. A second launch says nothing more.
+    */
+    #[test]
+    fn the_first_launch_of_a_new_version_says_the_update_once() {
+        let dir = temp_dir("first-launch");
+        saved_by_1_0_3(&dir);
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(Some(AppVersion::parse("1.0.3").unwrap()));
+        assert!(
+            first_launch_completions(&launched).is_empty(),
+            "before the move"
+        );
+        launched.installation_settled();
+        launched.installation_settled();
+        let completed = first_launch_completions(&launched);
+        assert_eq!(
+            completed,
+            vec![serde_json::json!({
+                "kind": "update_completed",
+                "from_version": "1.0.3",
+                "to_version": "1.1.0",
+                "observed_at_first_launch": true
+            })]
+        );
+        drop(launched);
+
+        let again = opened(&dir, "1.1.0");
+        again.observe_launch(Some(AppVersion::parse("1.1.0").unwrap()));
+        again.installation_settled();
+        assert_eq!(first_launch_completions(&again).len(), 1, "said again");
+    }
+
+    /// Connected to an OpenBot that runs elsewhere there is no installation to move: the first launch
+    /// says it straight away, from the version the saved state last ran.
+    #[test]
+    fn with_no_installation_the_first_launch_says_it_at_once() {
+        let dir = temp_dir("first-launch-connected");
+        drop(opened(&dir, "1.1.0-rc.1"));
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(None);
+        assert_eq!(
+            first_launch_completions(&launched),
+            vec![serde_json::json!({
+                "kind": "update_completed",
+                "from_version": "1.1.0-rc.1",
+                "to_version": "1.1.0",
+                "observed_at_first_launch": true
+            })]
+        );
+    }
+
+    /// A move of the installation that was put back, or could not be, is said by `update_restored` or
+    /// `update_failed`, and the first launch adds no `update_completed` to it. An update this app ran
+    /// itself is ended by its own marker, and is not said a second time either.
+    #[test]
+    fn the_first_launch_never_doubles_another_update_event() {
+        let dir = temp_dir("first-launch-restored");
+        saved_by_1_0_3(&dir);
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(Some(AppVersion::parse("1.0.3").unwrap()));
+        launched
+            .record(EventData::UpdateRestored {
+                from_version: AppVersion::parse("1.0.3").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+            })
+            .unwrap();
+        launched.installation_settled();
+        assert!(first_launch_completions(&launched).is_empty());
+
+        let dir = temp_dir("first-launch-marker");
+        opened(&dir, "1.0.4")
+            .record(EventData::UpdateStarted {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+            })
+            .unwrap();
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(None);
+        launched.installation_settled();
+        assert_eq!(first_launch_completions(&launched).len(), 1);
+
+        let dir = temp_dir("first-launch-not-shared");
+        saved_by_1_0_3(&dir);
+        let off = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Disabled,
+        )
+        .unwrap();
+        off.observe_launch(Some(AppVersion::parse("1.0.3").unwrap()));
+        off.installation_settled();
         assert!(off.snapshot().is_err());
         assert!(!state_path(&dir).exists());
     }
