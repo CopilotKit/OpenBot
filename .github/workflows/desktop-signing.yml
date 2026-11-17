@@ -314,6 +314,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ inputs.release-tag }}
       MAKE_LATEST: ${{ inputs.make-latest }}
+      # Tags kept from Latest for a staged rollout (scripts/release-make-latest.sh).
+      HOLD_LATEST: ${{ vars.RELEASE_HOLD_LATEST }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
