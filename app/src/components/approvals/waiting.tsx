@@ -69,20 +69,21 @@ import type { WaitingWhere } from "@/lib/tasks/groups";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
-type WaitingQuestion = ApprovalInboxData["questions"][number];
-type WaitingRequest = ApprovalInboxData["requests"][number];
+export type WaitingQuestion = ApprovalInboxData["questions"][number];
+export type WaitingRequest = ApprovalInboxData["requests"][number];
 
 /**
  * What waits on the person in the approval inbox, for one Bot or for all of them: the questions its
  * Bots asked, and the actions waiting on a decision. A question asked during a hand-off belongs to
  * the Bot whose conversation it is.
  */
-function useWaiting(agentId: string | undefined) {
+export function useWaiting(agentId: string | undefined) {
   const inbox = useQuery(approvalInboxOptions());
   const ours = (botId: string) => agentId === undefined || botId === agentId;
   return {
     error: inbox.error,
     failure: readFailure(inbox),
+    loading: inbox.isPending,
     questions: (inbox.data?.questions ?? []).filter((question) =>
       ours(question.conversationBotId ?? question.botId),
     ),
@@ -357,7 +358,7 @@ export function useWaitingByBot(
  * the question waits above the composer. A question with no conversation on record is answered in a
  * dialog instead.
  */
-function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
+export function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   const navigate = useNavigate();
   const [answering, setAnswering] = useState(false);
   const { channelId } = question;
@@ -635,19 +636,26 @@ function requestReason(request: WaitingRequest): ReactNode {
 }
 
 /**
+ * What an action is titled with on the board, capitalised. A share is titled as its card is, who it
+ * goes to included: "Hand this to Ledger Bot". Split as an action and its place, it read "Hand this
+ * to" over "Ledger Bot".
+ */
+export function requestBoardTitle(request: WaitingRequest): string {
+  const said =
+    shareOf(request.action) !== null
+      ? approvalPhrase(request.action)
+      : approvalWords(request.action).action;
+  return said.charAt(0).toUpperCase() + said.slice(1);
+}
+
+/**
  * An action on the board: what it wants to do and where, with its answers on the right
  * (`RequestAnswers`). Where it acts and what it would send are always on screen, whole: nobody
  * allows something they were not shown.
  */
-function RequestBoardRow({ request }: { request: WaitingRequest }) {
+export function RequestBoardRow({ request }: { request: WaitingRequest }) {
   const words = approvalWords(request.action);
-  /*
-   * A share is titled as its card is, who it goes to included: "Hand this to Ledger Bot". Split as
-   * an action and its place, it read "Hand this to" over "Ledger Bot".
-   */
   const share = shareOf(request.action) !== null;
-  const said = share ? approvalPhrase(request.action) : words.action;
-  const action = said.charAt(0).toUpperCase() + said.slice(1);
   return (
     <BoardRow
       actions={<RequestAnswers request={request} />}
@@ -656,7 +664,7 @@ function RequestBoardRow({ request }: { request: WaitingRequest }) {
       meta={[requestReason(request)]}
       more={<ApprovalDetails action={request.action} />}
       open
-      title={action}
+      title={requestBoardTitle(request)}
       waiting
       wholeDetail
     />

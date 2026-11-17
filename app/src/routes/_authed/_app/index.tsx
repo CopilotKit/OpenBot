@@ -20,6 +20,7 @@ import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { Briefing } from "@/components/places/briefing";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,6 +58,7 @@ import {
 import { useDraftModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
+import { usePlacesEnabled } from "@/lib/places/store";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 import { queryClient } from "@/query-client";
 
@@ -111,6 +113,7 @@ export const Route = createFileRoute("/_authed/_app/")({
 function RouteComponent() {
   const { data: user } = useQuery(currentUserQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
+  const placesOn = usePlacesEnabled();
   const {
     data: agents,
     isPending: loading,
@@ -460,7 +463,7 @@ function RouteComponent() {
         </div>
       </div>
       {/* A Bot already working somewhere, and the way to it. Nothing while every Bot is idle. */}
-      <WorkingNow channels={channels.data} />
+      {placesOn ? <Briefing /> : <WorkingNow channels={channels.data} />}
     </>
   );
 }
