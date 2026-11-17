@@ -404,7 +404,7 @@ Nothing in the cluster had changed and every check passed, yet the CLI reports `
 long as the record stays, and the window said the back end was not healthy and stopped.
 
 Only facts the window turns into its own sentences: the release (an identifier, like
-`installedRelease`), whether the update was still `prepared`, and whether it stopped downloading.
+`installedRelease`), how far the update got (`UpdateState`), and whether it stopped downloading.
 The recovery command and the schema are not kept.
 */
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -415,12 +415,46 @@ pub struct UnfinishedUpdate {
     /// The CLI's update state is still `prepared`: no migration has started, so the release that
     /// answers is the one installed (`installedRelease`).
     pub prepared: bool,
+    /// How far the update got, from the CLI's `update.state`.
+    pub state: UpdateState,
     /// The step that failed was one of the image downloads.
     pub stopped_downloading: bool,
     /// The step the CLI recorded as failed (`failedStep`), an identifier such as `update-quiesce`,
     /// so the window can say where the update stopped. Absent when none is recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_step: Option<String>,
+}
+
+/**
+How far an unfinished update got, as the CLI's `update.state` records it. The window says whether the
+services still run the version they had from this, never from the CLI's own text.
+
+Found on a Mac, rc.11 to rc.13: the CLI was stopped at `migrated`, while the new services started.
+The database was already on the new release, yet the window said the services ran the version they
+had.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateState {
+    /// Nothing migrated yet: the release installed is the one that answers.
+    Prepared,
+    /// The database migration started and did not finish: part-way.
+    Migrating,
+    /// The database is on the new release; the new services had not finished starting.
+    Migrated,
+    /// A state this build does not know.
+    Other,
+}
+
+impl UpdateState {
+    fn read(state: Option<&str>) -> Self {
+        match state {
+            Some("prepared") => Self::Prepared,
+            Some("migrating") => Self::Migrating,
+            Some("migrated") => Self::Migrated,
+            _ => Self::Other,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -2193,6 +2227,7 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
             Some(UnfinishedUpdate {
                 to: text(update.get("attemptedRelease"))?,
                 prepared: update.get("state").and_then(Value::as_str) == Some("prepared"),
+                state: UpdateState::read(update.get("state").and_then(Value::as_str)),
                 // The steps the CLI's own progress calls downloading the release's images.
                 stopped_downloading: matches!(
                     saved.get("failedStep").and_then(Value::as_str),
@@ -5839,6 +5874,41 @@ mod tests {
             assert_eq!(observed.running, running);
             assert!(!observed.services[0].ready);
             assert_eq!(report.readiness, Readiness::Unknown);
+            assert!(!exposes_secret(&report));
+        }
+    }
+
+    /// The window is told how far an unfinished update got as one of four words, never the CLI's
+    /// own text: a state this build does not know is `other`.
+    #[test]
+    fn an_unfinished_update_tells_the_window_how_far_it_got() {
+        for (state, expected, said) in [
+            (json!("prepared"), UpdateState::Prepared, "prepared"),
+            (json!("migrating"), UpdateState::Migrating, "migrating"),
+            (json!("migrated"), UpdateState::Migrated, "migrated"),
+            (json!(SECRET), UpdateState::Other, "other"),
+            (json!(null), UpdateState::Other, "other"),
+        ] {
+            let mut input = envelope();
+            input["stack"]["update"] = json!({
+                "attemptedRelease": "0.16.0-rc.13",
+                "state": state,
+                "recoveryCommand": "copilotkit local update",
+            });
+            let report = status(&input).unwrap();
+            let update = report.stack.clone().unwrap().unfinished_update.unwrap();
+            assert_eq!(update.state, expected, "{state}");
+            assert_eq!(
+                update.prepared,
+                expected == UpdateState::Prepared,
+                "{state}"
+            );
+            let window = serde_json::to_value(&report).unwrap();
+            assert_eq!(
+                window["stack"]["unfinishedUpdate"]["state"],
+                json!(said),
+                "{state}"
+            );
             assert!(!exposes_secret(&report));
         }
     }
