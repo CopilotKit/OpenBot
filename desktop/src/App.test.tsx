@@ -5313,6 +5313,36 @@ test("Settings' Change AI connection opens setup at the AI screen and starts wit
   expect(getStartStackPayload()).toMatchObject({
     model: { apiKey: "new-model-key" },
   });
+  // Chosen here, so OpenBot's server takes it over a connection changed in the app since.
+  expect(
+    invokeCalls.filter(
+      (call) => call.command === "record_ai_connection_chosen",
+    ),
+  ).toEqual([
+    {
+      command: "record_ai_connection_chosen",
+      args: { root: "/tmp/settings-change-ai-connection" },
+    },
+  ]);
+});
+
+/*
+ * A relaunch resumes the connection it recorded and chooses nothing: the server keeps whichever
+ * connection was last changed in the app.
+ */
+test("a relaunch starts with the saved connection and records no new choice", async () => {
+  setupConnectedLocalStack(
+    "/tmp/relaunch-keeps-ai-connection",
+    localStatus("ready", "valid"),
+  );
+  await renderApp();
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(true);
+  expect(
+    invokeCalls.some((call) => call.command === "record_ai_connection_chosen"),
+  ).toBe(false);
 });
 
 test("Back from Settings' Change AI connection shows the stopped screen with Start", async () => {
@@ -5804,6 +5834,7 @@ function setupRootConfiguration(
     // The engine already answers, unless a test says otherwise.
     if (command === "wake_engine") return null;
     if (command === "bring_setup_to_front") return null;
+    if (command === "record_ai_connection_chosen") return null;
     throw new Error(`unexpected command ${command}`);
   };
 }

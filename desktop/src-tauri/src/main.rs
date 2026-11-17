@@ -3922,6 +3922,40 @@ impl ChosenModel {
     ) -> Result<openbot_env::ModelCredential, Problem> {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
         let saved = self.saved.unwrap_or(false);
+        /*
+         * A KEY OR ADDRESS OPENBOT KEEPS. The connection was last changed in the app, where the key
+         * went to OpenBot's server and never to this app, and the window resumes it as a saved one.
+         * Start writes no key for it, so the server keeps the one it holds (the setup window made
+         * no newer choice: `ai_connection::CHOSEN_AT_ENV`). Plans and sign-ins are kept here, and
+         * resolve below as ever.
+         */
+        if saved {
+            if let Some(kept) = openbot_desktop_lib::ai_connection::Settled::read(root)
+                .filter(|kept| kept.names(&self.provider, &self.login))
+            {
+                match self.login.as_str() {
+                    "api-key" if self.provider == "openai" => {
+                        return Ok(openbot_env::ModelCredential::OpenAi {
+                            api_key: String::new(),
+                        });
+                    }
+                    "api-key" if self.provider == "anthropic" => {
+                        return Ok(openbot_env::ModelCredential::Anthropic {
+                            api_key: String::new(),
+                        });
+                    }
+                    "endpoint" => {
+                        return Ok(openbot_env::ModelCredential::Compatible {
+                            base_url: String::new(),
+                            container_base_url: None,
+                            api_key: String::new(),
+                            model: kept.model.unwrap_or_else(|| given(self.model.clone())),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
         match (self.provider.as_str(), self.login.as_str()) {
             ("google" | "xai", "oauth") => {
                 let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
@@ -4758,6 +4792,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
             "COMPUTER_NETWORK".into(),
             format!("{}_default", stack::project(&found, &root)?),
         );
+        // The plan engines' images, when the setup window last chose, and the files the server
+        // reads per run. See `ai_connection::start_settings`.
+        settings.extend(openbot_desktop_lib::ai_connection::start_settings(&root));
         /*
          * On Linux the server runs as the person, not as the image's user.
          *
@@ -4782,6 +4819,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
             );
         }
         let (settings, mut secrets) = persist_start_environment(&root, settings, &credential)?;
+        // The picked harness as the server reads it per run, from what was just written.
+        stack::make_sign_in_folder(&root)?;
+        openbot_desktop_lib::ai_connection::write_picked_harness_file(&root, &settings)?;
         report_plain(&app, "env", true, "Your settings are saved.");
         // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
         secrets.extend(ports.settings());
@@ -4810,11 +4850,14 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // its no-pull policy sends missing assets back to the installation step.
         report_running_plain(&app, "services", "Starting OpenBot's services.");
 
-        // Only an installed harness needs the local service; a BYO endpoint is already running elsewhere.
+        // Only an installed harness needs the local service; a BYO endpoint is already running
+        // elsewhere, and a Bot a plan's own engine serves runs there (`stack::plan_engine`).
         let installed_harness = picked
             .as_ref()
             .and_then(|picked| picked.installed_port())
-            .is_some();
+            .is_some()
+            && openbot_desktop_lib::ai_connection::Plan::serving(&credential, picked.as_ref())
+                .is_none();
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
@@ -11549,6 +11592,183 @@ pub(crate) fn ai_connection_now<R: tauri::Runtime>(
     openbot_desktop_lib::ai_connection::read(&root)
 }
 
+/*
+ * THE AI CONNECTION, CHANGED IN THE APP WITH NO STOP. Settings' AI model dialog sends a key or an
+ * address straight to OpenBot's server, which checks and keeps it; these are the parts only this
+ * app can do: the plan and provider sign-ins, which run here and keep what they get here, and the
+ * plan engines and the picked Bot's container, which `ai_connection` starts, stops or restarts one
+ * at a time while everything else keeps running. See `desktop_page` for the page's commands.
+ */
+
+/// The installation OpenBot runs from on this computer now, and the engine it runs on.
+fn running_installation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(PathBuf, engine::Address), String> {
+    desktop_connected::nothing_here(app)?;
+    app.state::<Shell>()
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| (owned.root.clone(), owned.address.clone()))
+        .ok_or_else(|| "OpenBot isn't running on this computer. Start it, then try again.".into())
+}
+
+/// The installation a sign-in keeps what it gets in: the running one, or the one selected.
+fn sign_in_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    desktop_connected::nothing_here(app)?;
+    Ok(running_installation(app)
+        .map(|(root, _)| root)
+        .unwrap_or_else(|_| cleanup_root(&app.state::<Shell>(), &stack::default_root())))
+}
+
+/// Start a plan's sign-in, the setup window's own, and the address the browser was sent to.
+pub(crate) async fn begin_plan_sign_in_now(
+    app: tauri::AppHandle,
+    plan: openbot_desktop_lib::ai_connection::Plan,
+) -> Result<String, String> {
+    use openbot_desktop_lib::ai_connection::Plan;
+    let root = sign_in_root(&app)?.to_string_lossy().into_owned();
+    match plan {
+        Plan::Claude => begin_claude_sign_in(app, root).await,
+        Plan::ChatGpt => begin_chatgpt_sign_in(app, root).await,
+    }
+    .map_err(|problem| problem.said)
+}
+
+/**
+Finish a plan's sign-in and keep what it gave on this computer, where Start and the plan's engine
+read it: the Claude plan's token in the credential store, the ChatGPT plan's store in the file its
+engine renews. Never returned: the page only learns that it finished.
+*/
+pub(crate) async fn finish_plan_sign_in_now(
+    app: tauri::AppHandle,
+    plan: openbot_desktop_lib::ai_connection::Plan,
+    code: Option<String>,
+) -> Result<(), String> {
+    use openbot_desktop_lib::ai_connection::Plan;
+    let root = sign_in_root(&app)?;
+    match plan {
+        Plan::Claude => {
+            let token = finish_claude_sign_in(app, code.unwrap_or_default()).await?;
+            tauri::async_runtime::spawn_blocking(move || {
+                openbot_desktop_lib::vault::remember(&root, "CLAUDE_CODE_OAUTH_TOKEN", &token)
+            })
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|problem| problem.said)
+        }
+        Plan::ChatGpt => {
+            let store = finish_chatgpt_sign_in(app).await?;
+            tauri::async_runtime::spawn_blocking(move || {
+                openbot_env::write_plan_store(
+                    &root,
+                    &openbot_env::ModelCredential::ChatGptPlan { store },
+                )
+            })
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|_| "OpenBot couldn't save the ChatGPT sign-in. Try again.".to_string())
+        }
+    }
+}
+
+/// Stop a plan's sign-in the person has left.
+pub(crate) async fn cancel_plan_sign_in_now(
+    app: tauri::AppHandle,
+    plan: openbot_desktop_lib::ai_connection::Plan,
+) -> Result<(), String> {
+    use openbot_desktop_lib::ai_connection::Plan;
+    match plan {
+        Plan::Claude => {
+            // Dropping a sign-in that was started removes its container.
+            let held = app.state::<Shell>().signing_in.lock().unwrap().take();
+            tauri::async_runtime::spawn_blocking(move || drop(held))
+                .await
+                .map_err(|error| error.to_string())
+        }
+        Plan::ChatGpt => cancel_chatgpt_sign_in(app).await,
+    }
+}
+
+/// Start a Google, xAI or Unbiased AI sign-in, sending the browser to it.
+pub(crate) async fn begin_provider_sign_in_now(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<openbot_desktop_lib::provider_oauth::Authorization, String> {
+    let root = sign_in_root(&app)?.to_string_lossy().into_owned();
+    let authorization = begin_model_oauth(root, provider).await?;
+    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&authorization.url, None::<&str>);
+    Ok(authorization)
+}
+
+/// Run the plan's engine the connection needs, alone. See `ai_connection::prepare`.
+pub(crate) async fn prepare_ai_connection_now(
+    app: tauri::AppHandle,
+    provider: String,
+    login: String,
+) -> Result<(), String> {
+    let (root, address) = running_installation(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // Not while a Start or a Stop is under way: they own the whole stack.
+        let shell = app.state::<Shell>();
+        let _startup = shell.startup.lock().unwrap();
+        log::info!("[ai-connection] preparing {provider} by {login}");
+        let prepared =
+            openbot_desktop_lib::ai_connection::prepare(&address, &root, &provider, &login);
+        if let Err(problem) = &prepared {
+            log::warn!(
+                "[ai-connection] could not prepare {provider} by {login}: {}",
+                problem.detail.as_deref().unwrap_or(&problem.said)
+            );
+        }
+        prepared.map_err(|problem| problem.said)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Settle on the connection now in use. See `ai_connection::settle`.
+pub(crate) async fn settle_ai_connection_now(
+    app: tauri::AppHandle,
+    change: openbot_desktop_lib::ai_connection::Change,
+) -> Result<(), String> {
+    let (root, address) = running_installation(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let shell = app.state::<Shell>();
+        let _startup = shell.startup.lock().unwrap();
+        let settled = openbot_desktop_lib::ai_connection::settle(&address, &root, &change);
+        match &settled {
+            Ok(done) => log::info!(
+                "[ai-connection] settled on {} by {}: stopped {:?}, Bot restarted {}, Bot's own \
+                 container stopped {}",
+                change.provider,
+                change.login,
+                done.stopped,
+                done.restarted_harness,
+                done.stopped_harness
+            ),
+            Err(problem) => log::warn!(
+                "[ai-connection] could not settle on {} by {}: {}",
+                change.provider,
+                change.login,
+                problem.detail.as_deref().unwrap_or(&problem.said)
+            ),
+        }
+        settled.map(|_| ()).map_err(|problem| problem.said)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// The setup window's AI screen saved a choice: the server imports it at its next start, over the
+/// connection last changed in the app. See `ai_connection::CHOSEN_AT_ENV`.
+#[tauri::command]
+fn record_ai_connection_chosen(root: String) -> Result<(), String> {
+    openbot_desktop_lib::ai_connection::record_chosen_at(&stack::root_from(&root))
+        .map_err(|error| format!("OpenBot couldn't record that choice: {error}"))
+}
+
 fn stop_then_show_setup<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     from: AskedFrom,
@@ -12658,6 +12878,7 @@ fn main() {
             already_running,
             last_failure,
             take_ai_connection_change,
+            record_ai_connection_chosen,
             default_root,
             selected_root,
             providers,
@@ -21433,12 +21654,12 @@ fn main() {
         }
         let root = temp_root("openbot-harness-start-ipc");
         write_installed_deployment(&root);
-        // A release's Compose file defines the ChatGPT plan's model service, and Start raises it
-        // only where the file does (`stack::selected_services`).
+        // A release's Compose file defines each plan's engine, and Start raises one only where the
+        // file does (`stack::plan_engine`).
         std::fs::write(
             root.join("docker-compose.yml"),
             format!(
-                "{INSTALLED_COMPOSE}  {}: {{}}\n",
+                "{INSTALLED_COMPOSE}  {}: {{}}\n  agent-claude-plan: {{}}\n",
                 openbot_desktop_lib::plan::CHATGPT_PLAN_SERVICE
             ),
         )
@@ -21504,11 +21725,14 @@ fn main() {
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness agent-langgraph-agui", Some("agent-langgraph-ts"))
+                // The TypeScript Bot in its own container, and the plan's own engine beside it.
+                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-claude-sdk"))
+                // The plan's own engine is the Claude Agent SDK Bot the plan picked: no container of
+                // the Bot's own, and the plan token in no container but that engine.
+                ("compose --profile claude-plan up -d --no-build --pull never postgres agent-computer server agent-claude-plan", Some("agent-claude-sdk"))
             }
             _ => panic!("unknown test case"),
         };
@@ -21629,11 +21853,12 @@ fn main() {
             ],
         )
         .unwrap();
-        // A ChatGPT plan's model calls go to the Python image, pinned to the release, which this
-        // start raised beside the Bot (`expected_up`). Every other sign-in names no such address.
+        // A ChatGPT plan's model calls go to the plan's own engine, which a ChatGPT-plan start
+        // raised beside the Bot (`expected_up`). Every start names its address, so a plan chosen
+        // in the app reaches it with no restart.
         assert_eq!(
             settings.get("CHATGPT_PLAN_HARNESS_URL").map(String::as_str),
-            (case == "chatgpt-plan").then_some(openbot_desktop_lib::plan::CHATGPT_PLAN_URL),
+            Some(openbot_desktop_lib::plan::CHATGPT_PLAN_URL),
             "case={case}"
         );
         assert_eq!(

@@ -808,21 +808,21 @@ test("passes the selected Anthropic provider and model into the picked harness",
   });
 });
 
-test("mounts the ChatGPT token store directory into the picked harness", () => {
-  const config = runComposeConfig({
-    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
+test("mounts the ChatGPT token store directory into the ChatGPT plan's engine", () => {
+  const config = runEveryProfileConfig({
+    CHATGPT_PLAN_IMAGE: "openbot-agent-langgraph-agui:test",
   });
 
-  expect(config.services["agent-harness"].environment).toMatchObject({
+  expect(config.services["agent-chatgpt-plan"].environment).toMatchObject({
     CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
   });
-  expect(config.services["agent-harness"].volumes).toContainEqual(
+  expect(config.services["agent-chatgpt-plan"].volumes).toContainEqual(
     expect.objectContaining({
       type: "bind",
       target: "/root/.langchain",
     }),
   );
-  expect(config.services["agent-harness"].volumes).not.toContainEqual(
+  expect(config.services["agent-chatgpt-plan"].volumes).not.toContainEqual(
     expect.objectContaining({
       type: "bind",
       target: "/root/.langchain/chatgpt-auth.json",
@@ -1464,4 +1464,217 @@ test("the computer is given NET_RAW, so ping works on Podman as on Docker", () =
   ).services["agent-computer"];
   expect(computer?.cap_add ?? []).toContain("NET_RAW");
   expect(computer?.cap_drop ?? []).not.toContain("NET_RAW");
+});
+
+/*
+ * The AI connection changes inside the app, with no restart. Engines stop holding provider keys:
+ * with the deployment's model gateway token set (OpenBot Desktop mints one), every engine reaches
+ * models through the server's gateway, which adds the organisation's live key per request. The
+ * Claude and ChatGPT plans each run on an engine of their own, behind a profile, so either can start
+ * alone while everything else keeps running.
+ */
+function runEveryProfileConfig(env: Record<string, string>) {
+  const output = execFileSync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      "/dev/null",
+      "--profile",
+      "*",
+      "config",
+      "--format",
+      "json",
+    ],
+    {
+      cwd: join(import.meta.dir, ".."),
+      env: {
+        PATH: process.env.PATH ?? "",
+        PICKED_HARNESS_IMAGE: "openbot-agent-langgraph-agui:test",
+        ...env,
+      },
+      encoding: "utf8",
+    },
+  );
+  return JSON.parse(output) as {
+    services: Record<
+      string,
+      {
+        image?: string;
+        profiles?: string[];
+        ports?: unknown[];
+        healthcheck?: { test?: string[] };
+        environment: Record<string, string>;
+        volumes?: Array<{ type: string; source: string; target: string }>;
+      }
+    >;
+  };
+}
+
+/** What OpenBot Desktop hands Compose for a running personal edition, the person's keys included. */
+const desktopGateway = {
+  MODEL_GATEWAY_TOKEN: "sentinel-gateway-token",
+  OPENBOT_MODEL_GATEWAY_URL: "http://server:3001/api/model-provider",
+  MODEL_GATEWAY_OPENAI_URL: "http://server:3001/api/model-provider/v1",
+  MODEL_GATEWAY_ANTHROPIC_URL:
+    "http://server:3001/api/model-provider/anthropic",
+  CLAUDE_PLAN_HARNESS_URL: "http://agent-claude-plan:4212",
+  CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4206",
+  CLAUDE_PLAN_IMAGE: "openbot-agent-claude-sdk:test",
+  CHATGPT_PLAN_IMAGE: "openbot-agent-langgraph-agui:test",
+  // The person's own keys and plan token, which the server reads only to import the connection.
+  OPENAI_API_KEY: "sentinel-openai-key",
+  ANTHROPIC_API_KEY: "sentinel-anthropic-key",
+  OPENAI_BASE_URL: "https://api.example.test/v1",
+  CLAUDE_CODE_OAUTH_TOKEN: "sentinel-claude-plan-token",
+};
+
+const providerSecrets = [
+  "sentinel-openai-key",
+  "sentinel-anthropic-key",
+  "sentinel-claude-plan-token",
+];
+
+test("points every engine at the model gateway and gives it no provider key", () => {
+  const config = runEveryProfileConfig(desktopGateway);
+  for (const service of ["agent-harness", "agent-langgraph-agui"]) {
+    const environment = config.services[service].environment;
+    expect(environment).toMatchObject({
+      OPENAI_BASE_URL: "http://server:3001/api/model-provider/v1",
+      ANTHROPIC_BASE_URL: "http://server:3001/api/model-provider/anthropic",
+      OPENAI_API_KEY: "sentinel-gateway-token",
+      ANTHROPIC_API_KEY: "sentinel-gateway-token",
+      OPENBOT_MODEL_GATEWAY_URL: "http://server:3001/api/model-provider",
+    });
+    const given = JSON.stringify(environment);
+    for (const secret of providerSecrets) {
+      expect(given).not.toContain(secret);
+    }
+  }
+});
+
+test("keeps the provider keys for an engine when no gateway token is set", () => {
+  const config = runEveryProfileConfig({
+    OPENAI_API_KEY: "sentinel-openai-key",
+    ANTHROPIC_API_KEY: "sentinel-anthropic-key",
+    OPENAI_BASE_URL: "https://api.example.test/v1",
+  });
+  expect(config.services["agent-langgraph-agui"].environment).toMatchObject({
+    OPENAI_API_KEY: "sentinel-openai-key",
+    ANTHROPIC_API_KEY: "sentinel-anthropic-key",
+    OPENAI_BASE_URL: "https://api.example.test/v1",
+  });
+});
+
+test("never hands a plan to the picked harness, which a plan engine of its own serves", () => {
+  const config = runEveryProfileConfig({
+    ...desktopGateway,
+    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
+  });
+  const harness = config.services["agent-harness"];
+  expect(harness.environment.CLAUDE_CODE_OAUTH_TOKEN ?? "").toBe("");
+  expect(harness.environment.CHATGPT_AUTH_FILE ?? "").toBe("");
+  expect(JSON.stringify(harness.volumes ?? [])).not.toContain(".langchain");
+});
+
+test("runs a Claude plan on its own engine, with the plan token and an empty Anthropic key", () => {
+  const config = runEveryProfileConfig(desktopGateway);
+  const plan = config.services["agent-claude-plan"];
+  expect(plan).toBeDefined();
+  expect(plan.profiles).toEqual(["claude-plan", "harness"]);
+  expect(plan.image).toBe("openbot-agent-claude-sdk:test");
+  expect(plan.environment).toMatchObject({
+    CLAUDE_CODE_OAUTH_TOKEN: "sentinel-claude-plan-token",
+    // The SDK prefers a key over the plan token, so the key is there and empty.
+    ANTHROPIC_API_KEY: "",
+    ANTHROPIC_BASE_URL: "",
+  });
+  expect(plan.environment.OPENAI_API_KEY ?? "").toBe("");
+  // Reached by the server on the Bots' network, by name: no host port.
+  expect(plan.ports ?? []).toEqual([]);
+  expect(JSON.stringify(plan.healthcheck?.test)).toContain(
+    "127.0.0.1:4212/health",
+  );
+});
+
+test("runs a ChatGPT plan on its own engine, with the store the engine renews mounted", () => {
+  const config = runEveryProfileConfig(desktopGateway);
+  const plan = config.services["agent-chatgpt-plan"];
+  expect(plan).toBeDefined();
+  expect(plan.profiles).toEqual(["chatgpt-plan", "harness"]);
+  expect(plan.image).toBe("openbot-agent-langgraph-agui:test");
+  expect(plan.environment).toMatchObject({
+    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
+  });
+  const given = JSON.stringify(plan.environment);
+  for (const secret of providerSecrets) {
+    expect(given).not.toContain(secret);
+  }
+  expect(plan.volumes).toContainEqual(
+    expect.objectContaining({ type: "bind", target: "/root/.langchain" }),
+  );
+  expect(plan.ports ?? []).toEqual([]);
+  expect(JSON.stringify(plan.healthcheck?.test)).toContain(
+    "127.0.0.1:4206/health",
+  );
+});
+
+test("gives the server the gateway token, both plan engines, the connection and the picked harness file", () => {
+  const config = runEveryProfileConfig({
+    ...desktopGateway,
+    OPENBOT_AI_CONNECTION: '{"provider":"anthropic","login":"plan"}',
+    OPENBOT_AI_CONNECTION_CHOSEN_AT: "2026-11-17T23:00:00Z",
+    OPENBOT_PICKED_HARNESS_FILE:
+      "/home/someone/OpenBot/.openbot/picked-harness.json",
+  });
+  expect(config.services.server.environment).toMatchObject({
+    MODEL_GATEWAY_TOKEN: "sentinel-gateway-token",
+    CLAUDE_PLAN_HARNESS_URL: "http://agent-claude-plan:4212",
+    CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4206",
+    OPENBOT_AI_CONNECTION: '{"provider":"anthropic","login":"plan"}',
+    OPENBOT_AI_CONNECTION_CHOSEN_AT: "2026-11-17T23:00:00Z",
+    // Inside the sign-in folder the server already mounts.
+    OPENBOT_PICKED_HARNESS_FILE: "/openbot/picked-harness.json",
+  });
+  const none = runEveryProfileConfig({}).services.server.environment;
+  expect(none.OPENBOT_PICKED_HARNESS_FILE ?? "").toBe("");
+  expect(none.MODEL_GATEWAY_TOKEN ?? "").toBe("");
+});
+
+test("tells every engine where the model gateway is, and the TypeScript engine where both plans are", () => {
+  const config = runEveryProfileConfig(desktopGateway);
+  for (const service of [
+    "agent-harness",
+    "agent-langgraph-ts",
+    "agent-langgraph-agui",
+    "agent-claude-plan",
+    "agent-chatgpt-plan",
+  ]) {
+    expect(config.services[service].environment.OPENBOT_MODEL_GATEWAY_URL).toBe(
+      "http://server:3001/api/model-provider",
+    );
+  }
+  for (const service of ["agent-harness", "agent-langgraph-ts"]) {
+    expect(config.services[service].environment).toMatchObject({
+      CLAUDE_PLAN_HARNESS_URL: "http://agent-claude-plan:4212",
+      CHATGPT_PLAN_HARNESS_URL: "http://agent-chatgpt-plan:4206",
+      OPENAI_API_KEY: "sentinel-gateway-token",
+      ANTHROPIC_API_KEY: "sentinel-gateway-token",
+    });
+  }
+});
+
+test("gives the gateway token to the server and the engines, and to no service a Bot's shell runs in", () => {
+  const holders = Object.entries(composeServices())
+    .filter(([, service]) =>
+      JSON.stringify(service.environment ?? {}).includes("MODEL_GATEWAY_TOKEN"),
+    )
+    .map(([name]) => name)
+    .sort();
+  expect(holders).toEqual([
+    "agent-harness",
+    "agent-langgraph-agui",
+    "agent-langgraph-ts",
+    "server",
+  ]);
 });
