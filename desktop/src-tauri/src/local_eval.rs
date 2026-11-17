@@ -2865,6 +2865,9 @@ fn command_inheriting(
     cli_environment(&mut command, engine, var, docker_config);
     if let Some(folder) = folder {
         command.current_dir(folder);
+        if let Some(ceiling) = git_ceiling(folder) {
+            command.env(GIT_CEILING, ceiling);
+        }
     }
     command.args(arguments);
     if let (Some(folder), ["local", ..]) = (folder, arguments) {
@@ -2873,6 +2876,46 @@ fn command_inheriting(
         command.arg(APP_PATH).arg(folder);
     }
     command
+}
+
+/// Git's list of folders it never goes up into while it looks for a repository.
+const GIT_CEILING: &str = "GIT_CEILING_DIRECTORIES";
+
+/**
+The folder above OpenBot's own, as `GIT_CEILING_DIRECTORIES`, for every call that runs in OpenBot's
+folder: git run there by the CLI never finds a repository above it.
+
+Before `local connect` writes the backend's key into `.env`, the CLI asks git whether `.env` is
+ignored, and also that `.env.example` is not. A Mac whose home folder is a git repository that
+ignores everything (`*`, as dotfiles repositories do) ignored `~/OpenBot` whole, so `.env.example`
+came out ignored too, and the `!.env.example` the CLI adds in `~/OpenBot/.gitignore` cannot undo
+an ignored parent folder. Connect failed every time, and Retry failed the same way. Outside any
+repository git cannot say, and the CLI goes on, as on a computer with no git at all.
+
+A repository in OpenBot's own folder is still found: git always looks in the folder it runs in, and
+only going up is stopped. Its own ignore rules then decide, as before. OpenBot's `.env` holds no key
+once connect is done: the key moves to the credential store (`connect_local_eval_at`).
+
+Both forms of the parent where they differ, as given and with links resolved, so a folder reached
+through a link stops at its real parent too. Windows' resolved form is a `\\?\` path git does not
+read, so only the given form is used there. None for a folder with no parent, or one whose parent
+holds the list separator.
+*/
+fn git_ceiling(folder: &std::path::Path) -> Option<std::ffi::OsString> {
+    let given = std::path::absolute(folder).ok()?.parent()?.to_path_buf();
+    let mut parents = vec![given];
+    if !cfg!(windows) {
+        if let Some(real) = folder
+            .canonicalize()
+            .ok()
+            .and_then(|real| real.parent().map(std::path::Path::to_path_buf))
+        {
+            if !parents.contains(&real) {
+                parents.push(real);
+            }
+        }
+    }
+    std::env::join_paths(parents).ok()
 }
 
 /**
@@ -6426,6 +6469,123 @@ mod tests {
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
 
+    /// The real git on this computer's PATH, if it has one.
+    fn real_git() -> Option<PathBuf> {
+        let name = format!("git{}", std::env::consts::EXE_SUFFIX);
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(&name))
+            .find(|git| git.is_file())
+    }
+
+    /// `git <arguments>` in `dir`, free of any repository a git hook running these tests set.
+    fn git_in(git: &Path, dir: &Path, arguments: &[&str]) {
+        let status = std::process::Command::new(git)
+            .current_dir(dir)
+            .args(arguments)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove(GIT_CEILING)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {arguments:?} in {}", dir.display());
+    }
+
+    /// Every call in OpenBot's folder runs with git told not to go above it: the folder over it is
+    /// the ceiling, as given and as resolved. A call with no folder of its own is told nothing.
+    #[test]
+    fn calls_in_openbots_folder_tell_git_not_to_look_above_it() {
+        let fixture = Fixture::new(
+            "local-eval-git-ceiling",
+            &format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        );
+        let home = fixture.root.join("home");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&installation).unwrap();
+        connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        let ceiling = std::fs::read_to_string(fixture.root.join("git-ceiling")).unwrap();
+        let ceilings: Vec<PathBuf> = std::env::split_paths(&ceiling).collect();
+        assert!(
+            ceilings.contains(&std::path::absolute(&home).unwrap()),
+            "{ceiling}"
+        );
+        if cfg!(not(windows)) {
+            assert!(
+                ceilings.contains(&home.canonicalize().unwrap()),
+                "{ceiling}"
+            );
+        }
+        assert!(
+            !ceilings.iter().any(|ceiling| ceiling.ends_with("OpenBot")),
+            "{ceiling}"
+        );
+
+        std::fs::write(fixture.root.join("scenario"), format!("0\n{}", envelope())).unwrap();
+        fixture
+            .run(
+                Action::Status,
+                Limits::for_action(Action::Status),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("git-ceiling")).unwrap(),
+            ""
+        );
+    }
+
+    /// A Mac's home folder was a git repository that ignores everything (`*`), and `local connect`
+    /// failed on every try: before it writes the key, the CLI asks git that `.env.example` is not
+    /// ignored, and nothing inside an ignored folder can be un-ignored. Real git, asked in OpenBot's
+    /// folder with the environment the CLI is given: it finds no repository there now (128), which
+    /// the CLI passes, where it found the home folder's and said ignored (0). A repository in
+    /// OpenBot's own folder still answers with its own rules: not ignored (1), as the CLI requires.
+    #[test]
+    fn a_home_folder_repository_that_ignores_everything_does_not_reach_openbots_folder() {
+        let Some(git) = real_git() else {
+            eprintln!("no git on PATH, so there is nothing to ask");
+            return;
+        };
+        let fixture = Fixture::new(
+            "local-eval-home-repository",
+            &format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        );
+        let home = fixture.root.join("home");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&installation).unwrap();
+        git_in(&git, &home, &["init", "-q"]);
+        std::fs::write(home.join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        // What the CLI appends in OpenBot's folder before it asks.
+        std::fs::write(
+            installation.join(".gitignore"),
+            ".env\n.env.*\n!.env.example\n",
+        )
+        .unwrap();
+        std::fs::write(fixture.root.join("git-check"), git.display().to_string()).unwrap();
+        let asked = || {
+            connect(
+                &fixture.cli(),
+                &installation,
+                Limits::for_action(Action::Status),
+                &Cancel::default(),
+            )
+            .unwrap();
+            std::fs::read_to_string(fixture.root.join("git-checked")).unwrap()
+        };
+        assert_eq!(asked(), "128");
+
+        git_in(&git, &installation, &["init", "-q"]);
+        assert_eq!(asked(), "1");
+    }
+
     #[test]
     fn connect_answers_keep_only_their_reason_and_whether_settings_conflicted() {
         let confirmation = normalize_connect(
@@ -8369,6 +8529,21 @@ fn main() {
     std::fs::write(dir.join("cwd"), std::env::current_dir().unwrap().display().to_string()).unwrap();
     let inherited = |name: &str| format!("{name}={}", std::env::var(name).is_ok());
     std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK"), inherited("COPILOTKIT_TELEMETRY_DISABLED")].join("\n")).unwrap();
+    std::fs::write(dir.join("git-ceiling"), std::env::var_os("GIT_CEILING_DIRECTORIES").map(|value| value.to_string_lossy().into_owned()).unwrap_or_default()).unwrap();
+    // The CLI's own question before connect writes the key (`ensureCredentialEnvIgnored`), asked
+    // with the real git named in `git-check`, in this folder and this environment. Only the
+    // person's global excludes file is left out, so the answer is the repository's alone.
+    if let Ok(git) = std::fs::read_to_string(dir.join("git-check")) {
+        let code = std::process::Command::new(git.trim())
+            .args(["-c", "core.excludesFile=", "check-ignore", "--quiet", "--", ".env.example"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .code()
+            .unwrap_or(-1);
+        std::fs::write(dir.join("git-checked"), code.to_string()).unwrap();
+    }
     let scenario = std::fs::read_to_string(dir.join("scenario")).unwrap();
     let (mode, body) = scenario.split_once('\n').unwrap_or((scenario.as_str(), ""));
     match mode {
