@@ -2608,8 +2608,8 @@ async fn check_app_update_for_page<R: tauri::Runtime>(
 }
 
 /// Check for Updates… in the tray or the OpenBot menu. Always answers, in a native dialog: the
-/// offer with Update and restart, up to date, or couldn't check. Not now closes the offer on that
-/// version, as it does in the windows.
+/// offer with Update and restart, up to date, or couldn't check. Not now minimizes the update panel
+/// on that version, as it does in the windows.
 fn check_for_updates_from_menu(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let asked = check_app_update_now(app.clone()).await;
@@ -2713,6 +2713,16 @@ fn dismiss_app_update_for<R: tauri::Runtime>(
         .map_err(|e| Problem::from(e.to_string()))?;
     app_update::dismiss(&config, &version)
         .map_err(|e| Problem::from(format!("OpenBot couldn't remember that: {e}")))
+}
+
+/// Open the minimized update panel again. Answers Ok when nothing is minimized.
+fn restore_app_update_for<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
+    let config = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| Problem::from(e.to_string()))?;
+    app_update::restore(&config)
+        .map_err(|e| Problem::from(format!("OpenBot couldn't open the update again: {e}")))
 }
 
 /**
@@ -7736,6 +7746,7 @@ mod app_page_tests {
             "update_offer",
             "check_update",
             "dismiss_update",
+            "restore_update",
             "install_update",
             // Open log folder opens the shell's own folder, but only for its own OpenBot.
             "open_logs",

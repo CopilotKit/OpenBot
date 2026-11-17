@@ -38,7 +38,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 25] = [
+pub const PERMISSIONS: [&str; 26] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -51,6 +51,7 @@ pub const PERMISSIONS: [&str; 25] = [
     "openbot-desktop:allow-update-offer",
     "openbot-desktop:allow-check-update",
     "openbot-desktop:allow-dismiss-update",
+    "openbot-desktop:allow-restore-update",
     "openbot-desktop:allow-install-update",
     "openbot-desktop:allow-speech-available",
     "openbot-desktop:allow-speech-start",
@@ -198,6 +199,12 @@ async fn dismiss_update(app: tauri::AppHandle, version: String) -> Result<(), St
     crate::dismiss_app_update_for(&app, &version).map_err(|problem| problem.said)
 }
 
+/// The panel's pill: open the minimized update again. Answers Ok when nothing is minimized.
+#[tauri::command]
+async fn restore_update(app: tauri::AppHandle) -> Result<(), String> {
+    crate::restore_app_update_for(&app).map_err(|problem| problem.said)
+}
+
 /// The banner's Update and restart. Returns only when it failed: on success the app restarts.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
@@ -323,6 +330,7 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             update_offer,
             check_update,
             dismiss_update,
+            restore_update,
             install_update,
             speech_available,
             speech_start,

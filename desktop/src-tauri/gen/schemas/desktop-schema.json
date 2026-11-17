@@ -3021,6 +3021,12 @@
           "markdownDescription": "Enables the restart command without any pre-configured scope."
         },
         {
+          "description": "Enables the restore_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-restore-update",
+          "markdownDescription": "Enables the restore_update command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_organization command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-set-organization",
@@ -3169,6 +3175,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-restart",
           "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-restore-update",
+          "markdownDescription": "Denies the restore_update command without any pre-configured scope."
         },
         {
           "description": "Denies the set_organization command without any pre-configured scope.",
