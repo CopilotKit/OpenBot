@@ -771,6 +771,9 @@ pub fn compose(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
+            // Where the ChatGPT plan's model calls go; see `crate::plan::CHATGPT_PLAN_URL`.
+            // Emptied on any other answer, which is also what stops that service being started.
+            "CHATGPT_PLAN_HARNESS_URL",
             "OPENBOT_MODEL_OAUTH_FILE",
             "BOT_PROVIDER",
             /*
@@ -840,6 +843,16 @@ pub fn compose(
         ModelCredential::ChatGptPlan { store } => {
             if !store.trim().is_empty() {
                 env.insert("CHATGPT_AUTH_FILE".into(), CHATGPT_STORE_INSIDE.into());
+                /*
+                 * The Bot is the TypeScript LangGraph image, which sends a plan's model calls to
+                 * the Python image that holds the Codex transport, and so do the server's own
+                 * Bots. Both read this address; the token is the deployment's MANAGED_AGENT_TOKEN,
+                 * which every one of them already has.
+                 */
+                env.insert(
+                    "CHATGPT_PLAN_HARNESS_URL".into(),
+                    crate::plan::CHATGPT_PLAN_URL.into(),
+                );
             }
         }
         ModelCredential::ProviderOAuth {
@@ -1389,7 +1402,9 @@ pub const REMOVED_WHEN_UNSET: [&str; 12] = [
     "AGENT_BOT_MODEL",
     // What earlier Desktops wrote for the two Bots that shipped in their own containers, agent-bot
     // and agent-langgraph: a host port and an image for the first, an image for the second. Neither
-    // Bot exists now, and nothing reads these.
+    // Bot exists now, and nothing reads these. `LANGGRAPH_IMAGE` is written again, pinned to the
+    // ChatGPT plan's model service, whenever the release publishes that image
+    // (`crate::deployment::OPTIONAL_IMAGE_VARIABLES`), and taken out when it does not.
     "BOT_PORT",
     "BOT_IMAGE",
     "LANGGRAPH_IMAGE",

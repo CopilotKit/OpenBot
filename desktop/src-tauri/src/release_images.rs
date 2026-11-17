@@ -150,13 +150,37 @@ mod tests {
     #[test]
     #[ignore = "runs docker compose"]
     fn names_every_image_install_and_the_back_end_download_pull() {
+        /*
+         * v0.3.3's manifest predates the TypeScript LangGraph image, which every Bot list since
+         * names and which is now the default Bot: named here as a later release names it, so every
+         * row of this build's catalogue resolves.
+         */
+        let manifest = std::env::temp_dir().join(format!(
+            "openbot-release-images-manifest-{}.json",
+            std::process::id()
+        ));
+        let mut published: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("test-fixtures/release-images/container-images-v0.3.3.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let digest = format!("sha256:{}", "0".repeat(64));
+        published["images"]["agent-langgraph-ts"] = serde_json::json!({
+            "repository": "ghcr.io/copilotkit/openbot-agent-langgraph-ts",
+            "digest": digest,
+            "reference": format!("ghcr.io/copilotkit/openbot-agent-langgraph-ts@{digest}"),
+        });
+        std::fs::write(&manifest, published.to_string()).unwrap();
         let found = release_images(
             &repository().join("docker-compose.yml"),
-            &Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("test-fixtures/release-images/container-images-v0.3.3.json"),
+            &manifest,
             CLI_48A3863,
         )
         .expect("the release's images");
+        let _ = std::fs::remove_file(&manifest);
         assert_eq!(found.openbot, "v0.3.3");
         assert_eq!(found.intelligence, "0.16.0-rc.9");
         let has = |image: &str| found.images.iter().any(|found| found == image);
