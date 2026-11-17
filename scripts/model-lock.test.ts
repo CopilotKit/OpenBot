@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MODEL_LOCK, type ModelLock } from "../shared/model-lock";
+import {
+  DEFAULT_ENGINES,
+  emptyPairs,
+  MODEL_LOCK,
+  type ModelLock,
+} from "../shared/model-lock";
 import {
   brokenVerified,
   buildLock,
@@ -26,6 +31,18 @@ const ROOT = join(import.meta.dir, "..");
  */
 test("the lock was proven on the model clients each harness pins in this commit", () => {
   expect(staleClients(MODEL_LOCK, ROOT)).toEqual([]);
+});
+
+/*
+ * A DEFAULT ENGINE ALWAYS HAS SOMETHING TO OFFER. The LangGraph (TypeScript) engine was first
+ * locked with its pairs empty, so nothing would be offered on it before a run proved a model: had
+ * that reached main before a run, every new Bot on it would have had no model at all.
+ */
+test("every engine new Bots run on by default verifies a model on each provider it is locked for", () => {
+  for (const engine of DEFAULT_ENGINES) {
+    expect(MODEL_LOCK.engines[engine], engine).toBeDefined();
+    expect(emptyPairs(MODEL_LOCK, engine), engine).toEqual([]);
+  }
 });
 
 test("every exact pin in a harness's requirements is a client the check records", () => {

@@ -1141,8 +1141,11 @@ the harness is hidden, and a conversation already set to one runs on the default
 - **A new engine** can be locked before its first release, by giving it empty pairs for the
   providers it runs on. Nothing is offered on it until a run proves a model, including on a
   provider the check has no key for. The check runs every engine the lock names, published or not
-  yet, from its `source` image (`bun scripts/model-compat.ts harnesses` lists them). The LangGraph
-  (TypeScript) engine, `agent-langgraph-ts`, starts this way on Anthropic, OpenAI and Google.
+  yet, from its `source` image (`bun scripts/model-compat.ts harnesses` lists them). An engine new
+  Bots run on by default (`DEFAULT_ENGINES` in `shared/model-lock.ts`, today the LangGraph
+  (TypeScript) engine, `agent-langgraph-ts`) must verify at least one model on every provider it is
+  locked for, or `scripts/model-lock.test.ts` fails: write its entry from a run, never empty. The
+  lock can't reach main before an engine it names has its row in `shared/harnesses.json`.
 - **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
   request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that
   started and stopped answering and the clients that moved. Merging it lets the picker offer them.

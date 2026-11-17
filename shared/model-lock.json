@@ -547,6 +547,103 @@
         }
       }
     },
+    "agent-langgraph-ts": {
+      "clients": {
+        "@ag-ui/client": "1.0.5",
+        "@ag-ui/core": "1.0.5",
+        "@ag-ui/encoder": "1.0.5",
+        "@langchain/anthropic": "1.6.5",
+        "@langchain/core": "1.4.1",
+        "@langchain/langgraph": "1.7.5",
+        "@langchain/openai": "1.8.4"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest"
+          ],
+          "refused": {
+            "gemini-2.5-flash-lite": "Error code: 404 - [{\"error\":{\"code\":404,\"message\":\"This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).\",\"status\":\"NOT_FOUND\"}}] Troubleshooting URL: https://docs.langchain.com/oss/...",
+            "gemini-decision-1": "Error code: 404 - [{\"error\":{\"code\":404,\"message\":\"models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.\",\"status\":\"NOT_FOUND\"}}] Troubleshooting URL: https://docs.langchain.com/oss/javascript/langchain/errors/MODEL_NOT_FOUND/",
+            "gemini-omni-1.1-flash": "Error code: 400 - [{\"error\":{\"code\":400,\"message\":\"This model only supports Interactions API.\",\"status\":\"INVALID_ARGUMENT\"}}]",
+            "gemini-omni-1.2-flash": "Error code: 400 - [{\"error\":{\"code\":400,\"message\":\"This model only supports Interactions API.\",\"status\":\"INVALID_ARGUMENT\"}}]",
+            "gemma-4-26b-a4b-it": "answers with its reasoning (<thought>...</thought>) in the reply text, which a person would read as the Bot's answer",
+            "gemma-4-31b-it": "answers with its reasoning (<thought>...</thought>) in the reply text, which a person would read as the Bot's answer"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
     "agent-langroid": {
       "clients": {
         "google-genai": "3.4.0",

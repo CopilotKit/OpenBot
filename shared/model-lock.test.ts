@@ -122,7 +122,9 @@ test("what the check never ran is open, so nobody loses their models to missing 
   ).toBe(true);
 });
 
-test("every engine the lock names is a harness OpenBot publishes, with the clients it ran", async () => {
+// Also why the lock can't reach main before an engine it names: agent-langgraph-ts needs its row in
+// shared/harnesses.json first.
+test("every engine the lock names is a harness OpenBot knows, with the clients it ran", async () => {
   const { harnesses } = (await import("./harnesses.json")).default as {
     harnesses: { image: string | null }[];
   };

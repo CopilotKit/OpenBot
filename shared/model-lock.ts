@@ -53,6 +53,21 @@ export type ModelLock = {
 export const MODEL_LOCK: ModelLock = manifest as ModelLock;
 
 /**
+ * The engines new Bots run on unless somebody picks another. A locked pair on one of these with
+ * nothing verified would leave every new Bot with no model to offer on that provider, so a test
+ * holds each to at least one (scripts/model-lock.test.ts).
+ */
+export const DEFAULT_ENGINES: readonly string[] = ["agent-langgraph-ts"];
+
+/** The locked pairs of an engine that verify nothing: no model would be offered on them. */
+export function emptyPairs(lock: ModelLock, engine: string): LockProvider[] {
+  const providers = lock.engines[engine]?.providers ?? {};
+  return (Object.keys(providers) as LockProvider[]).filter(
+    (provider) => (providers[provider]?.verified.length ?? 0) === 0,
+  );
+}
+
+/**
  * What the lock says about one model on one harness and provider.
  *
  * - `verified`: it answered through the harness's own client.
