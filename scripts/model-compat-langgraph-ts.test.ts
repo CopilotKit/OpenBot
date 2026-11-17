@@ -46,6 +46,20 @@ const anthropicIds = usableModels(
 const openaiIds = usableModels("openai", openaiListing, new Map(), NOW);
 const geminiIds = ["gemini-3.8-flash", "gemini-4-argon", "gemini-3.5-pro"];
 
+const UNRUN: ModelLock = {
+  checkedAt: "2026-11-16",
+  engines: {
+    [ENGINE]: {
+      clients: {},
+      providers: {
+        anthropic: { verified: [], refused: {} },
+        openai: { verified: [], refused: {} },
+        google: { verified: [], refused: {} },
+      },
+    },
+  },
+};
+
 test("before its first run, nothing is offered on langgraph-ts, on any provider", () => {
   expect(anthropicIds.length).toBeGreaterThan(0);
   expect(openaiIds.length).toBeGreaterThan(0);
@@ -56,7 +70,7 @@ test("before its first run, nothing is offered on langgraph-ts, on any provider"
   ] as const)
     for (const model of ids)
       expect(
-        lockAllows(MODEL_LOCK, ENGINE, provider, model),
+        lockAllows(UNRUN, ENGINE, provider, model),
         `${provider} ${model}`,
       ).toBe(false);
 });
@@ -125,7 +139,7 @@ test("after a run, exactly the models that answered are offered on langgraph-ts"
       },
     },
   };
-  const lock = buildLock(MODEL_LOCK, [run], "2026-11-17");
+  const lock = buildLock(UNRUN, [run], "2026-11-17");
   const allowed = (
     provider: "anthropic" | "openai" | "google",
     ids: string[],
@@ -289,6 +303,8 @@ test("the probe reads an engine's LangChain and AG-UI clients under plain Node",
     "@langchain/anthropic": "1.3.1",
     "@langchain/openai": "1.4.0",
     "@langchain/google-genai": "2.1.0",
+    // The engine's Gemini client, the one its package.json names.
+    "@langchain/google": "0.2.15",
     "@ag-ui/client": "0.0.46",
   };
   for (const [name, version] of Object.entries(installed)) {
