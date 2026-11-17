@@ -1,4 +1,5 @@
 import { IconPlus } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -7,7 +8,11 @@ import {
   requestBoardTitle,
   useWaiting,
 } from "@/components/approvals/waiting";
-import { useWaitingCount } from "@/components/bot-profile/attention";
+import {
+  unreadSummary,
+  useWaitingCount,
+  waitingAcross,
+} from "@/components/bot-profile/attention";
 import { useBotName, useNeedsYou } from "@/components/needs-you/needs-you";
 import { useStalledHandoffs } from "@/components/needs-you/stalled-handoffs";
 import {
@@ -16,6 +21,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
+import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { useAtWork } from "@/lib/places/at-work";
 import {
   type NeedsYouEntry,
@@ -198,8 +204,13 @@ function OpenBotPlace() {
   );
 }
 
+/** What waits on the person, or, when nothing does, a dot for anything unread, as the Bots badge draws. */
 function OpenBotBadge() {
-  return <StripBadge count={useWaitingCount()} />;
+  const bots = useQuery(botAttentionQueryOptions()).data;
+  const waiting = waitingAcross(bots);
+  const unread = waiting === 0 ? unreadSummary(bots) : null;
+  if (unread) return <StripBadge dot label={unread} />;
+  return <StripBadge count={waiting} />;
 }
 
 export const openbotPlace: PlaceEntry = {

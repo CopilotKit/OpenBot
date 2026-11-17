@@ -33,6 +33,7 @@ import { PLACES } from "@/lib/places/places";
 import { getPlace, getPlaceOrder, setPlace } from "@/lib/places/store";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { attentionOf } from "./bots-api";
+import { awayFromOpenBot } from "./desktop-notifications.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -61,6 +62,7 @@ const viewport = () =>
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
+const originalNotification = globalThis.Notification;
 const clients: QueryClient[] = [];
 
 beforeAll(() => {
@@ -87,6 +89,7 @@ afterEach(() => {
   for (const client of clients) client.clear();
   clients.length = 0;
   globalThis.fetch = originalFetch;
+  globalThis.Notification = originalNotification;
   viewport().setViewport({ width: 1280, height: 840 });
 });
 afterAll(async () => {
@@ -131,11 +134,16 @@ function renderSidebar({
   start = "/",
   edition = "team",
   waiting = 0,
+  bots = waiting > 0
+    ? [attentionOf("expenses", "Expenses", { questions: waiting })]
+    : [],
 }: {
   start?: string;
   edition?: "team" | "personal";
   /** How many things wait on the person. */
   waiting?: number;
+  /** What each Bot has waiting, in place of `waiting`. */
+  bots?: ReturnType<typeof attentionOf>[];
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -167,10 +175,7 @@ function renderSidebar({
     refetchInterval: false,
   });
   queryClient.setQueryData(botLifecycleKeys.attention, {
-    bots:
-      waiting > 0
-        ? [attentionOf("expenses", "Expenses", { questions: waiting })]
-        : [],
+    bots,
     lastPingId: null,
   });
   queryClient.setQueryData(channelKeys.list(), {
@@ -219,6 +224,7 @@ function renderSidebar({
     view,
     user,
     router,
+    queryClient,
     strip: () => view.findByRole("toolbar"),
   };
 }
@@ -316,6 +322,54 @@ test("the OpenBot button's description says how many things need you", async () 
       "1 needs you",
     );
   });
+});
+
+test("with nothing waiting, what check-ins found is a dot on the OpenBot button, said in words", async () => {
+  const app = renderSidebar({
+    bots: [attentionOf("expenses", "Expenses", { items: 1 })],
+  });
+  const strip = await app.strip();
+  const button = await within(strip).findByRole("button", {
+    name: PLACES.openbot.label,
+  });
+  await waitFor(() => {
+    const id = button.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id ?? "")?.textContent).toBe(
+      "Your check-ins found something",
+    );
+  });
+  expect(button.querySelector('[data-slot="strip-badge"]')).toBeTruthy();
+});
+
+test("a Bot that starts needing the person sends a browser notification", async () => {
+  const sent: string[] = [];
+  globalThis.Notification = Object.assign(
+    function (this: unknown, title: string) {
+      sent.push(title);
+    },
+    { permission: "granted" },
+  ) as unknown as typeof Notification;
+  const away = awayFromOpenBot();
+  try {
+    const app = renderSidebar({
+      bots: [attentionOf("expenses", "Expenses")],
+    });
+    await app.strip();
+    // The state on arrival is not news.
+    await settleReactWork();
+    expect(sent).toEqual([]);
+
+    act(() =>
+      app.queryClient.setQueryData(botLifecycleKeys.attention, {
+        bots: [attentionOf("expenses", "Expenses", { questions: 1 })],
+        lastPingId: null,
+      }),
+    );
+    await waitFor(() => expect(sent).toEqual(["Expenses needs you"]));
+  } finally {
+    away.look();
+  }
 });
 
 test("choosing a place changes the list and not the page", async () => {

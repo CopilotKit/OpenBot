@@ -112,10 +112,13 @@ export function PlaceEmpty({ children }: { children: ReactNode }) {
 export function StripBadge({
   count,
   dot,
+  label = "Unread",
   pulse,
 }: {
   count?: number;
   dot?: boolean;
+  /** What the dot says in words. */
+  label?: string;
   pulse?: boolean;
 }) {
   if (count !== undefined && count > 0) {
@@ -142,7 +145,7 @@ export function StripBadge({
           className="pointer-events-none absolute top-0 right-0 size-2 rounded-full bg-primary"
           data-slot="strip-badge"
         />
-        <span className="sr-only">Unread</span>
+        <span className="sr-only">{label}</span>
       </>
     );
   }

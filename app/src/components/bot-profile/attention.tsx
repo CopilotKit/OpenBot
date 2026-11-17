@@ -278,12 +278,37 @@ function usePingNotifications(
 }
 
 /**
+ * The browser notifications for what the person's Bots need: one when a Bot starts needing them,
+ * one per check-in ping. Called once, by whatever is always on screen: the sidebar's Bots badge, or
+ * the sidebar with places, which draws no such badge.
+ */
+export function useBotNotifications() {
+  const attention = useQuery(botAttentionQueryOptions());
+  const lastPing = useQuery(lastPingQueryOptions());
+  useAttentionNotifications(attention.data);
+  usePingNotifications(lastPing.data, attention.data);
+}
+
+/**
+ * Whether anything unread is the only news, said in words: unread messages first, then what a
+ * check-in found. Null when there is neither. What a dot beside the Bots says.
+ */
+export function unreadSummary(
+  bots: readonly BotAttention[] | undefined,
+): string | null {
+  const all = bots ?? [];
+  if (all.some((bot) => bot.unread > 0)) return "Unread messages";
+  if (all.some((bot) => bot.items > 0)) return "Your check-ins found something";
+  return null;
+}
+
+/**
  * The badge on the sidebar's Bots item: how many things wait on this person across all their Bots,
  * or a dot when the only news is something unread. Opening Bots lists what is behind the number
  * first, under Needs you.
  *
- * It also sends the browser notifications, since it is the one piece of the app that is always on
- * screen and always reading this.
+ * It also sends the browser notifications (`useBotNotifications`), since it is the one piece of the
+ * old sidebar and every skin that is always on screen and always reading this.
  *
  * Renders nothing when nothing is waiting, so a quiet day costs the sidebar nothing.
  *
@@ -291,11 +316,8 @@ function usePingNotifications(
  * 16px circle that a second digit widens, small enough to leave an 18px icon readable under it.
  */
 export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
-  const attention = useQuery(botAttentionQueryOptions());
-  const lastPing = useQuery(lastPingQueryOptions());
-  useAttentionNotifications(attention.data);
-  usePingNotifications(lastPing.data, attention.data);
-  const bots = attention.data ?? [];
+  useBotNotifications();
+  const bots = useQuery(botAttentionQueryOptions()).data ?? [];
   const waiting = waitingAcross(bots);
   if (waiting > 0) {
     return (
@@ -313,14 +335,11 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
       </span>
     );
   }
-  if (bots.some((bot) => bot.unread > 0 || bot.items > 0)) {
+  const unread = unreadSummary(bots);
+  if (unread) {
     return (
       <span
-        aria-label={
-          bots.some((bot) => bot.unread > 0)
-            ? "Unread messages"
-            : "Your check-ins found something"
-        }
+        aria-label={unread}
         className={cn("size-2 rounded-full bg-primary", !onIcon && "ml-auto")}
         role="img"
       />

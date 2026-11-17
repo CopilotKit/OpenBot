@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import type * as React from "react";
 import { useEffect } from "react";
 import { useAccountMenu } from "@/components/app-sidebar/account-menu-items";
+import { useBotNotifications } from "@/components/bot-profile/attention";
 import { useBeforeCommandNavigate } from "@/components/navigation/command-menu";
 import { Sidebar, SidebarRail, useSidebar } from "@/components/ui/sidebar";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
@@ -19,6 +20,8 @@ export function PlacesSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const accountMenu = useAccountMenu();
   // One socket for the app, opened where the lists are kept live.
   useChannelEvents();
+  // The notifications the old sidebar's Bots badge sends, since this sidebar draws no such badge.
+  useBotNotifications();
   const { setOpenMobile } = useSidebar();
   // Opened with Cmd/Ctrl+K over the phone sidebar, the menu closes it before it navigates.
   useBeforeCommandNavigate(() => setOpenMobile(false));
