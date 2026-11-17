@@ -32,6 +32,7 @@ import {
   localReadiness,
   onInstalledReleaseSaid,
   podmanTooSmallSaid,
+  resourcesShortSaid,
 } from "./localReadiness";
 import { PodmanTooSmall, usePodmanPlan } from "./PodmanTooSmall";
 import {
@@ -575,8 +576,18 @@ export function useLocalSequence({
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
     let updated = false;
     let stalled = false;
+    // Not started, for lack of room (`local_eval::update_room`): nothing changed, and the run stops
+    // here with what is short, before OpenBot's own update.
+    let short: Shortfall | null = null;
     try {
-      updated = (await started.report).outcome === "completed";
+      const answer = await started.report;
+      updated = answer.outcome === "completed";
+      if (
+        answer.reason === "resources-short" &&
+        answer.shortfall?.updating === true
+      ) {
+        short = answer.shortfall;
+      }
     } catch (error) {
       updated = false;
       stalled =
@@ -592,6 +603,20 @@ export function useLocalSequence({
     if (generation.current === token)
       update({ trailKind: null, since: Date.now() });
     if (generation.current !== token) return false;
+    if (short) {
+      update({
+        detail: null,
+        download: null,
+        updating: false,
+        running: false,
+        blocked: {
+          said: resourcesShortSaid(short),
+          reason: "resources-short",
+          shortfall: short,
+        },
+      });
+      return false;
+    }
     update({
       detail: null,
       download: null,
