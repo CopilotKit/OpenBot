@@ -1115,6 +1115,13 @@ pub enum EventData {
     WindowsStage {
         outcome: WindowsStageOutcome,
     },
+    /// One of the Windows readiness check's probes ran long or ran out of time (`windows::Heard`),
+    /// and how long it took. A probe that answered in good time says nothing.
+    WindowsProbe {
+        probe: WindowsProbeKind,
+        outcome: WindowsProbeOutcome,
+        duration_ms: u64,
+    },
     ImagePull {
         outcome: Outcome,
         duration_ms: u64,
@@ -1215,6 +1222,7 @@ impl EventData {
             Self::EngineDetected { .. } => "oss.desktop.engine_detected",
             Self::EngineInstalled { .. } => "oss.desktop.engine_installed",
             Self::WindowsStage { .. } => "oss.desktop.windows_stage",
+            Self::WindowsProbe { .. } => "oss.desktop.windows_probe",
             Self::ImagePull { .. } => "oss.desktop.image_pull",
             Self::SetupFailed { .. } => "oss.desktop.setup_failed",
             Self::Activated => "oss.desktop.activated",
@@ -1479,6 +1487,67 @@ pub enum WindowsStageOutcome {
     NestedVirtualizationUnavailable,
     NotAdministrator,
     CheckFailed,
+}
+
+/// Which of the Windows readiness check's probes, by what it asks. Never the command itself.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsProbeKind {
+    /// Whether a hypervisor runs or firmware virtualization is on (CIM).
+    Virtualization,
+    /// Whether this account can approve an administrator prompt.
+    Administrator,
+    /// The WSL optional feature's state (CIM, through Windows servicing).
+    WslFeature,
+    /// Whether the modern WSL service is installed (CIM).
+    WslService,
+    /// The Virtual Machine Platform optional feature's state (CIM, through Windows servicing).
+    VirtualMachinePlatformFeature,
+    /// The default WSL version, from the registry.
+    DefaultWslVersion,
+    /// `wsl.exe --version`.
+    WslVersion,
+    /// `wsl.exe --system`, which starts WSL's own VM.
+    WslSystemStart,
+    /// Whether Docker answers.
+    Docker,
+}
+
+impl WindowsProbeKind {
+    pub const ALL: [Self; 9] = [
+        Self::Virtualization,
+        Self::Administrator,
+        Self::WslFeature,
+        Self::WslService,
+        Self::VirtualMachinePlatformFeature,
+        Self::DefaultWslVersion,
+        Self::WslVersion,
+        Self::WslSystemStart,
+        Self::Docker,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Virtualization => "virtualization",
+            Self::Administrator => "administrator",
+            Self::WslFeature => "wsl_feature",
+            Self::WslService => "wsl_service",
+            Self::VirtualMachinePlatformFeature => "virtual_machine_platform_feature",
+            Self::DefaultWslVersion => "default_wsl_version",
+            Self::WslVersion => "wsl_version",
+            Self::WslSystemStart => "wsl_system_start",
+            Self::Docker => "docker",
+        }
+    }
+}
+
+/// How a Windows probe that said something went: it answered, but late, or it was stopped at its
+/// limit.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsProbeOutcome {
+    Slow,
+    TimedOut,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1768,6 +1837,11 @@ pub fn schema_json() -> serde_json::Value {
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
+            "windows_probe": {
+                "probe": WindowsProbeKind::ALL.map(WindowsProbeKind::as_str),
+                "outcome": ["slow", "timed_out"],
+                "duration_ms": "u64"
+            },
             "image_pull": { "outcome": ["success", "failure"], "duration_ms": "u64", "bytes": "option_u64" },
             "setup_failed": {
                 "step": steps,
@@ -2351,6 +2425,16 @@ mod tests {
             EventData::WindowsStage {
                 outcome: WindowsStageOutcome::WslNoKernel,
             },
+            EventData::WindowsProbe {
+                probe: WindowsProbeKind::WslFeature,
+                outcome: WindowsProbeOutcome::TimedOut,
+                duration_ms: 30_012,
+            },
+            EventData::WindowsProbe {
+                probe: WindowsProbeKind::VirtualMachinePlatformFeature,
+                outcome: WindowsProbeOutcome::Slow,
+                duration_ms: 7_250,
+            },
             EventData::ImagePull {
                 outcome: Outcome::Success,
                 duration_ms: 12,
@@ -2500,6 +2584,43 @@ mod tests {
             (&window, "url", serde_json::json!("tauri://localhost")),
         ] {
             let mut open = base.clone();
+            open[path] = value;
+            assert!(serde_json::from_value::<EventData>(open).is_err(), "{path}");
+        }
+    }
+
+    /// A Windows probe that ran long or out of time: its name, how it went and how long, and
+    /// nothing open. The command a probe ran, its output and its error never fit.
+    #[test]
+    fn windows_probe_events_round_trip_and_refuse_anything_open() {
+        let probe = serde_json::json!({
+            "kind": "windows_probe",
+            "probe": "wsl_feature",
+            "outcome": "timed_out",
+            "duration_ms": 30012
+        });
+        let event = serde_json::from_value::<EventData>(probe.clone()).unwrap();
+        assert_eq!(event.event_name(), "oss.desktop.windows_probe");
+        assert_eq!(serde_json::to_value(event).unwrap(), probe);
+        for kind in WindowsProbeKind::ALL {
+            let mut named = probe.clone();
+            named["probe"] = serde_json::json!(kind.as_str());
+            let event = serde_json::from_value::<EventData>(named).unwrap();
+            assert!(matches!(event, EventData::WindowsProbe { probe, .. } if probe == kind));
+        }
+        for (path, value) in [
+            (
+                "probe",
+                serde_json::json!("Get-CimInstance Win32_OptionalFeature"),
+            ),
+            ("probe", serde_json::json!("powershell")),
+            ("outcome", serde_json::json!("failed")),
+            ("duration_ms", serde_json::json!(-1)),
+            ("duration_ms", serde_json::json!("30012")),
+            ("command", serde_json::json!("wsl.exe --version")),
+            ("stderr", serde_json::json!("Access is denied.")),
+        ] {
+            let mut open = probe.clone();
             open[path] = value;
             assert!(serde_json::from_value::<EventData>(open).is_err(), "{path}");
         }

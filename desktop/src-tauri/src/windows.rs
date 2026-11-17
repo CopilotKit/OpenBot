@@ -279,6 +279,10 @@ struct ProbeLimits {
     /// How long a feature probe runs before the window says Windows is busy: a quiet machine
     /// answers it in a few seconds.
     servicing_busy_after: std::time::Duration,
+    /// How long a probe runs before it is reported as slow (`Heard::Probe`). A quiet machine
+    /// answers each of these in a second or two; five is past that and still well short of the
+    /// limit, so a machine getting slow shows up before it times out.
+    slow_after: std::time::Duration,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -286,7 +290,67 @@ const PROBE_LIMITS: ProbeLimits = ProbeLimits {
     powershell: std::time::Duration::from_secs(30),
     wsl_version: std::time::Duration::from_secs(30),
     servicing_busy_after: std::time::Duration::from_secs(5),
+    slow_after: std::time::Duration::from_secs(5),
 };
+
+/// What the check says while it runs, for the window and for usage data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Heard {
+    /// A feature probe is waiting on Windows's servicing: the window says Windows is busy.
+    ServicingBusy,
+    /// A probe ran long (`ProbeLimits::slow_after`) or was stopped at its limit, after
+    /// `duration_ms`. Its name only, never what it ran.
+    Probe {
+        probe: crate::telemetry::WindowsProbeKind,
+        outcome: crate::telemetry::WindowsProbeOutcome,
+        duration_ms: u64,
+    },
+}
+
+/// What a probe that took `took` says: nothing when it answered within `slow_after`.
+pub fn heard_of(
+    probe: crate::telemetry::WindowsProbeKind,
+    timed_out: bool,
+    took: std::time::Duration,
+    slow_after: std::time::Duration,
+) -> Option<Heard> {
+    use crate::telemetry::WindowsProbeOutcome as Outcome;
+    let outcome = if timed_out {
+        Outcome::TimedOut
+    } else if took >= slow_after {
+        Outcome::Slow
+    } else {
+        return None;
+    };
+    Some(Heard::Probe {
+        probe,
+        outcome,
+        duration_ms: u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+    })
+}
+
+/// Which probe `blocker_with` is running, by what it asks.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn probe_of(program: &str, args: &[&str]) -> crate::telemetry::WindowsProbeKind {
+    use crate::telemetry::WindowsProbeKind as Probe;
+    if program == "wsl.exe" {
+        return Probe::WslVersion;
+    }
+    let command = args.last().copied().unwrap_or_default();
+    if command.contains("Win32_ComputerSystem") {
+        Probe::Virtualization
+    } else if command.contains("S-1-5-32-544") {
+        Probe::Administrator
+    } else if command.contains("Microsoft-Windows-Subsystem-Linux") {
+        Probe::WslFeature
+    } else if command.contains("VirtualMachinePlatform") {
+        Probe::VirtualMachinePlatformFeature
+    } else if command.contains("WslService") {
+        Probe::WslService
+    } else {
+        Probe::DefaultWslVersion
+    }
+}
 
 /// Whether a probe asks Windows's servicing stack, as a `Win32_OptionalFeature` query does (above).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -294,13 +358,14 @@ fn asks_servicing(args: &[&str]) -> bool {
     args.iter().any(|arg| arg.contains("Win32_OptionalFeature"))
 }
 
-/// The check's probes as `blocker` runs them: each bounded by its limit, and `busy` called while a
-/// feature probe waits on Windows's servicing. Once one feature probe has run out of time, the next
-/// would only wait behind the same servicing, so it is not run, and says nothing either.
+/// The check's probes as `blocker` runs them: each bounded by its limit, `tell` told while a
+/// feature probe waits on Windows's servicing and of any probe that ran long or out of time. Once
+/// one feature probe has run out of time, the next would only wait behind the same servicing, so it
+/// is not run, and says nothing either.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 struct Probing<'a> {
     limits: ProbeLimits,
-    busy: &'a dyn Fn(),
+    tell: &'a dyn Fn(Heard),
     servicing_timed_out: bool,
 }
 
@@ -325,15 +390,26 @@ impl Probing<'_> {
         } else {
             self.limits.powershell
         };
+        let tell = self.tell;
+        let busy = || tell(Heard::ServicingBusy);
+        let started = std::time::Instant::now();
         let output = crate::quiet::output_watching(
             crate::quiet::command(binary).args(args),
             limit,
-            servicing.then_some((self.limits.servicing_busy_after, self.busy)),
+            servicing.then_some((self.limits.servicing_busy_after, &busy as &dyn Fn())),
         );
-        if servicing
-            && matches!(&output, Err(error) if error.kind() == std::io::ErrorKind::TimedOut)
-        {
+        let timed_out =
+            matches!(&output, Err(error) if error.kind() == std::io::ErrorKind::TimedOut);
+        if servicing && timed_out {
             self.servicing_timed_out = true;
+        }
+        if let Some(heard) = heard_of(
+            probe_of(program, args),
+            timed_out,
+            started.elapsed(),
+            self.limits.slow_after,
+        ) {
+            tell(heard);
         }
         output
     }
@@ -346,14 +422,18 @@ impl Probing<'_> {
 /// start waits for WSL after this.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const WSL_SYSTEM_START: std::time::Duration = std::time::Duration::from_secs(60);
+/// A cold start measured about six seconds on Windows Server 2022, so a start is slow past twenty:
+/// three times that, and a third of the limit.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const WSL_SYSTEM_SLOW: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// Read the machine and say which blocker, if any, is in the way. `busy` is called while Windows's
-/// servicing holds the check, for the window to say so.
+/// Read the machine and say which blocker, if any, is in the way. `tell` hears that Windows's
+/// servicing holds the check, for the window to say so, and of probes that ran long or timed out.
 #[cfg(target_os = "windows")]
-pub fn blocker(busy: &dyn Fn()) -> Result<Option<Blocker>, Problem> {
+pub fn blocker(tell: &dyn Fn(Heard)) -> Result<Option<Blocker>, Problem> {
     let mut probing = Probing {
         limits: PROBE_LIMITS,
-        busy,
+        tell,
         servicing_timed_out: false,
     };
     blocker_with(
@@ -686,7 +766,7 @@ fn blocker_with(
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn blocker(_busy: &dyn Fn()) -> Result<Option<Blocker>, Problem> {
+pub fn blocker(_tell: &dyn Fn(Heard)) -> Result<Option<Blocker>, Problem> {
     Ok(None)
 }
 
@@ -705,15 +785,21 @@ evidence about virtualization, and is left for Docker to report. Nor is running 
 (`WSL_SYSTEM_START`).
 */
 #[cfg(target_os = "windows")]
-pub fn nested_virtualization_blocker() -> Option<Blocker> {
-    let output = answered_in_time(
-        "WSL's own VM (wsl.exe --system)",
-        crate::quiet::output_within(
-            crate::quiet::command("wsl.exe").args(["--system", "--exec", "true"]),
-            WSL_SYSTEM_START,
-        ),
-    )?
-    .ok()?;
+pub fn nested_virtualization_blocker(tell: &dyn Fn(Heard)) -> Option<Blocker> {
+    let started = std::time::Instant::now();
+    let output = crate::quiet::output_within(
+        crate::quiet::command("wsl.exe").args(["--system", "--exec", "true"]),
+        WSL_SYSTEM_START,
+    );
+    if let Some(heard) = heard_of(
+        crate::telemetry::WindowsProbeKind::WslSystemStart,
+        matches!(&output, Err(error) if error.kind() == std::io::ErrorKind::TimedOut),
+        started.elapsed(),
+        WSL_SYSTEM_SLOW,
+    ) {
+        tell(heard);
+    }
+    let output = answered_in_time("WSL's own VM (wsl.exe --system)", output)?.ok()?;
     let said = format!(
         "{}\n{}",
         decode_probe_text(&output.stdout).unwrap_or_default(),
@@ -724,7 +810,7 @@ pub fn nested_virtualization_blocker() -> Option<Blocker> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn nested_virtualization_blocker() -> Option<Blocker> {
+pub fn nested_virtualization_blocker(_tell: &dyn Fn(Heard)) -> Option<Blocker> {
     None
 }
 
@@ -1637,7 +1723,7 @@ mod tests {
             "native setup service: {}",
             serde_json::json!({"modernWslInstalled": modern_wsl})
         );
-        let result = blocker(&|| {});
+        let result = blocker(&|_| {});
         println!(
             "native setup result: {}",
             serde_json::to_string(&result).unwrap()
@@ -2468,19 +2554,19 @@ mod tests {
             path
         };
         let (powershell, wsl) = (fake("powershell"), fake("wsl"));
-        let busy = std::cell::Cell::new(0);
-        let says_busy = || busy.set(busy.get() + 1);
+        let heard = std::cell::RefCell::new(Vec::new());
+        let hear = |said: Heard| heard.borrow_mut().push(said);
         let mut probing = Probing {
             limits: ProbeLimits {
                 powershell: std::time::Duration::from_millis(500),
                 wsl_version: std::time::Duration::from_millis(300),
                 servicing_busy_after: std::time::Duration::from_millis(100),
+                slow_after: std::time::Duration::from_millis(200),
             },
-            busy: &says_busy,
+            tell: &hear,
             servicing_timed_out: false,
         };
         let mut asked = Vec::new();
-        let started = std::time::Instant::now();
         let found = blocker_with(
             |program, args| {
                 asked.push(probe_named(program, args));
@@ -2493,7 +2579,6 @@ mod tests {
             },
             || Ok(false),
         );
-        let took = started.elapsed();
         assert_eq!(found, Ok(None));
         assert_eq!(
             asked,
@@ -2506,13 +2591,42 @@ mod tests {
                 "version"
             ]
         );
-        // Said once, for the WSL feature; the Virtual Machine Platform one was never started.
-        assert_eq!(busy.get(), 1);
-        // Unbounded, six two-second hangs are twelve seconds.
-        assert!(
-            took < std::time::Duration::from_secs(9),
-            "the check took {took:?}"
+        // Windows busy said once, for the WSL feature; the Virtual Machine Platform one was never
+        // started, so it neither waited nor timed out. Every probe that ran is reported as timed
+        // out, by name, after at least its limit.
+        use crate::telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
+        let heard = heard.into_inner();
+        let said: Vec<_> = heard
+            .iter()
+            .map(|said| match *said {
+                Heard::ServicingBusy => None,
+                Heard::Probe { probe, outcome, .. } => Some((probe, outcome)),
+            })
+            .collect();
+        assert_eq!(
+            said,
+            [
+                Some((Probe::Virtualization, Outcome::TimedOut)),
+                Some((Probe::Administrator, Outcome::TimedOut)),
+                None,
+                Some((Probe::WslFeature, Outcome::TimedOut)),
+                Some((Probe::DefaultWslVersion, Outcome::TimedOut)),
+                Some((Probe::WslVersion, Outcome::TimedOut)),
+            ]
         );
+        for said in &heard {
+            if let Heard::Probe {
+                probe, duration_ms, ..
+            } = said
+            {
+                let limit = if *probe == Probe::WslVersion {
+                    300
+                } else {
+                    500
+                };
+                assert!(*duration_ms >= limit, "{said:?}");
+            }
+        }
         std::thread::sleep(std::time::Duration::from_secs(3));
         for name in ["powershell", "wsl"] {
             assert!(
@@ -2521,6 +2635,113 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
+
+    /// A probe that answers, but late, is reported as slow with how long it took; one in good time
+    /// says nothing. On a real process: a `powershell` that takes two seconds, under a slow mark of
+    /// one and a limit with room for a loaded test machine.
+    #[test]
+    fn a_probe_that_answers_late_is_reported_slow_with_its_duration() {
+        use crate::telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
+        let cli = crate::test_support::probe_cli("windows-probe-slow");
+        let powershell = cli.with_file_name(format!("powershell{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(&cli, &powershell).unwrap();
+        let heard = std::cell::RefCell::new(Vec::new());
+        let hear = |said: Heard| heard.borrow_mut().push(said);
+        let mut probing = Probing {
+            limits: ProbeLimits {
+                powershell: std::time::Duration::from_secs(60),
+                wsl_version: std::time::Duration::from_secs(60),
+                servicing_busy_after: std::time::Duration::from_secs(60),
+                slow_after: std::time::Duration::from_secs(1),
+            },
+            tell: &hear,
+            servicing_timed_out: false,
+        };
+        let output = probing.run(
+            powershell.as_os_str(),
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "'hypervisor=' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent",
+            ],
+        );
+        assert!(output.unwrap().status.success());
+        let heard = heard.into_inner();
+        let [Heard::Probe {
+            probe: Probe::Virtualization,
+            outcome: Outcome::Slow,
+            duration_ms,
+        }] = heard.as_slice()
+        else {
+            panic!("expected one slow virtualization probe, heard {heard:?}");
+        };
+        assert!(*duration_ms >= 2_000, "took {duration_ms} ms");
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+
+        // The rule itself: in good time, nothing; late, slow; stopped, timed out.
+        let second = std::time::Duration::from_secs(1);
+        assert_eq!(heard_of(Probe::Docker, false, second / 2, second), None);
+        assert_eq!(
+            heard_of(Probe::Docker, false, second * 3, second),
+            Some(Heard::Probe {
+                probe: Probe::Docker,
+                outcome: Outcome::Slow,
+                duration_ms: 3_000
+            })
+        );
+        assert_eq!(
+            heard_of(Probe::WslSystemStart, true, second * 60, second),
+            Some(Heard::Probe {
+                probe: Probe::WslSystemStart,
+                outcome: Outcome::TimedOut,
+                duration_ms: 60_000
+            })
+        );
+    }
+
+    /// Every probe the check runs has its own name in usage data.
+    #[test]
+    fn each_probe_is_named_by_what_it_asks() {
+        use crate::telemetry::WindowsProbeKind as Probe;
+        let mut named = Vec::new();
+        let _ = check_where_naming(&mut named);
+        assert_eq!(
+            named,
+            [
+                Probe::Virtualization,
+                Probe::Administrator,
+                Probe::WslFeature,
+                Probe::WslService,
+                Probe::VirtualMachinePlatformFeature,
+                Probe::DefaultWslVersion,
+                Probe::WslVersion,
+            ]
+        );
+    }
+
+    /// The check on a machine whose WSL feature is off and WSL service is installed, so every
+    /// probe runs, recording what `probe_of` names each.
+    fn check_where_naming(
+        named: &mut Vec<crate::telemetry::WindowsProbeKind>,
+    ) -> Result<Option<Blocker>, Problem> {
+        blocker_with(
+            |program, args| {
+                named.push(probe_of(program, args));
+                let stdout = match probe_named(program, args) {
+                    "virtualization" => "hypervisor=True\nfirmware=False",
+                    "administrator" | "service" => "True",
+                    "wsl" => "2",
+                    "vmp" => "1",
+                    "default-version" => "2",
+                    _ => "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2",
+                };
+                Ok(probe_output(0, stdout, ""))
+            },
+            || Ok(false),
+        )
     }
 
     #[test]
