@@ -417,6 +417,7 @@ paths:
   /api/v2/organizations/{organizationId}/recorder/learning: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1learning' }
   /api/v2/organizations/{organizationId}/recorder/activity: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1activity' }
   /api/v2/organizations/{organizationId}/product-events: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1product-events' }
+  /api/v2/organizations/{organizationId}/app-errors: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-errors' }
   /api/v2/organizations/{organizationId}/settings/learning: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning' }
   /api/v2/organizations/{organizationId}/settings/learning/create-container: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1create-container' }
   /api/v2/organizations/{organizationId}/settings/learning/overview: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1overview' }
