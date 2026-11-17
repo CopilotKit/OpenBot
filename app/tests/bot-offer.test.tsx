@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import type { Tool } from "@ag-ui/core";
+import type { RunAgentInput, Tool } from "@ag-ui/core";
 import { HttpAgent } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient } from "@tanstack/react-query";
@@ -16,13 +16,14 @@ import {
   useOfferedTo,
 } from "@/lib/copilot/bot-offer";
 import { computerToolsOffered } from "@/lib/copilot/computer-available";
+import { GENERATIVE_UI_DESIGN_SKILL } from "@/lib/copilot/generative-ui";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
 import { botPath } from "./bots-api";
-import { settleReactWork } from "./settle-react-work";
 import { botComponentsPath } from "./components-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * What one run of a Bot is offered, and how its facts are read: the rules in `bot-offer.ts` against
@@ -225,4 +226,49 @@ test("a copy of an agent that already carries the offer is narrowed once a step"
   expect(offered).toEqual(["probe_tool"]);
   expect(asked).toBe(1);
   registered.unmount();
+});
+
+test("a Personal Assistant run gets native guidance when its catalog is offered", async () => {
+  answering((path) =>
+    path === botPath(BOT)
+      ? Response.json({
+          bot: { ...PROFILE, packageBotId: "personal-assistant" },
+        })
+      : ordinaryAnswer(path),
+  );
+  const queries = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const agent = new HttpAgent({ url: "http://127.0.0.1/none" });
+  offerItsOwnTools(agent, BOT, queries);
+  let offered: RunAgentInput | undefined;
+  agent.run = (input) => {
+    offered = input;
+    return of(
+      { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ) as ReturnType<HttpAgent["run"]>;
+  };
+  const context = [
+    { description: "Supplied facts", value: "The trip lasts three days." },
+    { description: "Design", value: GENERATIVE_UI_DESIGN_SKILL },
+  ];
+  await agent.runAgent({
+    tools: [],
+    context,
+    forwardedProps: {
+      copilotkit: { ui: { "1.0": { supportedCatalogIds: ["openbot/ui@1"] } } },
+    },
+  });
+  expect(offered?.context).toHaveLength(3);
+  expect(offered?.context[0]).toEqual(context[0]);
+  expect(offered?.context.at(-1)?.description).toBe(
+    "Personal Assistant native A2UI guidance.",
+  );
+  expect(offered?.context.at(-1)?.value).toContain("target chat");
+  expect(offered?.context[1]?.value).toStartWith(
+    "These design guidelines apply only to sandboxed HTML",
+  );
+  expect(context[1]?.value).toBe(GENERATIVE_UI_DESIGN_SKILL);
+  queries.clear();
 });
