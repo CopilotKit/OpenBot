@@ -17510,6 +17510,50 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-errors:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordAppError
+      summary: Report an error the app did not handle
+      description: 'Tell OpenBot about an error the app hit and did not handle: one its error screen caught, or one the page threw or left unhandled. OpenBot forwards it with the rest of its product telemetry, so the app never holds a telemetry key, and takes out of its message and stack anything that could name a person, quote what they wrote, or carry a secret before it leaves. It is best effort: a client sends one per error, waits on nothing, and sends it with keepalive. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppError'
+            examples:
+              errorScreen:
+                $ref: '#/components/examples/AppErrorBoundary'
+      responses:
+        '204':
+          description: The error is accepted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/settings/learning:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -34385,6 +34429,49 @@ components:
             - desktop
             - mobile
           description: Where the caller saw or copied it.
+    AppError:
+      type: object
+      description: An error the app hit and did not handle, as the app saw it. OpenBot scrubs and bounds it again before it is sent anywhere.
+      additionalProperties: false
+      required:
+        - source
+        - type
+        - message
+        - surface
+      properties:
+        source:
+          type: string
+          enum:
+            - error_boundary
+            - window_error
+            - unhandled_rejection
+          description: How the app caught it. error_boundary when its error screen was shown, window_error for an error the page threw, and unhandled_rejection for a promise nobody handled.
+        type:
+          type: string
+          description: The error's name, such as TypeError.
+          minLength: 1
+          maxLength: 128
+        message:
+          type: string
+          description: The error's message.
+          maxLength: 2048
+        stack:
+          type: string
+          description: The error's stack, as the browser wrote it.
+          maxLength: 12288
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+            - mobile
+          description: Where the app runs.
+        appVersion:
+          type: string
+          description: The release the app was built for, such as 1.1.0-rc.2, when the build knows it.
+          minLength: 1
+          maxLength: 32
+          pattern: ^v?\d+(?:\.\d+){1,3}(?:-[a-z]+(?:\.\d{1,9})?)?$
     LearningSpaceId:
       type: string
       description: A Learning space's id in the backend (its container).
@@ -44765,6 +44852,17 @@ components:
         threadId: 6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
         messageId: msg_0b1c6f0e
         surface: web
+    AppErrorBoundary:
+      summary: An error the web app's error screen caught.
+      value:
+        source: error_boundary
+        type: TypeError
+        message: Cannot read properties of undefined (reading 'title')
+        stack: |-
+          TypeError: Cannot read properties of undefined (reading 'title')
+              at BotCard (/assets/route-app-secondary.js:12:345)
+        surface: web
+        appVersion: 1.1.0-rc.2
     LearningConfigurationExample:
       summary: Learning on, every Bot learning into the space OpenBot assigned, people reviewing their own.
       value:
