@@ -28,6 +28,8 @@ import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
+import { ConversationCard } from "../places/conversation-card";
+import { PlaceHeading } from "../places/place-row";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -139,10 +141,13 @@ function ChannelRow({
   channel,
   animateOrder,
   emphasis,
+  dense,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
   emphasis: MessageListEmphasis;
+  /** One line per row, with a card on hover or focus: the Places sidebar's rows. */
+  dense?: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
   // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
@@ -152,6 +157,27 @@ function ChannelRow({
     select: (params) =>
       isUnread(channel, (params as { channelId?: string }).channelId),
   });
+  const row = (
+    <Channel
+      emphasis={emphasis}
+      dense={dense}
+      channelId={channel.id}
+      participantIds={channel.agentIds}
+      name={channel.name}
+      summary={channel.summary ?? undefined}
+      untitled={untitledLine(channel)}
+      lastMessageAt={
+        channel.lastMessageAt
+          ? relativeTimeShort(channel.lastMessageAt)
+          : undefined
+      }
+      pinned={channel.pinned}
+      canRename={channel.canRename ?? false}
+      unread={unread}
+      // A turn running, or work the conversation waits on between turns: a hop, a routine.
+      busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
+    />
+  );
   return (
     <motion.div
       animate={{ opacity: 1, transform: "translateY(0px)" }}
@@ -163,24 +189,11 @@ function ChannelRow({
       layout={animateOrder && !shouldReduceMotion ? "position" : false}
       transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
     >
-      <Channel
-        emphasis={emphasis}
-        channelId={channel.id}
-        participantIds={channel.agentIds}
-        name={channel.name}
-        summary={channel.summary ?? undefined}
-        untitled={untitledLine(channel)}
-        lastMessageAt={
-          channel.lastMessageAt
-            ? relativeTimeShort(channel.lastMessageAt)
-            : undefined
-        }
-        pinned={channel.pinned}
-        canRename={channel.canRename ?? false}
-        unread={unread}
-        // A turn running, or work the conversation waits on between turns: a hop, a routine.
-        busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
-      />
+      {dense ? (
+        <ConversationCard channel={channel}>{row}</ConversationCard>
+      ) : (
+        row
+      )}
     </motion.div>
   );
 }
@@ -201,12 +214,14 @@ function SearchResults({
   term,
   settled,
   emphasis,
+  dense,
 }: {
   /** The search as it was when typing last paused, normalised. This is what is asked for. */
   term: string;
   /** Whether that is still what is in the box. */
   settled: boolean;
   emphasis: MessageListEmphasis;
+  dense?: boolean;
 }) {
   const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
 
@@ -256,6 +271,7 @@ function SearchResults({
         {results.data.map((channel) => (
           <ChannelRow
             emphasis={emphasis}
+            dense={dense}
             key={channel.id}
             animateOrder={false}
             channel={channel}
@@ -297,8 +313,7 @@ function SearchResults({
  */
 export function ConversationRoster({
   scrollRoot,
-  // Accepted for a tighter layout a later change draws; unused for now.
-  dense: _dense,
+  dense,
 }: {
   scrollRoot: RefObject<HTMLDivElement | null>;
   dense?: boolean;
@@ -369,6 +384,7 @@ export function ConversationRoster({
         {searching ? (
           searchable ? (
             <SearchResults
+              dense={dense}
               emphasis={emphasis}
               settled={debouncedTerm === term}
               term={debouncedTerm}
@@ -394,10 +410,15 @@ export function ConversationRoster({
                 </Empty>
               </div>
             ) : null}
+            {/* Pinned rows come first (see `pinnedFirst`), so the heading sits above them alone. */}
+            {dense && visibleChannels[0]?.pinned ? (
+              <PlaceHeading>Pinned</PlaceHeading>
+            ) : null}
             <AnimatePresence initial={false}>
               {visibleChannels.map((channel) => (
                 <ChannelRow
                   emphasis={emphasis}
+                  dense={dense}
                   key={channel.id}
                   animateOrder={animateOrder}
                   channel={channel}

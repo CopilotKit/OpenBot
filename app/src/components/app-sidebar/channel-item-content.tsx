@@ -14,6 +14,7 @@ export function ChannelItemContent({
   unread = false,
   pinned = false,
   revealing = false,
+  dense = false,
 }: {
   participantIds: string[];
   name: string;
@@ -25,9 +26,44 @@ export function ChannelItemContent({
   unread?: boolean;
   pinned?: boolean;
   revealing?: boolean;
+  /** One line for the sidebar roster: a small avatar and one title, no time, no pin icon. */
+  dense?: boolean;
 }) {
   const primaryText = `text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
   const secondaryText = "text-[12px] leading-4 text-muted-foreground";
+
+  if (dense) {
+    const denseTitle = emphasis === "agent" ? name : displayedTitle;
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="shrink-0">
+          <ChannelAvatar
+            participantIds={participantIds}
+            size={20}
+            typing={busy}
+          />
+        </div>
+        <span
+          className={`min-w-0 flex-1 truncate ${primaryText}`}
+          title={emphasis === "agent" ? name : title}
+        >
+          {denseTitle}
+          {emphasis === "thread" && revealing ? (
+            <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
+          ) : null}
+        </span>
+        {unread ? (
+          <span className="size-2 shrink-0 rounded-full bg-primary" />
+        ) : busy ? (
+          <span
+            aria-label="Working"
+            className="size-1.5 shrink-0 rounded-full bg-indigo-600 dark:bg-indigo-300"
+            role="img"
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
