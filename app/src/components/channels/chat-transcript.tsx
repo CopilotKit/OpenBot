@@ -47,6 +47,7 @@ import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
+import { reportsUnderTheirCards } from "@/components/tasks/report-under-card";
 import { SteerLanded } from "@/components/tasks/task-steer";
 import {
   MessageReactions,
@@ -815,9 +816,12 @@ const TranscriptMessage = memo(function TranscriptMessage({
   text,
   threadId,
   messageId,
+  underItsCard = false,
 }: {
   commandLabels?: string;
   role: "user" | "assistant";
+  /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
+  underItsCard?: boolean;
   /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
   slackNames?: SlackNames;
   threadId?: string;
@@ -963,6 +967,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
                     <TaskReport
                       kind={report.kind}
                       taskId={report.taskId}
+                      underCard={underItsCard}
                       words={text}
                     >
                       <BotMarkdown
@@ -2297,6 +2302,8 @@ export function ChatTranscript({
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
+  /* The tasks' results drawn directly under their own card, which says which task each is about. */
+  const underTheirCards = reportsUnderTheirCards(items);
 
   /*
    * Decided once, from the rows present when the scroller mounts, and forgotten while restoring so
@@ -2551,6 +2558,7 @@ export function ChatTranscript({
         commandLabels={commandLabels}
         role={item.role}
         slackNames={slackNames}
+        underItsCard={underTheirCards.has(item.id)}
         streaming={
           busy && item.role === "assistant" && index === items.length - 1
         }
