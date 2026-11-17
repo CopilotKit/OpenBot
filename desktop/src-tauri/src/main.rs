@@ -2955,11 +2955,6 @@ async fn check_app_update<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-async fn dismiss_app_update(app: tauri::AppHandle, version: String) -> Result<(), Problem> {
-    dismiss_app_update_for(&app, &version)
-}
-
-#[tauri::command]
 async fn install_app_update(app: tauri::AppHandle) -> Result<(), Problem> {
     install_app_update_now(app).await
 }
@@ -12341,7 +12336,6 @@ fn main() {
             prepare_installation,
             check_app_update,
             app_update_offer,
-            dismiss_app_update,
             install_app_update,
             upgrade_due,
             upgrade_and_start,
