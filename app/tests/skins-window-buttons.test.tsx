@@ -39,7 +39,7 @@ const NARROWEST_WIDTH = 720;
 
 type Case = {
   name: string;
-  skin: "openduet" | "opendots" | "openfuse";
+  skin: "openbot" | "openduet" | "opendots" | "openfuse";
   path: string;
   width: number;
   /** The window's height, when not 800px. The desktop's shortest is 560px. */
@@ -167,6 +167,13 @@ const CASES: Case[] = [
       );
     },
     corner: ['[data-slot="dialog-title"]'],
+  },
+  {
+    name: "openbot-narrowest",
+    skin: "openbot",
+    path: "/",
+    width: NARROWEST_WIDTH,
+    corner: ['button[aria-label="Show sidebar"]'],
   },
   {
     name: "openfuse-update",
@@ -543,6 +550,9 @@ describe.skipIf(!asked)("the skins and the window's buttons", () => {
   test("without the mark, every skin's corner is where it has always been", async () => {
     // Measured on main before the desktop's room was made, so a skin that moves outside it fails.
     const before = {
+      "openbot-narrowest": {
+        'button[aria-label="Show sidebar"]': { x: 12, y: 8 },
+      },
       "openduet-menu": { '[data-slot="sheet-title"]': { x: 20, y: 20 } },
       "openduet-chat": { 'button[aria-label="Menu"]': { x: 161, y: 20 } },
       "openduet-page": {

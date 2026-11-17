@@ -9,6 +9,9 @@ import {
 } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
 import { PageShell } from "@/components/layout/page-shell";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { Sidebar, SidebarHeader, SidebarInset } from "@/components/ui/sidebar";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { SKINS } from "@/skins/registry";
 import type { SkinId } from "@/skins/types";
@@ -140,6 +143,10 @@ if (params.get("update") === "1")
     };
 
 const { Frame, screens } = SKINS[skinId];
+/*
+ * OpenBot's own frame is `_authed/_app`'s sidebar shell, not a skin's Frame. Its sidebar here is a
+ * header only: what matters is the shell's own layout around it, which is the real one.
+ */
 const rootRoute = createRootRoute({
   component: () =>
     Frame ? (
@@ -147,7 +154,15 @@ const rootRoute = createRootRoute({
         <Outlet />
       </Frame>
     ) : (
-      <Outlet />
+      <SidebarShell className="h-svh overflow-hidden">
+        <Sidebar variant="inset">
+          <SidebarHeader>OpenBot</SidebarHeader>
+        </Sidebar>
+        <SidebarInset className="min-h-0 overflow-hidden">
+          <SidebarToggleBar />
+          <Outlet />
+        </SidebarInset>
+      </SidebarShell>
     ),
 });
 const page = (routePath: string, body: () => React.ReactNode) =>

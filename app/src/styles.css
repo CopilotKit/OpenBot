@@ -57,6 +57,16 @@
   padding-left: 80px;
 }
 
+/*
+ * Below 768px the sidebar is a drawer drawn elsewhere in the page, so the wrapper holds no sidebar
+ * at all, and the main column's sidebar toggle sat under the buttons. That case moves down too.
+ */
+:root[data-desktop-titlebar="overlay"]
+  [data-slot="sidebar-wrapper"]:not(:has(> [data-slot="sidebar"]))
+  > main {
+  padding-top: 40px;
+}
+
 :root[data-desktop-titlebar="overlay"]
   [data-slot="sidebar-wrapper"]:has(
     > [data-slot="sidebar"][data-state="collapsed"]
