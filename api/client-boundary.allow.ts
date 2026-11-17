@@ -265,6 +265,12 @@ export const ALLOWED: Allowed[] = [
     rule: "stored-format",
     why: "the form a sent message keeps its attachment in; the app reads it at the API's address",
   },
+  {
+    file: "app/src/lib/markdown.tsx",
+    what: "/api/",
+    rule: "transport",
+    why: "tells a link in a Bot's words that points at the server apart from a page of the app, so the browser opens it rather than the app's router; it calls nothing",
+  },
   // Clients already released.
   {
     file: "shared/recorder-api.ts",
