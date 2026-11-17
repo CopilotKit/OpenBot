@@ -4,14 +4,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
-import { ActivityRow, upcomingOf } from "@/components/bot-profile/activity";
 import { useWaitingOnYou } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { Button } from "@/components/ui/button";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
-import { botActivityQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { conversationTitle } from "@/lib/channels/label";
 import {
   type ChannelSummary,
@@ -153,7 +151,6 @@ function BotItem({
       </div>
       {open ? (
         <div className="flex flex-col pl-4">
-          <BotUpcoming agentId={agent.id} />
           {recent.map((channel) => (
             <PlaceRow
               key={channel.id}
@@ -177,26 +174,6 @@ function BotItem({
       ) : null}
     </div>
   );
-}
-
-/**
- * What the Bot is running and has lined up, above its conversations, and nothing when there is
- * none. Read only for an open row, so a long list of Bots does not read every Bot's activity.
- */
-function BotUpcoming({ agentId }: { agentId: string }) {
-  const activity = useQuery(botActivityQueryOptions(agentId));
-  const upcoming = upcomingOf(activity.data);
-  if (activity.isPending) return null;
-  if (activity.error) {
-    return (
-      <p className="px-2 py-1 text-muted-foreground text-xs" role="alert">
-        Couldn't load what it is doing. Try again in a moment.
-      </p>
-    );
-  }
-  return upcoming.map(({ item, live }) => (
-    <ActivityRow agentId={agentId} item={item} key={item.id} live={live} />
-  ));
 }
 
 function NewBotAction() {

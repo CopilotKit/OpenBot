@@ -8,21 +8,16 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { upcomingOf } from "@/components/bot-profile/activity";
 import { botsPlace, recentWith } from "@/components/places/bots-place";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
-import {
-  type ActivityItem,
-  botLifecycleKeys,
-} from "@/lib/bot-lifecycle/queries";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
-import { activityOf, activityResponse, botOperationPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * The Bots place's list: Needs you, Pinned, Yours and Shared with you, each drawn only when it has
- * Bots, and each Bot's activity read only once its row is opened.
+ * Bots, and each Bot's latest conversations under its row once the row is opened.
  */
 
 const BotsPlace = botsPlace.List;
@@ -219,34 +214,29 @@ test("a Bot with something waiting shows the count", async () => {
   expect(quiet.textContent).toBe("Mine");
 });
 
-test("a Bot's activity is read only when its row is opened", async () => {
-  let reads = 0;
+test("an opened Bot with no conversations says so, and reads nothing for it", async () => {
+  const reads: string[] = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
-      if (String(input) === botOperationPath("mine", "activity")) {
-        reads += 1;
-        return activityResponse();
-      }
+      reads.push(String(input));
       return Response.json({ error: "not served" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
   );
   const { view } = renderPlace({ roster: four });
   await view.findByText("Mine");
-  expect(reads).toBe(0);
+  await settleReactWork();
+  const before = reads.length;
 
   fireEvent.click(
     view.getByRole("button", { name: "Mine's latest conversations" }),
   );
   await view.findByText("No conversations with Mine yet.");
   await settleReactWork();
-  expect(reads).toBe(1);
+  expect(reads.length).toBe(before);
 });
 
 test("an opened Bot lists its five latest conversations, newest first, each opening it", async () => {
-  globalThis.fetch = Object.assign(async () => activityResponse(), {
-    preconnect: originalFetch.preconnect,
-  });
   const channels = [
     conversation("one", ["mine"], "2026-11-17T12:00:00Z"),
     conversation("someone else's", ["theirs"], "2026-11-17T11:30:00Z"),
@@ -300,21 +290,6 @@ test("recentWith keeps one Bot's used conversations, five at most", () => {
   expect(recentWith(channels, "z")).toEqual([]);
 });
 
-test("a Bot's activity that can't be read says so, not that nothing is under way", async () => {
-  globalThis.fetch = Object.assign(
-    async () => Response.json({ error: "down" }, { status: 500 }),
-    { preconnect: originalFetch.preconnect },
-  );
-  const { view } = renderPlace({ roster: four });
-  await view.findByText("Mine");
-  fireEvent.click(
-    view.getByRole("button", { name: "Mine's latest conversations" }),
-  );
-  await view.findByText(
-    "Couldn't load what it is doing. Try again in a moment.",
-  );
-});
-
 test("a roster that can't be read says so", async () => {
   const { view } = renderPlace({ roster: [], rosterFails: true });
   await view.findByText("Couldn't load your Bots. Try again in a moment.");
@@ -350,32 +325,4 @@ test("a Bot's row opens its page", async () => {
   const { view } = renderPlace({ roster: four });
   const row = (await view.findByText("Mine")).closest("a");
   expect(row?.getAttribute("href")).toBe("/bots/mine");
-});
-
-const item = (id: string): ActivityItem => ({
-  id,
-  kind: "routine",
-  title: id,
-  detail: null,
-  status: "scheduled",
-  at: "2026-10-09T10:00:00Z",
-  channelId: null,
-  needsYou: false,
-  stoppable: false,
-  cancellable: false,
-});
-
-test("upcomingOf lists running work before what is lined up, three at most", () => {
-  const upcoming = upcomingOf(
-    activityOf({
-      inProgress: [item("running")],
-      scheduled: [item("a"), item("b"), item("c")],
-    }),
-  );
-  expect(upcoming.map(({ item: found, live }) => [found.id, live])).toEqual([
-    ["running", true],
-    ["a", false],
-    ["b", false],
-  ]);
-  expect(upcomingOf(undefined)).toEqual([]);
 });

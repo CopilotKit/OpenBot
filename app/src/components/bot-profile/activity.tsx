@@ -234,23 +234,6 @@ function useActivityGroups(agentId: string, boardAbove = false) {
   };
 }
 
-/** How many running or lined-up items a glance shows (the Bots place's chevron). */
-const GLANCE = 3;
-
-/**
- * Running work first, then what is lined up, then the goals that wait to be asked, as many as a
- * glance shows.
- */
-export function upcomingOf(activity: BotActivity | undefined) {
-  return activity
-    ? [
-        ...activity.inProgress.map((item) => ({ item, live: true })),
-        ...activity.scheduled.map((item) => ({ item, live: false })),
-        ...(activity.onDemand ?? []).map((item) => ({ item, live: false })),
-      ].slice(0, GLANCE)
-    : [];
-}
-
 /**
  * What the row to the Bot's Routines says: how many of its routines are lined up, and how many wait
  * to be asked. It counts only what the Routines page lists, as that page lists it: a routine that
