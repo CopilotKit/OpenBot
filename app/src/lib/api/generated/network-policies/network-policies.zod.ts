@@ -13,7 +13,7 @@ export const ListNetworkPoliciesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -61,16 +61,18 @@ export const ListNetworkPoliciesResponse = zod.object({
         id: zod
           .string()
           .describe(
-            "organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.",
+            "organization, team:<id> for a team, or group:<name> for a directory group.",
           ),
         scopeKind: zod
-          .enum(["organization", "group"])
+          .enum(["organization", "group", "team"])
           .describe(
-            "Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.",
+            "Whose policy: the organization's, a team's, or a directory group's.",
           ),
         scopeId: zod
           .string()
-          .describe("The directory group's name. Empty for the organization."),
+          .describe(
+            "The team's id, or the directory group's name. Empty for the organization.",
+          ),
         mode: zod
           .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
           .describe(
@@ -127,7 +129,7 @@ export const ListNetworkPoliciesResponse = zod.object({
 export const replaceNetworkPolicyPathNetworkPolicyIdMax = 206;
 
 export const replaceNetworkPolicyPathNetworkPolicyIdRegExp = new RegExp(
-  "^(organization|group:[^\\x00]*\\S[^\\x00]*)$",
+  "^(organization|team:[^\\x00]*\\S[^\\x00]*|group:[^\\x00]*\\S[^\\x00]*)$",
 );
 
 export const ReplaceNetworkPolicyParams = zod.object({
@@ -135,14 +137,16 @@ export const ReplaceNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   networkPolicyId: zod
     .string()
     .min(1)
     .max(replaceNetworkPolicyPathNetworkPolicyIdMax)
     .regex(replaceNetworkPolicyPathNetworkPolicyIdRegExp)
-    .describe("organization, or group:<name> for a directory group's."),
+    .describe(
+      "organization, team:<id> for a team's, or group:<name> for a directory group's.",
+    ),
 });
 
 export const replaceNetworkPolicyHeaderIdempotencyKeyMax = 128;
@@ -221,16 +225,18 @@ export const ReplaceNetworkPolicyResponse = zod.object({
   id: zod
     .string()
     .describe(
-      "organization, or group:<name> for a directory group. Team scopes will be added when teams arrive.",
+      "organization, team:<id> for a team, or group:<name> for a directory group.",
     ),
   scopeKind: zod
-    .enum(["organization", "group"])
+    .enum(["organization", "group", "team"])
     .describe(
-      "Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.",
+      "Whose policy: the organization's, a team's, or a directory group's.",
     ),
   scopeId: zod
     .string()
-    .describe("The directory group's name. Empty for the organization."),
+    .describe(
+      "The team's id, or the directory group's name. Empty for the organization.",
+    ),
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(
@@ -270,7 +276,7 @@ export const ReplaceNetworkPolicyResponse = zod.object({
 export const deleteNetworkPolicyPathNetworkPolicyIdMax = 206;
 
 export const deleteNetworkPolicyPathNetworkPolicyIdRegExp = new RegExp(
-  "^(organization|group:[^\\x00]*\\S[^\\x00]*)$",
+  "^(organization|team:[^\\x00]*\\S[^\\x00]*|group:[^\\x00]*\\S[^\\x00]*)$",
 );
 
 export const DeleteNetworkPolicyParams = zod.object({
@@ -278,14 +284,16 @@ export const DeleteNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   networkPolicyId: zod
     .string()
     .min(1)
     .max(deleteNetworkPolicyPathNetworkPolicyIdMax)
     .regex(deleteNetworkPolicyPathNetworkPolicyIdRegExp)
-    .describe("organization, or group:<name> for a directory group's."),
+    .describe(
+      "organization, team:<id> for a team's, or group:<name> for a directory group's.",
+    ),
 });
 
 export const deleteNetworkPolicyHeaderIdempotencyKeyMax = 128;
@@ -312,7 +320,7 @@ export const TranslateNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -389,7 +397,7 @@ export const ReplayNetworkPolicyParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -419,16 +427,18 @@ export const replayNetworkPolicyBodyLimitMax = 2000;
 
 export const ReplayNetworkPolicyBody = zod.object({
   scopeKind: zod
-    .enum(["organization", "group"])
+    .enum(["organization", "group", "team"])
     .describe(
-      "Whose policy: the organization's, or a directory group's. Team scopes will be added when teams arrive.",
+      "Whose policy: the organization's, a team's, or a directory group's.",
     ),
   scopeId: zod
     .string()
     .max(replayNetworkPolicyBodyScopeIdMax)
     .regex(replayNetworkPolicyBodyScopeIdRegExp)
     .optional()
-    .describe("The directory group's name. Empty for the organization."),
+    .describe(
+      "The team's id, or the directory group's name. Empty for the organization.",
+    ),
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(

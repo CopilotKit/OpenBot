@@ -157,7 +157,7 @@ const cases = [
   {
     shared: true,
     ownerGrants: "any",
-    line: "Bot owners who give it to their Bots let those Bots use the team account.",
+    line: "Bot owners who give it to their Bots let those Bots use the shared account.",
   },
   {
     shared: false,

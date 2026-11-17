@@ -9,6 +9,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
+  useStoppedTasks,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
@@ -31,6 +32,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
   const { bot: centre, userId } = useFuse();
   const agents = useQuery(agentListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
+  const stopped = useStoppedTasks();
   const channels = useInfiniteQuery(channelListQueryOptions());
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
@@ -56,7 +58,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
     >
       <div className="flex flex-col gap-3.5">
         {agents.isPending ? null : agents.error ? (
-          <ErrorNotice error="Couldn't load your Bots. Reload the page." />
+          <ErrorNotice error="Couldn't load your Bots. Try again in a moment." />
         ) : agents.data.length === 0 ? (
           <p className={fuseText.muted}>You don't have a Bot yet.</p>
         ) : (
@@ -66,7 +68,9 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                 (entry) => entry.botId === agent.id,
               );
               const asks = waiting ? waitingOnYou(waiting) : 0;
-              const summary = waiting ? attentionSummary(waiting) : "";
+              const summary = waiting
+                ? attentionSummary(waiting, stopped(agent.id))
+                : "";
               const selected = agent.id === centre?.id;
               return (
                 <Item
@@ -131,7 +135,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
             />
           ) : null}
           <LinkRow
-            detail="Yours, shared with you, and your team's"
+            detail="Yours, shared with you, and your organization's"
             icon={IconBolt}
             render={<Link onClick={onClose} to="/bots" />}
             tint="plain"

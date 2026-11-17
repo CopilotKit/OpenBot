@@ -9,7 +9,7 @@ import {
   getSignInRequest,
   listSignInRequests,
 } from "@/lib/api/generated/sign-in-requests/sign-in-requests";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /** A person's own things are addressed as theirs: the API reads `me` as the caller. */
 export const ME = "me";
@@ -43,7 +43,7 @@ export function signInRequestQueryOptions(id: string) {
     queryKey: passwordKeys.signIn(id),
     queryFn: async (): Promise<SignInRequest> =>
       (
-        await getSignInRequest(ORGANIZATION_ID, ME, id, {
+        await getSignInRequest(organizationId(), ME, id, {
           fallback: "Could not load this sign-in request",
         })
       ).signInRequest,
@@ -77,7 +77,7 @@ export function pendingSignInRequestsQueryOptions() {
       (
         await everyPage((cursor) =>
           listSignInRequests(
-            ORGANIZATION_ID,
+            organizationId(),
             ME,
             { limit: 100, ...(cursor ? { cursor } : {}) },
             { fallback: "Could not load your sign-in requests" },
@@ -96,7 +96,7 @@ export function savedLoginsQueryOptions() {
     }> => {
       const pages = await everyPage((cursor) =>
         listSavedLogins(
-          ORGANIZATION_ID,
+          organizationId(),
           ME,
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Could not load your passwords" },

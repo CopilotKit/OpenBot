@@ -6,6 +6,9 @@ import { Route as BotResponsibilitiesRoute } from "@/routes/_authed/_app/bots.$a
 import { Route as CapabilitiesRoute } from "@/routes/_authed/_app/capabilities.index";
 import { Route as CapabilitiesMemoryRoute } from "@/routes/_authed/_app/capabilities.memory";
 import { Route as CapabilitiesSkillsRoute } from "@/routes/_authed/_app/capabilities.skills";
+import { Route as AdminTeamsRoute } from "@/routes/_authed/admin/teams";
+import { Route as AdminTeamRoute } from "@/routes/_authed/admin/teams_.$teamId";
+import { Route as AdminNewTeamRoute } from "@/routes/_authed/admin/teams_.new";
 import { Route as SkillPageRoute } from "@/routes/_authed/settings/_personal/skills_.$slug";
 import { Route as NewSkillRoute } from "@/routes/_authed/settings/_personal/skills_.new";
 import { Route as BrowsersRoute } from "@/routes/_authed/settings/browsers";
@@ -96,6 +99,16 @@ test.each([
   expect(
     redirectOf(route as never, { params: { agentId: "scout" }, search: {} }),
   ).toMatchObject(to);
+});
+
+test("the team pages that were under Admin open the same pages outside it", () => {
+  expect(redirectOf(AdminTeamsRoute as never)).toMatchObject({ to: "/teams" });
+  expect(redirectOf(AdminNewTeamRoute as never)).toMatchObject({
+    to: "/teams/new",
+  });
+  expect(
+    redirectOf(AdminTeamRoute as never, { params: { teamId: "team_sales" } }),
+  ).toMatchObject({ to: "/teams/$teamId", params: { teamId: "team_sales" } });
 });
 
 test("/capabilities/skills opens Skills and keeps which panel was open", () => {

@@ -3,7 +3,7 @@
  */
 
 /**
- * The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.
+ * The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.
  */
 export type PersonRole = (typeof PersonRole)[keyof typeof PersonRole];
 

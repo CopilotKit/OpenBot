@@ -3,7 +3,7 @@ import {
   exportAuditEvents,
   listAuditEvents,
 } from "../src/lib/api/generated/audit-events/audit-events";
-import { ORGANIZATION_ID } from "../src/lib/api/request";
+import { organizationId } from "../src/lib/api/request";
 import { auditExport } from "./audit-api";
 
 /**
@@ -28,7 +28,7 @@ test("the export reads as the file, and its headers reach the caller", async () 
   let truncated: string | null = null;
 
   const csv = await exportAuditEvents(
-    ORGANIZATION_ID,
+    organizationId(),
     { eventType: "computer.action_refused" },
     {
       onResponse: (response) => {
@@ -50,7 +50,7 @@ test("a page answering a JSON operation is a failed request, with the caller's w
   );
 
   await expect(
-    listAuditEvents(ORGANIZATION_ID, undefined, {
+    listAuditEvents(organizationId(), undefined, {
       fallback: "Could not load audit events",
     }),
   ).rejects.toThrow("Could not load audit events");

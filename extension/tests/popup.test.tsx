@@ -10,6 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { handleConnectionMessage } from "../src/background/connection";
 import { PASS_HINTS } from "../src/offscreen/grant";
 import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
@@ -117,6 +118,14 @@ function setup(
       return { ok: true, learning: options.learning ?? learning("assigned") };
     if (message.type === "page.desktop.available")
       return { ok: true, available: options.desktop ?? false };
+    // The service worker's own answer: it asks OpenBot Desktop's native host (the fake's `native`) and opens the tab.
+    if (message.type === "page.openbot.open")
+      return (
+        (await handleConnectionMessage(message)) ?? {
+          ok: false,
+          error: "Unknown request.",
+        }
+      );
     return { ok: true };
   };
   const view = render(
@@ -158,6 +167,85 @@ test("a policy address adds an Open <host> button that opens its Browsers settin
     expect(fake.opened).toContain(
       "https://openbot.example.test/settings/browsers",
     ),
+  );
+});
+
+/** OpenBot Desktop's own OpenBot, on this computer: a port nothing answers on, so a link the test follows by mistake
+ * reaches nothing. */
+const DESKTOP_OPENBOT = "http://127.0.0.1:9";
+/** The entry address OpenBot Desktop's native host answers for `path` on its own OpenBot. */
+const entryFor = (path: string) =>
+  `${DESKTOP_OPENBOT}/api/install/enter?token=install-token-abc&to=${encodeURIComponent(path)}`;
+/** OpenBot Desktop's native host, answering an entry for its own OpenBot. */
+function desktopAnswersEntries() {
+  fake.native.reply = (message) => {
+    const { type, path } = message as { type: string; path?: string };
+    return type === "entry" && typeof path === "string"
+      ? { ok: true, url: entryFor(path) }
+      : { ok: false, error: "unknown-message" };
+  };
+}
+
+test("the personal edition only admits requests carrying its install's token: with OpenBot Desktop, Open <host> opens its Browsers settings through the entry address", async () => {
+  desktopAnswersEntries();
+  const { findByText } = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: DESKTOP_OPENBOT, invalid: false },
+    }),
+  );
+  fireEvent.click(await findByText("Open 127.0.0.1:9"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual([entryFor("/settings/browsers")]),
+  );
+  expect(fake.native.sent).toContainEqual({
+    type: "entry",
+    path: "/settings/browsers",
+  });
+});
+
+test("with no OpenBot Desktop to answer, Open <host> opens the plain address", async () => {
+  fake.native.reply = null;
+  const { findByText } = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: DESKTOP_OPENBOT, invalid: false },
+    }),
+  );
+  fireEvent.click(await findByText("Open 127.0.0.1:9"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual([`${DESKTOP_OPENBOT}/settings/browsers`]),
+  );
+});
+
+test("OpenBot Desktop's entry address is used only for its own OpenBot: a team OpenBot opens as it always did", async () => {
+  desktopAnswersEntries();
+  const team = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: "https://openbot.example.test", invalid: false },
+    }),
+  );
+  fireEvent.click(await team.findByText("Open openbot.example.test"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual([
+      "https://openbot.example.test/settings/browsers",
+    ]),
+  );
+  // OpenBot Desktop serves only plain http on this computer: an https OpenBot is never its own, so it is not asked.
+  expect(fake.native.sent).toEqual([]);
+  cleanup();
+  fake.opened.length = 0;
+  // Another OpenBot on a loopback port of this computer is not OpenBot Desktop's: its entry address is not used.
+  const other = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      policy: { openbotUrl: "http://127.0.0.1:10", invalid: false },
+    }),
+  );
+  fireEvent.click(await other.findByText("Open 127.0.0.1:10"));
+  await waitFor(() =>
+    expect(fake.opened).toEqual(["http://127.0.0.1:10/settings/browsers"]),
   );
 });
 
@@ -1274,6 +1362,39 @@ test("the Teach a Bot link keeps a path prefix on the OpenBot address", async ()
   const link = await sent.findByRole("link", { name: "See it on Teach a Bot" });
   expect(link.getAttribute("href")).toBe(
     "https://example.test/openbot/browser?recordings=1",
+  );
+});
+
+/** Connected through OpenBot Desktop, after a recording was sent. */
+const sentThroughDesktop = () =>
+  stateResponse({
+    state: { ...STOPPED, learning: learning("assigned"), draining: 0 },
+    connection: {
+      openbotUrl: DESKTOP_OPENBOT,
+      user: { name: "Ada Lovelace", email: "ada@example.test" },
+      via: "desktop",
+    },
+  });
+
+test("connected through OpenBot Desktop, See it on Teach a Bot opens it through the entry address", async () => {
+  desktopAnswersEntries();
+  const sent = setup(sentThroughDesktop());
+  fireEvent.click(
+    await sent.findByRole("link", { name: "See it on Teach a Bot" }),
+  );
+  await waitFor(() =>
+    expect(fake.opened).toEqual([entryFor("/browser?recordings=1")]),
+  );
+});
+
+test("with no OpenBot Desktop to answer, See it on Teach a Bot opens the plain address", async () => {
+  fake.native.reply = null;
+  const sent = setup(sentThroughDesktop());
+  fireEvent.click(
+    await sent.findByRole("link", { name: "See it on Teach a Bot" }),
+  );
+  await waitFor(() =>
+    expect(fake.opened).toEqual([`${DESKTOP_OPENBOT}/browser?recordings=1`]),
   );
 });
 

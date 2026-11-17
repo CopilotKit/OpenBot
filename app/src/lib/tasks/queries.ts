@@ -1,8 +1,12 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { Reaction, Task } from "@/lib/api/generated/model";
+import type { Reaction, Task, TaskTurn } from "@/lib/api/generated/model";
 import { listReactions } from "@/lib/api/generated/reactions/reactions";
-import { getTask, listTasks } from "@/lib/api/generated/tasks/tasks";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import {
+  getTask,
+  listTasks,
+  listTaskTurns,
+} from "@/lib/api/generated/tasks/tasks";
+import { organizationId } from "@/lib/api/request";
 
 /*
  * The person's tasks: what Start makes of an item a Bot's check-in found. Each runs in a conversation
@@ -50,13 +54,30 @@ export type BotTask = {
    * Stopped. Null once it carries on.
    */
   stoppedAt?: string | null;
+  /**
+   * False when trying it again can't change how it ends: it couldn't finish for a reason asking
+   * again gets the same answer to (a Bot it asked isn't shared with the person). Absent from a
+   * server that does not say, which reads as true.
+   */
+  canTryAgain?: boolean;
   /** One line on what comes next, from the last thing said in its conversation. */
   next: string | null;
   /** When the work it is doing now began, for how long it has been working. Null unless working. */
   workingSince?: string | null;
+  /**
+   * When its turn will next be tried, while it waits to try again after a failure that passes (a
+   * rate limit, a service that did not answer). Null or absent when it is not waiting.
+   */
+  tryingAgainAt?: string | null;
   /** When it last did something: a step of its work, or a line said in its conversation. */
   lastActivityAt?: string;
   resolvedAt: string | null;
+  /**
+   * The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a
+   * task the Bot does itself; absent from a server that does not name it. An agent private to
+   * somebody else is named "Private agent".
+   */
+  agent?: { id: string; name: string } | null;
   /** The latest thing the person told it directly in its conversation, unasked. See `TaskSteer`. */
   steer?: { text: string; at: string } | null;
   createdAt: string;
@@ -70,6 +91,7 @@ export const taskKeys = {
   ones: ["tasks", "one"] as const,
   one: (id: string) => ["tasks", "one", id] as const,
   reactions: (threadId: string) => ["tasks", "reactions", threadId] as const,
+  turns: (id: string) => ["tasks", "turns", id] as const,
 };
 
 /** A Bot's reaction to one of the person's messages, in place of a line of its own. */
@@ -113,7 +135,7 @@ export const taskListQueryOptions = () =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listTasks(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load your tasks" },
         );
@@ -139,13 +161,45 @@ export const taskQueryOptions = (id: string) =>
     queryFn: async (): Promise<BotTask> =>
       botTaskOf(
         (
-          await getTask(ORGANIZATION_ID, id, {
+          await getTask(organizationId(), id, {
             fallback: "Couldn't load this task",
           })
         ).task,
       ),
     refetchInterval: (query) =>
       query.state.data && moving(query.state.data.status) ? LIVE_MS : false,
+  });
+
+/** One finished turn of a task: what it answered, how long it worked, and which model answered. */
+export type { TaskTurn };
+
+/**
+ * How long a task worked on each thing it was asked, oldest first. A turn is listed once it ends,
+ * so while one is under way, or has just ended and is not listed yet, it is read again soon
+ * (`live`); otherwise only when something asks.
+ */
+export const taskTurnsQueryOptions = (id: string, live = false) =>
+  queryOptions({
+    queryKey: taskKeys.turns(id),
+    queryFn: async (): Promise<TaskTurn[]> => {
+      const turns: TaskTurn[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      // Read to the end; a cursor handed back twice ends the list too.
+      do {
+        const page = await listTaskTurns(
+          organizationId(),
+          id,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load how long this task worked." },
+        );
+        turns.push(...page.turns);
+        if (cursor) seen.add(cursor);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && !seen.has(cursor));
+      return turns;
+    },
+    refetchInterval: live ? LIVE_MS : false,
   });
 
 /**
@@ -162,7 +216,7 @@ export const reactionsQueryOptions = (threadId: string) =>
       // Read to the end; a cursor handed back twice ends the list too.
       do {
         const page = await listReactions(
-          ORGANIZATION_ID,
+          organizationId(),
           { threadId, limit: 100, ...(cursor ? { cursor } : {}) },
           { fallback: "Couldn't load reactions." },
         );
@@ -197,3 +251,55 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 export function couldNotFinish(failure: string | null): string {
   return failure ? `Couldn't finish: ${failure}.` : "Couldn't finish.";
 }
+
+/**
+ * A task that couldn't finish, in a word or two: what its card in the conversation says, and its
+ * row on the Needs you board, so the two never name one state twice.
+ */
+export const TASK_FAILED_LABEL = "Couldn't finish";
+
+/**
+ * Why a task couldn't finish, as a line of its own after a status that already says so: a
+ * sentence. The server words its reason to follow "Couldn't finish:" ("Pipeline Bot isn't shared
+ * with you"), so on its own it starts in capitals and ends with a full stop.
+ */
+export function failureSentence(failure: string): string {
+  const said = failure.trim();
+  if (!said) return said;
+  const sentence = `${said[0]?.toUpperCase()}${said.slice(1)}`;
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/**
+ * Whether Try again is offered: only on a task that couldn't finish, and not on one the server says
+ * asking again can't change, which would only be refused the same way again.
+ */
+export function canTryAgain(task: {
+  status: TaskStatus;
+  canTryAgain?: boolean;
+}): boolean {
+  return task.status === "failed" && task.canTryAgain !== false;
+}
+
+/**
+ * Whether the person stopped this task. Its status is `failed` either way, and only a stop sets
+ * `stoppedAt`. A stop is the person's own choice, so nothing that lists the task calls it a failure.
+ */
+export function stoppedByYou(
+  task: { status?: TaskStatus; stoppedAt?: string | null } | undefined,
+): boolean {
+  return task?.status === "failed" && Boolean(task.stoppedAt);
+}
+
+/**
+ * A finished task's status in a word, on its card and on its row under Done on a Bot's Activity
+ * page. One name for one state: a row under Done never reads "Ready for review".
+ */
+export const TASK_DONE_LABEL = "Done";
+
+/** A stopped task's status in a word, on its card and on every row that lists it. */
+export const TASK_STOPPED_LABEL = "Stopped";
+
+/** What a stopped task says after its status. Stopping never undoes what was already done. */
+export const TASK_STOPPED =
+  "You stopped this. Anything it had already done stays done.";

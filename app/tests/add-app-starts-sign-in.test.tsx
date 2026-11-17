@@ -22,6 +22,10 @@ import userEvent from "@testing-library/user-event";
 import { BrokerDirectory } from "@/components/plugins/broker-directory";
 import { connectionRows } from "@/lib/connections/rows";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  CONSENT_HANDOFF_PATH,
+  readConsentHandoff,
+} from "@/lib/plugins/consent-handoff";
 import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
 import {
   APPS_PATH,
@@ -30,12 +34,12 @@ import {
   type TodayDirectoryApp,
   type TodayServer,
 } from "./apps-api";
-import { settleReactWork } from "./settle-react-work";
 import {
   connectionPage,
   connectionsCall,
   startResponse,
 } from "./connections-api";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * ADDING AN APP THAT SIGNS IN IS NOT THE SAME AS BEING SIGNED IN TO IT.
@@ -186,6 +190,23 @@ afterEach(() => {
   window.open = originalOpen;
 });
 
+/** Whether a tab was sent to OpenBot's own step before the sign-in (`/connecting`). */
+function stepShown(url: string | null | undefined): boolean {
+  return url?.includes(`${CONSENT_HANDOFF_PATH}#`) ?? false;
+}
+
+/** Where a tab ends up: the sign-in itself, or the one OpenBot's step was left to go on to. */
+function signInBehind(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `${CONSENT_HANDOFF_PATH}#`;
+  const at = url.indexOf(marker);
+  if (at < 0) return url;
+  return (
+    readConsentHandoff(decodeURIComponent(url.slice(at + marker.length)))
+      ?.url ?? null
+  );
+}
+
 function draw(edition: "team" | "personal") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -252,7 +273,11 @@ describe("Add in the personal edition", () => {
       await waitFor(() => {
         expect(writes).toEqual([`add ${target.slug}`, `connect ${id}`]);
         expect(tabs).toHaveLength(1);
-        expect(tabs[0]?.url).toBe(`https://sign-in.example/${id}`);
+        // Through Composio the tab shows OpenBot's step first, which then goes on to the sign-in.
+        expect(stepShown(tabs[0]?.url)).toBe(target.provider === "composio");
+        expect(signInBehind(tabs[0]?.url)).toBe(
+          `https://sign-in.example/${id}`,
+        );
       });
       // Added and not yet signed in: said plainly, while the other tab is open.
       await waitFor(() => {
@@ -326,7 +351,10 @@ describe("an added app nobody has signed in to", () => {
         within(slack).getByRole("button", { name: "Connect Slack" }),
       );
       await waitFor(() => {
-        expect(tabs[0]?.url).toBe("https://sign-in.example/composio-slack");
+        expect(stepShown(tabs[0]?.url)).toBe(true);
+        expect(signInBehind(tabs[0]?.url)).toBe(
+          "https://sign-in.example/composio-slack",
+        );
       });
     });
   }
@@ -388,4 +416,25 @@ describe("the Connections tile", () => {
       rows.filter((row) => row.title === "GitHub" || row.key === github.id),
     ).toHaveLength(1);
   });
+});
+
+/*
+ * Found in a dark-mode pass over Admin, Apps, Browse apps: GitHub's mark is black, and on the dark
+ * page it all but vanished. A vendor's artwork is never recoloured, so in dark mode every mark sits
+ * on a white tile, the same rule the framework marks follow (`harness-mark.tsx`).
+ */
+test("Browse apps draws each vendor's mark on a white tile in dark mode, so a black mark still shows", async () => {
+  provider = "composio";
+  apps = [
+    {
+      ...app("github", "GitHub", "consent", false),
+      logo: "https://logos.example/github.svg",
+    },
+  ];
+  const { view } = draw("team");
+  const row = await view.findByTestId("directory-github");
+  const mark = row.querySelector('img[src="https://logos.example/github.svg"]');
+  if (!mark) throw new Error("Expected GitHub's mark on its row");
+  const tile = mark.closest("[data-slot=item-media]");
+  expect(tile?.className).toContain("dark:bg-white");
 });

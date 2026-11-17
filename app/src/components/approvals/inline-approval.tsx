@@ -3,6 +3,7 @@ import { approvalPhrase } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
+import { shareOf, ShareText } from "@/components/approvals/share-details";
 import { DecisionCard } from "@/components/decisions/decision-card";
 import type { Tone } from "@/components/gallery/frame";
 import {
@@ -104,6 +105,8 @@ export function InlineApproval({
         ];
   // In the words the step and Activity use for the same action: "Save a file todo.txt in share".
   const title = request ? approvalPhrase(request.action) : "";
+  // A share shows who reads it and what it would send, so the person sees what leaves the conversation.
+  const share = request ? shareOf(request.action) : null;
   return (
     <>
       {/* The card leaves by folding away; what is left behind is the tool's own line. */}
@@ -130,6 +133,7 @@ export function InlineApproval({
               }
               caption={
                 request.action.policy?.reason ??
+                share?.caption ??
                 (handOff ? "This one is yours to do." : undefined)
               }
               error={decision.error?.message ?? null}
@@ -144,7 +148,9 @@ export function InlineApproval({
               }))}
               submitting={decision.isPending}
               title={title.charAt(0).toUpperCase() + title.slice(1)}
-            />
+            >
+              {share?.text ? <ShareText text={share.text} /> : null}
+            </DecisionCard>
           </motion.section>
         ) : null}
       </AnimatePresence>

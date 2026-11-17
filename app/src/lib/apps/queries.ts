@@ -11,7 +11,7 @@ import type {
   CatalogueAppEntry,
   DirectoryAppEntry,
 } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * The apps this OpenBot has added, the directory it adds them from, and how apps are set up here,
@@ -41,7 +41,7 @@ export function appSetupQueryOptions() {
   return queryOptions({
     queryKey: appKeys.setup(),
     queryFn: ({ signal }): Promise<AppSetup> =>
-      getAppSetup(ORGANIZATION_ID, {
+      getAppSetup(organizationId(), {
         signal,
         fallback: "Couldn't load how apps are set up",
       }),
@@ -60,9 +60,12 @@ export function appsQueryOptions() {
     queryFn: ({ signal }): Promise<App[]> =>
       everyPage(async (cursor) => {
         const page = await listApps(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: PAGE, ...(cursor ? { cursor } : {}) },
-          { signal, fallback: "Couldn't load your apps. Reload the page." },
+          {
+            signal,
+            fallback: "Couldn't load your apps. Try again in a moment.",
+          },
         );
         return { items: page.apps, nextCursor: page.nextCursor };
       }),
@@ -93,9 +96,12 @@ export function catalogueQueryOptions() {
     queryFn: async ({ signal }): Promise<CatalogueItem[]> => {
       const entries = await everyPage(async (cursor) => {
         const page = await listAppDirectory(
-          ORGANIZATION_ID,
+          organizationId(),
           { source: "catalogue", limit: PAGE, ...(cursor ? { cursor } : {}) },
-          { signal, fallback: "Couldn't load your apps. Reload the page." },
+          {
+            signal,
+            fallback: "Couldn't load your apps. Try again in a moment.",
+          },
         );
         return { items: page.entries, nextCursor: page.nextCursor };
       });
@@ -124,7 +130,7 @@ export function directoryAppsQueryOptions(search: string) {
     queryFn: async ({ signal }): Promise<DirectoryApp[]> => {
       const entries = await everyPage(async (cursor) => {
         const page = await listAppDirectory(
-          ORGANIZATION_ID,
+          organizationId(),
           {
             source: "directory",
             limit: PAGE,
@@ -134,7 +140,7 @@ export function directoryAppsQueryOptions(search: string) {
           {
             signal,
             fallback:
-              "Couldn't load the apps you can connect. Reload the page.",
+              "Couldn't load the apps you can connect. Try again in a moment.",
           },
         );
         return { items: page.entries, nextCursor: page.nextCursor };

@@ -27,6 +27,7 @@ export const getGetDeploymentResponseMock = (): Deployment => ({
   ssoRequired: false,
   builtInBots: true,
   isolatedBots: false,
+  botComputers: true,
 });
 
 export const getGetOrganizationSettingsResponseMock =

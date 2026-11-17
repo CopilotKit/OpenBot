@@ -1,5 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { desktopShell } from "@/lib/desktop/shell";
+import {
+  brokeredConsentFor,
+  consentHandoffAddress,
+  storeConsentHandoff,
+} from "@/lib/plugins/consent-handoff";
+import { finishInBackground } from "@/lib/plugins/finish-on-return";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { pluginKeys } from "@/lib/plugins/queries";
 
@@ -59,10 +66,17 @@ export function useConnectInNewTab() {
   const onReturn = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!waiting) return;
+    /*
+     * In OpenBot Desktop's window the consent ran in the person's browser, and where the verifier
+     * finishes it the window does that first, in the background ({@link finishInBackground}), so the
+     * connections read below sees it.
+     */
     const finish = () => {
       onReturn.current = null;
       setWaiting(false);
-      void queryClient.invalidateQueries({ queryKey: pluginKeys.all });
+      void finishInBackground().then(() =>
+        queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
+      );
     };
     const timer = setInterval(() => {
       if (!handle.current?.closed || onReturn.current) return;
@@ -180,10 +194,27 @@ export function useConnectInNewTab() {
       return;
     }
     const { authorizationUrl } = start;
+    /*
+     * THROUGH COMPOSIO, THE TAB SHOWS OPENBOT'S STEP FIRST: what the next pages will say, for a
+     * countdown, and then the sign-in (`routes/connecting.tsx`). Anything else goes straight there.
+     *
+     * NOT IN OPENBOT DESKTOP'S WINDOW. It opens no tab of its own (the window denies `window.open`
+     * and hands sites outside OpenBot to the browser), so what is offered there is the link, and a
+     * link to one of OpenBot's own pages would open nowhere. The browser has none of this tab's
+     * storage either.
+     */
+    const consent = desktopShell()
+      ? null
+      : await brokeredConsentFor(queryClient, serverId);
+    const destination = consent
+      ? consentHandoffAddress(
+          storeConsentHandoff({ ...consent, url: authorizationUrl }),
+        )
+      : authorizationUrl;
     setWaiting(true);
-    if (tab) tab.location.replace(authorizationUrl);
+    if (tab) tab.location.replace(destination);
     // The tab was blocked. The url is still good, so offer it as something to click.
-    else setBlockedUrl(authorizationUrl);
+    else setBlockedUrl(destination);
   };
 
   return {

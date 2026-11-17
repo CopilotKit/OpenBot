@@ -4,6 +4,7 @@ import {
   stopPersonComputers,
   updateCapability,
 } from "@/lib/api/generated/capabilities/capabilities";
+import type { CapabilityChangeScopeKind } from "@/lib/api/generated/model";
 import {
   deleteNetworkPolicy,
   replaceNetworkPolicy,
@@ -12,7 +13,7 @@ import {
   stopInactiveComputers,
   updateOrganizationSettings,
 } from "@/lib/api/generated/organization-settings/organization-settings";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { modelKeys } from "@/lib/models/queries";
 import {
@@ -21,6 +22,7 @@ import {
   type EnterpriseSettings,
   enterpriseKeys,
   type NetworkMode,
+  type NetworkScopeKind,
 } from "./queries";
 
 const FALLBACK = "Couldn't save that setting. Try again.";
@@ -33,21 +35,24 @@ function invalidateEnterprise(queryClient: QueryClient) {
 export function setCapabilityMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
-      scopeKind: "organization" | "role" | "group";
+      scopeKind: CapabilityChangeScopeKind;
       scopeId: string;
       capability: CapabilityKey;
       allowed: boolean | null;
     }) => {
       const { scopeKind, scopeId, capability, allowed } = variables;
-      // One level of one switch: the organization's, or one role's or group's by name.
+      // One level of one switch: the organization's, one role's by name, one team's by id, or one
+      // directory group's by name.
       await updateCapability(
-        ORGANIZATION_ID,
+        organizationId(),
         capability,
         scopeKind === "organization"
           ? { organization: allowed }
           : scopeKind === "role"
             ? { roles: { [scopeId]: allowed } }
-            : { groups: { [scopeId]: allowed } },
+            : scopeKind === "team"
+              ? { teams: { [scopeId]: allowed } }
+              : { groups: { [scopeId]: allowed } },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
       );
@@ -71,7 +76,7 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
       value: unknown;
     }) => {
       await updateOrganizationSettings(
-        ORGANIZATION_ID,
+        organizationId(),
         { [variables.key]: variables.value },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: FALLBACK },
@@ -92,7 +97,7 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
 export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
-      scopeKind: "organization" | "group";
+      scopeKind: NetworkScopeKind;
       scopeId: string;
       mode: NetworkMode;
       rules: EgressRule[];
@@ -102,7 +107,7 @@ export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
     }) => {
       const { scopeKind, scopeId, ...policy } = variables;
       await replaceNetworkPolicy(
-        ORGANIZATION_ID,
+        organizationId(),
         networkPolicyId(scopeKind, scopeId),
         policy,
         { "Idempotency-Key": idempotencyKey() },
@@ -116,12 +121,12 @@ export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
 export function removeNetworkPolicyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
-      scopeKind: "organization" | "group";
+      scopeKind: NetworkScopeKind;
       scopeId: string;
     }) => {
       try {
         await deleteNetworkPolicy(
-          ORGANIZATION_ID,
+          organizationId(),
           networkPolicyId(variables.scopeKind, variables.scopeId),
           { "Idempotency-Key": idempotencyKey() },
           { fallback: FALLBACK },
@@ -151,7 +156,7 @@ export function terminateMemberComputersMutationOptions() {
       failed: { computer: string; reason: string }[];
     }> =>
       stopPersonComputers(
-        ORGANIZATION_ID,
+        organizationId(),
         userId,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Could not stop that person's computers" },
@@ -163,17 +168,19 @@ export function terminateInactiveComputersMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<{ stopped: string[] }> =>
       stopInactiveComputers(
-        ORGANIZATION_ID,
+        organizationId(),
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Could not sweep inactive computers" },
       ),
   });
 }
 
-/** A network policy's address in the API: `organization`, or `group:` and the group's name. */
-function networkPolicyId(
-  scopeKind: "organization" | "group",
-  scopeId: string,
-): string {
-  return scopeKind === "organization" ? "organization" : `group:${scopeId}`;
+/**
+ * A network policy's address in the API: `organization`, `team:` and the team's id, or `group:` and
+ * the directory group's name.
+ */
+function networkPolicyId(scopeKind: NetworkScopeKind, scopeId: string): string {
+  return scopeKind === "organization"
+    ? "organization"
+    : `${scopeKind}:${scopeId}`;
 }

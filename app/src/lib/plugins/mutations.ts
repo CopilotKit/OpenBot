@@ -1,4 +1,8 @@
-import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  type MutationFunctionContext,
+  mutationOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 import {
   deleteBotGrant,
   replaceBotGrant,
@@ -19,9 +23,10 @@ import type {
   ConnectionStart as ApiConnectionStart,
   ConnectAppRequest,
 } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
+import { confirmOnReturn } from "./confirm-on-return";
 import { pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
 
@@ -98,7 +103,7 @@ export function grantPlugin(variables: {
   approval?: SharedUseApproval;
 }): Promise<unknown> {
   return replaceBotGrant(
-    ORGANIZATION_ID,
+    organizationId(),
     variables.agentId,
     grantIdOf(variables.kind, variables.ref),
     { "Idempotency-Key": idempotencyKey() },
@@ -118,7 +123,7 @@ export async function revokePlugin(variables: {
 }): Promise<void> {
   try {
     await deleteBotGrant(
-      ORGANIZATION_ID,
+      organizationId(),
       variables.agentId,
       grantIdOf(variables.kind, variables.ref),
       { "Idempotency-Key": idempotencyKey() },
@@ -221,13 +226,21 @@ export function connectAccountMutationOptions(
   shared = false,
 ) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<ConnectStart> =>
-      startOf(
-        await startConnect(serverId, {
-          returnTo,
-          shared,
-          fallback: "Couldn't connect that account.",
-        }),
+    mutationFn: async (
+      serverId: string,
+      context: MutationFunctionContext,
+    ): Promise<ConnectStart> =>
+      confirmedOnReturn(
+        context.client,
+        serverId,
+        shared,
+        startOf(
+          await startConnect(serverId, {
+            returnTo,
+            shared,
+            fallback: "Couldn't connect that account.",
+          }),
+        ),
       ),
   });
 }
@@ -241,15 +254,42 @@ export function connectAnotherAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
 ) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<ConnectStart> =>
-      startOf(
-        await startConnect(serverId, {
-          returnTo,
-          another: true,
-          fallback: "Couldn't connect that account.",
-        }),
+    mutationFn: async (
+      serverId: string,
+      context: MutationFunctionContext,
+    ): Promise<ConnectStart> =>
+      confirmedOnReturn(
+        context.client,
+        serverId,
+        false,
+        startOf(
+          await startConnect(serverId, {
+            returnTo,
+            another: true,
+            fallback: "Couldn't connect that account.",
+          }),
+        ),
       ),
   });
+}
+
+/**
+ * Every consent a connect press starts, in one place: in OpenBot Desktop's window the account is
+ * confirmed when the window is back in front, whatever screen it is on ({@link confirmOnReturn}).
+ * A person's own connection is confirmed as the return page did before, falling back to the app's
+ * shared account where the app has one.
+ */
+function confirmedOnReturn(
+  queryClient: QueryClient,
+  serverId: string,
+  shared: boolean,
+  start: ConnectStart,
+): ConnectStart {
+  if (start !== null && "authorizationUrl" in start)
+    confirmOnReturn(queryClient, serverId, () =>
+      confirmBrokeredConnection(serverId, shared || undefined),
+    );
+  return start;
 }
 
 /**
@@ -271,7 +311,7 @@ function startConnect(
   const options = { fallback: press.fallback };
   if (press.shared)
     return connectSharedApp(
-      ORGANIZATION_ID,
+      organizationId(),
       serverId,
       {
         returnTo: desktopShell() ? "desktop" : "apps",
@@ -289,7 +329,7 @@ function startConnect(
     ...(press.another ? { anotherAccount: true } : {}),
     ...(press.values ? { values: press.values } : {}),
   };
-  return connectApp(ORGANIZATION_ID, "me", serverId, body, headers, options);
+  return connectApp(organizationId(), "me", serverId, body, headers, options);
 }
 
 /** A sign-in page to visit, an account already connected, or `null` for a key form. */
@@ -342,44 +382,49 @@ export function confirmBrokeredConnectionMutationOptions(
   shared?: boolean,
 ) {
   return mutationOptions({
-    mutationFn: async (
-      serverId: string,
-    ): Promise<BrokeredConnectionConfirmation> => {
-      const options = { fallback: "Couldn't confirm that connection." };
-      const confirmShared = () =>
-        confirmSharedConnection(
-          ORGANIZATION_ID,
-          serverId,
-          { "Idempotency-Key": idempotencyKey() },
-          options,
-        );
-      if (shared) return confirmShared();
-      try {
-        return await confirmConnection(
-          ORGANIZATION_ID,
-          "me",
-          serverId,
-          { "Idempotency-Key": idempotencyKey() },
-          options,
-        );
-      } catch (error) {
-        /*
-         * The page a consent lands back on (`/desktop-return`) knows the app and not whose account
-         * it was: a person's own connection refuses an app with one shared account as a conflict,
-         * and that account is then the one to confirm. A caller that knows says so.
-         */
-        if (
-          shared === undefined &&
-          error instanceof ClientError &&
-          error.status === 409 &&
-          error.code === "CONFLICT"
-        )
-          return confirmShared();
-        throw error;
-      }
-    },
+    mutationFn: (serverId: string) =>
+      confirmBrokeredConnection(serverId, shared),
     onSettled: () => invalidatePlugins(queryClient),
   });
+}
+
+/** The confirm itself, for {@link confirmBrokeredConnectionMutationOptions} and the window's return. */
+async function confirmBrokeredConnection(
+  serverId: string,
+  shared?: boolean,
+): Promise<BrokeredConnectionConfirmation> {
+  const options = { fallback: "Couldn't confirm that connection." };
+  const confirmShared = () =>
+    confirmSharedConnection(
+      organizationId(),
+      serverId,
+      { "Idempotency-Key": idempotencyKey() },
+      options,
+    );
+  if (shared) return confirmShared();
+  try {
+    return await confirmConnection(
+      organizationId(),
+      "me",
+      serverId,
+      { "Idempotency-Key": idempotencyKey() },
+      options,
+    );
+  } catch (error) {
+    /*
+     * A caller may know the app and not whose account it was: a person's own connection refuses
+     * an app with one shared account as a conflict,
+     * and that account is then the one to confirm. A caller that knows says so.
+     */
+    if (
+      shared === undefined &&
+      error instanceof ClientError &&
+      error.status === 409 &&
+      error.code === "CONFLICT"
+    )
+      return confirmShared();
+    throw error;
+  }
 }
 
 /** Every disconnect of a person's own connection, so the app's page can stop reading it. */
@@ -438,8 +483,8 @@ export function disconnectBrokeredMutationOptions(
       const headers = { "Idempotency-Key": idempotencyKey() };
       const options = { fallback: "Couldn't disconnect that account." };
       await (shared
-        ? disconnectSharedApp(ORGANIZATION_ID, serverId, headers, options)
-        : disconnectApp(ORGANIZATION_ID, "me", serverId, headers, options));
+        ? disconnectSharedApp(organizationId(), serverId, headers, options)
+        : disconnectApp(organizationId(), "me", serverId, headers, options));
     },
     /*
      * In `onSettled`, which a screen's own `onSuccess` and `onError` cannot shadow. A person's own
@@ -463,7 +508,7 @@ export function setDefaultBrokeredAccountMutationOptions(
   return mutationOptions({
     mutationFn: async (variables: { serverId: string; accountId: string }) => {
       await makeConnectedAccountDefault(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         variables.serverId,
         variables.accountId,
@@ -486,7 +531,7 @@ export function disconnectBrokeredAccountMutationOptions(
     mutationKey: disconnectBrokeredAccountMutationKey,
     mutationFn: (variables: { serverId: string; accountId: string }) =>
       disconnectConnectedAccount(
-        ORGANIZATION_ID,
+        organizationId(),
         "me",
         variables.serverId,
         variables.accountId,
@@ -683,13 +728,13 @@ export function recheckBrokeredConnectionMutationOptions(
       const options = { fallback: "Couldn't check that connection." };
       const check = shared
         ? await recheckSharedConnection(
-            ORGANIZATION_ID,
+            organizationId(),
             serverId,
             headers,
             options,
           )
         : await recheckConnection(
-            ORGANIZATION_ID,
+            organizationId(),
             "me",
             serverId,
             headers,

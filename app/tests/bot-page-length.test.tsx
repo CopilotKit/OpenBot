@@ -17,6 +17,7 @@ import {
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
 import { activityResponse, botOperationPath } from "./bots-api";
+import { taskOf } from "./conversations-api";
 import {
   CHECK_IN_ITEMS_PATH,
   ORGANIZATION_PATH,
@@ -239,13 +240,14 @@ test("the newest three suggestions show, and the rest open in place", async () =
 function glance(
   data: Partial<BotActivity>,
   Component: typeof BotActivityGlance = BotActivityGlance,
+  tasks: readonly unknown[] = [],
 ) {
   global.fetch = (async (input: RequestInfo | URL) =>
     String(input) === botOperationPath("scout", "activity")
       ? activityResponse(data)
-      : // The person's tasks, which the Activity page lists beside the Bot's activity: none here.
+      : // The person's tasks, which the Activity page lists beside the Bot's activity.
         pathOf(input) === `${ORGANIZATION_PATH}/tasks`
-        ? Response.json({ tasks: [], nextCursor: null })
+        ? Response.json({ tasks, nextCursor: null })
         : Response.json(
             { error: "unexpected" },
             { status: 404 },
@@ -304,6 +306,57 @@ test("with nothing running or scheduled, there is no Activity section, and For y
   expect(titles).toEqual(["Activity"]);
   expect(section.container.querySelector("[data-slot=item]")).toBeNull();
   expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
+});
+
+/** One of the Bot's delegated tasks, as the API answers it. */
+const botTask = (id: string, status: string, title: string) =>
+  taskOf({
+    id,
+    agentId: "scout",
+    channelId: `channel_${id}`,
+    threadId: `thread_${id}`,
+    title,
+    why: null,
+    origin: "delegated",
+    suggestionId: null,
+    sourceApp: null,
+    sourceLink: null,
+    originChannelId: "channel_main",
+    status,
+    failure: null,
+    failedAt: null,
+    next: null,
+    resolvedAt: null,
+    createdAt: "2026-10-09T10:00:00Z",
+    updatedAt: "2026-10-09T10:00:00Z",
+  });
+
+/*
+ * FOUND LIVE: the Bot page's Activity row said "No tasks, routines or goals yet" while the Activity
+ * page it opens listed a finished task under Done. The row counted only the Bot's own activity and
+ * not its tasks, which the Activity page lists beside it. It reads what the Activity page reads.
+ */
+test("the Activity row counts the Bot's tasks as the Activity page lists them", async () => {
+  const idle = { inProgress: [], scheduled: [], completed: [] };
+  const finished = glance(idle, BotActivityRow, [
+    botTask("d", "ready_for_review", "Find Fremont Troll's origins"),
+  ]);
+  expect(
+    await finished.findByText("Nothing running or scheduled"),
+  ).toBeTruthy();
+  expect(finished.queryByText("No tasks, routines or goals yet")).toBeNull();
+  cleanup();
+
+  const working = glance(idle, BotActivityRow, [
+    botTask("w", "working", "Plan the offsite"),
+    botTask("q", "needs_input", "Order the seeds"),
+  ]);
+  expect(await working.findByText("2 in progress")).toBeTruthy();
+  cleanup();
+
+  // And with nothing at all, it still says so.
+  const none = glance(idle, BotActivityRow);
+  expect(await none.findByText("No tasks, routines or goals yet")).toBeTruthy();
 });
 
 test("a long title is cut to one line with an ellipsis, and the whole of it shows on hover", async () => {

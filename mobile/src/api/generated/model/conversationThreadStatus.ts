@@ -6,4 +6,6 @@ export interface ConversationThreadStatus {
   threadId: string;
   /** Whether the thread still holds the caller's conversation. */
   known: boolean;
+  /** The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId. */
+  liveThreadId?: string;
 }

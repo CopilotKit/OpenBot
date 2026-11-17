@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   HARNESSES,
+  reachedThroughMastra,
   starterSubtitle,
   WEB_HARNESSES,
   withCurrentFrameworkNames,
@@ -39,6 +40,7 @@ test("leads the web list with the partners people look for, keeping the rest in 
     "strands",
     "ag2",
     "langroid",
+    "mastra",
     "byo-url",
   ]);
 });
@@ -51,13 +53,16 @@ test("the brands with no usable mark carry none", () => {
 });
 
 /*
- * Mastra is the one row a plain AG-UI endpoint cannot stand in for: the server dials it through the
- * `@ag-ui/mastra` bridge as `remote_mastra` and needs a roster id, neither of which the web create
- * API can send. Offered there it would make a Bot that answers nothing.
+ * Mastra is the one row a plain AG-UI address cannot stand in for: the server dials it through the
+ * `@ag-ui/mastra` bridge. The web create names the framework, and the server proves a Mastra address
+ * against Mastra's own API and saves it as a Mastra Bot, so the dialog offers it with the rest.
  */
-test("marks Mastra as something the web dialog must not offer", () => {
+test("offers Mastra on the web, reached through Mastra's own API", () => {
   const notOfferable = HARNESSES.filter((h) => !h.webCreate).map((h) => h.id);
-  expect(notOfferable).toEqual(["mastra"]);
+  expect(notOfferable).toEqual([]);
+  expect(
+    HARNESSES.filter((h) => reachedThroughMastra(h.id)).map((h) => h.id),
+  ).toEqual(["mastra"]);
 });
 
 test("gives a web-specific summary only where the installer's is false here", () => {
@@ -91,7 +96,7 @@ test("CrewAI uses its expected image, health endpoint and port", () => {
  * Antigravity only ever runs on Gemini: its README says the harness requires a Gemini API key
  * wherever `base_url` points. `any-provider` would let a deployment holding only an OpenAI key
  * install it and get a Bot that cannot answer — the shape of failure `webCreate: false` exists to
- * stop for Mastra.
+ * stop.
  */
 test("marks Antigravity as needing Google's key rather than any provider's", () => {
   const antigravity = HARNESSES.find((h) => h.id === "antigravity");

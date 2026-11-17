@@ -26,11 +26,13 @@ not touch the same lines:
 | `bot-grants.yaml` | What a Bot was given: its grants and apps, giving and taking back an app, and app access requests |
 | `schedules.yaml` | Routines, check-ins and what they found, goals with their triggers and GitHub event sources, and a Bot's follow-ups |
 | `approvals.yaml` | Approvals and questions, approval rules and settings, reviewer guidance, boundaries, what-if, shared app accounts and folder access |
+| `organizations.yaml` | The organizations a person is a member of, and each one's members |
 | `computers.yaml` | A Bot's computer: its state, screen, control, a Bot's actions on it, its files, and the administrator's list |
 | `browsers.yaml` | A Bot's browser and a person's own OpenBot browser |
 | `passwords-and-recorder.yaml` | Sign-in requests, saved logins and the Recorder |
 | `learning.yaml` | OpenBot's side of Automatic learning: Learning settings, each person's spaces and sharing choices, sharing requests, and the skills delivered to Bots |
 | `memory.yaml` | A person's memories and memory sources |
+| `agents.yaml` | The agents Bots hand work to (`bot-agents`), their callback tokens, and each Bot's delegation |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual

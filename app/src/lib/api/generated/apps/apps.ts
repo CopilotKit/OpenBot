@@ -105,7 +105,7 @@ export const getListAppsUrl = (
 };
 
 /**
- * Return one page of the apps this OpenBot has added for its Bots: the ones from its catalogue, the ones added from the app directory, and servers added by their address. Each app comes with the actions it offers and the Bots that may use each one. Anybody signed in may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the apps the organization has added for its Bots: the ones from OpenBot's catalogue, the ones added from the app directory, and servers added by their address. Each organization has its own apps, and an app added in one is not in another. Each app comes with the actions it offers and the Bots that may use each one. Any member of the organization may read them. Ordered by title, ignoring case, then by id. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the apps added here
  */
 export const listApps = async (
@@ -935,7 +935,7 @@ export const getDeleteAppUrl = (organizationId: string, appId: string) => {
 };
 
 /**
- * Remove an app for everybody. Every person's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator may.
+ * Remove an app for everybody in the organization. Every member's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator of the organization may.
  * @summary Remove an app
  */
 export const deleteApp = async (
@@ -1222,7 +1222,7 @@ export const getSetAppAccountModeUrl = (
 };
 
 /**
- * Choose whose account an app from the directory acts in: each person's own (personal), or one account OpenBot holds for everybody (shared). Every account the switch leaves behind is ended at the app's service first. Nothing changes unless all of them ended, and the problem's problems then names each account that didn't. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.
+ * Choose whose account an app from the directory acts in: each person's own (personal), or one account OpenBot holds for everybody in the organization (shared). Every account the switch leaves behind is ended at the app's service first. Nothing changes unless all of them ended, and the problem's problems then names each account that didn't. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.
  * @summary Choose whose account an app acts in
  */
 export const setAppAccountMode = async (

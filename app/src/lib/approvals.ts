@@ -27,7 +27,7 @@ import {
   updateApprovalPreferences,
   updatePersonApprovalRule,
 } from "@/lib/api/generated/approvals/approvals";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 
 /** The person asking: every approval, question, preference and rule here is their own. */
@@ -215,7 +215,7 @@ export const approvalInboxOptions = () =>
       ] = await Promise.all([
         everyPage(async (cursor) => {
           const answer = await listApprovals(
-            ORGANIZATION_ID,
+            organizationId(),
             ME,
             page(cursor),
             options,
@@ -224,17 +224,17 @@ export const approvalInboxOptions = () =>
         }),
         everyPage(async (cursor) => {
           const answer = await listQuestions(
-            ORGANIZATION_ID,
+            organizationId(),
             ME,
             page(cursor),
             options,
           );
           return { items: answer.questions, nextCursor: answer.nextCursor };
         }),
-        getApprovalPreferences(ORGANIZATION_ID, ME, options),
+        getApprovalPreferences(organizationId(), ME, options),
         everyPage(async (cursor) => {
           const answer = await listPersonApprovalRules(
-            ORGANIZATION_ID,
+            organizationId(),
             ME,
             page(cursor),
             options,
@@ -243,7 +243,7 @@ export const approvalInboxOptions = () =>
         }),
         everyPage(async (cursor) => {
           const answer = await listConversationGrants(
-            ORGANIZATION_ID,
+            organizationId(),
             ME,
             page(cursor),
             options,
@@ -253,10 +253,10 @@ export const approvalInboxOptions = () =>
             nextCursor: answer.nextCursor,
           };
         }),
-        getApprovalSettings(ORGANIZATION_ID, options),
+        getApprovalSettings(organizationId(), options),
         everyPage(async (cursor) => {
           const answer = await listApprovalRules(
-            ORGANIZATION_ID,
+            organizationId(),
             page(cursor),
             options,
           );
@@ -331,7 +331,7 @@ export const threadAsksEveryStepQueryOptions = (threadId: string) =>
     queryKey: approvalThreadKeys.detail(threadId),
     queryFn: async ({ signal }): Promise<boolean> =>
       (
-        await getApprovalMode(ORGANIZATION_ID, ME, threadId, {
+        await getApprovalMode(organizationId(), ME, threadId, {
           signal,
           fallback: "This conversation's approvals could not be checked.",
         })
@@ -339,15 +339,15 @@ export const threadAsksEveryStepQueryOptions = (threadId: string) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 export const decideApproval = (id: string, decision: ApprovalDecision) =>
-  decideApprovalRequest(ORGANIZATION_ID, ME, id, { decision }, once(), {
+  decideApprovalRequest(organizationId(), ME, id, { decision }, once(), {
     fallback: "Your decision could not be saved.",
   });
 export const revokeConversationGrant = (id: string) =>
-  deleteConversationGrant(ORGANIZATION_ID, ME, id, once(), {
+  deleteConversationGrant(organizationId(), ME, id, once(), {
     fallback: "Couldn't turn that off. Try again.",
   });
 export const revokeApprovalRule = (id: string) =>
-  deletePersonApprovalRule(ORGANIZATION_ID, ME, id, once(), {
+  deletePersonApprovalRule(organizationId(), ME, id, once(), {
     fallback: "The permission could not be revoked.",
   });
 export const setApprovalEnabled = (enabled: boolean) =>
@@ -357,11 +357,11 @@ export const setApprovalPreferences = (input: {
   autoReview?: boolean;
   hostCommands?: HostCommandPolicy;
 }) =>
-  updateApprovalPreferences(ORGANIZATION_ID, ME, input, once(), {
+  updateApprovalPreferences(organizationId(), ME, input, once(), {
     fallback: "Your approval preference could not be saved.",
   });
 export const createApprovalRule = (input: ApprovalRuleInput) =>
-  createPersonApprovalRule(ORGANIZATION_ID, ME, input, once(), {
+  createPersonApprovalRule(organizationId(), ME, input, once(), {
     fallback: "The rule could not be saved.",
   });
 export const setTeamApprovalSettings = (input: {
@@ -370,16 +370,16 @@ export const setTeamApprovalSettings = (input: {
   hostCommandsCap?: HostCommandPolicy;
   actionKinds?: Partial<Record<ActionKind, ActionKindPolicy>>;
 }) =>
-  updateApprovalSettings(ORGANIZATION_ID, input, once(), {
-    fallback: "The team setting could not be saved.",
+  updateApprovalSettings(organizationId(), input, once(), {
+    fallback: "The organization setting could not be saved.",
   });
 export const createTeamApprovalRule = (input: ApprovalRuleInput) =>
-  createOrganizationRule(ORGANIZATION_ID, input, once(), {
-    fallback: "The team rule could not be saved.",
+  createOrganizationRule(organizationId(), input, once(), {
+    fallback: "The organization rule could not be saved.",
   });
 export const revokeTeamApprovalRule = (id: string) =>
-  deleteOrganizationRule(ORGANIZATION_ID, id, once(), {
-    fallback: "The team rule could not be removed.",
+  deleteOrganizationRule(organizationId(), id, once(), {
+    fallback: "The organization rule could not be removed.",
   });
 /**
  * Answer a question a Bot asked. Given in the open conversation (`inConversation`), it may be that
@@ -393,7 +393,7 @@ export const answerPersonQuestion = async (
 ) =>
   (
     await respondToQuestion(
-      ORGANIZATION_ID,
+      organizationId(),
       ME,
       id,
       inConversation ? { response, inConversation } : { response },
@@ -402,22 +402,22 @@ export const answerPersonQuestion = async (
     )
   ).continueHere === true;
 export const dismissPersonQuestion = (id: string) =>
-  dismissQuestion(ORGANIZATION_ID, ME, id, once(), {
+  dismissQuestion(organizationId(), ME, id, once(), {
     fallback: "Couldn't dismiss that question.",
   });
 export const updateApprovalRule = (
   id: string,
   input: Partial<ApprovalRuleInput>,
 ) =>
-  updatePersonApprovalRule(ORGANIZATION_ID, ME, id, input, once(), {
+  updatePersonApprovalRule(organizationId(), ME, id, input, once(), {
     fallback: "The rule could not be changed.",
   });
 export const updateTeamApprovalRule = (
   id: string,
   input: Partial<ApprovalRuleInput>,
 ) =>
-  updateOrganizationRule(ORGANIZATION_ID, id, input, once(), {
-    fallback: "The team rule could not be changed.",
+  updateOrganizationRule(organizationId(), id, input, once(), {
+    fallback: "The organization rule could not be changed.",
   });
 
 /** The inbox's key, which every approval write invalidates: requests, rules and settings alike. */
@@ -486,7 +486,16 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
       decideApproval(id, choice),
-    onSuccess: settle(queryClient),
+    /*
+     * The badge that counted it is read again at once, as for an answered question: left to its
+     * poll, it kept the old count for seconds beside a board that already showed the new one.
+     */
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: botLifecycleKeys.attention,
+      });
+      return settle(queryClient)();
+    },
   });
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>

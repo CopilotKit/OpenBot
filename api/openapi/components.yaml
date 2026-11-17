@@ -11,8 +11,12 @@ paths:
       operationId: listComponents
       summary: List components
       description: >-
-        Return one page of the components Bots draw in conversations: charts,
-        cards and the ones an admin wrote in Playground. An admin sees every
+        Return one page of the components the organization's Bots draw in
+        conversations: charts, cards and the ones an admin wrote in
+        Playground. Each organization has its own: what a component tells the
+        model, whether it is published, which Bots may draw it and which data
+        it may read are decided in one organization and change nothing in
+        another. An admin of the organization sees every
         component with its draft, the Bots held back from it and the data it
         may read. Anybody else sees the published ones only, and those fields
         are null. kind=playground lists only the components written in
@@ -61,14 +65,15 @@ paths:
       summary: Announce the components the app can draw
       description: >-
         Tell OpenBot which components this version of the app can draw. A
-        component OpenBot has not seen before is added and published, so
-        every Bot can draw it at once. One it already has is left exactly as
-        it is: what it tells the model, whether it is published and who may
-        use it were decided here. A description nobody here has edited
-        follows the one this version of OpenBot ships. In OpenBot Personal a
-        component is also given the data it reads. Anybody signed in may
-        announce, and the web app does it on every load. The whole list is
-        refused if one entry is missing a field.
+        component the organization has not seen before is added and
+        published, so every one of its Bots can draw it at once. One it
+        already has is left exactly as it is: what it tells the model,
+        whether it is published and who may use it were decided here. A
+        description nobody here has edited follows the one this version of
+        OpenBot ships. In OpenBot Personal a component is also given the data
+        it reads. Anybody signed in may announce, and the web app does it on
+        every load. The whole list is refused if one entry is missing a field
+        or has a name that starts with @.
       security:
         - webSession: []
         - appOAuth: [components:write]
@@ -95,7 +100,7 @@ paths:
                       description: Show how many actions each Bot took recently.
       responses:
         '200':
-          description: The components this announcement added. Empty when OpenBot had them all.
+          description: The components this announcement added. Empty when the organization had them all.
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
@@ -990,7 +995,7 @@ components:
           type: string
           minLength: 1
           pattern: \S
-          description: The tool name a Bot draws it by. Trimmed.
+          description: The tool name a Bot draws it by. Trimmed. It can't start with @.
         title:
           type: string
           minLength: 1
@@ -1190,13 +1195,24 @@ components:
         A field is missing or blank once trimmed, holds text that can't be
         kept, or doesn't fit this kind of component: a title or source for
         one that comes with OpenBot, a Playground name that isn't custom_ and
-        lower-case letters, numbers and underscores, or a data function this
-        OpenBot doesn't ship.
+        lower-case letters, numbers and underscores, an announced name that
+        starts with @, or a data function this OpenBot doesn't ship.
       content:
         application/problem+json:
           schema:
             $ref: './common.yaml#/components/schemas/Problem'
           examples:
+            nameStartsWithAt:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Component at index 0 has a name that starts with @, which a component's name can't.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
             announcement:
               value:
                 type: https://open.bot/errors/validation-error

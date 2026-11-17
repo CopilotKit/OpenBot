@@ -1,7 +1,7 @@
 import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import { queryOptions } from "@tanstack/react-query";
 import { getPersonBrowser } from "@/lib/api/generated/browsers/browsers";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 export const browserKeys = {
   all: ["browser"] as const,
@@ -47,7 +47,7 @@ export function browserStateQueryOptions(options?: { poll?: boolean }) {
   return queryOptions({
     queryKey: browserKeys.state,
     queryFn: (): Promise<BrowserApiState> =>
-      getPersonBrowser(ORGANIZATION_ID, "me", {
+      getPersonBrowser(organizationId(), "me", {
         fallback: "Couldn't load your browser.",
       }),
     refetchInterval: options?.poll

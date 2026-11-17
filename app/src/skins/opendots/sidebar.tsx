@@ -200,7 +200,7 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots. Reload the page.
+          Couldn't load your Bots. Try again in a moment.
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -446,7 +446,7 @@ function RecentChats({
       >
         {channels.isPending ? null : channels.error ? (
           <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations. Reload the page.
+            Couldn't load your conversations. Try again in a moment.
           </p>
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">

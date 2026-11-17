@@ -1,6 +1,12 @@
 import { OFFER_CHECK_IN_TOOL } from "./check-in-offer";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
-import { DELEGATE_TOOL, LINK_TOOL, REACT_TOOL } from "./orchestration";
+import {
+  DELEGATE_TOOL,
+  FOLLOW_UP_TOOL,
+  LINK_TOOL,
+  REACT_TOOL,
+  STOP_TOOL,
+} from "./orchestration";
 import { RESEARCH_ROLE_LABELS, researchRoleOfTool } from "./research";
 import { SUBAGENT_TOOL } from "./subagent";
 import { lowerFirst, nameInWords } from "./tool-name-words";
@@ -188,6 +194,8 @@ export function approvalWords(action: {
   target?: unknown;
   /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
   account?: string;
+  /** What it would send, which names who a share goes to. */
+  args?: unknown;
 }): {
   action: string;
   place: string;
@@ -207,6 +215,8 @@ export function approvalPhrase(action: {
   target?: unknown;
   /** Which of the person's accounts at the app, where they hold several: "from dana@work.example". */
   account?: string;
+  /** What it would send, which names who a share goes to. */
+  args?: unknown;
 }): string {
   const { action: words, place, joiner } = approvalParts(action);
   return joiner ? `${words} ${joiner} ${place}` : `${words} ${place}`;
@@ -217,7 +227,34 @@ function approvalParts(action: {
   scope: string;
   target?: unknown;
   account?: string;
+  args?: unknown;
 }): { action: string; place: string; joiner: "on" | "in" | "" } {
+  /*
+   * Sharing something private with other people, by who it goes to: "share private information with
+   * Pipeline Bot". It read "openbot/share private information on handoff:" and a person's id.
+   */
+  if (action.toolRef === PRIVATE_SHARE_TOOL_REF) {
+    const { audience, handOff } = (action.args ?? {}) as {
+      audience?: unknown;
+      handOff?: unknown;
+    };
+    // One card for a hand-off that also shares: "hand this to Pipeline Bot".
+    if (typeof handOff === "string" && handOff.trim())
+      return { action: "hand this to", place: handOff.trim(), joiner: "" };
+    return {
+      action: "share private information with",
+      place:
+        typeof audience === "string" &&
+        audience.trim() &&
+        !audience.includes(":")
+          ? audience.trim()
+          : "other people",
+      joiner: "",
+    };
+  }
+  // Handing work to another Bot, by the Bot it goes to: "ask Pipeline Bot".
+  if (action.toolRef === HANDOFF_TOOL_REF)
+    return { action: "ask", place: action.scope, joiner: "" };
   const slash = action.toolRef.indexOf("/");
   const app = action.toolRef.slice(0, slash);
   if (slash > 0 && app === action.scope) {
@@ -267,7 +304,19 @@ function approvalParts(action: {
 }
 
 /** Handles the model cites and the run carries, which name nothing a person could check. */
-const INTERNAL_ARGS = new Set(["ref", "snapshotId", "toolCallId", "signal"]);
+const INTERNAL_ARGS = new Set([
+  "ref",
+  "snapshotId",
+  "toolCallId",
+  "signal",
+  // A share's fingerprint of what it sends, which the server matches an answer against.
+  "contentDigest",
+]);
+
+/** How OpenBot asks before a Bot shares something private with other people. */
+export const PRIVATE_SHARE_TOOL_REF = "openbot/share_private_information";
+/** How OpenBot asks before a Bot hands work to another Bot. */
+const HANDOFF_TOOL_REF = "bot/message_bot";
 
 /**
  * What an approval would send, as labelled lines for its card: "Text: hello", "To: sam@example.test".
@@ -520,6 +569,11 @@ const OWN_TOOLS: Record<string, OwnTool> = {
   message_bot: { running: "Asking another Bot", done: "Asked another Bot" },
   [SUBAGENT_TOOL]: { running: "Working on a subtask", done: "Ran a subtask" },
   [DELEGATE_TOOL]: { running: "Starting a task", done: "Started a task" },
+  [FOLLOW_UP_TOOL]: {
+    running: "Telling a task more",
+    done: "Told a task more",
+  },
+  [STOP_TOOL]: { running: "Stopping a task", done: "Stopped a task" },
   [REACT_TOOL]: { running: "Reacting", done: "Reacted" },
   [LINK_TOOL]: {
     running: "Finding the task thread",

@@ -2,12 +2,13 @@ import { queryOptions } from "@tanstack/react-query";
 import { everyPage } from "@/lib/api/every-page";
 import { listSkills } from "@/lib/api/generated/skills/skills";
 import type { Skill as ApiSkill } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * A skill as the screens read it: a named instruction a person runs with `/`.
  *
- * The caller sees the organization's skills and their own; an admin sees everybody's.
+ * The caller sees their own skills, the ones granted to a team they are in, and the organization's
+ * that are granted to no team; an admin sees every skill.
  */
 export type Skill = {
   /** The same as `slug`, which is the skill's address. */
@@ -28,6 +29,11 @@ export type Skill = {
    * granted, so a skill naming a tool its Bot does not hold selects the skill and loads nothing.
    */
   tools: string[];
+  /**
+   * Whether the caller may put it on a Bot they own: their own skill, or one granted to a team they
+   * are in. The server's answer, so a Bot's Skills page offers exactly what the grant would allow.
+   */
+  usableOnYourBots: boolean;
 };
 
 /**
@@ -50,6 +56,7 @@ function skillRecord(skill: ApiSkill): Skill {
     instructions: skill.instructions,
     grantedTo: skill.botIds,
     tools: skill.tools,
+    usableOnYourBots: skill.usableOnYourBots,
   };
 }
 
@@ -61,7 +68,7 @@ export function skillListQueryOptions() {
       (
         await everyPage(async (cursor) => {
           const page = await listSkills(
-            ORGANIZATION_ID,
+            organizationId(),
             { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
             { fallback: "Couldn't load the skills." },
           );

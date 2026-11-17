@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import get_args
@@ -196,6 +197,23 @@ def _loaded_upfront_in(server_config, names):
 # A replay holds no result longer than this either (`RESULT_CHARS` in `replay`).
 INLINE_RESULT_CHARS = RESULT_CHARS
 
+# How many times Claude Code retries a failed API request on its own (code.claude.com/docs/en/errors:
+# `CLAUDE_CODE_MAX_RETRIES`, 10 by default, lowered "to surface failures faster in scripts").
+#
+# A delegated task's turn is retried by the server, which sorts the failure first and waits as long
+# as the provider asked. Under that, Claude Code's own ten retries multiply the server's and spend
+# the task's time before the server hears of the failure at all. So a run the server says it
+# retries itself (`forwardedProps.openbotSendOnce`) starts its query with none, and the failure is
+# handed back. Every other run keeps Claude Code's own retries.
+MAX_RETRIES = "CLAUDE_CODE_MAX_RETRIES"
+
+
+def sends_once(forwarded_props) -> bool:
+    """Whether the server retries this run itself, and so wants each request sent once."""
+    props = forwarded_props if isinstance(forwarded_props, dict) else {}
+    return props.get("openbotSendOnce") is True
+
+
 # Claude Code's switch for a model ID it does not know (code.claude.com/docs/en/env-vars).
 #
 # The Claude Code this harness ships (2.1.259, in claude-agent-sdk 0.2.152) predates Opus 5.5,
@@ -297,6 +315,58 @@ class ModelRefusedError(Exception):
     coded `OPENBOT_MODEL_REFUSED`, and the server says it in words
     (server/src/agents/provider-refusal.ts).
     """
+
+
+class ModelUnreachableError(Exception):
+    """Nothing answered at the model's address: the connection was refused, the host doesn't
+    exist, or nothing answered in time. No provider said anything, so it is not a refusal.
+
+    FOUND ON OPENBOT DESKTOP: a base URL with nothing listening at it. Claude Code says so in its
+    own words, which went on as a refusal, and the person read that the provider "turned down the
+    request". It ends the run coded `OPENBOT_MODEL_UNREACHABLE`, and the server puts the step that
+    fits its edition in place of the second sentence.
+    """
+
+
+# Claude Code's own account of a request that never reached the API, as 2.1.259 (claude-agent-sdk
+# 0.2.152) writes it: "API Error: " and then "Connection refused — a firewall or proxy may be blocking
+# it (ConnectionRefused)", "Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+# "No internet route — …", "Unable to connect to API (…)" or "Request timed out. …". Not a dropped
+# connection ("Connection dropped"), which reached the API, and not a certificate or a proxy the
+# person has to fix ("Unable to connect to API: SSL …", "Couldn't connect through your proxy").
+UNREACHED = re.compile(
+    r"^API Error: (?:Connection refused\b|Can't reach the API server\b|No internet route\b"
+    r"|Unable to connect to API\b(?!:)|Request timed out\b)"
+)
+
+
+def model_address():
+    """Where Claude Code reaches the model, as host and port.
+
+    Nothing else of the URL: a base URL can carry a user and password, and some gateways put a key
+    in the path. Claude Code reads `ANTHROPIC_BASE_URL` from this container's environment.
+    """
+    from urllib.parse import urlsplit
+
+    base = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+    try:
+        parts = urlsplit(base)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    shown = f"[{host}]" if ":" in host else host
+    return f"{shown}:{port}" if port else shown
+
+
+def unreachable_message(address):
+    """The same sentence agent-langgraph-agui ends its run with (`unreachable_message`)."""
+    at = f" at {address}" if address else ""
+    return (
+        f"OpenBot couldn't reach the AI model{at}. "
+        "Check that it's running and the address is right."
+    )
 
 
 def refusal_text(message):
@@ -715,6 +785,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         # is the one prop it honours. Every query is built here, so a choice changed between runs
         # starts the next query on it.
         chosen = run_model(input_data.forwarded_props) if input_data else None
+        once = sends_once(input_data.forwarded_props) if input_data else False
         if self._model_only and input_data:
             # The model endpoint accepts prompts and caller-owned tools, never SDK
             # configuration or an ungoverned state-management tool.
@@ -726,6 +797,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
         options.env = {**(options.env or {}), UNKNOWN_MODEL_WINDOW: "1"}
+        if once:
+            options.env[MAX_RETRIES] = "0"
         options.max_buffer_size = MESSAGE_BUFFER_BYTES
         if not self._model_only and input_data:
             # The model endpoint gets its instructions in context. A full Bot gets its standing
@@ -887,6 +960,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     raise ModelAuthenticationError(
                         "Sign in to your model provider again."
                     )
+                if (
+                    isinstance(message, AssistantMessage)
+                    and message.error
+                    and UNREACHED.match(refusal_text(message))
+                ):
+                    # Claude Code's own words stay here, in the log: the sentence replaces them.
+                    logger.warning("The model couldn't be reached: %s", refusal_text(message))
+                    raise ModelUnreachableError(unreachable_message(model_address()))
                 if isinstance(message, AssistantMessage) and message.error:
                     raise ModelRefusedError(refusal_text(message))
                 if (
@@ -1050,6 +1131,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     if isinstance(error, ModelAuthenticationError)
                     else "OPENBOT_MODEL_REFUSED"
                     if isinstance(error, ModelRefusedError)
+                    else "OPENBOT_MODEL_UNREACHABLE"
+                    if isinstance(error, ModelUnreachableError)
                     else None,
                 )
             )

@@ -112,6 +112,9 @@ export type Shortfall = {
   freeOnDrive?: boolean;
 };
 
+/** How far an unfinished update got, as the CLI recorded it (`local_eval::UpdateState`). */
+export type UpdateState = "prepared" | "migrating" | "migrated" | "other";
+
 export type LocalReport = {
   outcome: LocalOutcome;
   /**
@@ -131,6 +134,12 @@ export type LocalReport = {
       to: string;
       /** No migration started: the release that answers is `installedRelease`. */
       prepared: boolean;
+      /**
+       * How far it got (`local_eval::UpdateState`). `migrating`: part-way through updating the data.
+       * `migrated`: the data is on the new release, and its services had not finished starting.
+       * Absent from an older build's answer.
+       */
+      state?: UpdateState;
       stoppedDownloading: boolean;
       /** The CLI's name for the step that failed, such as `update-quiesce`, when it recorded one. */
       failedStep?: string;

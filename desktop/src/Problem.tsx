@@ -21,6 +21,11 @@ export type Problem = {
   leftover_containers?: string[] | null;
   /** Only a Windows restart fixes this: the window offers one instead of Try again. */
   restart_windows?: boolean | null;
+  /**
+   * Which thing went wrong while connecting to an OpenBot that runs elsewhere. The window reads it
+   * only to choose what to offer next (`ConnectToOpenBot`); the sentence is still `said`.
+   */
+  kind?: string | null;
 };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */

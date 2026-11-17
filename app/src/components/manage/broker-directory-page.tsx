@@ -35,7 +35,7 @@ export function BrokerDirectoryPage({ provider }: { provider: Broker }) {
   if (setup.isError) {
     return (
       <p className="m-4 text-destructive text-sm" role="alert">
-        Couldn't load the app settings. Reload the page.
+        Couldn't load the app settings. Try again in a moment.
       </p>
     );
   }

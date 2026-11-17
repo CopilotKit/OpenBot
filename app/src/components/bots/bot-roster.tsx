@@ -5,6 +5,7 @@ import { Fragment, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   attentionSummary,
+  useStoppedTasks,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
 import { LoadingRows } from "@/components/layout/loading-rows";
@@ -64,7 +65,7 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load your Bots. Reload the page.
+        Couldn't load your Bots. Try again in a moment.
       </p>
     );
   }
@@ -166,7 +167,14 @@ function HiddenSection({
   return (
     <PageSection
       action={
-        <Button onClick={() => setOpen(!open)} size="sm" variant="ghost">
+        // Short on screen; to a screen reader it says which list it opens, beside Done's own Show.
+        <Button
+          aria-expanded={open}
+          aria-label={open ? "Hide hidden Bots" : "Show hidden Bots"}
+          onClick={() => setOpen(!open)}
+          size="sm"
+          variant="ghost"
+        >
           {open ? "Hide" : "Show"}
         </Button>
       }
@@ -209,8 +217,9 @@ function RosterRow({
   agent: AgentProfile;
   state: BotAttention | undefined;
 }) {
+  const stopped = useStoppedTasks();
   const summary = state
-    ? [state.paused ? "Paused" : "", attentionSummary(state)]
+    ? [state.paused ? "Paused" : "", attentionSummary(state, stopped(agent.id))]
         .filter(Boolean)
         .join(" · ")
     : "";

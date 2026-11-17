@@ -1,0 +1,1146 @@
+# Agents: the agents an organization's Bots hand work to, and each Bot's delegation.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+#
+# The path noun is `bot-agents`, not `agents`: Intelligence's API already uses `agentId` for the
+# runtime agent a thread ran on (in OpenBot, a Bot), and names under an organization that are not a
+# Bot's could one day be Intelligence's. Intelligence has no Bots, so a `bot-` name cannot collide.
+paths:
+  /api/v2/organizations/{organizationId}/bot-agents:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Agents]
+      operationId: listBotAgents
+      summary: List agents
+      description: >-
+        Return one page of the agents the caller can see: the organization's
+        public agents and the caller's own private ones, oldest first, and by
+        id among agents made at the same moment. Somebody else's private agent
+        is never among them. scope=organization lists every agent in the
+        organization, people's private ones included, for an admin's screens;
+        it is refused to anybody who is not an admin of the organization. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:read]
+        - apiKey: []
+      parameters:
+        - name: scope
+          in: query
+          description: >-
+            Whose agents: caller, the agents the caller can see; organization,
+            every agent in the organization, for an admin of it only.
+          schema:
+            type: string
+            enum: [caller, organization]
+            default: caller
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of agents.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAgentPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/BotAgentPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    post:
+      tags: [Agents]
+      operationId: createBotAgent
+      summary: Add an agent
+      description: >-
+        Add an agent for Bots to hand work to. kind openbot runs inside
+        OpenBot, on the model given or the organization's default. kind
+        address runs at an AG-UI address, which the server checks before
+        saving; a key, when given, is stored encrypted and never returned.
+        Anybody may add a private agent, for their own Bots; only an admin of
+        the organization may add a public one, which every member's Bots may
+        use. A repeated request with the same Idempotency-Key and body returns
+        the first result.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBotAgentRequest'
+            examples:
+              openbot:
+                summary: OpenBot's own agent, on a model of its own.
+                value:
+                  name: Researcher
+                  description: Deep research on the web and in the person's apps, with sources.
+                  visibility: public
+                  kind: openbot
+                  model: null
+              address:
+                summary: An agent somebody runs themselves, behind a key.
+                value:
+                  name: Pipeline analyst
+                  description: Reads the sales pipeline and forecasts the quarter.
+                  visibility: private
+                  kind: address
+                  endpoint: https://agents.example.com/ag-ui
+                  auth:
+                    header: Authorization
+                    value: Bearer example-key
+                  harness: langgraph
+                  skills:
+                    - name: Forecast
+                      description: Forecasts the quarter from the open deals.
+                      examples: [What will we close this quarter?]
+      responses:
+        '201':
+          description: The agent was added.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            Location:
+              description: The new agent's address.
+              schema:
+                type: string
+              example: /api/v2/organizations/default/bot-agents/bag_4f7c1e2a9d0b4c63
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAgentResponse'
+              examples:
+                created:
+                  $ref: '#/components/examples/CreatedBotAgent'
+        '400':
+          $ref: '#/components/responses/InvalidBotAgent'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotAgentForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bot-agents/{botAgentId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotAgentId'
+    get:
+      tags: [Agents]
+      operationId: getBotAgent
+      summary: Read one agent
+      description: >-
+        Return one agent the caller can see. An agent that does not exist, was
+        deleted, or is private to somebody else is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The agent.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAgentResponse'
+              examples:
+                openbot:
+                  $ref: '#/components/examples/OpenBotAgent'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/BotAgentNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Agents]
+      operationId: updateBotAgent
+      summary: Change an agent
+      description: >-
+        Replace an agent's name, description and visibility, which are all
+        required, and change any optional field that is present. An absent
+        endpoint, key, model or skills leaves that setting as it is, so an edit
+        to a name never drops a key. Only whoever may manage the agent may
+        change it: its owner for a private one, an admin for a public one.
+        Only an admin may make an agent public. kind cannot change. Every Bot
+        that uses the agent runs on the change from its next turn.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBotAgentRequest'
+            examples:
+              rename:
+                value:
+                  name: Research desk
+                  description: Deep research on the web and in the person's apps, with sources.
+                  visibility: public
+      responses:
+        '200':
+          description: The changed agent.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAgentResponse'
+              examples:
+                renamed:
+                  $ref: '#/components/examples/CreatedBotAgent'
+        '400':
+          $ref: '#/components/responses/InvalidBotAgent'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotAgentForbidden'
+        '404':
+          $ref: '#/components/responses/BotAgentNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Agents]
+      operationId: deleteBotAgent
+      summary: Delete an agent
+      description: >-
+        Delete an agent and retire its key and callback token. It is taken off
+        every Bot that may use it. Refused, with BOT_AGENT_IN_USE, while it is
+        the only agent of any Bot, deleted Bots aside: give that Bot another
+        agent first. The refusal names those Bots the caller can see and
+        only counts the rest. Only whoever may manage the agent may delete it. Task
+        threads it worked in stay readable. An agent that is already deleted
+        is not found.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The agent was deleted.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotAgentForbidden'
+        '404':
+          $ref: '#/components/responses/BotAgentNotFound'
+        '409':
+          $ref: '#/components/responses/BotAgentInUse'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bot-agents/{botAgentId}/issue-callback-token:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotAgentId'
+    post:
+      tags: [Agents]
+      operationId: issueBotAgentCallbackToken
+      summary: Issue an agent's callback token
+      description: >-
+        Give an agent at an address a new credential for calling OpenBot's
+        tools back, and return it this once: it is never returned again, and
+        the audit trail records that one was issued, never what it is. Issuing
+        one for an agent that has one replaces it, which is how a leaked token
+        is retired. A call made with it is allowed only for a run of a Bot
+        that may use this agent, as the person that run is for. Only whoever
+        may manage the agent may issue one. An agent that runs inside OpenBot,
+        or at an address OpenBot runs itself, needs none and is refused.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The new token, shown once.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAgentCallbackToken'
+              examples:
+                issued:
+                  $ref: '#/components/examples/BotAgentCallbackTokenExample'
+        '400':
+          $ref: '#/components/responses/InvalidBotAgent'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotAgentForbidden'
+        '404':
+          $ref: '#/components/responses/BotAgentNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bot-agents/{botAgentId}/revoke-callback-token:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/BotAgentId'
+    post:
+      tags: [Agents]
+      operationId: revokeBotAgentCallbackToken
+      summary: Revoke an agent's callback token
+      description: >-
+        Take away an agent's credential for calling OpenBot's tools back. It
+        still answers in a conversation; it can't reach anything outside one.
+        Only whoever may manage the agent may revoke it. Revoking a token that
+        is not there changes nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bot-agents:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The agent, with no callback token.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotAgentResponse'
+              examples:
+                revoked:
+                  $ref: '#/components/examples/CreatedBotAgent'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BotAgentForbidden'
+        '404':
+          $ref: '#/components/responses/BotAgentNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/bots/{botId}/delegation:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Agents]
+      operationId: getBotDelegation
+      x-openbot-singleton: true
+      summary: Read a Bot's delegation
+      description: >-
+        Return how a Bot the caller can see works: on its own agent (mode
+        self, every Bot made before agents were a list), or handing work to
+        the agents it may use (mode orchestrate). The first agent is its
+        default: a Bot in mode self runs on it, and a Bot in mode orchestrate
+        hands it work the Bot names no agent for and every run nobody is
+        waiting on (a routine, a check-in, a goal, another Bot's hand-off, a
+        group conversation). Whoever uses a Bot uses its agents: an agent that
+        is private to the Bot's owner still does the work for everybody the
+        Bot is shared with, and to anybody else it is named Private agent,
+        with its description withheld. An agent that was deleted, or that the
+        Bot's owner can no longer use, is listed with available false, and
+        the Bot hands it nothing.
+      security:
+        - webSession: []
+        - appOAuth: [bots:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Bot's delegation.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotDelegation'
+              examples:
+                self:
+                  $ref: '#/components/examples/SelfBotDelegation'
+                orchestrate:
+                  $ref: '#/components/examples/OrchestratingBotDelegation'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Agents]
+      operationId: replaceBotDelegation
+      summary: Set a Bot's delegation
+      description: >-
+        Replace how a Bot works. Mode self takes exactly one agent, which the
+        Bot runs on with its apps, as every Bot did before agents were a list.
+        Mode orchestrate takes one to twenty agents, in order, the first being
+        the default: the Bot then answers on its own model with only the tools
+        for replying, reacting, finding a task's thread and handing work to an
+        agent, plus reading the person's memory, and each agent works with the
+        Bot's apps as the person who asked. model and effort are the Bot's own
+        when it orchestrates, one the model catalogue offers, or null for the
+        organization's default; they are ignored in mode self. instructions
+        steer how it hands work out and answers, and are read only in mode
+        orchestrate. Every agent named must be one the caller can see, or one
+        the Bot already has. Only
+        whoever may manage the Bot may change it, and a Bot that comes with
+        OpenBot cannot be changed.
+      security:
+        - webSession: []
+        - appOAuth: [bots:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceBotDelegationRequest'
+            examples:
+              orchestrate:
+                value:
+                  mode: orchestrate
+                  model: null
+                  effort: null
+                  instructions: Hand research to Researcher and anything about the pipeline to Pipeline analyst. Answer greetings yourself.
+                  agentIds: [bag_4f7c1e2a9d0b4c63, bag_9a2d7e1c3b5f4086]
+      responses:
+        '200':
+          description: The Bot's delegation after the change.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotDelegation'
+              examples:
+                orchestrate:
+                  $ref: '#/components/examples/OrchestratingBotDelegation'
+        '400':
+          $ref: '#/components/responses/InvalidBotDelegation'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/BotForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    BotAgentId:
+      name: botAgentId
+      in: path
+      required: true
+      description: The agent's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: bag_4f7c1e2a9d0b4c63
+  schemas:
+    BotAgentKind:
+      type: string
+      enum: [openbot, address]
+      description: >-
+        openbot: runs inside OpenBot. address: runs at an AG-UI address,
+        somebody's own or a framework OpenBot runs itself.
+    BotAgentVisibility:
+      type: string
+      enum: [public, private]
+      description: >-
+        public: every member's Bots may use it, and only an admin may make one.
+        private: only its owner's Bots may use it.
+    BotAgentSkill:
+      type: object
+      description: >-
+        One thing the agent is good at, in the shape of an A2A Agent Card's
+        skill. A Bot reads its agents' skills when it decides which to hand
+        work to.
+      additionalProperties: false
+      required: [name, description]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: \S
+          description: The skill's name, 1 to 80 characters once trimmed.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: What it does, 1 to 500 characters once trimmed.
+        examples:
+          type: array
+          maxItems: 5
+          description: Up to five things a person might ask for that it handles.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+    BotAgent:
+      type: object
+      description: >-
+        An agent as the caller sees it. canManage, mine and builtIn are the
+        server's verdicts for this caller; a client renders them and never
+        recomputes them. No secret is ever part of an agent: hasAuth and
+        hasCallbackToken say whether one is set.
+      required:
+        - id
+        - name
+        - description
+        - kind
+        - visibility
+        - endpoint
+        - model
+        - skills
+        - hasAuth
+        - hasCallbackToken
+        - builtIn
+        - canManage
+        - mine
+        - botCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: The agent's id.
+        name:
+          type: string
+          description: What the agent is called.
+        description:
+          type: string
+          description: >-
+            What it is good at, in its owner's words. A Bot reads it when it
+            decides which agent to hand work to.
+        kind:
+          $ref: '#/components/schemas/BotAgentKind'
+        visibility:
+          $ref: '#/components/schemas/BotAgentVisibility'
+        endpoint:
+          type: [string, 'null']
+          description: >-
+            The AG-UI address it runs at, as it was stored. Null for an agent
+            that runs inside OpenBot.
+        framework:
+          type: string
+          description: >-
+            What runs it, by the name a person reads ("LangChain", "OpenBot").
+            Absent when OpenBot doesn't know.
+        model:
+          type: [string, 'null']
+          description: >-
+            The model it runs on, for an agent whose model is OpenBot's to
+            choose. Null for the organization's default, or for an agent that
+            picks its own.
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotAgentSkill'
+        hasAuth:
+          type: boolean
+          description: Whether a key is set for its address. Never the key.
+        hasCallbackToken:
+          type: boolean
+          description: >-
+            Whether it holds a credential for calling OpenBot's tools back.
+            Never the credential.
+        builtIn:
+          type: boolean
+          description: >-
+            Whether OpenBot runs it, inside OpenBot or at an address OpenBot
+            started, so it needs no callback token of its own.
+        canManage:
+          type: boolean
+          description: Whether the caller may change and delete it.
+        mine:
+          type: boolean
+          description: Whether the caller added it.
+        botCount:
+          type: integer
+          minimum: 0
+          description: >-
+            How many of the Bots the caller can see may use it, deleted Bots
+            aside. A count only: which Bots is not said. With
+            scope=organization, every Bot in the organization.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was added.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When it last changed.
+    BotAgentPage:
+      type: object
+      required: [agents, nextCursor]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/BotAgent'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    BotAgentResponse:
+      type: object
+      required: [agent]
+      properties:
+        agent:
+          $ref: '#/components/schemas/BotAgent'
+    BotAgentKey:
+      type: object
+      description: >-
+        A key the agent's address sits behind. Write-only: stored encrypted and
+        never returned. A blank value sets no key.
+      additionalProperties: false
+      required: [value]
+      properties:
+        header:
+          type: string
+          maxLength: 200
+          pattern: ^[A-Za-z0-9-]*$
+          description: The header it is sent in. Blank or absent means Authorization.
+        value:
+          type: string
+          maxLength: 8000
+          writeOnly: true
+          description: The header's value.
+    BotAgentName:
+      type: string
+      minLength: 1
+      maxLength: 80
+      pattern: \S
+      description: What the agent is called, 1 to 80 characters once trimmed.
+    BotAgentDescription:
+      type: string
+      minLength: 1
+      maxLength: 1000
+      pattern: \S
+      description: >-
+        What it is good at, 1 to 1000 characters once trimmed. A Bot reads it
+        when it decides which agent to hand work to, so say what to send it.
+    BotAgentEndpoint:
+      type: string
+      description: >-
+        The AG-UI address it runs at: an absolute http or https address. An
+        address that fits can still be refused: the server refuses one this
+        organization may not reach, and one that does not answer a real AG-UI
+        run.
+      maxLength: 2048
+      format: uri
+      pattern: ^[Hh][Tt][Tt][Pp][Ss]?://
+    BotAgentModel:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 500
+      pattern: \S
+      description: >-
+        A model the catalogue offers, or null for the organization's default.
+        Read only for an agent whose model is OpenBot's to choose.
+    BotAgentSkills:
+      type: array
+      maxItems: 20
+      description: Up to twenty things it is good at. Absent on a change leaves them as they are.
+      items:
+        $ref: '#/components/schemas/BotAgentSkill'
+    BotAgentHarness:
+      type: string
+      description: >-
+        The framework an agent at an address is built on, by its id in
+        OpenBot's harness list (shared/harnesses.json). Empty means none was
+        named. Kept only for kind address.
+      enum:
+        - ''
+        - crewai
+        - llamaindex
+        - agno
+        - langgraph
+        - google-adk
+        - antigravity
+        - pydantic-ai
+        - microsoft-agent-framework
+        - claude-agent-sdk
+        - strands
+        - ag2
+        - langroid
+        - mastra
+    CreateBotAgentRequest:
+      type: object
+      description: >-
+        A new agent. endpoint is required for kind address and refused for
+        kind openbot.
+      additionalProperties: false
+      required: [name, description, visibility, kind]
+      properties:
+        name:
+          $ref: '#/components/schemas/BotAgentName'
+        description:
+          $ref: '#/components/schemas/BotAgentDescription'
+        visibility:
+          $ref: '#/components/schemas/BotAgentVisibility'
+        kind:
+          $ref: '#/components/schemas/BotAgentKind'
+        endpoint:
+          $ref: '#/components/schemas/BotAgentEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotAgentKey'
+        harness:
+          $ref: '#/components/schemas/BotAgentHarness'
+        model:
+          $ref: '#/components/schemas/BotAgentModel'
+        skills:
+          $ref: '#/components/schemas/BotAgentSkills'
+    UpdateBotAgentRequest:
+      type: object
+      description: An agent's fields after the change. Absent optional fields stay as they are.
+      additionalProperties: false
+      required: [name, description, visibility]
+      properties:
+        name:
+          $ref: '#/components/schemas/BotAgentName'
+        description:
+          $ref: '#/components/schemas/BotAgentDescription'
+        visibility:
+          $ref: '#/components/schemas/BotAgentVisibility'
+        endpoint:
+          $ref: '#/components/schemas/BotAgentEndpoint'
+        auth:
+          $ref: '#/components/schemas/BotAgentKey'
+        model:
+          $ref: '#/components/schemas/BotAgentModel'
+        skills:
+          $ref: '#/components/schemas/BotAgentSkills'
+    BotAgentCallbackToken:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          description: >-
+            The agent's credential for calling OpenBot's tools back. Returned
+            this once and never again.
+    BotDelegationMode:
+      type: string
+      enum: [self, orchestrate]
+      description: >-
+        self: the Bot runs on its one agent with its apps. orchestrate: the
+        Bot answers on its own model and hands work to the agents it may use.
+    BotDelegationAgent:
+      type: object
+      description: One agent a Bot may use, as the caller sees it.
+      required: [id, name, description, kind, available]
+      properties:
+        id:
+          type: string
+          description: The agent's id.
+        name:
+          type: string
+          description: >-
+            What the agent is called. An agent private to somebody other than
+            the caller is named Private agent.
+        description:
+          type: string
+          description: What it is good at. Empty for an agent private to somebody other than the caller.
+        kind:
+          $ref: '#/components/schemas/BotAgentKind'
+        framework:
+          type: string
+          description: What runs it, by the name a person reads. Absent when OpenBot doesn't know.
+        available:
+          type: boolean
+          description: >-
+            Whether the Bot may still hand it work: false once the agent is
+            deleted, or private to somebody other than the Bot's owner.
+    BotDelegation:
+      type: object
+      description: How a Bot works, and the agents it may use, the first being its default.
+      required: [botId, mode, model, effort, instructions, agents, canManage]
+      properties:
+        botId:
+          type: string
+          description: The Bot's id.
+        mode:
+          $ref: '#/components/schemas/BotDelegationMode'
+        model:
+          type: [string, 'null']
+          description: >-
+            The model the Bot answers on when it orchestrates, or null for the
+            organization's default.
+        effort:
+          type: [string, 'null']
+          description: How hard it thinks when it orchestrates, or null for the model's own.
+        instructions:
+          type: string
+          description: >-
+            How it hands work out and answers when it orchestrates. May be
+            empty. Empty for a caller who can't change the Bot, since it can
+            name an agent private to its owner.
+        agents:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/BotDelegationAgent'
+        canManage:
+          type: boolean
+          description: Whether the caller may change it.
+    ReplaceBotDelegationRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, model, effort, instructions, agentIds]
+      properties:
+        mode:
+          $ref: '#/components/schemas/BotDelegationMode'
+        model:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: A model the catalogue offers, or null for the default. Trimmed.
+        effort:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 40
+          pattern: \S
+          description: An effort the model takes, or null for its own. Trimmed, and read in lower case.
+        instructions:
+          type: string
+          maxLength: 4000
+          description: How it hands work out and answers, up to 4000 characters. May be empty.
+        agentIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          description: >-
+            The agents it may use, in order, the first being its default.
+            Exactly one in mode self.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: \S
+  responses:
+    InvalidBotAgent:
+      description: >-
+        A field is missing or out of bounds, kind and endpoint don't agree,
+        the address is one this organization may not reach or did not answer
+        a real AG-UI run, the model is not one the catalogue offers, or the
+        agent runs inside OpenBot and so takes no callback token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            description:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Say what this agent is good at, so your Bots know what to send it.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            unreachable:
+              value:
+                type: https://open.bot/errors/bot-agent-unreachable
+                title: Couldn't reach that agent.
+                status: 400
+                detail: Couldn't reach an agent at that address. Check the address and its key, then try again.
+                code: BOT_AGENT_UNREACHABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotAgentForbidden:
+      description: >-
+        The caller may not manage this agent, or only an admin may make an
+        agent public.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: You can't manage this agent.
+                status: 403
+                detail: You can't manage this agent.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            publicAdminOnly:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Only an admin can share an agent with everyone.
+                status: 403
+                detail: Only an admin can share an agent with everyone. Keep it private to use it with your own Bots.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotAgentNotFound:
+      description: >-
+        The agent does not exist, was deleted, or is not visible to the
+        caller, or the organization is not.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/bot-agent-not-found
+                title: Agent not found.
+                status: 404
+                detail: Couldn't find that agent.
+                code: BOT_AGENT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BotAgentInUse:
+      description: >-
+        The agent is the only agent of a Bot, or a repeated request with the
+        same Idempotency-Key had a different body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            onlyAgent:
+              value:
+                type: https://open.bot/errors/bot-agent-in-use
+                title: A Bot runs on this agent alone.
+                status: 409
+                detail: Quote Checker and 1 other Bot run on this agent alone. Give them another agent first, then delete this one.
+                code: BOT_AGENT_IN_USE
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidBotDelegation:
+      description: >-
+        A field is missing or out of bounds, mode self names other than one
+        agent, an agent named is not one the caller can see, or the model or
+        effort is not one the catalogue offers.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            selfTakesOne:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: A Bot that works on its own runs on one agent. Turn on handing work to agents to choose more.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            unknownAgent:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Couldn't find one of those agents. Choose from the agents you can see.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    BotAgentPageLast:
+      summary: The last page.
+      value:
+        agents:
+          - id: bag_0c51d9e3a7f24b18
+            name: OpenBot
+            description: OpenBot's own agent, with every app and component the Bot may use.
+            kind: openbot
+            visibility: public
+            endpoint: null
+            framework: OpenBot
+            model: null
+            skills: []
+            hasAuth: false
+            hasCallbackToken: false
+            builtIn: true
+            canManage: false
+            mine: false
+            botCount: 4
+            createdAt: '2026-11-16T09:00:00Z'
+            updatedAt: '2026-11-16T09:00:00Z'
+        nextCursor: null
+    OpenBotAgent:
+      summary: OpenBot's own agent.
+      value:
+        agent:
+          id: bag_0c51d9e3a7f24b18
+          name: OpenBot
+          description: OpenBot's own agent, with every app and component the Bot may use.
+          kind: openbot
+          visibility: public
+          endpoint: null
+          framework: OpenBot
+          model: null
+          skills: []
+          hasAuth: false
+          hasCallbackToken: false
+          builtIn: true
+          canManage: false
+          mine: false
+          botCount: 4
+          createdAt: '2026-11-16T09:00:00Z'
+          updatedAt: '2026-11-16T09:00:00Z'
+    CreatedBotAgent:
+      summary: An agent a person added at their own address.
+      value:
+        agent:
+          id: bag_4f7c1e2a9d0b4c63
+          name: Pipeline analyst
+          description: Reads the sales pipeline and forecasts the quarter.
+          kind: address
+          visibility: private
+          endpoint: https://agents.example.com/ag-ui
+          framework: LangChain
+          model: null
+          skills:
+            - name: Forecast
+              description: Forecasts the quarter from the open deals.
+              examples: [What will we close this quarter?]
+          hasAuth: true
+          hasCallbackToken: false
+          builtIn: false
+          canManage: true
+          mine: true
+          botCount: 0
+          createdAt: '2026-11-16T09:30:00Z'
+          updatedAt: '2026-11-16T09:30:00Z'
+    BotAgentCallbackTokenExample:
+      summary: A new token.
+      value:
+        token: obot_agt_7f3a9c2e5d1b4f60a8e2c9d4b1f7e3a6c0d9
+    SelfBotDelegation:
+      summary: A Bot that runs on its own agent, as every Bot did before agents were a list.
+      value:
+        botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        mode: self
+        model: null
+        effort: null
+        instructions: ''
+        agents:
+          - id: bag_0c51d9e3a7f24b18
+            name: OpenBot
+            description: OpenBot's own agent, with every app and component the Bot may use.
+            kind: openbot
+            framework: OpenBot
+            available: true
+        canManage: true
+    OrchestratingBotDelegation:
+      summary: A Bot that hands work to two agents.
+      value:
+        botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        mode: orchestrate
+        model: null
+        effort: null
+        instructions: Hand research to Researcher and anything about the pipeline to Pipeline analyst. Answer greetings yourself.
+        agents:
+          - id: bag_4f7c1e2a9d0b4c63
+            name: Researcher
+            description: Deep research on the web and in the person's apps, with sources.
+            kind: openbot
+            framework: OpenBot
+            available: true
+          - id: bag_9a2d7e1c3b5f4086
+            name: Pipeline analyst
+            description: Reads the sales pipeline and forecasts the quarter.
+            kind: address
+            framework: LangChain
+            available: true
+        canManage: true

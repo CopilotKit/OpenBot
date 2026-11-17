@@ -3,7 +3,7 @@
  */
 
 /**
- * Whose accounts they are: people's own (person), or the one OpenBot holds for everybody (deployment).
+ * Whose accounts they are: people's own (person), or the one OpenBot holds for everybody in the organization (deployment).
  */
 export type AppAccountModeChangeAccountsEndedHolder =
   (typeof AppAccountModeChangeAccountsEndedHolder)[keyof typeof AppAccountModeChangeAccountsEndedHolder];

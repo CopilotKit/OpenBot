@@ -13,7 +13,7 @@ export const ListPeopleParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
 
@@ -82,7 +82,7 @@ export const ListPeopleResponse = zod.object({
           role: zod
             .enum(["owner", "admin", "member"])
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
             ),
           needsName: zod
             .boolean()
@@ -162,7 +162,7 @@ export const GetPersonParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -195,7 +195,7 @@ export const GetPersonResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -271,7 +271,7 @@ export const UpdatePersonParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -338,7 +338,7 @@ export const UpdatePersonResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -395,7 +395,7 @@ export const UpdatePersonResponse = zod.object({
 });
 
 /**
- * Stop a person from using OpenBot: their address can't sign in again, and the sessions, API keys and app sign-ins they hold end at once. They keep their record and their history, and restoring their access lets them sign in again. Their connected credentials are retired too. Only an administrator may do this, never to themselves, and never to somebody the deployment's configuration names as an administrator. Removing somebody already removed retires anything left and records nothing new.
+ * Remove a person from the organization. Where everybody has an organization of their own (an OpenBot whose list of organizations answers canCreate true), this ends their membership of this organization alone: they lose its Bots and conversations from their next request, and their account, sessions, API keys, their own organization and any other they belong to are unchanged. Restoring them puts the membership back with its role and teams. Where OpenBot keeps one organization, it stops the person using OpenBot: their address can't sign in again, and the sessions, API keys and app sign-ins they hold end at once; restoring their access lets them sign in again. Either way they keep their record and their history, and the credentials they connected here are retired. Only an administrator may do this, never to themselves, never to somebody the deployment's configuration names as an administrator, and never to the organization's owner. Removing somebody already removed retires anything left and records nothing new.
  * @summary Remove a person's access
  */
 
@@ -408,7 +408,7 @@ export const RevokePersonAccessParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -453,7 +453,7 @@ export const RevokePersonAccessResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -510,7 +510,7 @@ export const RevokePersonAccessResponse = zod.object({
 });
 
 /**
- * Let a removed person sign in again. What ended when they were removed stays ended: they sign in afresh and make new API keys. Only an administrator may do this. Restoring somebody who was never removed changes nothing and records nothing.
+ * Give a removed person their access back. Where everybody has an organization of their own, this puts back their membership of this organization with the role and teams it had; their sessions and API keys, which were never ended, work here again from their next request. Where OpenBot keeps one organization, it lets them sign in again, and what ended when they were removed stays ended: they sign in afresh and make new API keys. Only an administrator may do this. Restoring somebody who was never removed changes nothing and records nothing.
  * @summary Give a person their access back
  */
 
@@ -523,7 +523,7 @@ export const RestorePersonAccessParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -568,7 +568,7 @@ export const RestorePersonAccessResponse = zod.object({
       role: zod
         .enum(["owner", "admin", "member"])
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. Nobody is an owner yet; the role is listed so that a client reads it when it arrives.",
+          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
         ),
       needsName: zod
         .boolean()
@@ -638,7 +638,7 @@ export const AdvanceOnboardingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -710,7 +710,7 @@ export const CompleteOnboardingParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -771,7 +771,7 @@ export const GetStandingInstructionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -815,7 +815,7 @@ export const UpdateStandingInstructionsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -889,7 +889,7 @@ export const GetPreferencesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -953,7 +953,7 @@ export const UpdatePreferencesParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()

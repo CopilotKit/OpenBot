@@ -25,6 +25,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PageShell } from "@/components/layout/page-shell";
+import type { BotAttention } from "@/lib/bot-lifecycle/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { navigationFor } from "@/lib/navigation";
 import { SKINS } from "@/skins/registry";
@@ -35,7 +36,7 @@ import {
   approvalWriteResponse,
   type TestInbox,
 } from "./approvals-api";
-import { answerBotAttention, answerBotsList } from "./bots-api";
+import { answerBotAttention, answerBotsList, attentionOf } from "./bots-api";
 import {
   CONVERSATIONS_PATH,
   conversationPage,
@@ -104,7 +105,16 @@ function channel(id: string, agentIds: string[], summary: string) {
   };
 }
 
-function api(role: "admin" | "user") {
+/** What each Bot waits on the person for, as the server counts it: the approval and the question below. */
+const SERVER_COUNTS = [
+  attentionOf("b-1", "Inbox Bot", { approvals: 1 }),
+  attentionOf("b-2", "Ops Bot", { questions: 1 }),
+];
+
+function api(
+  role: "admin" | "user",
+  { attention = SERVER_COUNTS }: { attention?: BotAttention[] } = {},
+) {
   const sent: Sent[] = [];
   const bodies: Record<string, unknown> = {
     [ME_PATH]: meBody({
@@ -282,7 +292,7 @@ function api(role: "admin" | "user") {
       ],
     });
     if (bots) return bots;
-    const waiting = answerBotAttention(input, init, { bots: [] });
+    const waiting = answerBotAttention(input, init, { bots: attention });
     if (waiting) return waiting;
     const approvals = approvalInboxResponse(input, bodies[INBOX] as TestInbox);
     if (approvals) return approvals;
@@ -474,6 +484,31 @@ describe("the frame reaches every OpenBot surface", () => {
     expect(
       await view.findByRole("link", { name: "Tasks, 2 waiting" }),
     ).toBeTruthy();
+  });
+
+  /*
+   * The tab counted the approval inbox its own way, so a task that couldn't finish, or one waiting
+   * on its own question, was in OpenBot's Bots badge and not in the tab. It shows OpenBot's count.
+   */
+  test("the Tasks tab says the same number as OpenBot's Bots badge, tasks included", async () => {
+    api("user", {
+      attention: [
+        attentionOf("b-1", "Inbox Bot", {
+          approvals: 1,
+          tasks: { needsInput: 1, ready: 0, failed: 1 },
+        }),
+        attentionOf("b-2", "Ops Bot", { questions: 1 }),
+      ],
+    });
+    const view = renderApp("/");
+    expect(
+      await view.findByRole("link", { name: "Tasks, 4 waiting" }),
+    ).toBeTruthy();
+    // OpenBot's own badge, mounted unseen in this frame for its notices, says the same.
+    expect(
+      view.getAllByRole("img", { name: "4 things need you", hidden: true })
+        .length,
+    ).toBeGreaterThan(0);
   });
 });
 

@@ -30,9 +30,9 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import type { BrokerField } from "@/lib/plugins/mutations";
-import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import {
   APP_ACCESS_REQUESTS_PATH,
   appAccessRequestsResponse,
@@ -50,6 +50,7 @@ import {
   myConnectionPath,
   startResponse,
 } from "./connections-api";
+import { answerNoTeamGrants } from "./team-grants-api";
 
 /**
  * The server's probe outcomes, in the order its `BrokeredProbe` union declares them. The server runs
@@ -487,6 +488,9 @@ function installDeployment(deployment: Deployment): Server {
       if (!state.composioConfigured) {
         return connectionsProblem(503, "Composio is not set up");
       }
+      // The route records what the app answered: an account the app says is connected is kept,
+      // so the connections read lists it from then on.
+      if (state.confirms) state.recorded = true;
       return confirmationResponse(state.confirms);
     }
     /*
@@ -661,6 +665,9 @@ function installDeployment(deployment: Deployment): Server {
     );
     if (apps) return apps;
     if (path.startsWith("/api/plugins")) return json({ skills: [] });
+    // The app's Teams row: no teams here, and the app granted to none.
+    const teamGrants = answerNoTeamGrants(input, init);
+    if (teamGrants) return teamGrants;
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
@@ -1212,9 +1219,15 @@ test("a consent app's Connect leaves for the vendor's own page", async () => {
     await userEvent.click(await view.findByRole("button", { name: "Connect" }));
 
     /*
-     * The whole of what this press does, and the reason the case below is worth having: the row
-     * hands the browser whatever the route answered with, and there is nothing between the two.
+     * Through Composio, OpenBot's step comes first and says what the next pages will say. Nothing
+     * has left yet; Continue now (or the countdown) hands the browser the route's own answer.
      */
+    const step = await view.findByRole("dialog");
+    expect(within(step).getByText("Connecting Gmail")).toBeTruthy();
+    expect(watched.navigations).toEqual([]);
+    await userEvent.click(
+      within(step).getByRole("button", { name: "Continue now" }),
+    );
     await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
   } finally {
     watched.restore();
@@ -1242,6 +1255,11 @@ test("in OpenBot Desktop, the page asks again once the window is back in front",
   try {
     const view = renderAccountScreen(queryClient());
     await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+    await userEvent.click(
+      within(await view.findByRole("dialog")).getByRole("button", {
+        name: "Continue now",
+      }),
+    );
     await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
     const before = server.confirmsAsked;
 
@@ -1335,6 +1353,9 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
   return {
     configured: true,
     reconnectsInPlace: false,
+    handoff: null,
+    continueHandoff: () => {},
+    cancelHandoff: () => {},
     connect: () => {},
     connected: false,
     connecting: false,
@@ -2212,7 +2233,7 @@ test("the administrator's connector screen keeps the rest of the page when the c
   // AND THE PAGE IS STILL THERE. The switch is how a server is removed from this deployment, and
   // its absence was the whole cost of collapsing the page.
   expect(
-    view.getByRole("switch", { name: "Enable Gmail for this deployment" }),
+    view.getByRole("switch", { name: "Enable Gmail for this organization" }),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Refresh tools" })).toBeTruthy();
 });

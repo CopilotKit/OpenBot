@@ -78,6 +78,11 @@ export const STAYS: { prefix: string; rule: Rule; why: string }[] = [
     why: "where an app account's sign-in comes back to be verified",
   },
   {
+    prefix: "/api/install/enter",
+    rule: "sign-in-protocol",
+    why: "where a single-user OpenBot's own app enters with its install's token, which sets the cookie it carries",
+  },
+  {
     prefix: "/api/copilotkit",
     rule: "runtime",
     why: "the CopilotKit runtime, which carries runs",
@@ -175,9 +180,15 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "mobile/src/api/request.ts",
-    what: /^(fetch\(\)|\/api\/|\/api\/v2\/)$/,
+    what: /^(fetch\(\)|\/api\/|\/api\/v2\/|\/api\/v2\/organizations\/\{\})$/,
     rule: "transport",
-    why: "mobile's one request function, the generated client's mutator, which checks it is given an address of the server and keys the API's writes",
+    why: "mobile's one request function, the generated client's mutator, which checks it is given an address of the server, keys the API's writes, and recognises where a generated call wrote the organization",
+  },
+  {
+    file: "mobile/src/organization.ts",
+    what: /^\/api\/v2\/organizations\/(\{organizationId\}|\{\}\{\})$/,
+    rule: "transport",
+    why: "fills the organization the person is working in into an address the generated client built, and into the screen socket's",
   },
   {
     file: "extension/src/shared/openbot-client.ts",
@@ -193,10 +204,22 @@ export const ALLOWED: Allowed[] = [
     why: "Better Auth's client sends sign-in's own requests (sign-in, SSO, sign-out) through the page's fetch",
   },
   {
+    file: "app/src/lib/organizations/queries.ts",
+    what: "/api/auth/organization/set-active",
+    rule: "sign-in-protocol",
+    why: "Better Auth's own address for the organization a session works in, which switching sets",
+  },
+  {
     file: "app/src/lib/auth/resume.ts",
     what: "/api/plugins/arcade/verify",
     rule: "sign-in-protocol",
     why: "where sign-in sends a person back to finish verifying an app account",
+  },
+  {
+    file: "app/src/lib/plugins/finish-on-return.ts",
+    what: "fetch()",
+    rule: "sign-in-protocol",
+    why: "OpenBot Desktop's window finishes an app account's verification in the background, at the verifier resume.ts names",
   },
   // The runtime and the sockets.
   {
@@ -235,12 +258,6 @@ export const ALLOWED: Allowed[] = [
       why: "one of the API's sockets, at the address socket-url.ts builds (api/asyncapi.yaml)",
     }),
   ),
-  {
-    file: "mobile/app/computer.tsx",
-    what: "/api/v2/organizations/default/computers/{}/screen",
-    rule: "socket",
-    why: "a Bot's screen socket (api/asyncapi.yaml)",
-  },
   // Stored data.
   {
     file: "shared/attachments.ts",
@@ -297,6 +314,43 @@ export const ALLOWED: Allowed[] = [
     what: "/api/v2/organizations/default/people/me/recorder-connect-codes",
     rule: "hand-built-v2",
     why: "the Recorder host's handoff, from Rust, which has no generated client",
+  },
+  {
+    file: "desktop/src-tauri/src/install_token.rs",
+    what: "/api/install/enter",
+    rule: "sign-in-protocol",
+    why: "the window enters the OpenBot on this computer once with its install's token",
+  },
+  {
+    file: "scripts/start.sh",
+    what: /^\/api\/install\/enter\?token=/,
+    rule: "sign-in-protocol",
+    why: "the start script prints the address a single-user OpenBot is opened at, with its install's token",
+  },
+  // Desktop connecting to an OpenBot that runs somewhere else.
+  {
+    file: "desktop/src-tauri/src/connected/address.rs",
+    what: "/api/v2/organizations/default/deployment",
+    rule: "hand-built-v2",
+    why: "whether the address a person typed is an OpenBot, asked from Rust before anybody signs in",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/address.rs",
+    what: "/.well-known/oauth-authorization-server/api/auth",
+    rule: "before-sign-in",
+    why: "OAuth's discovery document, which names the sign-in's addresses",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/sign_in.rs",
+    what: "/api/copilotkit/info",
+    rule: "runtime",
+    why: "whether the OpenBot serves its runtime to an app's sign-in, asked once after signing in",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/relay.rs",
+    what: /^\/(api\/?|\.well-known\/)$/,
+    rule: "transport",
+    why: "the relay that carries the window's requests to the OpenBot it is connected to: the starts of the paths it signs in, naming no address of its own",
   },
   // Path tables the server registers today's routes from.
   ...["shared/bot-browser.ts", "shared/openbot-browser.ts"].map(
@@ -375,39 +429,4 @@ export const ALLOWED: Allowed[] = [
  * Today's calls made by hand that are moving onto the API. Each change that moves one deletes its
  * entry here; the test then fails if the call is still made by hand.
  */
-export const TEMPORARY: Temporary[] = [
-  // Learning and memory: the spec in OpenBot PR 1667, the screens after it.
-  ...[
-    "app/src/lib/learning/queries.ts",
-    "app/src/lib/learning/mutations.ts",
-  ].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/(admin|settings)\/learning(\/|\?|\{|$)/,
-      rule: "temporary",
-      why: "Learning's screens, at today's addresses",
-      until:
-        "OpenBot PR 1667 (Learning in the API), then its screens on the generated client",
-    }),
-  ),
-  ...["app/src/lib/memory.ts", "mobile/app/memory.tsx"].map(
-    (file): Temporary => ({
-      file,
-      what: /^\/api\/memory(\/|$)/,
-      rule: "temporary",
-      why: "memory, at today's addresses",
-      until:
-        "OpenBot PR 1667 (memory in the API), then these screens on the generated client",
-    }),
-  ),
-  // The Recorder's earlier addresses: no client calls them any more (the Recorder is on its
-  // generated client), but the server's own tests still read them from this table.
-  {
-    file: "shared/recorder-api.ts",
-    what: /^\/api\/recorder\/(connections|me|recordings|learning|activity)(\/|$)/,
-    rule: "temporary",
-    why: "the Recorder's earlier addresses, which no client calls and the server's tests still read from shared/recorder-api.ts",
-    until:
-      "the server no longer reading them, then their removal from shared/recorder-api.ts",
-  },
-];
+export const TEMPORARY: Temporary[] = [];

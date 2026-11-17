@@ -27,7 +27,7 @@ export const Route = createFileRoute("/_authed/admin/")({
 function RouteComponent() {
   return (
     <PageShell
-      description="Manage settings that apply to everyone and every Bot in this deployment."
+      description="Manage settings that apply to everyone and every Bot in this organization."
       title="Admin"
     >
       {ADMIN_SECTIONS.map((section) => (

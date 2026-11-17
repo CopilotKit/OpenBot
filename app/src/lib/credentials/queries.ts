@@ -4,7 +4,7 @@ import {
   listCredentials,
 } from "@/lib/api/generated/credentials/credentials";
 import type { Credential } from "@/lib/api/generated/model";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 
 /**
@@ -42,7 +42,7 @@ export function credentialListQueryOptions() {
       let cursor: string | undefined;
       do {
         const page = await listCredentials(
-          ORGANIZATION_ID,
+          organizationId(),
           { limit: 100, ...(cursor ? { cursor } : {}) },
           { signal, fallback: FALLBACK },
         );
@@ -63,7 +63,7 @@ export function modelKeyQueryOptions() {
     queryKey: credentialKeys.modelKey(),
     queryFn: async ({ signal }): Promise<ModelKeyName | null> => {
       try {
-        const { provider, keyId } = await getModelKey(ORGANIZATION_ID, {
+        const { provider, keyId } = await getModelKey(organizationId(), {
           signal,
           fallback: FALLBACK,
         });

@@ -8,9 +8,9 @@ import type { WrittenCapabilityChangeScopeKind } from "./writtenCapabilityChange
  * A switch change as the model wrote it, before it is checked.
  */
 export interface WrittenCapabilityChange {
-  /** Whose switch: the organization's, a member role's, or a directory group's. Team scopes will be added when teams arrive. */
+  /** Whose switch: the organization's, a member role's, a team's, or a directory group's. */
   scopeKind: WrittenCapabilityChangeScopeKind;
-  /** Empty for the organization; admin or member for a role; a directory group's name for a group. */
+  /** Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group. */
   scopeId: string;
   capability: string;
   allowed: SwitchValue | null;

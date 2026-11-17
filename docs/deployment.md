@@ -59,7 +59,7 @@ creates it. The first migration creates it and migration `0010` drops it again, 
 vectors any more, and only the extension's owner can drop it. So do not enable it ahead of time as
 an administrator: that leaves the migrations failing with `must be owner of extension vector`. RDS,
 Cloud SQL and Azure Database all offer it; "Your own database" in the Helm guide that comes with
-the chart (`helm show readme`) has the grant each one needs.
+the `openbot` chart (`helm show readme`) has the grant each one needs.
 
 **Not in it:**
 
@@ -207,9 +207,10 @@ No shared-memory configuration is needed or possible.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
 and it is the only one that gives each person (or an Isolated Bot) a computer of its own and scales
-the API apart from the browsers. That is the Helm chart published with each release, whose
-guide (`helm show readme`) covers EKS, GKE, AKS and a plain self-hosted cluster from the same
-templates.
+the API apart from the browsers. That is the two Helm charts published with each release:
+`openbot-bundle`, OpenBot and Intelligence together on one PostgreSQL server, and `openbot`,
+OpenBot alone pointed at an Intelligence that already runs. The `openbot` chart's guide
+(`helm show readme`) covers EKS, GKE, AKS and a plain self-hosted cluster from the same templates.
 
 **Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets

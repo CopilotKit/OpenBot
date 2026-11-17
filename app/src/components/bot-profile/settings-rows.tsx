@@ -1,6 +1,7 @@
 import {
   IconChevronRight,
   IconDeviceMobile,
+  IconSitemap,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -26,6 +27,8 @@ import {
 import type { AgentProfile } from "@/lib/agents/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { delegationSummary } from "@/lib/bot-agents/queries";
 import { destinationsQueryOptions } from "@/lib/delivery";
 import {
   deploymentCapabilitiesQueryOptions,
@@ -40,7 +43,7 @@ import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { teamBotsQueryOptions } from "@/lib/team-bots";
 import { connectorCount } from "./access";
-import { useBotPlugins } from "./use-bot-reads";
+import { useBotDelegation, useBotPlugins } from "./use-bot-reads";
 
 type Row = {
   to:
@@ -51,6 +54,7 @@ type Row = {
     | "/bots/$agentId/computer"
     | "/bots/$agentId/approvals"
     | "/bots/$agentId/setup"
+    | "/bots/$agentId/agents"
     | "/bots/$agentId/sharing"
     | "/bots/$agentId/reach";
   title: string;
@@ -85,8 +89,9 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     ...destinationsQueryOptions(),
     enabled: !personal,
   });
+  const delegation = useBotDelegation(agent.id);
   const published = teamBots.data?.find((bot) => bot.botId === agent.id);
-  const admin = me?.role === "admin";
+  const admin = isOrganizationAdmin(me?.role);
   // Its owner and admins change it there; anyone it is published to finds its link there.
   const canShare =
     !personal && (agent.mine || admin || published !== undefined);
@@ -130,7 +135,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
             "/bots/$agentId/memory",
             sources.data
               ? memorySummary(
-                  sources.data.filter((source) => source.agentId === agent.id)
+                  sources.data.filter((source) => source.botId === agent.id)
                     .length,
                 )
               : "",
@@ -186,6 +191,12 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       title: SETUP.label,
       icon: SETUP.icon,
       summary: setupSummary(agent, personal ? "personal" : "team"),
+    },
+    {
+      to: "/bots/$agentId/agents",
+      title: "Agents",
+      icon: IconSitemap,
+      summary: delegation.data ? delegationSummary(delegation.data) : "",
     },
     ...(canShare
       ? [

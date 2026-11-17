@@ -181,7 +181,7 @@
       "credential": "any-provider",
       "maintainer": "partnership",
       "mark": "mastra",
-      "webCreate": false
+      "webCreate": true
     },
     {
       "id": "byo-url",

@@ -126,6 +126,49 @@ describe("a Bot's turn that reacts or hands work on", () => {
     ]);
   });
 
+  /*
+   * A task that asks with the question tool says one needs-you line, and what its turn drew (the
+   * choices, as a table) is carried under that line as it is under a result: drawn, and drawn again
+   * when the conversation is read back.
+   */
+  test("what a task drew beside its question is drawn under its needs-you line", () => {
+    const needs = "task-report:needs:t1:run-1";
+    const items = toVisibleChatItems([
+      { id: "user-seeds", role: "user", content: "Order me some seeds." },
+      {
+        id: "assistant-line",
+        role: "assistant",
+        content: "I'll check both pages, then ask you.",
+        toolCalls: [call("call-delegate", "delegate", '{"title":"Seeds"}')],
+      },
+      {
+        id: "tool-delegate",
+        role: "tool",
+        toolCallId: "call-delegate",
+        content: '{"taskId":"t1","channelId":"c1","title":"Seeds"}',
+      },
+      {
+        id: needs,
+        role: "assistant",
+        content: "Waiting for your answer: Which seed should I order?",
+        toolCalls: [call("call-table", "showTable", '{"title":"Seeds"}')],
+      },
+      {
+        id: "tool-table",
+        role: "tool",
+        toolCallId: "call-table",
+        content: "Shown to the person.",
+      },
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      "user-seeds",
+      "assistant-line",
+      "call-delegate",
+      needs,
+      "call-table",
+    ]);
+  });
+
   test("one line, then the card: a second line after it is not drawn, and the task's report is", () => {
     const report = "task-report:result:t1:run-1";
     const items = toVisibleChatItems([

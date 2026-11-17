@@ -3,7 +3,7 @@
  */
 
 /**
- * Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot. choose: every Bot, for the skills they open one by one.
+ * Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.
  */
 export type LearningSharingMode =
   (typeof LearningSharingMode)[keyof typeof LearningSharingMode];

@@ -12,6 +12,9 @@
 #   MAKE_LATEST        `true` when publish-release.yml decided this release becomes Latest
 #   GITHUB_REPOSITORY  and GH_TOKEN, for `gh`
 #   FEED_RETRY_DELAY   seconds between reads of the update feed (default 15)
+#   HOLD_LATEST        the repository variable RELEASE_HOLD_LATEST: release tags, separated by
+#                      spaces or commas, that are signed and published but kept from Latest for a
+#                      staged rollout, such as `v1.1.0`
 #
 # A stable release is signed when it carries every fixed download name and a latest.json that lists
 # every platform (scripts/release-update-feed.sh --platforms). On a stable release only the signing
@@ -76,7 +79,23 @@ if [ "$make_latest" = true ]; then
     echo "$RELEASE_TAG is not Latest yet: it still needs the signed ${missing[*]}. The signing run that attaches the last of them makes it Latest."
   else
     becomes="$(VERSION="$RELEASE_TAG" PRERELEASE=false "$root/scripts/release-becomes-latest.sh")"
-    if [ "$becomes" = true ]; then
+    held=false
+    holds="${HOLD_LATEST:-}"
+    for hold in ${holds//,/ }; do
+      if [ "$hold" = "$RELEASE_TAG" ]; then held=true; fi
+    done
+    if [ "$becomes" = true ] && [ "$held" = true ]; then
+      # A staged rollout: the release stays published, signed and not Latest, so releases/latest,
+      # downloads.copilotkit.ai/latest/ and both update feeds keep serving the release before it.
+      # Its signed files go to rollout/<tag>/ instead, which the edge function hands to the share
+      # of viewers its key value store names (docs/releasing.md, "Staged rollout").
+      # Assigned first: a failure inside a command's argument would not stop the script.
+      kept="$(latest_tag)"
+      echo "$RELEASE_TAG is held back from Latest (RELEASE_HOLD_LATEST), so $kept stays Latest."
+      gh workflow run downloads-sync.yml -R "$GITHUB_REPOSITORY" --ref main \
+        -f tag="$RELEASE_TAG" -f rollout=true
+      echo "Started Downloads sync, which copies its signed installers to downloads.copilotkit.ai/rollout/$RELEASE_TAG/."
+    elif [ "$becomes" = true ]; then
       gh release edit "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --latest
       echo "$RELEASE_TAG is now the latest release."
       # downloads.copilotkit.ai mirrors the Latest release (scripts/downloads-sync.sh). An edit made

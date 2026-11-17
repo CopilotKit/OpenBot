@@ -31,6 +31,7 @@
         "@openbot/shared": "workspace:*",
         "@shadcn/react": "^0.3.0",
         "@streamdown/code": "2.0.0",
+        "@streamdown/math": "1.0.3",
         "@tabler/icons-react": "^3.36.1",
         "@tanstack/react-form": "^1.33.5",
         "@tanstack/react-hotkeys": "^0.10.0",
@@ -45,6 +46,7 @@
         "clsx": "^2.1.1",
         "diff": "9.0.0",
         "embla-carousel-react": "^8.6.0",
+        "katex": "0.16.47",
         "motion": "^13.1.0",
         "prompt-area": "^0.6.3",
         "react": "^19.2.0",
@@ -715,6 +717,8 @@
     "@standard-schema/utils": ["@standard-schema/utils@0.3.0", "", {}, "sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g=="],
 
     "@streamdown/code": ["@streamdown/code@2.0.0", "", { "dependencies": { "shiki": "^4.4.3" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-sSyX/9gOOcivbP7204+sfAam+gotxjUNV+T4EuN3aa6i5x1LaqtB6Ln/Mxzd1XGvm0vNApO4oKLZs+7gzFI1kQ=="],
+
+    "@streamdown/math": ["@streamdown/math@1.0.3", "", { "dependencies": { "katex": "^0.16.27", "rehype-katex": "^7.0.1", "remark-math": "^6.0.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-TOTRlPYs4LBNT8GaIWNCEVrcGVQsVcfc8WZ/x/0IyO+Rvsu6W+nF+YCS4Pl3JTVWQK8QX7LbWUChSilwlyzPZw=="],
 
     "@tabler/icons": ["@tabler/icons@3.46.0", "", {}, "sha512-f2RYFl3fzPwj5WO82x6en0dmkjefxEfOm16D1ByM6cj/McNiwOkL4VaPUoP9VVIrXAD9WnTSVFr70px703b//A=="],
 

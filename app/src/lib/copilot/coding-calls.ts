@@ -45,6 +45,11 @@ function isCodingTool(name: string): name is CodingToolName {
   return Object.hasOwn(CLAUDE_CODE_ARGUMENTS, name);
 }
 
+/** Whether a call is Claude Code's own tool, by its name and the arguments Claude Code sends. */
+export function claudeCodeCall(name: string, args: string): boolean {
+  return isCodingTool(name) && !foreignCodingCall(name, args);
+}
+
 /** The arguments as an object once all of them have arrived, or undefined while they stream. */
 function settled(args: string): unknown {
   try {

@@ -77,6 +77,48 @@ describe("a delegated task's brief", () => {
     expect(framed).toContain("never by an app's id or its markup for one");
   });
 
+  test("a report of work done is shaped after the brief: a few sentences, no list, one for what to check", () => {
+    // Claude Sonnet 5.5 reported a three-app job in 166 to 252 words, where GPT-5.6 Terra took 45 to
+    // 84, answering its brief's "report back with ... anything you could not confirm" item by item.
+    // Said after the brief, where Claude reads it last, the report came to 81 to 114 words.
+    const brief =
+      "Put the last day's customer emails in a new sheet and post a short summary in #sales. Report back with the sheet link and anything you could not confirm.";
+    const framed = frameBrief(brief);
+    const after = framed.slice(framed.indexOf(brief) + brief.length);
+    expect(after).toContain(
+      "your report is one paragraph of at most four sentences, with no list and no headings, whatever the task asks it to include",
+    );
+    expect(after).toContain(
+      "then at most one sentence on what the person should check",
+    );
+    expect(after).toContain(
+      "That sentence is where what you could not confirm goes, and nothing follows it.",
+    );
+    expect(after).toContain(
+      "Leave out the items again, the checks you ran, what you read back and what you left out.",
+    );
+    // Only for work done: a question's answer is shaped by the frame before the brief, as it was.
+    expect(after).toContain(
+      "When the task above is to make, change or send something",
+    );
+    // The example keeps the claims rule (an inference is said to be one), on apps no test uses.
+    expect(after).toContain(
+      "a whole report is: 'I saved this week's 4 invoices to [Invoices, week 46](link) and posted the list in #finance. Two vendor names come from their email addresses, so check those.'",
+    );
+    for (const app of ["Gmail", "Sheets", "Slack", "Smartlead"])
+      expect(after).not.toContain(app);
+    // Read back, the brief is the brief alone.
+    expect(readBrief(framed)).toBe(brief);
+  });
+
+  test("a thread opened before a report of work done was shaped after the brief still reads as the Bot's brief", () => {
+    const before = `${frameBrief("Post the summary in #sales.").split("Post the summary in #sales.")[0]}Post the summary in #sales.`;
+    expect(before.endsWith("The task:\n\nPost the summary in #sales.")).toBe(
+      true,
+    );
+    expect(readBrief(before)).toBe("Post the summary in #sales.");
+  });
+
   test("a thread opened before the report was asked to be the result alone still reads as the Bot's brief", () => {
     const before =
       "This is a task from your conversation with the person, handed into a thread of its own so that conversation stays short. Do the work here with your tools, as you would there, and finish it.\nAnswer the way you always do: when the answer has structure (figures, a comparison, a list of items, a plan, a record), draw it with a component, and say in words what it shows and what stands out. Never write out what a component already shows: no Markdown table or list of the same rows beside it.\nLead with the result and say plainly anything you could not confirm. Your answer and any components you draw are posted back in that conversation as they are, your words first; what you say while you work stays in this thread. Write it to the person: never mention this brief, and never say where a component sits, such as 'the chart above'.\nThe task:\n\nFind Dana's latest email.";
@@ -118,6 +160,29 @@ describe("how a Bot answers a short ask itself", () => {
  * order itself, and wrote 👍 as a reply beside its 👍 reaction.
  */
 describe("how a Bot that holds delegate is told to work", () => {
+  test("the tool is named where it is called, never as what the Bot is", () => {
+    // "When you hold delegate, you are the person's point of contact" is a sentence a Bot can say
+    // back about itself, and the section is only given to a run that holds the tool.
+    expect(DELEGATING_GUIDANCE).not.toContain("When you hold");
+    expect(
+      DELEGATING_GUIDANCE.startsWith("You are the person's point of contact,"),
+    ).toBe(true);
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Hand the other work the person asked for to a task with delegate",
+    );
+  });
+
+  test("a brief is not told to stop short: the work's own checks stay in it", () => {
+    // Told to end a brief at what to check, Claude wrote shorter briefs: of 24 replayed briefs for
+    // "emails from the last day", 4 kept a rolling 24 hours (17 without the line), and the task then
+    // took a 30-hour-old email as the last day's. How the task reports is shaped after the brief.
+    expect(DELEGATING_GUIDANCE).not.toContain("end it there");
+    expect(DELEGATING_GUIDANCE).not.toContain("how to report");
+    expect(DELEGATING_GUIDANCE).toContain(
+      "every figure, name, link and constraint from this conversation the work needs",
+    );
+  });
+
   test("names the work that goes to a task, so it is handed off without being asked", () => {
     expect(DELEGATING_GUIDANCE).toContain("without waiting to be asked");
     // On Claude Sonnet 5.5 a chart of four figures and a sheet with a total were done in the
@@ -137,6 +202,19 @@ describe("how a Bot that holds delegate is told to work", () => {
     expect(DELEGATING_GUIDANCE).toContain(
       "First write one short line saying what you will do",
     );
+  });
+
+  test("a brief keeps a time window counted back from now, never a calendar date", () => {
+    // Live, on the Claude Agent SDK: asked for customer mail "in the last day", the brief said
+    // "since 2026-11-15" in half the replays; the task searched by that date, which takes whole
+    // calendar days, and filed a 30-hour-old email as one of the last day's.
+    const paragraph = DELEGATING_GUIDANCE.split("\n").find((line) =>
+      line.includes("with a brief that stands on its own"),
+    );
+    expect(paragraph).toContain(
+      'Give a time window as the person did, counted back from now: "the last day" is the last 24 hours',
+    );
+    expect(paragraph).toContain('never "since" yesterday\'s date');
   });
 
   test("hands off only work the person asked for: a question about whether it can gets an answer", () => {
@@ -181,6 +259,47 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
     expect(DELEGATING_GUIDANCE).toContain(
       "Only when the person asks for the link",
+    );
+  });
+
+  test("more for a task already started goes to that task, and a stop to it, never a new task", () => {
+    expect(DELEGATING_GUIDANCE).toContain(
+      "pass it on with follow_up, naming that task by the taskId its delegate answer gave",
+    );
+    expect(DELEGATING_GUIDANCE).toContain("never start a new task for it");
+    expect(DELEGATING_GUIDANCE).toContain("call stop for it");
+    // Live, told to stop work it had done itself, a Bot stopped the conversation's other task.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "stop nothing, never a different task in its place",
+    );
+  });
+
+  test("a new piece of work asked for with 'also' or 'too' is a task of its own, never a follow-up", () => {
+    /*
+     * Live, while a task wrote a guide for EU customers, "Also write a guide for US customers" was
+     * passed into that task with follow_up, so "Stop the EU one" could only steer the task writing
+     * both. Without "also" the same ask was a task of its own.
+     */
+    // The paragraph about a task already started, after the three things a turn may do.
+    const pointed =
+      DELEGATING_GUIDANCE.split("\n\n").find((paragraph) =>
+        paragraph.includes("pass it on with follow_up"),
+      ) ?? "";
+    expect(pointed).toContain(
+      'A new piece of work is a new task, even when they ask for it with "also" or "too" while another task runs',
+    );
+    expect(pointed).toContain('"Also write a guide for US customers"');
+    expect(pointed).toContain("goes to its own task with delegate");
+    expect(pointed).toContain(
+      "never into a task that is making something else",
+    );
+    expect(pointed).toContain(
+      "follow_up is only for changing or adding to the work a task is already doing",
+    );
+    // "Tell it to also check X" stays a follow-up: the rule above it is unchanged.
+    expect(pointed).toContain('"tell it to also check the parking"');
+    expect(pointed.indexOf("pass it on with follow_up")).toBeLessThan(
+      pointed.indexOf("A new piece of work is a new task"),
     );
   });
 

@@ -8,7 +8,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { type ConversationSummary, ORGANIZATION_ID } from "../src/api";
+import {
+  type ConversationSummary,
+  DEPLOYMENT_ORGANIZATION_ID,
+  ORGANIZATION_ID,
+} from "../src/api";
 import { listConversations } from "../src/api/generated/conversations/conversations";
 import { getDeployment } from "../src/api/generated/organization-settings/organization-settings";
 import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
@@ -29,8 +33,8 @@ export default function Home() {
     setPushRegistered(false);
   }, [session?.user.id]);
   const loadOptions = useCallback(
-    // The API's `deployment`, which answers before anybody has signed in.
-    () => getDeployment(ORGANIZATION_ID),
+    // The API's `deployment`, which answers before anybody has signed in: asked of the organization every install has.
+    () => getDeployment(DEPLOYMENT_ORGANIZATION_ID),
     [],
   );
   const options = useLoad(loadOptions, !session);

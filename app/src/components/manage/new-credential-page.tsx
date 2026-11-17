@@ -62,7 +62,7 @@ export function NewCredentialPage() {
       description={
         paths.edition === "personal"
           ? "Save a key to your vault. You won’t be able to view it after saving it."
-          : `Save a credential for ${paths.deploymentName}. You won’t be able to view the secret after saving it.`
+          : "Save a credential for this organization. You won’t be able to view the secret after saving it."
       }
       title={paths.edition === "personal" ? "Add key" : "Add credential"}
     >

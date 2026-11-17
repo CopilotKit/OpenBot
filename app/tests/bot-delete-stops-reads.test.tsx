@@ -13,7 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { BotProfileRoutePage } from "@/components/bot-profile/page";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { getGetComputerUrl } from "@/lib/api/generated/computers/computers";
-import { ORGANIZATION_ID } from "@/lib/api/request";
+import { organizationId } from "@/lib/api/request";
 import { queryClient } from "@/query-client";
 import {
   activityResponse,
@@ -78,10 +78,10 @@ const EXPENSES: AgentProfile = {
 /** How long the list of Bots takes to come back after the delete. */
 const LIST_TAKES_MS = 1_500;
 
-const computerOf = getGetComputerUrl(ORGANIZATION_ID, EXPENSES.id);
+const computerOf = () => getGetComputerUrl(organizationId(), EXPENSES.id);
 /** A request about the Expenses Bot: one of its own addresses, or one that names it. */
 const aboutExpenses = (path: string) =>
-  !path.startsWith(computerOf) && path.split("/").includes(EXPENSES.id);
+  !path.startsWith(computerOf()) && path.split("/").includes(EXPENSES.id);
 
 /**
  * The server: the Bot until it is deleted, and 404 for anything about it after, as the real one. It
@@ -139,6 +139,24 @@ function answerExpenses(path: string): Response {
     return handoffResponse();
   if (path === `${botPath(EXPENSES.id)}/grants`)
     return Response.json({ grants: [], nextCursor: null });
+  if (path === `${botPath(EXPENSES.id)}/delegation`)
+    return Response.json({
+      botId: EXPENSES.id,
+      mode: "self",
+      model: null,
+      effort: null,
+      instructions: "",
+      agents: [
+        {
+          id: "bag_openbot",
+          name: "OpenBot",
+          description: "OpenBot's own agent.",
+          kind: "openbot",
+          available: true,
+        },
+      ],
+      canManage: true,
+    });
   return Response.json({});
 }
 

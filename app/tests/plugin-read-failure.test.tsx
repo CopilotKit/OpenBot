@@ -221,7 +221,7 @@ test("a connector's admin page says the list of apps failed, not that there is n
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load apps. Reload the page."),
+    await view.findByText("Couldn't load apps. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText("Not an app")).toBeNull();
   expect(view.queryByText("Nothing to configure.")).toBeNull();
@@ -233,7 +233,9 @@ test("a list that genuinely lacks the connector still says it is not an app", as
   await waitForFailedRead(client);
 
   expect(await view.findByText("Not an app")).toBeTruthy();
-  expect(view.queryByText("Couldn't load apps. Reload the page.")).toBeNull();
+  expect(
+    view.queryByText("Couldn't load apps. Try again in a moment."),
+  ).toBeNull();
 });
 
 test("a tool's admin page says the plugin list failed, not that the connector is off", async () => {
@@ -245,7 +247,7 @@ test("a tool's admin page says the plugin list failed, not that the connector is
   await waitForFailedRead(client);
 
   expect(
-    await view.findByText("Couldn't load plugins. Reload the page."),
+    await view.findByText("Couldn't load plugins. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText("This connector isn't turned on.")).toBeNull();
   expect(
@@ -263,7 +265,7 @@ test("a list that genuinely lacks the connector still says it is not enabled, on
 
   expect(await view.findByText("This connector is off")).toBeTruthy();
   expect(
-    view.queryByText("Couldn't load plugins. Reload the page."),
+    view.queryByText("Couldn't load plugins. Try again in a moment."),
   ).toBeNull();
 });
 

@@ -79,11 +79,18 @@ function mounted(
   const sentTo: string[] = [];
   let closed = 0;
   let claimed = 0;
+  /** Whether the person has closed the consent tab, which is what the card's wait watches for. */
+  let tabGone = false;
+  /** Each request to the verifier, with how it was asked. */
+  const verifierCalls: RequestInit[] = [];
   window.open = ((url?: string) => {
     claimed += 1;
     if (url) sentTo.push(url);
     if (!popupsAllowed) return null;
     const tab = {
+      get closed() {
+        return tabGone;
+      },
       opener: {} as unknown,
       location: {
         replace: (next: string) => {
@@ -106,6 +113,11 @@ function mounted(
         status,
         headers: { "content-type": "application/json" },
       });
+    if (url === "/api/plugins/arcade/verify") {
+      verifierCalls.push(init ?? {});
+      // The verifier always answers with somewhere to go, which a manual redirect does not follow.
+      return new Response(null, { status: 303, headers: { location: "/" } });
+    }
     const call = connectionsCall(url, init);
     // A person's own connections. A Shared app's one account is never among them.
     if (call?.operation === "list")
@@ -189,6 +201,10 @@ function mounted(
     sentTo,
     tabsClosed: () => closed,
     tabsClaimed: () => claimed,
+    closeTab: () => {
+      tabGone = true;
+    },
+    verifierCalls,
   };
 }
 
@@ -346,4 +362,60 @@ test("once connected in front of the person, the conversation carries on by itse
   expect(card.view.getByText("Notion is connected.")).toBeTruthy();
   await settleReactWork();
   expect(asked).toHaveLength(1);
+});
+
+/*
+ * OPENBOT DESKTOP'S WINDOW SENDS THE CONSENT TO THE PERSON'S BROWSER, which the OpenBot on this
+ * computer does not admit as its person. Where each action is authorized on its own, the server holds
+ * what that browser brought back for the window to finish at the verifier. The card must not move the
+ * conversation to do it, so the window asks in the background once the person is back, and then reads
+ * the connections again. In a browser the consent comes back to the verifier itself.
+ */
+
+/** Close the consent tab and come back to this one, until the card has stopped waiting. */
+async function comeBack(card: ReturnType<typeof mounted>) {
+  await waitFor(() =>
+    expect(card.view.getByText(/Finish in the tab that opened/)).toBeTruthy(),
+  );
+  card.closeTab();
+  await waitFor(
+    () => {
+      window.dispatchEvent(new Event("focus"));
+      expect(card.view.queryByText(/Finish in the tab that opened/)).toBeNull();
+    },
+    { timeout: 3_000 },
+  );
+  await settleReactWork();
+}
+
+test("in OpenBot Desktop, coming back finishes a held consent in the background, once, and stays put", async () => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  try {
+    const card = mounted();
+    const before = window.location.href;
+    await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+    press(card);
+
+    await comeBack(card);
+
+    expect(card.verifierCalls).toEqual([
+      { credentials: "same-origin", redirect: "manual" },
+    ]);
+    expect(window.location.href).toBe(before);
+  } finally {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  }
+});
+
+test("in a browser, coming back asks the verifier nothing", async () => {
+  const card = mounted();
+  await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+  press(card);
+
+  await comeBack(card);
+
+  expect(card.verifierCalls).toEqual([]);
 });

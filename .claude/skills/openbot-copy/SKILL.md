@@ -23,11 +23,15 @@ One word for one thing, everywhere a person can see it.
 |---|---|---|
 | **Bot**, **Bots** (capitalised) | What a person creates, talks to and gives work to. | agent, coworker, assistant, AI |
 | **agent** | Only an outside framework's program, in the places that are about connecting one: "an agent you already run", "AG-UI agent". | Bot, when the thing is a Bot |
+| **agent**, **Agents** | What a Bot hands work to, listed on the Agents page: OpenBot's own, a framework OpenBot runs, or one you run. Never for the Bot itself. | Bot, worker, subagent |
 | **app** | A service a Bot uses: Gmail, Google Drive, Notion. | connector, integration, plugin |
 | **Connections** | The page that lists the apps and accounts every Bot uses as you: the every-Bot page of Apps. On a Bot's page the same thing is the **Apps** row. | connected accounts, linked accounts |
 | **connect / disconnect / reconnect** | What a person does to their own account. | link (except GitHub and Slack identity, where "link" is the vendor's own word) |
 | **skill** | A named instruction invoked with `/`. | command, prompt |
 | **admin** | The person who runs OpenBot for everybody. | administrator, owner, operator |
+| **organization**, **everyone in the organization** | Everybody who uses OpenBot together, and what is theirs as a whole: "everyone in the organization", "organization rules", "your organization's shared account". | team, the whole team, teammates, organisation |
+| **team**, **Teams** | A named group of people inside one organization, made in Admin under Teams or kept in step with the company's directory. Whatever can be given to everyone can be given to a team. | group (for a team), and never the whole organization |
+| **shared account** | An app account the organization connects once, which Bots act as. | team account |
 | **OpenBot** | The product the person is using, and their account with it: "Sign in to OpenBot", "your OpenBot account". | this deployment, the server, the instance, CopilotKit |
 | **OpenBot by CopilotKit** | The company, only where it has to be named: the license agreement's name, a legal or privacy line, the one place setup says who makes OpenBot. | CopilotKit alone |
 | **turn on / turn off** | An admin switching an app or a feature. | enable / disable (in sentences; a switch may still read "Enabled") |
@@ -101,7 +105,11 @@ because the admin is the one who sets them. A page anybody can open may not.
 8. **Buttons are verbs**: Connect, Request access, Create, Save. A button never says "Click here" or
    "OK" when it does something specific.
 9. **Errors**: what failed, in the person's terms, and one next step. "Couldn't load your
-   connections. Reload the page." No stack of reasons, no blame.
+   connections. Try again in a moment." No stack of reasons, no blame. Never "Reload the page": the
+   same screens show in the OpenBot Desktop window, which has no reload button. While OpenBot
+   Desktop can't reach the OpenBot it is connected to, one line says so and the screens wait
+   (`lib/desktop/connection-lost.ts`), so a section's error is never the place to name that cause.
+   `tests/no-reload-the-page-in-user-copy.test.ts` reads every shown string.
 10. **Empty states** say what will appear and how: "No skills yet. Write one with New skill."
 
 ## Before And After
@@ -109,7 +117,7 @@ because the admin is the one who sets them. A page anybody can open may not.
 | Before | After |
 |---|---|
 | The apps and accounts your Bots use as you. Open one to connect it or change it. | Connect your accounts so Bots can use apps on your behalf. |
-| Your connected accounts could not be loaded, so nothing is listed here rather than a list that may be wrong. Reload the page, and tell an administrator if it persists. | Couldn't load your connections. Reload the page, or ask an admin if it keeps happening. |
+| Your connected accounts could not be loaded, so nothing is listed here rather than a list that may be wrong. Reload the page, and tell an administrator if it persists. | Couldn't load your connections. Try again in a moment, or ask an admin if it keeps happening. |
 | Sent to the coworker it is for. Type @ to choose one yourself. | OpenBot picks the right Bot. Type @ to choose one. |
 | Gmail is a Composio app, and this deployment has no Composio key. (to a non-admin) | Gmail isn't set up yet. An admin has to turn it on. |
 | The agent is still working on another request. Please wait or stop that task first. | This Bot is still working on something. Wait for it, or stop it first. |
@@ -120,6 +128,7 @@ because the admin is the one who sets them. A page anybody can open may not.
 |---|---|
 | "agent" or "coworker" for a Bot | Bot |
 | "administrator" | admin |
+| "team", "the whole team" or "teammates" for everybody | "everyone in the organization", or "organization"; a team is one named group inside it |
 | "this deployment" on a page anybody can open | OpenBot, or say what is missing |
 | "CopilotKit" alone: "Sign in to CopilotKit", "your CopilotKit account" | OpenBot, or "OpenBot by CopilotKit" where the company must be named |
 | A sentence over ~25 words | Split it, or cut the clause that justifies the screen |

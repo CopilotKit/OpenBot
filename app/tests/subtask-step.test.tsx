@@ -149,6 +149,34 @@ test("a subtask is one step of the turn's work line, not a card of its own", asy
   expect(line.getByText("2 steps")).toBeTruthy();
 });
 
+/*
+ * FOUND ON DESKTOP: a task's subagent answered "PONG" without calling a tool, and the work was
+ * reported as "0 steps". It ran and it answered, so its line says that, whether the result is a
+ * server's from before (`steps: 0`) or one that gives no count at all.
+ */
+test("a subtask that answered without calling a tool says it answered directly, never 0 steps", async () => {
+  const threadId = await subagentThreadId(
+    answered.parentThreadId,
+    answered.call.id,
+  );
+  for (const result of [
+    { answer: "PONG", threadId, steps: 0 },
+    { answer: "PONG", threadId, worked: "Answered directly" },
+  ]) {
+    const view = await draw(
+      { ...answered, result: JSON.stringify(JSON.stringify(result)) },
+      { settled: true, busy: false },
+      answered.subagent.slice(0, 1),
+    );
+    const line = within(
+      (await view.findByText("Subtask")).closest("summary") as HTMLElement,
+    );
+    expect(line.getByText("Answered directly")).toBeTruthy();
+    expect(view.queryByText(/\b0 steps\b/)).toBeNull();
+    cleanup();
+  }
+});
+
 test("while it works, the line says so, and the row opens to each step as the subagent takes it", async () => {
   // Its first step only: the subagent has asked for the account and the tickets, and nothing is back.
   const view = await draw(answered, { settled: false, busy: true }, [

@@ -119,6 +119,12 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 | `OPENBOT_TOOL_GUIDES` | unset                             | Path to a JSON file of `{ "<ACTION>": guide }` that replaces or adds to the guides OpenBot ships for Composio actions; `null` for an action puts the app's own words back. Read once. A file that cannot be read is logged and left out, and the shipped guides are used. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
+| `OPENBOT_MULTIPLE_ORGANIZATIONS` | unset (one organization) | `true` or `1` lets this OpenBot hold more than one organization. Everybody who signs in gets an organization of their own, anybody signed in can create another, and people join one by invitation. Signing in no longer makes anybody a member of `default`, which keeps the people already in it and the admins `INITIAL_ADMIN_EMAILS` names. Any other value, or none, keeps the one organization: everybody who signs in is a member of it, and creating another is refused for everybody. An OpenBot with one person keeps one organization either way. With it on, the server logs once at start what is not yet kept apart between organizations. |
+| `SMTP_HOST`          | unset (no email)                   | The mail server OpenBot sends email through. Today that is an invitation to an organization. Unset, OpenBot sends no email: the invited person sees the invitation in the app when they sign in with that address, and the inviter passes its link on. The email's link is on `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`); with neither, no email is sent. When the mail server does not take a message, the invitation is still made and the inviter is told to pass the link on. With `SMTP_HOST` unset, none of the mail settings below is read. |
+| `MAIL_FROM`          | unset                              | The sender, such as `OpenBot <openbot@example.com>`. Required with `SMTP_HOST`: without it the server refuses to start. |
+| `SMTP_PORT`          | `587`, or `465` with `SMTP_SECURE=true` | The mail server's port. A value that is not a port number from 1 to 65535 refuses to start. |
+| `SMTP_SECURE`        | `false`                            | `true` or `1` is TLS from the first byte. `false` or `0` upgrades the connection with STARTTLS when the mail server offers it. Any other value refuses to start. |
+| `SMTP_USER`, `SMTP_PASSWORD` | unset (no sign-in)         | The sign-in for a mail server that asks for one. Set both or neither: one alone refuses to start. The password is never logged. |
 | `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `OPENBOT_PRODUCT_TELEMETRY` | unset (off; on for OpenBot Desktop) | `1` or `true` sends OpenBot's product usage events; `0` turns them off. `DO_NOT_TRACK` or `COPILOTKIT_TELEMETRY_DISABLED` set to `1` or `true` turns them off whatever this says. See [TELEMETRY.md](TELEMETRY.md). |
 | `OPENBOT_ALLOW_LOOPBACK_MCP` | unset                      | `1` lets an MCP server on this machine's loopback address (`http://127.0.0.1:<port>` or `[::1]`) be added by its address, for developing an MCP server against OpenBot and for the end-to-end tests. Leave it unset everywhere people use OpenBot: every other private, local or plain-http address stays refused either way. |
@@ -149,6 +155,12 @@ deployment's Intelligence entitlement and hides the bar when it is active on a p
 developer plan, an inactive entitlement, and one that cannot be read all show it. The answer is
 kept for ten minutes, so a plan bought today hides the bar within ten minutes, and a page waits at
 most a second for the first answer after the server starts. In Helm, set the variable through
+`config.extraEnv`.
+
+**`OPENBOT_MULTIPLE_ORGANIZATIONS` and the mail settings** reach the server from `.env` under
+Docker Compose: the `server` service reads that file, and its own `environment:` names none of them.
+In Helm, the mail settings are `config.mail` (`host`, `from`, `port`, `secure`, `user`), with the
+password in `secrets.smtpPassword`, and `OPENBOT_MULTIPLE_ORGANIZATIONS` goes through
 `config.extraEnv`.
 
 The component catalogue has separate per-Bot grants. Its sortable data table (`showTable`),
@@ -197,7 +209,7 @@ To rotate the secret, do one of these:
   every Bot that uses it stay as they are. Set the new value in the environment as well, so a config
   created later carries it.
 - **Turn the app off and on again.** Set the new values, restart, then on the app's page under Apps
-  turn **Enable for this deployment** off and back on. Turning it off deletes the config at Composio
+  turn **Enable for this organization** off and back on. Turning it off deletes the config at Composio
   and ends the shared account and every Bot's grant on the app. Turning it on creates a new config
   with the new client. Then make the app shared, connect the team account and grant it to Bots again.
 
@@ -410,6 +422,7 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Refused on a public address. Ignored when a provider is configured. |
+| `OPENBOT_INSTALL_TOKEN`      | The install's own token. The personal edition only admits requests carrying its install's token: a browser once through `/api/install/enter?token=<token>&to=/`, which leaves it a cookie, and a script in the `X-OpenBot-Install-Token` header. **Required** for a single-user server in a container. OpenBot Desktop and `scripts/start.sh` generate it. API keys on `/api/v2` do not need it. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
@@ -673,6 +686,19 @@ anyone who can see the Bot can read it. The personal edition does not show this 
 
 With both caps above at zero the screen says the capability is switched off, because a grant made
 then is a row nothing will read.
+
+## A Bot giving parts of its work to subagents
+
+| Variable                       | Meaning                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `BOT_SUBAGENTS_AT_ONCE`        | How many of one answer's subagents run at the same time. Any more wait for one to finish. Default `10`.       |
+| `BOT_SUBAGENTS_PER_ANSWER`     | How many subagents one answer may start in all, the guard against a run that never stops. Default `100`.     |
+
+A Bot working through a long list gives out every part: the first ones run, the rest wait their turn
+and start as places free up, so no part is refused for arriving late. Past the overall number, the
+next one is refused and the Bot is told to do the rest of the work itself. `BOT_SUBAGENTS_PER_ANSWER=0`
+refuses every one. Both are refused at start-up if they are not whole numbers, and
+`BOT_SUBAGENTS_AT_ONCE` must be at least `1`, because nothing would ever run.
 
 ## Slack and Microsoft Teams (OpenTag pairing)
 

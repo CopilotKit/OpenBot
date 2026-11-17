@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,13 @@ import { parse, stringify } from "yaml";
  * that stops firing (a plugin that fails to load, a visitor that never matches) fails here rather
  * than letting the break through review.
  */
+
+/*
+ * Each lint is one run of the CLI over the whole spec: about 1 s on a laptop and 2.4 to 2.7 s on a CI
+ * runner, so a test that lints twice took 4.7 s there and one ran past Bun's 5 s default. Twenty
+ * seconds is four times the slowest seen.
+ */
+setDefaultTimeout(20_000);
 
 const ROOT = join(import.meta.dir, "../..");
 const SPEC = join(ROOT, "api/openapi.yaml");
@@ -84,6 +91,34 @@ test("each convention is enforced", () => {
   ]) {
     expect(rules).toContain(rule);
   }
+});
+
+test("only the caller's own organizations and invitations sit outside an organization", () => {
+  const ORGANIZATIONS = "/api/v2/people/me/organizations";
+  // What a person can ask before they can name an organization, or before they are a member of
+  // the one an invitation is for: allowed as committed.
+  expect(Object.keys(spec().paths)).toContain(ORGANIZATIONS);
+  expect(Object.keys(spec().paths)).toContain(
+    "/api/v2/people/me/invitations/{invitationId}/accept",
+  );
+  const broken = spec();
+  // Nothing beside it is: not another of the person's own resources, and not the address under it.
+  broken.paths["/api/v2/people/me/bots"] = broken.paths[BOTS];
+  broken.paths[`${ORGANIZATIONS}/{organizationId}`] = broken.paths[BOTS];
+  const outside = lint(broken)
+    .filter((problem) => problem.ruleId === "openbot/organization-scoped")
+    .map((problem) => problem.message);
+  expect(outside).toHaveLength(2);
+  expect(
+    outside.some((text) =>
+      text.startsWith("/api/v2/people/me/bots is not under"),
+    ),
+  ).toBe(true);
+  expect(
+    outside.some((text) =>
+      text.startsWith(`${ORGANIZATIONS}/{organizationId} is not under`),
+    ),
+  ).toBe(true);
 });
 
 test("an area's own problem must be the shared one and more", () => {

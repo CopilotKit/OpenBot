@@ -17,7 +17,7 @@ export const ListSignInRequestsParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -164,7 +164,7 @@ export const ListSignInRequestsResponse = zod.object({
 });
 
 /**
- * Open a sign-in request: a Bot in the person's open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot's browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use.
+ * Open a sign-in request: a Bot in the person's open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot's browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use. On an OpenBot with no computers for Bots there is nowhere to sign a Bot in, and the answer is 503, as the computers answer there: nothing was opened. The deployment's botComputers says so beforehand.
  * @summary Ask a person to sign a Bot in to a website
  */
 
@@ -177,7 +177,7 @@ export const CreateSignInRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -329,7 +329,7 @@ export const CreateSignInRequestResponse = zod.object({
 });
 
 /**
- * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found.
+ * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.
  * @summary Read a sign-in request
  */
 
@@ -345,7 +345,7 @@ export const GetSignInRequestParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -467,7 +467,7 @@ export const SubmitSignInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -620,7 +620,7 @@ export const SubmitSignInCodeParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -766,7 +766,7 @@ export const UseSavedLoginParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -910,7 +910,7 @@ export const TakeOverSignInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1044,7 +1044,7 @@ export const FinishSignInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
@@ -1178,7 +1178,7 @@ export const CancelSignInParams = zod.object({
     .string()
     .min(1)
     .describe(
-      "The organization. Until multi-organization lands every install has one, addressed as `default`.",
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
   personId: zod
     .string()
