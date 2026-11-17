@@ -1048,6 +1048,37 @@ bun scripts/model-compat.ts --env-file .env --harness agent-claude-sdk --provide
 
 `--model <regex>` narrows the models, `--tags latest` skips building from source.
 
+### Model lock
+
+The picker offers a model only when this check has proven it on the Bot's harness.
+`shared/model-lock.json` holds, per harness, the model clients its `source` image carried and, per
+provider, the models that answered and the ones refused, in the provider's words. The server's model
+catalogue reads it (`shared/model-lock.ts` has the rule): a live model the lock doesn't verify for
+the harness is hidden, and a conversation already set to one runs on the default and says so.
+
+- **Which harness.** A Claude plan runs every Bot through `agent-claude-sdk`, a ChatGPT plan through
+  `agent-langgraph-agui`, and with a key, the harness picked in setup when it takes OpenBot's model
+  choice. OpenBot's own runtime is not a harness image, so its models are not locked.
+- **What is locked.** Only a harness and provider pair this check has run. A pair it never ran (a
+  provider with no key here, such as xAI today) stays open, and a gateway is never locked.
+- **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
+  request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that
+  started and stopped answering and the clients that moved. Merging it lets the picker offer them.
+  A failure that says nothing about the model (the harness never started, a timeout) keeps what the
+  lock said before.
+- **A client bump** is held to the lock: a pull request from this repository that changes a
+  harness's `requirements.txt`, `package.json`, `bun.lock`, `Dockerfile` or the Codex client version
+  runs the **Model lock** workflow, which builds that harness, sends every listed model a request,
+  and fails when a model the lock verifies no longer answers. Models the bump newly fixes are added
+  by the next daily refresh.
+
+To write the lock from results by hand:
+
+```sh
+bun scripts/model-compat.ts lock --changes changes.md results/*.json
+bun scripts/model-compat.ts guard results/*.json
+```
+
 ## The one thing CI cannot do
 
 The smoke journey in `tests/smoke` is the only check that proves the parts are wired to each other:

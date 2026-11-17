@@ -25,18 +25,30 @@
  * OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY. A provider with no key is reported as skipped,
  * not failed. Keys are never printed: every detail is scrubbed of them.
  *
+ * What passed on the `source` image becomes the model lock (shared/model-lock.ts): the models
+ * the picker may offer for each harness. `lock` writes it from the results; `guard` fails when a
+ * model the lock verifies no longer answers, for a pull request that changes a harness's client.
+ *
  *   bun scripts/model-compat.ts [--env-file .env] [--harness agent-claude-sdk,...]
  *     [--provider anthropic,...] [--model <regex>] [--tags latest,source] [--concurrency 6]
  *     [--out results.json] [--exit-zero]
  *   bun scripts/model-compat.ts report --summary <file> [--issue <file>] results/*.json
+ *   bun scripts/model-compat.ts lock [--lock shared/model-lock.json] [--date YYYY-MM-DD] results/*.json
+ *   bun scripts/model-compat.ts guard [--lock shared/model-lock.json] [--summary <file>] results/*.json
  *
  * Needs Docker. Exits 1 when anything failed (unless --exit-zero); `report` merges the results of
- * several runs, writes the Markdown summary, and exits 1 when any of them failed.
+ * several runs, writes the Markdown summary, and exits 1 when any of them failed. `lock` exits 0,
+ * and says whether the lock changed. `guard` exits 1 when a verified model failed.
  */
 
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type {
+  LockedEngine,
+  LockProvider,
+  ModelLock,
+} from "../shared/model-lock";
 
 const ROOT = join(import.meta.dir, "..");
 const REGISTRY = "ghcr.io/copilotkit/openbot-";
@@ -304,7 +316,8 @@ export const PROVIDERS: readonly Provider[] = [
 
 /**
  * Providers the Desktop offers by address that this check leaves out on purpose, with why. A
- * gateway serves its own aliases, not a provider's models.
+ * gateway serves its own aliases, not a provider's models, so the lock has nothing to say about
+ * it and leaves its models open.
  */
 export const NOT_CHECKED: readonly { baseUrl: string; why: string }[] = [
   {
@@ -540,10 +553,20 @@ export function codexGate(
 export type Result = {
   harness: string;
   tag: string;
+  /** What a person reads: "Anthropic (key or Claude plan)", "ChatGPT plan". */
   provider: string;
+  /** What the lock files it under. */
+  providerId: LockProvider;
   model: string;
   status: "pass" | "fail" | "skipped";
   detail: string;
+};
+
+/** One results file: the rows, and the model clients each image carried. */
+export type Results = {
+  results: Result[];
+  /** By harness, then image tag: package name to version. */
+  clients?: Record<string, Record<string, Record<string, string>>>;
 };
 
 function cell(text: string): string {
@@ -768,6 +791,100 @@ async function prepare(harness: Harness, tag: string) {
     : exec(["docker", "pull", "--quiet", imageOf(harness, tag)]);
 }
 
+/**
+ * The model-client packages whose versions decide what a provider accepts, by the names each
+ * ecosystem installs them under. Whichever an image has are recorded in the lock beside the
+ * models they were proven with, so a lock entry says what it was true for.
+ */
+const PYTHON_CLIENTS = [
+  "claude-agent-sdk",
+  "ag-ui-claude-sdk",
+  "openai",
+  "anthropic",
+  "litellm",
+  "google-genai",
+  "google-adk",
+  "ag2",
+  "agno",
+  "crewai",
+  "langgraph",
+  "langchain-core",
+  "langchain-openai",
+  "langchain-anthropic",
+  "langchain-google-genai",
+  "langroid",
+  "llama-index-core",
+  "llama-index-llms-openai",
+  "llama-index-llms-anthropic",
+  "llama-index-llms-google-genai",
+  "pydantic-ai-slim",
+  "strands-agents",
+  "agent-framework",
+  "agent-framework-core",
+];
+const NODE_CLIENTS = [
+  "@mastra/core",
+  "ai",
+  "@ai-sdk/openai",
+  "@ai-sdk/anthropic",
+  "@ai-sdk/google",
+];
+
+const PYTHON_VERSIONS = `
+import json, importlib.metadata as m
+found = {}
+for name in ${JSON.stringify(PYTHON_CLIENTS)}:
+    try:
+        found[name] = m.version(name)
+    except Exception:
+        pass
+try:
+    import claude_agent_sdk, pathlib, subprocess
+    for cli in pathlib.Path(claude_agent_sdk.__file__).parent.glob("_bundled/claude*"):
+        said = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=30).stdout.split()
+        if said:
+            found["claude-code"] = said[0]
+            break
+except Exception:
+    pass
+print(json.dumps(found))
+`;
+const NODE_VERSIONS = `
+const found = {};
+for (const name of ${JSON.stringify(NODE_CLIENTS)}) {
+  try { found[name] = require(\`\${process.cwd()}/node_modules/\${name}/package.json\`).version; } catch {}
+}
+console.log(JSON.stringify(found));
+`;
+
+/** The model clients an image carries, or an empty record when it says nothing. */
+async function clientsIn(image: string): Promise<Record<string, string>> {
+  for (const args of [
+    ["python", "-c", PYTHON_VERSIONS],
+    ["bun", "-e", NODE_VERSIONS],
+  ] as const) {
+    const ran = await exec([
+      "docker",
+      "run",
+      "--rm",
+      "--entrypoint",
+      args[0],
+      image,
+      args[1],
+      args[2],
+    ]);
+    if (ran.code !== 0) continue;
+    try {
+      const found = JSON.parse(ran.stdout.trim().split("\n").at(-1) ?? "");
+      if (found && typeof found === "object" && Object.keys(found).length)
+        return found as Record<string, string>;
+    } catch {
+      // Not this runtime's answer: try the next.
+    }
+  }
+  return {};
+}
+
 let serial = 0;
 
 /** Starts the harness on one provider and model, sends one run, and stops it. */
@@ -987,6 +1104,7 @@ async function check(argv: string[]): Promise<number> {
         harness: row.harness.image ?? "",
         tag: options.tags.join(", "),
         provider: label(row.provider),
+        providerId: row.provider,
         model: "(all)",
         status: "skipped",
         detail: `skipped: no key (${provider(row.provider).secret})`,
@@ -996,6 +1114,7 @@ async function check(argv: string[]): Promise<number> {
         harness: row.harness.image ?? "",
         tag: options.tags.join(", "),
         provider: label(row.provider),
+        providerId: row.provider,
         model: "(all)",
         status: "fail",
         detail: row.detail,
@@ -1019,6 +1138,15 @@ async function check(argv: string[]): Promise<number> {
         oneLine(ready.stderr.split("\n").slice(-5).join(" ")),
       );
   });
+
+  // The model clients each image carries, which the lock records beside what passed.
+  const clients: NonNullable<Results["clients"]> = {};
+  for (const { harness, tag } of images) {
+    const image = imageOf(harness, tag);
+    if (unpulled.has(image) || !harness.image) continue;
+    const found = await clientsIn(image);
+    clients[harness.image] = { ...clients[harness.image], [tag]: found };
+  }
 
   // The ChatGPT plan's Codex client version, in whichever images carry the plan.
   const codex = await fetchJson(CODEX_CATALOGUE);
@@ -1044,6 +1172,7 @@ async function check(argv: string[]): Promise<number> {
             harness: harness.image ?? "",
             tag,
             provider: "ChatGPT plan",
+            providerId: "chatgpt",
             model: "(all)",
             status: "fail",
             detail: `could not read Codex's model catalogue: ${codex.error}`,
@@ -1055,6 +1184,7 @@ async function check(argv: string[]): Promise<number> {
             harness: harness.image ?? "",
             tag,
             provider: "ChatGPT plan",
+            providerId: "chatgpt",
             ...gate,
           });
       }
@@ -1078,6 +1208,7 @@ async function check(argv: string[]): Promise<number> {
         row.provider === "anthropic" && row.harness.credential === "anthropic"
           ? "Anthropic (key or Claude plan)"
           : label(row.provider),
+      providerId: row.provider,
       model: row.model,
       ...outcome,
     });
@@ -1088,11 +1219,266 @@ async function check(argv: string[]): Promise<number> {
   });
 
   if (options.out)
-    writeFileSync(options.out, `${JSON.stringify({ results }, null, 2)}\n`);
+    writeFileSync(
+      options.out,
+      `${JSON.stringify({ results, clients } satisfies Results, null, 2)}\n`,
+    );
   console.log(renderSummary(results));
   return results.some((row) => row.status === "fail") && !options.exitZero
     ? 1
     : 0;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The model lock.
+// ---------------------------------------------------------------------------------------------
+
+const PROVIDER_IDS_BY_LABEL: Record<string, LockProvider> = {
+  OpenAI: "openai",
+  Anthropic: "anthropic",
+  "Anthropic (key or Claude plan)": "anthropic",
+  Google: "google",
+  xAI: "xai",
+  "ChatGPT plan": "chatgpt",
+};
+
+/** The lock's name for a row's provider. Results written before rows carried it are read by label. */
+export function providerIdOf(row: {
+  provider: string;
+  providerId?: string;
+}): LockProvider | undefined {
+  if (row.providerId) return row.providerId as LockProvider;
+  return PROVIDER_IDS_BY_LABEL[row.provider];
+}
+
+/**
+ * A failure that says nothing about the model: the harness never started, the image could not be
+ * had, or the run timed out with no word from the provider. The lock keeps what it knew before
+ * for such a model rather than take it away on a bad day for the runner.
+ */
+const INCONCLUSIVE =
+  /^(no answer:|the harness did not start|the harness never became healthy|the harness published no port|could not get |the stream ended without finishing the run)/;
+
+export function inconclusive(detail: string): boolean {
+  return INCONCLUSIVE.test(detail);
+}
+
+function sortedRecord<T>(record: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(record).sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+/**
+ * The tag a harness's lock is read from: `source`, the image built from this commit, which is what
+ * the next release ships. A run of the published images alone says nothing about this commit.
+ */
+function lockTag(rows: readonly Result[]): string | undefined {
+  return rows.some((row) => row.tag === SOURCE) ? SOURCE : undefined;
+}
+
+/**
+ * The model lock from a run's results, over the lock before it.
+ *
+ * For each harness, the `source` image's rows: what passed is verified, what the provider refused
+ * is refused, in its words. What the run could not decide (an inconclusive failure), a provider
+ * it had no key for or could not list, and a harness it did not run, keep what the lock said
+ * before. A model the provider no longer lists drops out. The date moves only when the lock does,
+ * so a day with nothing new changes nothing.
+ */
+export function buildLock(
+  previous: ModelLock | undefined,
+  runs: readonly Results[],
+  date: string,
+): ModelLock {
+  const results = runs.flatMap((run) => run.results);
+  const clients = Object.assign({}, ...runs.map((run) => run.clients ?? {}));
+  const engines: Record<string, LockedEngine> = {
+    ...(previous?.engines ?? {}),
+  };
+  const harnesses = [...new Set(results.map((row) => row.harness))];
+  for (const harness of harnesses) {
+    const rows = results.filter((row) => row.harness === harness);
+    const tag = lockTag(rows);
+    const before = previous?.engines[harness];
+    const providers: LockedEngine["providers"] = {
+      ...(before?.providers ?? {}),
+    };
+    const ran = rows.filter((row) => row.tag === tag && row.model !== "(all)");
+    for (const id of new Set(ran.map(providerIdOf))) {
+      if (!id) continue;
+      const earlier = before?.providers[id];
+      const verified = new Set<string>();
+      const refused: Record<string, string> = {};
+      for (const row of ran.filter((row) => providerIdOf(row) === id)) {
+        if (row.status === "pass") verified.add(row.model);
+        else if (row.status !== "fail") continue;
+        else if (!inconclusive(row.detail)) refused[row.model] = row.detail;
+        else if (earlier?.verified.includes(row.model)) verified.add(row.model);
+        else if (earlier?.refused[row.model] !== undefined)
+          refused[row.model] = earlier.refused[row.model] ?? "";
+      }
+      providers[id] = {
+        verified: [...verified].sort(),
+        refused: sortedRecord(refused),
+      };
+    }
+    if (!Object.keys(providers).length) continue;
+    const found = tag ? clients[harness]?.[tag] : undefined;
+    engines[harness] = {
+      clients: sortedRecord(
+        found && Object.keys(found).length ? found : (before?.clients ?? {}),
+      ),
+      providers: sortedRecord(providers),
+    };
+  }
+  const next = sortedRecord(engines);
+  const same =
+    previous !== undefined &&
+    JSON.stringify(previous.engines) === JSON.stringify(next);
+  return { checkedAt: same ? previous.checkedAt : date, engines: next };
+}
+
+/**
+ * What changed between two locks, as a pull request says it: models that newly answer, models
+ * that stopped, models that dropped out of a provider's listing, and clients that moved.
+ */
+export function describeLockChange(
+  before: ModelLock | undefined,
+  after: ModelLock,
+): string {
+  const lines: string[] = [];
+  for (const [engine, entry] of Object.entries(after.engines)) {
+    const earlier = before?.engines[engine];
+    const changes: string[] = [];
+    for (const [provider, now] of Object.entries(entry.providers)) {
+      if (!now) continue;
+      const was = earlier?.providers[provider as LockProvider];
+      const known = new Set([
+        ...(was?.verified ?? []),
+        ...Object.keys(was?.refused ?? {}),
+      ]);
+      const passes = now.verified.filter(
+        (model) => !was?.verified.includes(model),
+      );
+      const stopped = Object.keys(now.refused).filter((model) =>
+        was?.verified.includes(model),
+      );
+      const newlyRefused = Object.keys(now.refused).filter(
+        (model) => !known.has(model),
+      );
+      const gone = [...known].filter(
+        (model) => !now.verified.includes(model) && !(model in now.refused),
+      );
+      if (passes.length)
+        changes.push(
+          `${provider}: now answers ${passes.map((m) => `\`${m}\``).join(", ")}`,
+        );
+      if (stopped.length)
+        changes.push(
+          `${provider}: **stopped answering** ${stopped.map((m) => `\`${m}\` (${cell(now.refused[m] ?? "")})`).join(", ")}`,
+        );
+      if (newlyRefused.length)
+        changes.push(
+          `${provider}: refused ${newlyRefused.map((m) => `\`${m}\` (${cell(now.refused[m] ?? "")})`).join(", ")}`,
+        );
+      if (gone.length)
+        changes.push(
+          `${provider}: no longer listed ${gone.map((m) => `\`${m}\``).join(", ")}`,
+        );
+    }
+    const moved = Object.entries(entry.clients)
+      .filter(([name, version]) => earlier?.clients[name] !== version)
+      .map(([name, version]) =>
+        earlier?.clients[name]
+          ? `${name} ${earlier.clients[name]} to ${version}`
+          : `${name} ${version}`,
+      );
+    if (moved.length) changes.push(`clients: ${moved.join(", ")}`);
+    if (changes.length)
+      lines.push(
+        `- **${engine}**`,
+        ...changes.map((change) => `  - ${change}`),
+      );
+  }
+  return lines.length ? lines.join("\n") : "No model changed.";
+}
+
+/** Every model the lock verifies that now fails: what a client bump must not break. */
+export function brokenVerified(
+  lock: ModelLock,
+  results: readonly Result[],
+): Result[] {
+  return results.filter((row) => {
+    if (row.status !== "fail" || row.model === "(all)") return false;
+    const id = providerIdOf(row);
+    return (
+      !!id &&
+      (lock.engines[row.harness]?.providers[id]?.verified.includes(row.model) ??
+        false)
+    );
+  });
+}
+
+function readResults(files: readonly string[]): Results[] {
+  return files.map((file) => JSON.parse(readFileSync(file, "utf8")) as Results);
+}
+
+function lockCommand(argv: string[]): number {
+  let path = join(ROOT, "shared/model-lock.json");
+  let date = new Date().toISOString().slice(0, 10);
+  let changes: string | undefined;
+  const files: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--lock") path = argv[++i] ?? path;
+    else if (arg === "--date") date = argv[++i] ?? date;
+    else if (arg === "--changes") changes = argv[++i];
+    else if (arg) files.push(arg);
+  }
+  const previous = existsSync(path)
+    ? (JSON.parse(readFileSync(path, "utf8")) as ModelLock)
+    : undefined;
+  const next = buildLock(previous, readResults(files), date);
+  const text = `${JSON.stringify(next, null, 2)}\n`;
+  const changed = !existsSync(path) || readFileSync(path, "utf8") !== text;
+  if (changed) writeFileSync(path, text);
+  if (changes)
+    writeFileSync(changes, `${describeLockChange(previous, next)}\n`);
+  console.log(
+    changed
+      ? `The model lock changed: ${path}`
+      : "The model lock is unchanged.",
+  );
+  return 0;
+}
+
+function guardCommand(argv: string[]): number {
+  let path = join(ROOT, "shared/model-lock.json");
+  let summary: string | undefined;
+  const files: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--lock") path = argv[++i] ?? path;
+    else if (arg === "--summary") summary = argv[++i];
+    else if (arg) files.push(arg);
+  }
+  const lock = JSON.parse(readFileSync(path, "utf8")) as ModelLock;
+  const results = readResults(files).flatMap((run) => run.results);
+  const broken = brokenVerified(lock, results);
+  const markdown = [
+    "## Model lock",
+    "",
+    broken.length
+      ? `${broken.length} model${broken.length === 1 ? "" : "s"} the lock verifies no longer answer${broken.length === 1 ? "s" : ""} through this change's client. A person set to one would get the provider's refusal on every message. Fix the client, or, if the model really can't run on this harness any more, say so in the pull request: the next daily check takes it out of the lock.`
+      : "Every model the lock verifies for the harnesses this change touches still answers.",
+    "",
+    ...(broken.length ? [renderTable(broken), ""] : []),
+    renderSummary(results),
+  ].join("\n");
+  if (summary) writeFileSync(summary, `${markdown}\n`);
+  else console.log(markdown);
+  return broken.length ? 1 : 0;
 }
 
 function report(argv: string[]): number {
@@ -1128,6 +1514,13 @@ function report(argv: string[]): number {
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  const code = argv[0] === "report" ? report(argv.slice(1)) : await check(argv);
+  const code =
+    argv[0] === "report"
+      ? report(argv.slice(1))
+      : argv[0] === "lock"
+        ? lockCommand(argv.slice(1))
+        : argv[0] === "guard"
+          ? guardCommand(argv.slice(1))
+          : await check(argv);
   process.exit(code);
 }
