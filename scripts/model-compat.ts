@@ -35,6 +35,12 @@
  *   bun scripts/model-compat.ts report --summary <file> [--issue <file>] results/*.json
  *   bun scripts/model-compat.ts lock [--lock shared/model-lock.json] [--date YYYY-MM-DD] results/*.json
  *   bun scripts/model-compat.ts guard [--lock shared/model-lock.json] [--summary <file>] results/*.json
+ *   bun scripts/model-compat.ts harnesses
+ *
+ * The harnesses it runs are the published ones and every engine the lock names, published or not
+ * yet (`harnesses` prints them, for the workflows' matrix). An engine is put in the lock with its
+ * providers' pairs empty before its first release, so nothing is offered on it until it has
+ * passed here: the LangGraph (TypeScript) engine, agent-langgraph-ts, starts that way.
  *
  * Needs Docker. Exits 1 when anything failed (unless --exit-zero); `report` merges the results of
  * several runs, writes the Markdown summary, and exits 1 when any of them failed. `lock` exits 0,
@@ -345,6 +351,43 @@ export function providersFor(harness: Harness): ProviderId[] {
     default:
       return [];
   }
+}
+
+/**
+ * The harnesses the check runs: every published harness, and every engine the model lock names
+ * whether it is published yet or not. An engine the lock names offers a model only once it has
+ * passed here, so it is checked from before its first release (its `source` image, built from this
+ * checkout; a `latest` that isn't published yet is an inconclusive row). A lock entry with no row
+ * in shared/harnesses.json has nothing to start, so it is not run. `only` narrows to the named
+ * image directories.
+ */
+export function probedHarnesses(
+  known: readonly Harness[],
+  published: readonly string[],
+  lock: ModelLock | undefined,
+  only?: readonly string[],
+): Harness[] {
+  const locked = Object.keys(lock?.engines ?? {});
+  return known.filter(
+    (row) =>
+      !!row.image &&
+      (published.includes(row.image) || locked.includes(row.image)) &&
+      (!only || only.includes(row.image)),
+  );
+}
+
+function readProbed(only?: readonly string[]): Harness[] {
+  const published: string[] = JSON.parse(
+    readFileSync(join(ROOT, ".github/published-images.json"), "utf8"),
+  );
+  const { harnesses } = JSON.parse(
+    readFileSync(join(ROOT, "shared/harnesses.json"), "utf8"),
+  ) as { harnesses: Harness[] };
+  const lockPath = join(ROOT, "shared/model-lock.json");
+  const lock = existsSync(lockPath)
+    ? (JSON.parse(readFileSync(lockPath, "utf8")) as ModelLock)
+    : undefined;
+  return probedHarnesses(harnesses, published, lock, only);
 }
 
 export type Listing = { models: string[] } | { error: string };
@@ -828,6 +871,17 @@ const NODE_CLIENTS = [
   "@ai-sdk/openai",
   "@ai-sdk/anthropic",
   "@ai-sdk/google",
+  // The LangGraph (TypeScript) engine: its graph, the LangChain chat models that call each
+  // provider, and the AG-UI packages it speaks through.
+  "@langchain/langgraph",
+  "@langchain/core",
+  "@langchain/anthropic",
+  "@langchain/openai",
+  "@langchain/google-genai",
+  "@ag-ui/core",
+  "@ag-ui/client",
+  "@ag-ui/encoder",
+  "@ag-ui/langgraph",
 ];
 
 const PYTHON_VERSIONS = `
@@ -849,10 +903,23 @@ except Exception:
     pass
 print(json.dumps(found))
 `;
-const NODE_VERSIONS = `
+/**
+ * Read under `bun -e` or plain `node -e` (a Node image may have no Bun), from the image's working
+ * directory up, the way Node resolves a package. The manifest is read as a file rather than
+ * required, since a package whose `exports` map leaves out `./package.json` refuses the require.
+ */
+export const NODE_VERSIONS = `
+const { readFileSync } = require("node:fs");
+const { dirname, join } = require("node:path");
 const found = {};
 for (const name of ${JSON.stringify(NODE_CLIENTS)}) {
-  try { found[name] = require(\`\${process.cwd()}/node_modules/\${name}/package.json\`).version; } catch {}
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    try {
+      found[name] = JSON.parse(readFileSync(join(dir, "node_modules", name, "package.json"), "utf8")).version;
+      break;
+    } catch {}
+    if (dirname(dir) === dir) break;
+  }
 }
 console.log(JSON.stringify(found));
 `;
@@ -862,6 +929,7 @@ async function clientsIn(image: string): Promise<Record<string, string>> {
   for (const args of [
     ["python", "-c", PYTHON_VERSIONS],
     ["bun", "-e", NODE_VERSIONS],
+    ["node", "-e", NODE_VERSIONS],
   ] as const) {
     const ran = await exec([
       "docker",
@@ -1042,21 +1110,11 @@ async function check(argv: string[]): Promise<number> {
   const keys = readKeys(options.envFile);
   const scrub = scrubber(keys);
 
-  const published: string[] = JSON.parse(
-    readFileSync(join(ROOT, ".github/published-images.json"), "utf8"),
-  );
-  const harnesses = (
-    JSON.parse(readFileSync(join(ROOT, "shared/harnesses.json"), "utf8")) as {
-      harnesses: Harness[];
-    }
-  ).harnesses.filter(
-    (row) =>
-      row.image &&
-      published.includes(row.image) &&
-      (!options.harnesses || options.harnesses.includes(row.image)),
-  );
+  const harnesses = readProbed(options.harnesses);
   if (!harnesses.length)
-    throw new Error("No published harness matches --harness.");
+    throw new Error(
+      "No harness matches --harness: it must be published, or named in shared/model-lock.json, and have a row in shared/harnesses.json.",
+    );
 
   const wanted = new Set(
     harnesses
@@ -1514,6 +1572,13 @@ function report(argv: string[]): number {
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
+  if (argv[0] === "harnesses") {
+    // The workflows' matrix: one job per harness this check runs, as compact JSON.
+    console.log(
+      JSON.stringify(readProbed().map((harness) => harness.image ?? "")),
+    );
+    process.exit(0);
+  }
   const code =
     argv[0] === "report"
       ? report(argv.slice(1))

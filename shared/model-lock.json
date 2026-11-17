@@ -1,4 +1,22 @@
 {
   "checkedAt": "2026-11-17",
-  "engines": {}
+  "engines": {
+    "agent-langgraph-ts": {
+      "clients": {},
+      "providers": {
+        "anthropic": {
+          "verified": [],
+          "refused": {}
+        },
+        "google": {
+          "verified": [],
+          "refused": {}
+        },
+        "openai": {
+          "verified": [],
+          "refused": {}
+        }
+      }
+    }
+  }
 }

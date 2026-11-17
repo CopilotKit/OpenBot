@@ -85,6 +85,14 @@ test("every engine the lock names is a harness OpenBot publishes, with the clien
   const images = harnesses.map((harness) => harness.image);
   for (const [engine, entry] of Object.entries(MODEL_LOCK.engines)) {
     expect(images, engine).toContain(engine);
-    expect(Object.keys(entry.clients).length, engine).toBeGreaterThan(0);
+    // An engine locked before its first run (agent-langgraph-ts) has run no client yet, and
+    // offers nothing until it has.
+    const ran = Object.values(entry.providers).some(
+      (pair) =>
+        !!pair &&
+        (pair.verified.length > 0 || Object.keys(pair.refused).length > 0),
+    );
+    if (ran)
+      expect(Object.keys(entry.clients).length, engine).toBeGreaterThan(0);
   }
 });

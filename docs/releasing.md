@@ -1061,6 +1061,11 @@ the harness is hidden, and a conversation already set to one runs on the default
   choice. OpenBot's own runtime is not a harness image, so its models are not locked.
 - **What is locked.** Only a harness and provider pair this check has run. A pair it never ran (a
   provider with no key here, such as xAI today) stays open, and a gateway is never locked.
+- **A new engine** can be locked before its first release, by giving it empty pairs for the
+  providers it runs on. Nothing is offered on it until a run proves a model, including on a
+  provider the check has no key for. The check runs every engine the lock names, published or not
+  yet, from its `source` image (`bun scripts/model-compat.ts harnesses` lists them). The LangGraph
+  (TypeScript) engine, `agent-langgraph-ts`, starts this way on Anthropic, OpenAI and Google.
 - **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
   request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that
   started and stopped answering and the clients that moved. Merging it lets the picker offer them.

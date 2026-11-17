@@ -16,6 +16,7 @@ on:
       - "agent-*/Dockerfile"
       - "agent-*/package.json"
       - "agent-*/bun.lock"
+      - "agent-*/package-lock.json"
       - "agent-langgraph-agui/src/chatgpt_models.py"
       - "shared/model-lock.json"
       - "scripts/model-compat.ts"
@@ -42,6 +43,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
       - id: list
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -49,13 +53,17 @@ jobs:
         run: |
           set -euo pipefail
           changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          # The harnesses the check runs: the published ones, and every engine the lock names,
+          # published yet or not, that has a row in shared/harnesses.json.
+          checked=$(bun scripts/model-compat.ts harnesses)
           # The check itself, or the lock, changed: every harness the lock names is checked.
           if grep -qxE 'shared/model-lock.json|scripts/model-compat.ts|\.github/workflows/model-lock.yml' <<<"$changed"; then
-            harnesses=$(jq -c '[.engines | keys[]]' shared/model-lock.json)
+            harnesses=$(jq -c --argjson checked "$checked" \
+              '[.engines | keys[] | select(. as $h | $checked | index($h))]' shared/model-lock.json)
           else
             harnesses=$(grep -oE '^agent-[a-z0-9-]+/' <<<"$changed" | tr -d / | sort -u \
-              | jq -R . | jq -sc --slurpfile published .github/published-images.json \
-                'map(select(. as $h | $published[0] | index($h)))')
+              | jq -R . | jq -sc --argjson checked "$checked" \
+                'map(select(. as $h | $checked | index($h)))')
           fi
           echo "harnesses=$harnesses" >> "$GITHUB_OUTPUT"
           echo "Harnesses to check: $harnesses"
