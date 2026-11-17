@@ -245,7 +245,8 @@ export type ComputerGuidance = typeof computerGuidance;
  * look. The browser is still not for hunting; a search tool's own guidance bounds how much it does.
  *
  * Citing is in words, not tool ids: a Bot answered "Confirmed via `GMAIL_GET_PROFILE`", which tells
- * the person nothing and reads as a debug log.
+ * the person nothing and reads as a debug log. The rule for that is the reply rules' plain-words
+ * paragraph, which covers every reply, not only a citation; see {@link REPLY_GUIDANCE}.
  *
  * So is addressing them: these instructions call the user "the person" throughout, and a Bot said it
  * back to them, "...without digging into turn-by-turn, which the person didn't ask for".
@@ -254,8 +255,7 @@ const PROVENANCE_GUIDANCE_LINES = [
   "Say where an answer came from. When you read it with one of your tools, cite what you read.",
   "When you are answering from your own knowledge instead, say so in a line, and never dress that",
   "up as something you looked up here.",
-  "Say what you did in plain words, such as 'I checked your Gmail profile'. Never name a tool or a",
-  "function to the person, such as GMAIL_GET_PROFILE, in code formatting or otherwise.",
+  "Cite it in plain words, as the reply rules below say.",
   "These instructions call the person you are working for 'the person'. When you write to them, call",
   "them 'you', and never narrate your own reasoning about what they asked for.",
   "",
@@ -621,6 +621,16 @@ export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
  * inference, said to be one, because the claims rule is unchanged. A delegated task is told the
  * same after its brief (`BRIEF_CLOSE` in orchestration.ts), where Claude reads it last.
  *
+ * PLAIN WORDS, NOT MACHINERY. A Bot's replies read like a debug log when they name what only the
+ * machinery knows: a tool ("run_subagent", "delegate"), an app action's code name
+ * (GMAIL_GET_PROFILE), how its tools are loaded (Claude Code calls the ones it holds back
+ * "deferred tools"), or an error as a tool gave it ("No such tool available"). The rule used to be
+ * one sentence about citing, in the sources section, and said nothing of what a Bot can do, how it
+ * splits work, or what failed. So it is said here, for every reply, with the words to use instead,
+ * shown as examples on apps no test uses: the person hears what was done in their apps, never how.
+ * The rule names no internal tool itself, because a name in the prompt is one more name for the
+ * model to repeat.
+ *
  * It says it is about words. Generative UI is unchanged: a component the answer calls for is drawn.
  */
 const REPLY_LINES = [
@@ -648,6 +658,14 @@ const REPLY_LINES = [
   "what is left, if anything.",
   "This is about words, not components: a chart, table or card the answer calls for under the rules",
   "above is still drawn.",
+  "",
+  "Talk about your work in the person's words, never in your own machinery's. Say what you can do,",
+  "what you did and what did not work as things done in their apps, on the web or on your computer:",
+  "'I can read and post in your Teams channels', 'I checked your HubSpot contacts', 'I looked into",
+  "each account separately', 'I've started this as a task', 'the Teams post didn't go through'. Never",
+  "name a tool, a function or an app action's code name, in code formatting or otherwise. Never say",
+  "how your tools are found, loaded, handed out or run, and never quote an error the way a tool gave",
+  "it: say in a few words what did not work.",
 ];
 
 export const REPLY_GUIDANCE = asParagraphs(REPLY_LINES);
