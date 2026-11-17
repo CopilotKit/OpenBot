@@ -22,6 +22,7 @@ import {
 import { SEARCH_TOOLS, toolsFound } from "@openbot/shared/tool-search";
 import {
   IconAlertTriangle,
+  IconArrowsMaximize,
   IconBox,
   IconChevronDown,
   IconClock,
@@ -83,7 +84,11 @@ import {
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { attachmentAddress, attachmentUrl } from "@/lib/channels/attachments";
+import {
+  attachmentAddress,
+  attachmentUrl,
+  LARGEST_PICTURE_DRAWN_INLINE,
+} from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
@@ -409,6 +414,10 @@ function parkedTiles(attachments: readonly Attachment[]): SentAttachment[] {
       url: source.value,
       ...(attachment.filename ? { filename: attachment.filename } : {}),
       modality: attachmentModality(attachment.type, mimeType),
+      ...(typeof attachment.size === "number"
+        ? { sizeBytes: attachment.size }
+        : {}),
+      ...(mimeType ? { mimeType } : {}),
     };
   });
 }
@@ -1231,6 +1240,30 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
     );
   }
 
+  /*
+   * A PICTURE OVER 8MB IS SHOWN AS ITS FILE, NOT DOWNLOADED FOR A THUMBNAIL. A thumbnail is drawn
+   * from the whole file, pictures go up to 100MB, and every reader would pay that on first paint
+   * while the download held up the conversation's other requests. Its name, kind and size are on the
+   * message, so nothing is fetched until somebody opens it. A message from before sizes were sent
+   * carries none, and every picture sent then was 8MB at most, so it draws as it always did.
+   */
+  if (
+    attachment.sizeBytes !== undefined &&
+    attachment.sizeBytes > LARGEST_PICTURE_DRAWN_INLINE
+  ) {
+    return (
+      <PictureFileTile
+        address={address}
+        facts={{
+          sizeBytes: attachment.sizeBytes,
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        }}
+        filename={filename}
+        openable
+      />
+    );
+  }
+
   return (
     <AttachmentLightbox filename={filename} url={address}>
       <img
@@ -1254,10 +1287,13 @@ function PictureFileTile({
   address,
   facts,
   filename,
+  openable = false,
 }: {
   address: string;
   facts: { sizeBytes?: number; mimeType?: string } | undefined;
   filename?: string;
+  /** An Open beside the Download, for a picture that can be drawn but is too large to draw here. */
+  openable?: boolean;
 }) {
   const name = filename ?? "Untitled file";
   const kind = facts?.mimeType ? kindLabel(facts.mimeType, name) : "Image";
@@ -1265,15 +1301,32 @@ function PictureFileTile({
     <div className="flex h-32 w-44 flex-col justify-between rounded-xl border border-border bg-muted/40 p-3">
       <div className="flex items-start justify-between gap-2">
         <IconPhoto aria-hidden className="size-6 text-muted-foreground" />
-        <Button
-          aria-label={`Download ${name}`}
-          nativeButton={false}
-          render={<a download={name} href={address} />}
-          size="icon-sm"
-          variant="outline"
-        >
-          <IconDownload />
-        </Button>
+        <div className="flex gap-1">
+          {openable ? (
+            <AttachmentLightbox
+              filename={name}
+              trigger={
+                <Button
+                  aria-label={`Open ${name}`}
+                  size="icon-sm"
+                  variant="outline"
+                />
+              }
+              url={address}
+            >
+              <IconArrowsMaximize />
+            </AttachmentLightbox>
+          ) : null}
+          <Button
+            aria-label={`Download ${name}`}
+            nativeButton={false}
+            render={<a download={name} href={address} />}
+            size="icon-sm"
+            variant="outline"
+          >
+            <IconDownload />
+          </Button>
+        </div>
       </div>
       <div className="min-w-0">
         {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}

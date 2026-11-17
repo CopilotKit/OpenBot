@@ -18,6 +18,7 @@ export {
   classifyAttachment,
   DEFAULT_ATTACHMENT_LIMITS,
   formatAttachmentLimit,
+  LARGEST_PICTURE_DRAWN_INLINE,
   largestAttachmentBytes,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_DOCUMENT_BYTES,
