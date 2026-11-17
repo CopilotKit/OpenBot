@@ -193,11 +193,13 @@ isn't known until it is on, shows **Turn on**, and one that takes a key shows **
 opens its page under Connections. The Bot is told which button the card shows, so it names that one.
 
 **Bots** lists your Bots and, under **What your Bots learn**, a link to Skills. A Bot's own page
-shows what it is working on and what waits for you, with its Activity beside them, then its settings
-in this order: **Routines** (its routines, goals and check-ins in one list), **Skills**, **Apps**,
-**Computer** (its folders and its browser), **Approvals** and **Setup** (its name, instructions and
-who it hands work to). There is no Memory row, because the personal edition does not offer memory
-yet.
+has three tabs under its title: **Profile**, **Activity** and **Settings**. Profile shows what waits
+for you and the Bot's own switches. Activity shows what it is working on and has done. Settings
+holds its rows in four groups: **When it works** (a box to tell the Bot when to work, then
+**Routines**, its routines, goals and check-ins in one list), **What it knows** (**Skills**),
+**What it uses** (**Apps**, **Computer**, its folders and its browser, and **Approvals**) and
+**This Bot** (**Setup**, its name and instructions, and **Agents**, who it hands work to).
+There is no Memory row, because the personal edition does not offer memory yet.
 
 The main menu has **Bots**, **Routines**, **Skills** and **Connections**. **Teach a Bot** opens from
 the Skills page. **Settings** is in three

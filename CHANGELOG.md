@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Pages and routines
+
+- **A Bot's page has three tabs: Profile, Activity and Settings.** Profile keeps the Bot's header,
+  what needs you and its switches, Activity lists what it is doing, and Settings groups its rows
+  under When it works, What it knows, What it uses and This Bot. The earlier `/bots/<id>/activity`
+  address opens the Activity tab.
+
 ## 1.1.0
 
 **Before upgrading.** Read these first: several of them change what a script, a proxy, a Compose

@@ -138,8 +138,8 @@ there:
 
 - **Conversations** has nothing to configure. It is where the work happens, so it leads the docs and
   is not a settings row.
-- **Activity** for one Bot opens from the Bot's page itself, beside what it is working on, and is not
-  a settings row either.
+- **Activity** for one Bot is the Activity tab of the Bot's page, beside Profile and Settings, and
+  is not a settings row either.
 - **Memory** is listed only where OpenBot offers it. The personal edition does not yet.
 
 | Primitive | Holds | Every Bot | This Bot | No longer a separate name |
