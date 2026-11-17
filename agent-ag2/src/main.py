@@ -8,22 +8,29 @@ from pathlib import Path
 # The spec file every language in the box reads: one level above this Bot in the repository, and
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from model_providers import bot_settings
+from model_providers import bot_settings, openai_api
 
 from ag2 import Agent
 from ag2.ag_ui import AGUIStream
-from ag2.config import AnthropicConfig, OpenAIConfig
+from ag2.config import AnthropicConfig, OpenAICompletionsConfig, OpenAIResponsesConfig
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
 
-def _config() -> AnthropicConfig | OpenAIConfig:
+def _config() -> AnthropicConfig | OpenAICompletionsConfig | OpenAIResponsesConfig:
     """The provider the model screen chose, which AG2 reaches through a config of its own.
 
     `BOT_PROVIDER` is `anthropic` for an Anthropic key and `openai` otherwise, an OpenAI-compatible
     endpoint included. Each SDK reads its own key from the environment.
+
+    An OpenAI model takes AG2's Responses config when it takes function tools only there
+    (`gpt-5.6` and later, `gpt-5.4` and `gpt-5.5` once a run carries an effort, the `-pro` models:
+    "To use function tools, use /v1/responses"), and the
+    Chat Completions config otherwise, which every OpenAI-compatible endpoint serves. Both are
+    named explicitly: AG2 1.4.0 turns the bare `OpenAIConfig` into the Responses config, which
+    would move every compatible endpoint onto an API most of them do not serve.
     """
     settings = bot_settings("agent-ag2")
     provider = settings.provider
@@ -35,7 +42,9 @@ def _config() -> AnthropicConfig | OpenAIConfig:
     # The same "" for OPENAI_BASE_URL, which Compose writes whenever the model screen chose a plain
     # OpenAI key. The SDK only defaults an absent URL; given "", every request fails to connect.
     base_url = (os.environ.get("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
-    return OpenAIConfig(model=model, base_url=base_url)
+    if openai_api(model) == "responses":
+        return OpenAIResponsesConfig(model=model, base_url=base_url)
+    return OpenAICompletionsConfig(model=model, base_url=base_url)
 
 
 agent = Agent(

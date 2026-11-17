@@ -278,12 +278,17 @@ export function botSettings(
 /**
  * Whether this model has to be driven through the Responses API.
  *
- * Two kinds of OpenAI model, as OpenAI's own API answered on 2026-10-28:
+ * Two kinds of OpenAI model, as OpenAI's own API answered on 2026-10-28 and 2026-11-17:
  *
  * - `gpt-5.6-*` and every `gpt-6*` reject function tools on `/v1/chat/completions` ("To use
  *   function tools, use /v1/responses or set reasoning_effort to 'none'"), and `none` is itself
  *   refused by some of them (`gpt-6-astra`, `gpt-6.1-sol`), so the Responses API is the one way all
  *   of them take tools.
+ * - `gpt-5.4*` and `gpt-5.5*` (`-mini`, `-nano` and the dated snapshots too) reject the same the
+ *   moment a run carries a reasoning effort: "Function tools with reasoning_effort are not supported
+ *   for gpt-5.5 in /v1/chat/completions." Without one they take tools there, and on the Responses
+ *   API they take tools with or without one, so the Responses API is the one way that always works.
+ *   `gpt-5`, `gpt-5.1` and `gpt-5.2` take tools and an effort on either API.
  * - The `-pro` models (`gpt-5-pro`, `gpt-5.5-pro`, `o3-pro`) and `gpt-5.3-codex` are not served on
  *   `/v1/chat/completions` at all.
  *
@@ -299,7 +304,7 @@ export function botSettings(
  */
 export function requiresResponsesApi(model: string): boolean {
   const name = model.trim().split("/").at(-1) ?? "";
-  return /^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b/.test(
+  return /^gpt-5\.[4-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b/.test(
     name,
   );
 }
