@@ -16,8 +16,6 @@ export function useMergedRoutines(agentId?: string): {
   /** Names and faces for each row's Bot, hidden Bots included: a routine outlives hiding its Bot. */
   bots: Map<string, AgentProfile>;
   pending: boolean;
-  /** The first read's error, or null. */
-  error: Error | null;
   /** Which reads failed, as the list says it: "routines", "goals", "check-ins". */
   failed: string[];
   /** Whether the routines read failed, so a goal's row does not claim it has no starts. */
@@ -26,7 +24,6 @@ export function useMergedRoutines(agentId?: string): {
   const routines = useQuery(routinesQueryOptions());
   const goals = useQuery(responsibilitiesQueryOptions());
   const checkIns = useQuery(proactiveSettingsQueryOptions());
-  /* Names and faces for each row's Bot, hidden Bots included: a routine outlives hiding its Bot. */
   const shownBots = useQuery(agentListQueryOptions());
   const hiddenBots = useQuery({
     ...agentListQueryOptions(true),
@@ -55,7 +52,6 @@ export function useMergedRoutines(agentId?: string): {
     rows,
     bots,
     pending: routines.isPending || goals.isPending || checkIns.isPending,
-    error: routines.error ?? goals.error ?? checkIns.error ?? null,
     failed,
     routinesFailed: routines.error !== null,
   };

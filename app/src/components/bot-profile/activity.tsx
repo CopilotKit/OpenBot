@@ -234,7 +234,7 @@ function useActivityGroups(agentId: string, boardAbove = false) {
   };
 }
 
-/** How many running or scheduled items the Bot's page shows before "All activity". */
+/** How many running or lined-up items a glance shows (the Bots place's chevron). */
 const GLANCE = 3;
 
 /**

@@ -29,7 +29,7 @@ export function ConversationsBadge() {
   return unread ? <StripBadge dot /> : null;
 }
 
-export const conversationsPlace: PlaceEntry | undefined = {
+export const conversationsPlace: PlaceEntry = {
   List: ConversationsPlace,
   Badge: ConversationsBadge,
 };

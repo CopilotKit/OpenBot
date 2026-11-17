@@ -18,6 +18,7 @@ import {
   useLiveRecording,
 } from "@/components/browser/browser-nav-item";
 import { BrandName } from "@/components/edition/brand-name";
+import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { buttonVariants } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -28,7 +29,10 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -56,19 +60,6 @@ const stripButtonClassName = cn(
   "relative hover:bg-foreground/5 aria-pressed:bg-foreground/5 dark:hover:bg-foreground/5",
 );
 
-/** The places that are drawn: those with a list. */
-function drawnPlaces(order: readonly PlaceId[]): PlaceId[] {
-  return order.filter((id) => PLACE_LISTS[id] !== undefined);
-}
-
-/** The stored order for a new drawn order: a place with no list yet is kept, after the drawn ones, and not drawn. */
-function withUndrawn(
-  order: readonly PlaceId[],
-  drawn: readonly PlaceId[],
-): PlaceId[] {
-  return [...drawn, ...order.filter((id) => PLACE_LISTS[id] === undefined)];
-}
-
 /** A press that moves less than this is a click, not a drag. */
 const DRAG_THRESHOLD_PX = 4;
 
@@ -85,14 +76,11 @@ function PlaceButton({
   id: PlaceId;
   entry: PlaceEntry;
   current: boolean;
-  /** The stored order, which the drawn places are a part of. */
   order: readonly PlaceId[];
 }) {
   const { label, icon: PlaceIcon } = PLACES[id];
   const descId = useId();
-  const drawn = drawnPlaces(order);
-  const move = (delta: -1 | 1) =>
-    setPlaceOrder(withUndrawn(order, movePlace(drawn, id, delta)));
+  const move = (delta: -1 | 1) => setPlaceOrder(movePlace(order, id, delta));
   const reduceMotion = useReducedMotion();
   // The browser still sends a click when the pointer is released over the button, and motion reports
   // a drag's end only after that click, so the press is measured from the button's own pointer and
@@ -148,11 +136,11 @@ function PlaceButton({
           </TooltipContent>
         </Tooltip>
         <ContextMenuContent>
-          <ContextMenuItem disabled={id === drawn[0]} onClick={() => move(-1)}>
+          <ContextMenuItem disabled={id === order[0]} onClick={() => move(-1)}>
             Move up
           </ContextMenuItem>
           <ContextMenuItem
-            disabled={id === drawn[drawn.length - 1]}
+            disabled={id === order[order.length - 1]}
             onClick={() => move(1)}
           >
             Move down
@@ -291,6 +279,13 @@ function AccountButton({
         side="right"
         sideOffset={8}
       >
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="max-w-56 truncate">
+            {person}
+          </DropdownMenuLabel>
+          <OpenBotVersion className="-mt-1 max-w-56 px-1.5 pb-1 text-[10px] leading-3 text-muted-foreground" />
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <AccountMenuItems
           menu={accountMenu}
           onNavigate={() => setOpenMobile(false)}
@@ -312,7 +307,6 @@ export function Strip({
 }) {
   const place = usePlaceId();
   const order = usePlaceOrder();
-  const drawn = drawnPlaces(order);
   return (
     <Toolbar.Root
       className="flex w-12 shrink-0 flex-col items-center gap-1 py-2"
@@ -322,13 +316,13 @@ export function Strip({
         as="div"
         axis="y"
         className="flex flex-col items-center gap-1"
-        onReorder={(next) => setPlaceOrder(withUndrawn(order, next))}
-        values={drawn}
+        onReorder={setPlaceOrder}
+        values={order}
       >
-        {drawn.map((id) => (
+        {order.map((id) => (
           <PlaceButton
             current={id === place}
-            entry={PLACE_LISTS[id] as PlaceEntry}
+            entry={PLACE_LISTS[id]}
             id={id}
             key={id}
             order={order}

@@ -16,7 +16,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
-import { PLACE_LISTS, PlacePanel } from "@/components/places/place-panel";
+import { PlacePanel } from "@/components/places/place-panel";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
@@ -24,13 +24,12 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { PLACES } from "@/lib/places/places";
-import { getPlace, setPlace } from "@/lib/places/store";
+import { setPlace } from "@/lib/places/store";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * The panel under the strip: a header naming the place and the place's own list. A place that has
- * no list yet draws the Conversations list, and the store keeps the place that was chosen.
+ * The panel under the strip: a header naming the place and the place's own list.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -157,23 +156,6 @@ function renderPanel() {
     </QueryClientProvider>,
   );
 }
-
-const savedBots = PLACE_LISTS.bots;
-afterEach(() => {
-  if (savedBots) PLACE_LISTS.bots = savedBots;
-});
-
-test("a place with no list yet draws the Conversations list", async () => {
-  delete PLACE_LISTS.bots;
-  setPlace("bots");
-  const view = renderPanel();
-  const heading = await view.findByRole("heading", { level: 2 });
-  expect(heading.textContent).toBe("Conversations");
-  expect(
-    view.getByRole("textbox", { name: "Search conversations" }),
-  ).toBeTruthy();
-  expect(getPlace()).toBe("bots");
-});
 
 test("the header names the place", async () => {
   const view = renderPanel();
