@@ -53,8 +53,6 @@
             "gemma-4-31b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'...",
-            "gemini-decision-1": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
           }
@@ -146,8 +144,6 @@
             "gemma-4-31b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "NotFoundError('Error code: 404')",
-            "gemini-decision-1": "NotFoundError('Error code: 404')",
             "gemini-omni-1.1-flash": "BadRequestError('Error code: 400')",
             "gemini-omni-1.2-flash": "BadRequestError('Error code: 400')"
           }
@@ -309,8 +305,6 @@
             "gemma-4-26b-a4b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 404, Message: This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started)., Status: NOT_FOUND, De...",
-            "gemini-decision-1": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 404, Message: models/gemini-decision-1 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods., Status: NOT_FOUND, Details: []: Error 404, Message: models/gemini-decision-1 is not found ...",
             "gemini-omni-1.1-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)",
             "gemini-omni-1.2-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)"
           }
@@ -513,8 +507,6 @@
             "gemma-4-31b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "Error code: 404",
-            "gemini-decision-1": "Error code: 404",
             "gemini-omni-1.1-flash": "Error code: 400",
             "gemini-omni-1.2-flash": "Error code: 400"
           }
@@ -607,8 +599,6 @@
             "gemma-4-31b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "Agent error: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'}}]",
-            "gemini-decision-1": "Agent error: Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
             "gemini-omni-1.1-flash": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
           }
@@ -701,8 +691,6 @@
             "gemma-4-31b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'...",
-            "gemini-decision-1": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
           }
@@ -1072,8 +1060,6 @@
             "gemma-4-31b-it"
           ],
           "refused": {
-            "gemini-2.5-pro": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'...",
-            "gemini-decision-1": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
             "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
             "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
           }

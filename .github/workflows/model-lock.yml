@@ -86,8 +86,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        # The published image too, with the same keys in the same run: a verified model that fails
+        # on both is the provider's or the key's today, not this change's (`brokenVerified`).
         run: >-
-          bun scripts/model-compat.ts --harness "$HARNESS" --tags source --exit-zero
+          bun scripts/model-compat.ts --harness "$HARNESS" --tags latest,source --exit-zero
           --out "$RUNNER_TEMP/model-compat.json"
       - name: Every model the lock verifies still answers
         env:

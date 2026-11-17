@@ -4,6 +4,7 @@ import {
   brokenVerified,
   buildLock,
   describeLockChange,
+  inconclusive,
   providerIdOf,
   type Result,
   type Results,
@@ -234,4 +235,67 @@ test("a client bump that breaks a verified model is caught, and one the lock alr
   expect(brokenVerified(lock, afterBump).map((broken) => broken.model)).toEqual(
     ["claude-sonnet-5-5"],
   );
+});
+
+test("a model the check's key can't use is the key's, not the client's", () => {
+  const google = (model: string, status: Result["status"], detail = "OK") =>
+    row(model, status, detail, {
+      harness: "agent-langgraph-agui",
+      provider: "Google",
+      providerId: "google",
+    });
+  // One Gemini key's run on 2026-11-17; another key, through the same image, disagreed on both.
+  const lock = buildLock(
+    undefined,
+    [
+      {
+        results: [
+          google("gemini-2.5-flash-lite", "pass"),
+          google(
+            "gemini-2.5-pro",
+            "fail",
+            "Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users.'}}]",
+          ),
+          google(
+            "gemini-omni-1.1-flash",
+            "fail",
+            "Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.'}}]",
+          ),
+        ],
+      },
+    ],
+    "2026-11-17",
+  );
+  const pair = lock.engines["agent-langgraph-agui"]?.providers.google;
+  expect(pair?.verified).toEqual(["gemini-2.5-flash-lite"]);
+  // Not refused: another key may run it, and a later run with one proves it.
+  expect(Object.keys(pair?.refused ?? {})).toEqual(["gemini-omni-1.1-flash"]);
+  expect(
+    brokenVerified(lock, [
+      google("gemini-2.5-flash-lite", "fail", "Error code: 404"),
+    ]),
+  ).toEqual([]);
+  // CrewAI hides the provider's words; the published image failing too, with the same key in the
+  // same run, says it isn't the change.
+  const hidden = () =>
+    google(
+      "gemini-2.5-flash-lite",
+      "fail",
+      "CrewAI flow failed; see server logs",
+    );
+  expect(
+    brokenVerified(lock, [hidden(), { ...hidden(), tag: "latest" }]),
+  ).toEqual([]);
+  expect(
+    brokenVerified(lock, [
+      hidden(),
+      { ...google("gemini-2.5-flash-lite", "pass"), tag: "latest" },
+    ]).map((broken) => broken.model),
+  ).toEqual(["gemini-2.5-flash-lite"]);
+  // A 404 that names the client's endpoint is the client's.
+  expect(
+    inconclusive(
+      "NotFoundError('Error code: 404 - This model is only supported in v1/responses and not in v1/chat/completions.')",
+    ),
+  ).toBe(false);
 });

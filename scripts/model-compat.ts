@@ -1263,8 +1263,23 @@ const INCONCLUSIVE =
 const RATE_LIMITED =
   /\b429\b|rate.?limit|RESOURCE_EXHAUSTED|too many requests/i;
 
+/**
+ * A model this key's account can't use, which another account can: Google closes older models to
+ * new projects ("no longer available to new users") and answers a model a project can't see with a
+ * bare 404. Seen on 2026-11-17, when two Gemini keys disagreed on gemini-2.5-pro and
+ * gemini-2.5-flash-lite through the same clients. About the key, not the client. A 404 that names
+ * the client's endpoint ("only supported in v1/responses") is the client's, and stays a refusal.
+ */
+const UNAVAILABLE_TO_KEY =
+  /no longer available to new users|is not found for API version|does not exist or you do not have access|do not have access to (?:the )?model|^(?:NotFoundError\(')?Error code: 404'?\)?$|^Not Found$/i;
+
+/** A failure about the check's key, not the harness's client: a rate limit, or a model it can't see. */
+export function aboutTheKey(detail: string): boolean {
+  return RATE_LIMITED.test(detail) || UNAVAILABLE_TO_KEY.test(detail);
+}
+
 export function inconclusive(detail: string): boolean {
-  return INCONCLUSIVE.test(detail) || RATE_LIMITED.test(detail);
+  return INCONCLUSIVE.test(detail) || aboutTheKey(detail);
 }
 
 function sortedRecord<T>(record: Record<string, T>): Record<string, T> {
@@ -1413,8 +1428,24 @@ export function brokenVerified(
   lock: ModelLock,
   results: readonly Result[],
 ): Result[] {
+  /*
+   * What the published image did with the same key in the same run, when the run checked it too: a
+   * model that fails there as well is the provider's or the key's today, not this change's.
+   */
+  const failsOnPublished = (row: Result) =>
+    results.some(
+      (other) =>
+        other.tag !== SOURCE &&
+        other.status === "fail" &&
+        other.harness === row.harness &&
+        other.model === row.model &&
+        providerIdOf(other) === providerIdOf(row),
+    );
   return results.filter((row) => {
     if (row.status !== "fail" || row.model === "(all)") return false;
+    if (row.tag !== SOURCE) return false;
+    // The key's account, not the change's client: says nothing about the change.
+    if (aboutTheKey(row.detail) || failsOnPublished(row)) return false;
     const id = providerIdOf(row);
     return (
       !!id &&
