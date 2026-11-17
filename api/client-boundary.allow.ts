@@ -173,7 +173,7 @@ export const ALLOWED: Allowed[] = [
     why: "the development server's proxy of /api",
   },
   {
-    file: "app/src/components/channels/chat-transcript.tsx",
+    file: "app/src/components/channels/attachment-view.tsx",
     what: "fetch()",
     rule: "transport",
     why: "asks with HEAD whether a sent document is still there, at the address the generated client builds (getGetAttachmentUrl)",
