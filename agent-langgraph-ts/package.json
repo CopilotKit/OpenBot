@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "test": "node --import ./src/json-modules.ts --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

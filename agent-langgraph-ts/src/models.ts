@@ -19,6 +19,10 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogle } from "@langchain/google";
 import { ChatOpenAI } from "@langchain/openai";
+// The one rule every Bot in the box decides by, imported rather than copied, so a model OpenAI
+// moves to the Responses API moves here in the same change. Node loads it through the JSON hook in
+// json-modules.ts (see there for why and how).
+import { requiresResponsesApi } from "../../shared/model-providers.ts";
 import { PlanHarnessChatModel } from "./plan-model.ts";
 
 export type Env = Record<string, string | undefined>;
@@ -76,17 +80,6 @@ export function runModel(props: Record<string, unknown>): {
       ? reasoningEffort
       : "";
   return { model: model.trim(), effort };
-}
-
-/**
- * `requiresResponsesApi` in shared/model-providers.ts: `gpt-5.6-*` and every `gpt-6*` take function
- * tools only on the Responses API, and the `-pro` and `-codex` models are not served on Chat
- * Completions at all. A gateway's namespaced name (`openai/gpt-5.6-terra`) is the model it names.
- */
-const RESPONSES_API_MODEL =
-  /^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b/;
-export function requiresResponsesApi(model: string): boolean {
-  return RESPONSES_API_MODEL.test(model.trim().split("/").at(-1) ?? "");
 }
 
 type Spec = {
