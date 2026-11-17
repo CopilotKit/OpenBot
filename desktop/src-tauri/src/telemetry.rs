@@ -472,7 +472,9 @@ impl Telemetry {
                     .lock()
                     .map_err(|_| TelemetryError::Poisoned)? = None;
             }
-            EventData::SetupAbandoned { .. } => {
+            // Both end the setup session at its step: neither this launch's quit nor the next
+            // launch says it again.
+            EventData::SetupAbandoned { .. } | EventData::SetupRestartRequired { .. } => {
                 if state.activated {
                     return Ok(());
                 }
@@ -563,17 +565,33 @@ impl Telemetry {
         }
     }
 
+    /// The setup step this launch is on, while setup has not yet activated.
+    fn setup_step(&self) -> Result<Option<Step>> {
+        let guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        Ok(guard
+            .as_ref()
+            .and_then(|state| (!state.activated).then_some(state.last_step).flatten()))
+    }
+
     pub fn shutdown(&self) -> Result<()> {
-        let step = {
-            let guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
-            guard
-                .as_ref()
-                .and_then(|state| (!state.activated).then_some(state.last_step).flatten())
-        };
-        if let Some(step) = step {
+        if let Some(step) = self.setup_step()? {
             self.record(EventData::SetupAbandoned { step })?;
         }
         self.flush_with_lock_wait(FLUSH_BUDGET)
+    }
+
+    /**
+    Windows is restarting for the fix setup asked for (Windows Subsystem for Linux), during setup:
+    `setup_restart_required` at the step it is on, saved before Windows ends the app. Setup goes on
+    after the restart under the same installation, so the exit is not an abandonment: neither this
+    launch nor the next one says `setup_abandoned` for it. Nothing once setup has activated, or
+    when this setup session already ended.
+    */
+    pub fn restart_required(&self) -> Result<()> {
+        if let Some(step) = self.setup_step()? {
+            self.record(EventData::SetupRestartRequired { step })?;
+        }
+        Ok(())
     }
 
     pub fn snapshot(&self) -> Result<PersistedState> {
@@ -1122,6 +1140,11 @@ pub enum EventData {
     SetupAbandoned {
         step: Step,
     },
+    /// Setup ended its session for the Windows restart a fix needs (`Telemetry::restart_required`),
+    /// at the last screen the window showed. Setup goes on after it, under the same installation.
+    SetupRestartRequired {
+        step: Step,
+    },
     /// The Account step's CopilotKit sign-in: started, and how it ended, with how long the person
     /// was in their browser. `restored` is an account check that found this computer already
     /// signed in, once a launch.
@@ -1196,6 +1219,7 @@ impl EventData {
             Self::SetupFailed { .. } => "oss.desktop.setup_failed",
             Self::Activated => "oss.desktop.activated",
             Self::SetupAbandoned { .. } => "oss.desktop.setup_abandoned",
+            Self::SetupRestartRequired { .. } => "oss.desktop.setup_restart_required",
             Self::SignIn { .. } => "oss.desktop.sign_in",
             Self::SetupStalled { .. } => "oss.desktop.setup_stalled",
             Self::UiStalled { .. } => "oss.desktop.ui_stalled",
@@ -1760,6 +1784,7 @@ pub fn schema_json() -> serde_json::Value {
             },
             "activated": {},
             "setup_abandoned": { "step": steps },
+            "setup_restart_required": { "step": steps },
             "sign_in": {
                 "outcome": ["started", "completed", "failed", "cancelled", "restored"],
                 "duration_ms": "option_u64",
@@ -2360,6 +2385,9 @@ mod tests {
             },
             EventData::Activated,
             EventData::SetupAbandoned { step: Step::Ask },
+            EventData::SetupRestartRequired {
+                step: Step::Install,
+            },
             EventData::SignIn {
                 outcome: SignInOutcome::Cancelled,
                 duration_ms: Some(12),
@@ -2416,7 +2444,7 @@ mod tests {
                 .is_some_and(|steps| steps.iter().any(|step| step == "connect_openbot")),
             "{listed}"
         );
-        for kind in ["step_viewed", "setup_abandoned"] {
+        for kind in ["step_viewed", "setup_abandoned", "setup_restart_required"] {
             let sent = serde_json::json!({ "kind": kind, "step": "connect_openbot" });
             let event = serde_json::from_value::<EventData>(sent.clone()).unwrap();
             assert_eq!(serde_json::to_value(event).unwrap(), sent);
@@ -2934,6 +2962,114 @@ mod tests {
                 step: Step::Install
             }
         )));
+    }
+
+    /// A first Windows install that needs WSL restarts Windows. Windows ends the app without a Quit
+    /// and OpenBot opens again after sign-in. That launch sends `setup_restart_required` at the
+    /// step, and never `setup_abandoned`; setup then goes on under the same installation id.
+    #[test]
+    fn a_planned_windows_restart_sends_restart_required_and_setup_goes_on_after_it() {
+        let dir = temp_dir("windows-restart");
+        let before = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let install_id = before.install_id().unwrap();
+        before
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        // Restart now: saved, then Windows ends the process. No Quit, so no `shutdown`.
+        before.restart_required().unwrap();
+        drop(before);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            vec![
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        let after = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        after.flush().unwrap();
+        let sent = server.join().unwrap();
+        assert!(sent[0].contains("oss.desktop.step_viewed"), "{sent:?}");
+        assert!(
+            sent[1].contains("oss.desktop.setup_restart_required"),
+            "{sent:?}"
+        );
+        assert!(sent[1].contains(r#""step":"install""#), "{sent:?}");
+        assert!(sent.iter().all(|request| request.contains(&install_id)));
+        assert!(after.snapshot().unwrap().queue.is_empty(), "nothing else");
+
+        // The same setup goes on: the same installation, and the step the window shows next is
+        // counted, so a real quit after the restart is still an abandonment.
+        assert_eq!(after.install_id().unwrap(), install_id);
+        after
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        after.record(EventData::Activated).unwrap();
+        let queue = after.snapshot().unwrap().queue;
+        assert!(matches!(
+            queue.iter().map(|event| &event.data).collect::<Vec<_>>()[..],
+            [
+                EventData::StepViewed {
+                    step: Step::Install
+                },
+                EventData::Activated
+            ]
+        ));
+    }
+
+    /// Quit during setup, with no restart planned, is an abandonment as it always was.
+    #[test]
+    fn a_plain_quit_during_setup_still_sends_setup_abandoned() {
+        let dir = temp_dir("plain-quit");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            vec![
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        telemetry
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        telemetry.shutdown().unwrap();
+        let sent = server.join().unwrap();
+        assert!(sent[0].contains("oss.desktop.step_viewed"), "{sent:?}");
+        assert!(sent[1].contains("oss.desktop.setup_abandoned"), "{sent:?}");
+        assert!(sent[1].contains(r#""step":"install""#), "{sent:?}");
+        assert!(
+            telemetry.snapshot().unwrap().queue.is_empty(),
+            "nothing else"
+        );
+        // A restart asked for after that is not a second ending of the same setup session.
+        telemetry.restart_required().unwrap();
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
     }
 
     #[test]

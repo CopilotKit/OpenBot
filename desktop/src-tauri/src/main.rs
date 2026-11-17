@@ -1701,9 +1701,23 @@ async fn windows_restart_pending(app: tauri::AppHandle) -> Result<bool, Problem>
 }
 
 /// Restart Windows to finish a fix, with OpenBot set to open again afterwards.
+///
+/// Setup goes on after the restart, so the exit it brings is not an abandonment: that is saved
+/// first, before Windows ends the app.
 #[tauri::command]
-fn windows_restart() -> Result<(), Problem> {
+fn windows_restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
+    desktop_telemetry::restart_required(&app);
     win::restart()
+}
+
+/// A fix's Windows restart is still owed (`win::record_restart_needed`). Only whether the record is
+/// there: Windows is ending the session, too late to ask which boot this is.
+fn windows_restart_owed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    cfg!(target_os = "windows")
+        && app
+            .path()
+            .app_local_data_dir()
+            .is_ok_and(|data| win::restart_path(&data).exists())
 }
 
 /// Bring the engine up: create the machine if it is missing, start it, then prove it answers.
@@ -12816,6 +12830,12 @@ fn main() {
                             "OpenBot couldn't start shutting down. Try Quit again.",
                         );
                     }
+                }
+                // Windows ending the session exits here without Quit. With a fix's restart owed,
+                // that is setup's planned restart, from the Start menu as the screen offers, not an
+                // abandonment. After Quit, setup already said how it ended and this adds nothing.
+                tauri::RunEvent::Exit if windows_restart_owed(app) => {
+                    desktop_telemetry::restart_required(app);
                 }
                 _ => {}
             }

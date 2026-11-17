@@ -1198,6 +1198,16 @@ pub fn update_not_restored<R: tauri::Runtime>(
     }
 }
 
+/// Windows is restarting for the fix setup asked for (`Telemetry::restart_required`). Saved at
+/// once: Windows ends the app without a Quit, and the launch after the restart sends what is left.
+pub fn restart_required<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        if state.emitter.restart_required().is_err() {
+            log::warn!("[telemetry] setup event could not be saved");
+        }
+    }
+}
+
 pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<DesktopTelemetry>() {
         if state.emitter.shutdown().is_err() {
