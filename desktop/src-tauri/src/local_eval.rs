@@ -3993,11 +3993,13 @@ pub enum ShutdownBy {
 What a call in `IN_FLIGHT` is, which decides what may cancel it.
 
 - A call the window asked for: every Stop and Quit cancels it, and the window can.
-- A Stop's own stop of the stack: only Quit cancels it, since Quit stops the stack itself and must
-  not wait behind it. Another Stop leaves it to finish: cancelling it only cut a stop short for the
-  later one to start again, and the earlier Stop said some services didn't stop.
-- Quit's own stop: nothing cancels it. It is the last thing that stops the stack before the app
-  exits.
+- A stop of the stack, a Stop's or Quit's own: nothing cancels it. Another Stop leaves it to finish
+  and waits its turn; cancelling it only cut a stop short for the later one to start again, and
+  the earlier Stop said some services didn't stop. Quit waits for a Stop's and takes its answer
+  as its own (`a_stops_answer`), and refuses one a Stop starts once Quit has begun. Quit used to
+  cancel a Stop's and run its own: on Windows cancelling is a hard kill, which runs none of the
+  CLI's cleanup, so the killed CLI's lock outlived it, Quit's own stop was refused as busy
+  (`local_command_busy`), and the stack was left running.
 */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -4047,8 +4049,8 @@ pub fn closing_for_stop() -> Closing {
     Closing(())
 }
 
-/// As `closing_for_stop`, for good. Quitting also cancels a Stop's own stop, so Quit never waits
-/// behind it, and refuses one a Stop starts later; Quit runs its own, which nothing cancels.
+/// As `closing_for_stop`, for good. A Stop's own stop already running is left to finish, and Quit
+/// takes its answer (`stop_for_shutdown`); one a Stop starts later is refused.
 pub fn close_for_quit() {
     close_for_quit_reporting(|| {});
 }
@@ -4067,10 +4069,10 @@ Except an update that has begun changing the release with Helm, or a repair of o
 True when it waited for one.
 */
 pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
-    // Before cancelling, and read under the same lock, so a Stop's own stop registering now is
-    // either refused there or cancelled here.
+    // Before anything else, and read under the lock a Stop's own stop registers with, so it is
+    // either refused there or already on record for Quit to wait for.
     QUITTING.store(true, Ordering::SeqCst);
-    cancel_for_quit();
+    cancel_all();
     let mut finishing = Some(finishing);
     let until = Instant::now() + Duration::from_secs(10);
     loop {
@@ -4110,8 +4112,38 @@ impl Drop for Running {
     }
 }
 
-/// An attempt's place in `IN_FLIGHT`, removed however the call ends.
-struct Attempt(Cancel);
+/// An attempt's place in `IN_FLIGHT`, removed however the call ends, and for a Stop's own stop of
+/// the stack, its place in `STOPS`.
+struct Attempt(Cancel, Option<Arc<StopOfTheStack>>);
+
+/**
+A Stop's own stop of the stack, from the moment it is let through until it ends, and its answer.
+
+Quit waits on these rather than cancel them (`Kind`), and answers with theirs.
+*/
+#[derive(Default)]
+struct StopOfTheStack {
+    /// Whether it has ended, and what it answered if it got as far as answering.
+    done: std::sync::Mutex<(bool, Option<Result<Report, Failure>>)>,
+    ended: std::sync::Condvar,
+}
+
+impl StopOfTheStack {
+    fn done(&self) -> std::sync::MutexGuard<'_, (bool, Option<Result<Report, Failure>>)> {
+        self.done
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Every Stop's own stop of the stack let through and not yet ended.
+static STOPS: std::sync::Mutex<Vec<Arc<StopOfTheStack>>> = std::sync::Mutex::new(Vec::new());
+
+fn stops() -> std::sync::MutexGuard<'static, Vec<Arc<StopOfTheStack>>> {
+    STOPS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 impl Attempt {
     /// Read under the same lock `cancel_all` takes, so a call registering as closing begins is
@@ -4131,9 +4163,9 @@ impl Attempt {
             .position(|(attempt, _, _)| attempt == id)
             .map(|index| held.remove(index).1);
         let cancel = match kind {
-            // Not even a cancel sent ahead for its id stops Quit's own stop.
-            Kind::Shutdown(ShutdownBy::Quit) => Cancel::default(),
-            _ => earlier.unwrap_or_default(),
+            Kind::Call => earlier.unwrap_or_default(),
+            // Not even a cancel sent ahead for its id stops a stop of the stack.
+            Kind::Shutdown(_) => Cancel::default(),
         };
         let refused = match kind {
             Kind::Call => closed(),
@@ -4144,15 +4176,82 @@ impl Attempt {
         if refused {
             cancel.cancel();
         }
+        // On record before the lock is let go, so a Quit beginning now waits for it.
+        let stop = (kind == Kind::Shutdown(ShutdownBy::Stop) && !refused).then(|| {
+            let stop = Arc::new(StopOfTheStack::default());
+            stops().push(stop.clone());
+            stop
+        });
         held.push((id.to_owned(), cancel.clone(), kind));
-        Self(cancel)
+        Self(cancel, stop)
+    }
+
+    /// What the call answered, for a Quit waiting on this Stop's stop of the stack.
+    fn answered(&self, answer: &Result<Report, Failure>) {
+        if let Some(stop) = &self.1 {
+            stop.done().1 = Some(answer.clone());
+        }
     }
 }
 
 impl Drop for Attempt {
     fn drop(&mut self) {
         in_flight().retain(|(_, cancel, _)| !Arc::ptr_eq(&cancel.0, &self.0 .0));
+        if let Some(stop) = self.1.take() {
+            stops().retain(|other| !Arc::ptr_eq(other, &stop));
+            stop.done().0 = true;
+            stop.ended.notify_all();
+        }
     }
+}
+
+/**
+Quit's answer when a Stop is already stopping the stack: that stop's, once it has ended, within
+`bound`. None when no Stop's stop is running, or none got as far as answering: Quit then runs its
+own.
+
+Quit used to cancel it and run its own. Cancelling cuts the CLI short, which on Windows is a hard
+kill that leaves the CLI's lock behind, so Quit's own stop was refused as busy and the stack kept
+running. Waiting for it costs Quit no more than its own stop would have: a stop takes about 12 s on
+macOS and 13 s on Windows (measured on OpenBot 1.1.0), and `bound` is the two minutes Quit allows
+its own stop (`Limits::for_quit`).
+
+When `bound` runs out first, Quit says the stop did not finish in time (`Failure::Timeout`) and
+leaves that stop running: it is the CLI's own `local stop`, and cut short it would leave the stack
+half stopped, so it finishes on its own after OpenBot has exited.
+*/
+fn a_stops_answer(bound: Duration) -> Option<Result<Report, Failure>> {
+    let running: Vec<_> = stops().clone();
+    if running.is_empty() {
+        return None;
+    }
+    log::info!("[quit] a Stop is already stopping the backend: waiting for it");
+    let deadline = Instant::now() + bound;
+    let mut answer = None;
+    for stop in running {
+        let mut done = stop.done();
+        while !done.0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                log::warn!(
+                    "[quit] the Stop's stop of the backend did not end within {bound:?}; it carries on"
+                );
+                return Some(Err(Failure::Timeout));
+            }
+            done = stop
+                .ended
+                .wait_timeout(done, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        match done.1.clone() {
+            // The stack is stopped: nothing a later Stop's stop says changes that.
+            Some(Ok(report)) if report.outcome == Outcome::Completed => return Some(Ok(report)),
+            Some(other) => answer = Some(other),
+            None => {}
+        }
+    }
+    answer
 }
 
 /// Held by the one call that is running. The CLI refuses a second `local` command while one is in
@@ -4253,14 +4352,20 @@ pub fn run_installed_with(
     run_attempt(attempt, Attempt::register(attempt), action, stack, limits)
 }
 
-/// `stop` for Stop or Quit itself: the one call let through while closing. Another Stop leaves it
-/// to finish. Quit cancels a Stop's, or refuses it once quitting, and nothing cancels Quit's.
+/// `stop` for Stop or Quit itself: the one call let through while closing, and never cancelled.
+/// Quit's answers with a Stop's already running when there is one (`a_stops_answer`), and a
+/// Stop's is refused once Quit has begun.
 pub fn stop_for_shutdown(
     attempt: &str,
     stack: &StackId,
     by: ShutdownBy,
     limits: Limits,
 ) -> Result<Report, Failure> {
+    if by == ShutdownBy::Quit {
+        if let Some(answer) = a_stops_answer(limits.timeout) {
+            return answer;
+        }
+    }
     run_attempt(
         attempt,
         Attempt::register_for_shutdown(attempt, by),
@@ -4273,6 +4378,18 @@ pub fn stop_for_shutdown(
 fn run_attempt(
     id: &str,
     attempt: Attempt,
+    action: Action,
+    stack: &StackId,
+    limits: Limits,
+) -> Result<Report, Failure> {
+    let answer = run_turn(id, &attempt, action, stack, limits);
+    attempt.answered(&answer);
+    answer
+}
+
+fn run_turn(
+    id: &str,
+    attempt: &Attempt,
     action: Action,
     stack: &StackId,
     limits: Limits,
@@ -5575,7 +5692,7 @@ pub fn list_installed(attempt: &str) -> Result<Listing, Failure> {
 pub fn cancel(attempt: &str) {
     let mut held = in_flight();
     match held.iter().find(|(id, _, _)| id == attempt) {
-        Some((_, _, Kind::Shutdown(ShutdownBy::Quit))) => {}
+        Some((_, _, Kind::Shutdown(_))) => {}
         Some((_, cancel, _)) => cancel.cancel(),
         None => {
             if held.len() >= REMEMBERED {
@@ -5588,22 +5705,12 @@ pub fn cancel(attempt: &str) {
     }
 }
 
-/// Stop every call the window asked for, before a Stop asks the CLI to stop. Each stops its own
-/// process tree, and a call still waiting for its turn never starts. A stop of the stack already
-/// running, another Stop's or Quit's, is left to finish (`Kind`).
+/// Stop every call the window asked for, before Stop or Quit asks the CLI to stop. Each stops its
+/// own process tree, and a call still waiting for its turn never starts. A stop of the stack
+/// already running, a Stop's or Quit's, is left to finish (`Kind`).
 pub fn cancel_all() {
-    cancel_where(|kind| kind == Kind::Call);
-}
-
-/// `cancel_all` for Quit, which also cancels a Stop's own stop so it never waits behind one. Never
-/// Quit's own.
-pub fn cancel_for_quit() {
-    cancel_where(|kind| kind != Kind::Shutdown(ShutdownBy::Quit));
-}
-
-fn cancel_where(cancels: impl Fn(Kind) -> bool) {
     for (_, cancel, kind) in in_flight().iter() {
-        if cancels(*kind) {
+        if *kind == Kind::Call {
             cancel.cancel();
         }
     }
@@ -7605,9 +7712,9 @@ mod tests {
     }
 
     #[test]
-    fn quitting_closes_for_good_and_cancels_a_stop_in_progress() {
+    fn quitting_closes_for_good_and_leaves_a_stop_in_progress_to_finish() {
         if crate::test_support::isolated_process(
-            "local_eval::tests::quitting_closes_for_good_and_cancels_a_stop_in_progress",
+            "local_eval::tests::quitting_closes_for_good_and_leaves_a_stop_in_progress_to_finish",
         ) {
             return;
         }
@@ -7616,9 +7723,11 @@ mod tests {
         let stops = Attempt::register_for_shutdown("stop-in-progress", ShutdownBy::Stop);
         close_for_quit();
         assert!(
-            stops.0.requested(),
-            "Quit does not wait behind Stop's own stop"
+            !stops.0.requested(),
+            "Quit cut a Stop's stop of the stack short"
         );
+        // It ended without answering, so Quit runs its own.
+        drop(stops);
         drop(stopping);
         drop(closing_for_stop());
         assert_eq!(
@@ -7646,49 +7755,118 @@ mod tests {
         );
     }
 
-    /// Who may cancel what (`Kind`): a Stop cancels only the window's calls, Quit also a Stop's own
-    /// stop, and nothing, not a Stop, a Quit, or a cancel sent for its id, cancels Quit's own.
+    /// Who may cancel what (`Kind`): Stop and Quit cancel only the window's calls. Nothing, not a
+    /// Stop, a Quit, or a cancel sent for its id, cancels a stop of the stack, a Stop's or Quit's.
     #[test]
-    fn a_stop_never_cancels_a_stop_of_the_stack_and_nothing_cancels_quits() {
+    fn nothing_cancels_a_stop_of_the_stack() {
         if crate::test_support::isolated_process(
-            "local_eval::tests::a_stop_never_cancels_a_stop_of_the_stack_and_nothing_cancels_quits",
+            "local_eval::tests::nothing_cancels_a_stop_of_the_stack",
         ) {
             return;
         }
         cancel("quit-own");
+        cancel("stop-own");
         let window = Attempt::register("window-call");
         let stop_own = Attempt::register_for_shutdown("stop-own", ShutdownBy::Stop);
         let quit_own = Attempt::register_for_shutdown("quit-own", ShutdownBy::Quit);
+        assert!(!stop_own.0.requested(), "a cancel sent ahead for its id");
         assert!(!quit_own.0.requested(), "a cancel sent ahead for its id");
 
         let stopping = closing_for_stop();
         cancel_all();
         assert!(window.0.requested());
-        assert!(
-            !stop_own.0.requested(),
-            "another Stop cut a Stop's own stop short"
-        );
-        assert!(!quit_own.0.requested(), "a Stop cancelled Quit's own stop");
         // A second Stop's own stop, while the first's runs, is let through to wait its turn.
         let second_stop = Attempt::register_for_shutdown("second-stop", ShutdownBy::Stop);
-        assert!(!second_stop.0.requested());
         drop(stopping);
-
+        cancel("stop-own");
         cancel("quit-own");
-        assert!(
-            !quit_own.0.requested(),
-            "the window cancelled Quit's own stop"
-        );
-
         close_for_quit();
+        for (attempt, which) in [
+            (&stop_own, "a Stop's"),
+            (&second_stop, "a second Stop's"),
+            (&quit_own, "Quit's"),
+        ] {
+            assert!(
+                !attempt.0.requested(),
+                "{which} stop of the stack was cut short"
+            );
+        }
+        // Once quitting, a Stop's is refused before it starts: Quit stops the stack itself.
+        let late = Attempt::register_for_shutdown("late-stop", ShutdownBy::Stop);
+        assert!(late.0.requested());
         assert!(
-            stop_own.0.requested(),
-            "Quit waits behind a Stop's own stop"
+            late.1.is_none(),
+            "Quit would wait for a stop that never runs"
         );
-        assert!(second_stop.0.requested());
-        assert!(!quit_own.0.requested(), "Quit cancelled its own stop");
-        cancel_for_quit();
-        assert!(!quit_own.0.requested());
+    }
+
+    fn completed() -> Report {
+        normalize(
+            Action::Stop,
+            0,
+            {
+                let mut done = envelope();
+                done["command"] = json!("local stop");
+                done.to_string()
+            }
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    /// Quit during a Stop's stop of the stack waits for it and answers with it, without running the
+    /// CLI again: a second `local stop` behind one cut short was what the CLI refused as busy.
+    #[test]
+    fn quit_waits_for_a_stops_stop_and_answers_with_it() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_waits_for_a_stops_stop_and_answers_with_it",
+        ) {
+            return;
+        }
+        let stack = StackId::parse("local-abc123").unwrap();
+        let stopping = Attempt::register_for_shutdown("stop-running", ShutdownBy::Stop);
+        // Held here, in STOPS and by the attempt: Quit holds one more while it waits.
+        let held = stopping.1.clone().unwrap();
+        close_for_quit();
+        let quitting = std::thread::spawn(move || {
+            stop_for_shutdown("quit-own", &stack, ShutdownBy::Quit, Limits::for_quit())
+        });
+        let until = Instant::now() + Duration::from_secs(30);
+        while Arc::strong_count(&held) < 4 {
+            assert!(
+                Instant::now() < until,
+                "Quit never waited for the Stop's stop"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!quitting.is_finished(), "Quit ran its own stop meanwhile");
+        stopping.answered(&Ok(completed()));
+        drop(stopping);
+        // This build has no CLI: an answer of Quit's own would be Unavailable.
+        assert_eq!(quitting.join().unwrap(), Ok(completed()));
+    }
+
+    /// When a Stop's stop of the stack outlasts Quit's bound, Quit says so and leaves it running.
+    #[test]
+    fn quit_says_when_a_stops_stop_outlasts_its_bound_and_leaves_it_running() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_says_when_a_stops_stop_outlasts_its_bound_and_leaves_it_running",
+        ) {
+            return;
+        }
+        let stack = StackId::parse("local-abc123").unwrap();
+        let stopping = Attempt::register_for_shutdown("stop-running", ShutdownBy::Stop);
+        close_for_quit();
+        assert_eq!(
+            stop_for_shutdown(
+                "quit-own",
+                &stack,
+                ShutdownBy::Quit,
+                short(Duration::from_millis(300))
+            ),
+            Err(Failure::Timeout)
+        );
+        assert!(!stopping.0.requested(), "Quit cut the Stop's stop short");
     }
 
     #[test]

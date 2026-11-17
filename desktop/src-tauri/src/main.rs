@@ -5569,11 +5569,7 @@ fn stop_local_eval(
     #[cfg(test)]
     INTELLIGENCE_TIMEOUT.with(|used| used.set(Some(limits.timeout)));
     let attempt = format!("openbot-shutdown-{:016x}", rand::random::<u64>());
-    let cancel_all: fn() = match by {
-        local_eval::ShutdownBy::Stop => local_eval::cancel_all,
-        local_eval::ShutdownBy::Quit => local_eval::cancel_for_quit,
-    };
-    stop_local_eval_with(root, by, cancel_all, |stack| {
+    stop_local_eval_with(root, by, local_eval::cancel_all, |stack| {
         local_eval::stop_for_shutdown(&attempt, stack, by, limits)
     })
 }
@@ -5600,13 +5596,12 @@ stack's containers are never touched here; only the CLI stops what the CLI start
 
 Calls already in flight are cancelled first, whoever owns the stack: cancelling ends only this
 app's own CLI processes, never the stack, and a `start` left running could otherwise hold the stop
-behind it, finish after it and leave the stack running, or outlive the app as an orphan. Another
-Stop's stop of the stack is left to finish, and this one waits its turn behind it. Quit also
-cancels a Stop's (`local_eval::Kind`).
+behind it, finish after it and leave the stack running, or outlive the app as an orphan. A stop of
+the stack already running, another Stop's or Quit's, is never cancelled (`local_eval::Kind`): a
+Stop waits its turn behind it, and Quit waits for a Stop's and answers with it.
 
-So a Stop's own stop is cancelled only by Quit, and Quit then stops the stack itself, after the
-cancelled CLI has gone: that is not a stop that failed, and the Stop does not say it was. Nothing
-cancels Quit's.
+A Stop's own stop comes back cancelled only when Quit had already begun: Quit refuses it, since
+Quit stops the stack itself. That is not a stop that failed, and the Stop does not say it was.
 
 Every way this can fail is said in fixed words. There is no CLI output to repeat, and none would
 be repeated if there were.
@@ -6508,11 +6503,12 @@ where
 /**
 Quit's cleanup, then `intelligence` last, as in `stop_everything_then`.
 
-Local evaluation closes for good here, which also cancels a Stop's own CLI stop, so Quit never
-waits behind one. The order is host processes, Compose down, on Linux the Podman API this session
-started, and only then Intelligence, with no lock held. So Quit's Intelligence cap starts after all
-of that: 120 seconds for the CLI, its turn included, plus up to five seconds of grace to stop the
-CLI's process tree if it overruns.
+Local evaluation closes for good here. A Stop's own CLI stop already running is left to finish, and
+Quit's Intelligence step answers with it rather than start another (`local_eval::stop_for_shutdown`).
+The order is host processes, Compose down, on Linux the Podman API this session started, and only
+then Intelligence, with no lock held. So Quit's Intelligence cap starts after all of that: 120
+seconds for the CLI, its turn or the Stop's stop included, plus up to five seconds of grace to stop
+the CLI's process tree if its own overruns.
 
 `progress` hears OpenBot's part start and end, then Intelligence's. Intelligence has a row only
 when a stack OpenBot created is recorded, which is when its step stops anything; it is asked either
@@ -19144,6 +19140,13 @@ mod tests {
 
     #[test]
     fn quit_reports_a_created_stack_this_build_cannot_stop() {
+        // Quit answers with a Stop's stop of the stack when one is running, and which are is
+        // process-wide: another test's would be taken for this one's.
+        if test_support::isolated_process(
+            "tests::quit_reports_a_created_stack_this_build_cannot_stop",
+        ) {
+            return;
+        }
         let root = local_eval_root(
             "openbot-local-eval-quit-no-cli",
             Some(local_eval_state::Ownership::Created),
