@@ -1,3 +1,5 @@
+import { acceptedFileTypeOf } from "@openbot/shared/attachments";
+
 /**
  * A file a Bot sent from its computer into the conversation, as its tool call's answer carries it.
  *
@@ -47,14 +49,15 @@ export function fileSize(bytes: number): string {
   return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`;
 }
 
-/** What the card calls a file's kind, from the type the server found. */
+/**
+ * What the card calls a file's kind, from the type the server found and the names in the one list
+ * of files OpenBot takes (`ACCEPTED_FILE_TYPES`): "PNG image", "PDF", "CSV". Plain text has no
+ * better name than its extension, so it reads as "LOG file" or "Text file".
+ */
 export function kindLabel(mimeType: string, name: string): string {
-  const type = mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
-  if (type === "application/pdf") return "PDF";
-  if (type === "text/csv") return "CSV";
-  if (type === "application/json") return "JSON";
-  if (type === "text/markdown") return "Markdown";
-  if (type.startsWith("image/")) return `${type.slice(6).toUpperCase()} image`;
+  const type = acceptedFileTypeOf(mimeType);
+  if (type?.kind === "image") return `${type.name} image`;
+  if (type && type.mimeType !== "text/plain") return type.name;
   const dot = name.lastIndexOf(".");
   return dot > 0 ? `${name.slice(dot + 1).toUpperCase()} file` : "Text file";
 }

@@ -191,6 +191,16 @@ function refusedDetail(target: string | undefined, outcome: ComputerOutcome) {
   return [target, reason].filter(Boolean).join(" · ");
 }
 
+/**
+ * A file that was not sent: the server's sentence already names the file ("budget.xlsx can't be
+ * sent. ..."), so the line leads with it rather than saying the name twice in a narrow column.
+ */
+function sendRefusedDetail(path: string | undefined, outcome: ComputerOutcome) {
+  const reason = outcomeForPerson(String(outcome.reason ?? ""));
+  const name = path?.split("/").pop();
+  return name && reason.includes(name) ? reason : refusedDetail(path, outcome);
+}
+
 /** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
 function didNotWork(outcome: ComputerOutcome): boolean {
   return (
@@ -983,7 +993,7 @@ export function ComputerTools() {
           failedLabel="Didn't send a file"
           detail={
             outcome.refused === true || didNotWork(outcome)
-              ? refusedDetail(path, outcome)
+              ? sendRefusedDetail(path, outcome)
               : path
           }
           refused={outcome.refused === true}
