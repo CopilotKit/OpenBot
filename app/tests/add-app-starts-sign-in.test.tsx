@@ -22,6 +22,10 @@ import userEvent from "@testing-library/user-event";
 import { BrokerDirectory } from "@/components/plugins/broker-directory";
 import { connectionRows } from "@/lib/connections/rows";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  CONSENT_HANDOFF_PATH,
+  readConsentHandoff,
+} from "@/lib/plugins/consent-handoff";
 import type { PluginsProvider } from "@/lib/plugins/provider-vocabulary";
 import {
   APPS_PATH,
@@ -186,6 +190,23 @@ afterEach(() => {
   window.open = originalOpen;
 });
 
+/** Whether a tab was sent to OpenBot's own step before the sign-in (`/connecting`). */
+function stepShown(url: string | null | undefined): boolean {
+  return url?.includes(`${CONSENT_HANDOFF_PATH}#`) ?? false;
+}
+
+/** Where a tab ends up: the sign-in itself, or the one OpenBot's step was left to go on to. */
+function signInBehind(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `${CONSENT_HANDOFF_PATH}#`;
+  const at = url.indexOf(marker);
+  if (at < 0) return url;
+  return (
+    readConsentHandoff(decodeURIComponent(url.slice(at + marker.length)))
+      ?.url ?? null
+  );
+}
+
 function draw(edition: "team" | "personal") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -252,7 +273,11 @@ describe("Add in the personal edition", () => {
       await waitFor(() => {
         expect(writes).toEqual([`add ${target.slug}`, `connect ${id}`]);
         expect(tabs).toHaveLength(1);
-        expect(tabs[0]?.url).toBe(`https://sign-in.example/${id}`);
+        // Through Composio the tab shows OpenBot's step first, which then goes on to the sign-in.
+        expect(stepShown(tabs[0]?.url)).toBe(target.provider === "composio");
+        expect(signInBehind(tabs[0]?.url)).toBe(
+          `https://sign-in.example/${id}`,
+        );
       });
       // Added and not yet signed in: said plainly, while the other tab is open.
       await waitFor(() => {
@@ -326,7 +351,10 @@ describe("an added app nobody has signed in to", () => {
         within(slack).getByRole("button", { name: "Connect Slack" }),
       );
       await waitFor(() => {
-        expect(tabs[0]?.url).toBe("https://sign-in.example/composio-slack");
+        expect(stepShown(tabs[0]?.url)).toBe(true);
+        expect(signInBehind(tabs[0]?.url)).toBe(
+          "https://sign-in.example/composio-slack",
+        );
       });
     });
   }

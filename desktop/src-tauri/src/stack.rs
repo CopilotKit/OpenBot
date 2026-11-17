@@ -3537,6 +3537,15 @@ never logged.
 Every service's row rather than `server` named, for the reason `server_publishes` gives.
 */
 pub fn server_host_token(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    match server_environment(engine, root)? {
+        Some(environment) => host_token_in(&environment),
+        None => Ok(None),
+    }
+}
+
+/// The `{{json .Config.Env}}` of the installation's running `server` container, if one is running.
+/// Only reads; what it holds is never logged.
+fn server_environment(engine: &Address, root: &Path) -> Result<Option<Vec<u8>>, String> {
     let listed = compose_command(engine, root, &Secrets::new())
         .args(["ps", "--format", "{{.Service}}\t{{.ID}}"])
         .output()
@@ -3568,17 +3577,43 @@ pub fn server_host_token(engine: &Address, root: &Path) -> Result<Option<String>
     if !inspected.status.success() {
         return Err(command_said(&inspected.stderr));
     }
-    host_token_in(&inspected.stdout)
+    Ok(Some(inspected.stdout))
+}
+
+/// The install's token the installation's running `server` container was given, if it has one
+/// (`install_token`). Read back from there, as `server_host_token` reads its own, by a session that
+/// shows a deployment an earlier one raised and by the Recorder's native host, a process of its own:
+/// it is exactly the token the server checks. A server from a release before the token was given
+/// none, and asks for none. Never logged.
+pub fn server_install_token(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    match server_environment(engine, root)? {
+        Some(environment) => install_token_in(&environment),
+        None => Ok(None),
+    }
+}
+
+/// `server_install_token` over a container's `{{json .Config.Env}}`.
+pub fn install_token_in(environment: &[u8]) -> Result<Option<String>, String> {
+    setting_in(environment, crate::install_token::NAME)
 }
 
 /// `server_host_token` over a container's `{{json .Config.Env}}`. Pure, for the reason
 /// `published_in` is. An empty value is no token, as the server reads it.
 pub fn host_token_in(environment: &[u8]) -> Result<Option<String>, String> {
+    setting_in(environment, "OPENBOT_DESKTOP_HOST_TOKEN")
+}
+
+/// The value of `name` in a container's `{{json .Config.Env}}`, None when it is absent or empty.
+fn setting_in(environment: &[u8], name: &str) -> Result<Option<String>, String> {
     let environment: Vec<String> = serde_json::from_slice(environment)
         .map_err(|_| "the server container's settings could not be read".to_string())?;
     Ok(environment
         .iter()
-        .find_map(|entry| entry.strip_prefix("OPENBOT_DESKTOP_HOST_TOKEN="))
+        .find_map(|entry| {
+            entry
+                .strip_prefix(name)
+                .and_then(|rest| rest.strip_prefix('='))
+        })
         .filter(|token| !token.trim().is_empty())
         .map(str::to_owned))
 }
@@ -12135,6 +12170,87 @@ fn main() {
         let other = br#"["NOT_OPENBOT_DESKTOP_HOST_TOKEN=x"]"#;
         assert_eq!(host_token_in(other), Ok(None));
         assert!(host_token_in(b"no such container").is_err());
+    }
+
+    /// The same for the install's token, which an earlier session's deployment and the Recorder's
+    /// native host read back. A server from a release before it was given none.
+    #[test]
+    fn the_install_token_is_read_from_the_server_containers_environment() {
+        let given = br#"["OPENBOT_DESKTOP_HOST_TOKEN=host-abc","OPENBOT_INSTALL_TOKEN=install-xyz_-","PATH=/usr/bin"]"#;
+        assert_eq!(install_token_in(given), Ok(Some("install-xyz_-".into())));
+        assert_eq!(host_token_in(given), Ok(Some("host-abc".into())));
+        let empty = br#"["OPENBOT_INSTALL_TOKEN=","PATH=/usr/bin"]"#;
+        assert_eq!(install_token_in(empty), Ok(None));
+        let older = br#"["OPENBOT_DESKTOP_HOST_TOKEN=host-abc","PATH=/usr/bin"]"#;
+        assert_eq!(install_token_in(older), Ok(None));
+        assert_eq!(
+            install_token_in(br#"["XOPENBOT_INSTALL_TOKEN=x"]"#),
+            Ok(None)
+        );
+        assert!(install_token_in(b"no such container").is_err());
+    }
+
+    /// The services of a Compose file whose own block names `setting` in its environment, with the
+    /// value each gives it. Read as text, as `compose_service_names` reads the file.
+    fn services_given(compose: &str, setting: &str) -> Vec<(String, String)> {
+        let mut given = Vec::new();
+        let mut service = None;
+        let mut inside = false;
+        for line in compose.lines() {
+            if line.trim().is_empty() || line.trim_start().starts_with('#') {
+                continue;
+            }
+            if !line.starts_with(' ') {
+                inside = line.trim_end() == "services:";
+                service = None;
+                continue;
+            }
+            if !inside {
+                continue;
+            }
+            if let Some(rest) = line
+                .strip_prefix("  ")
+                .filter(|rest| !rest.starts_with(' '))
+            {
+                service = rest.split_once(':').map(|(name, _)| name.trim().to_owned());
+                continue;
+            }
+            if let (Some(service), Some((key, value))) = (&service, line.trim().split_once(": ")) {
+                if key == setting {
+                    given.push((service.clone(), value.trim().to_owned()));
+                }
+            }
+        }
+        given
+    }
+
+    /// The install's token reaches the server, from the environment Desktop runs Compose in and
+    /// otherwise from `.env` (scripts/start.sh), and no other service. The releases an install may be
+    /// put back to name it nowhere: their server asks for none.
+    #[test]
+    fn the_install_token_is_given_to_the_server_alone() {
+        assert_eq!(
+            services_given(THIS_RELEASES_COMPOSE, crate::install_token::NAME),
+            [(
+                "server".to_string(),
+                "${OPENBOT_INSTALL_TOKEN:-}".to_string()
+            )]
+        );
+        // Beside the host token, which reaches it the same way.
+        assert_eq!(
+            services_given(THIS_RELEASES_COMPOSE, "OPENBOT_DESKTOP_HOST_TOKEN"),
+            [(
+                "server".to_string(),
+                "${OPENBOT_DESKTOP_HOST_TOKEN:-}".to_string()
+            )]
+        );
+        for (release, compose) in RELEASED_COMPOSES {
+            assert_eq!(
+                services_given(compose, crate::install_token::NAME),
+                [],
+                "{release}"
+            );
+        }
     }
 
     #[test]

@@ -78,6 +78,11 @@ export const STAYS: { prefix: string; rule: Rule; why: string }[] = [
     why: "where an app account's sign-in comes back to be verified",
   },
   {
+    prefix: "/api/install/enter",
+    rule: "sign-in-protocol",
+    why: "where a single-user OpenBot's own app enters with its install's token, which sets the cookie it carries",
+  },
+  {
     prefix: "/api/copilotkit",
     rule: "runtime",
     why: "the CopilotKit runtime, which carries runs",
@@ -210,6 +215,12 @@ export const ALLOWED: Allowed[] = [
     rule: "sign-in-protocol",
     why: "where sign-in sends a person back to finish verifying an app account",
   },
+  {
+    file: "app/src/lib/plugins/finish-on-return.ts",
+    what: "fetch()",
+    rule: "sign-in-protocol",
+    why: "OpenBot Desktop's window finishes an app account's verification in the background, at the verifier resume.ts names",
+  },
   // The runtime and the sockets.
   {
     file: "app/src/lib/copilot/provider.tsx",
@@ -303,6 +314,18 @@ export const ALLOWED: Allowed[] = [
     what: "/api/v2/organizations/default/people/me/recorder-connect-codes",
     rule: "hand-built-v2",
     why: "the Recorder host's handoff, from Rust, which has no generated client",
+  },
+  {
+    file: "desktop/src-tauri/src/install_token.rs",
+    what: "/api/install/enter",
+    rule: "sign-in-protocol",
+    why: "the window enters the OpenBot on this computer once with its install's token",
+  },
+  {
+    file: "scripts/start.sh",
+    what: /^\/api\/install\/enter\?token=/,
+    rule: "sign-in-protocol",
+    why: "the start script prints the address a single-user OpenBot is opened at, with its install's token",
   },
   // Desktop connecting to an OpenBot that runs somewhere else.
   {

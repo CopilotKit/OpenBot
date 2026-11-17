@@ -209,6 +209,8 @@ test("the Details pane says who ran it and on which model, and lists what it mad
   await waitFor(() => expect(ranBy.textContent).toContain("General Assistant"));
   expect(ranBy.textContent).toContain("Built in");
   await waitFor(() => expect(ranBy.textContent).toContain("gpt-5.1"));
+  // How long it worked, as listTaskTurns adds it up: a subagent it started worked inside that turn.
+  expect(ranBy.textContent).toContain("Worked for 52s");
 
   const outputs = view.getByRole("region", { name: "Outputs" });
   expect(within(outputs).getByRole("link").getAttribute("href")).toBe(SHEET);

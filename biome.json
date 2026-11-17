@@ -142,6 +142,7 @@
       "includes": [
         "app/src/lib/client.ts",
         "app/src/lib/auth/client.ts",
+        "app/src/lib/plugins/finish-on-return.ts",
         "app/src/components/channels/chat-transcript.tsx",
         "app/src/lib/channels/use-channel-events.ts",
         "app/src/components/computer/live-screen.tsx",

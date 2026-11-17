@@ -1,4 +1,8 @@
-import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import {
+  type Query,
+  type QueryClient,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
@@ -326,8 +330,31 @@ export function refreshTaskCards(
   readTasksOfConversation(queryClient, activity.channelId);
 }
 
-/** Cards waiting on a read under way, to read once more when it lands. */
-const readAgainAfter = new Set<string>();
+/** Reads waiting on a read under way, to read once more when it lands. */
+const readAgainAfter = new WeakSet<Query>();
+
+/**
+ * Read a query once more when the read under way lands, since that read may have begun before the
+ * change being answered.
+ *
+ * The read under way is let finish rather than cancelled: cancelling and starting again under a
+ * stream of events starves it (see `readTasksOfConversation`). However many changes arrive while it
+ * runs, it is read once more, once.
+ */
+function readAgainWhenLanded(queryClient: QueryClient, query: Query): void {
+  if (readAgainAfter.has(query)) return;
+  readAgainAfter.add(query);
+  const cache = queryClient.getQueryCache();
+  const stop = cache.subscribe((event) => {
+    if (event.query !== query || query.state.fetchStatus === "fetching") return;
+    stop();
+    readAgainAfter.delete(query);
+    void queryClient.invalidateQueries(
+      { queryKey: query.queryKey, exact: true },
+      { cancelRefetch: false },
+    );
+  });
+}
 
 /**
  * THE CARDS OF ONE CONVERSATION READ THEIR TASKS AGAIN, AND A READ UNDER WAY IS NEVER THROWN AWAY.
@@ -352,29 +379,14 @@ function readTasksOfConversation(queryClient: QueryClient, channelId: string) {
       card.channelId !== channelId
     )
       continue;
-    const hash = query.queryHash;
-    if (query.state.fetchStatus !== "fetching") {
-      void queryClient.invalidateQueries(
-        { queryKey: query.queryKey, exact: true },
-        { cancelRefetch: false },
-      );
+    if (query.state.fetchStatus === "fetching") {
+      readAgainWhenLanded(queryClient, query);
       continue;
     }
-    if (readAgainAfter.has(hash)) continue;
-    readAgainAfter.add(hash);
-    const stop = cache.subscribe((event) => {
-      if (
-        event.query.queryHash !== hash ||
-        event.query.state.fetchStatus === "fetching"
-      )
-        return;
-      stop();
-      readAgainAfter.delete(hash);
-      void queryClient.invalidateQueries(
-        { queryKey: query.queryKey, exact: true },
-        { cancelRefetch: false },
-      );
-    });
+    void queryClient.invalidateQueries(
+      { queryKey: query.queryKey, exact: true },
+      { cancelRefetch: false },
+    );
   }
 }
 
@@ -414,9 +426,16 @@ export function botLineOf(activity: ChannelActivityEvent): BotLine | null {
  * A conversation no page holds is refetched for, and when the event is a Bot's line the conversation
  * itself is told (`said-off-the-list.ts`): a task's thread is never on a page, and is read through
  * this alone.
+ *
+ * A patch made while the list is being read is read for again once that read lands. The read may
+ * have begun before the change, and landing after the patch it would put the old row back. Found
+ * with a subagent and its parent named in the same pass, the subagent first: its conversation was
+ * not on the list, so the list was read again; the parent's name patched its row while that read
+ * was on its way, and the read put back the row with no name. Nothing read the list again, so the
+ * sidebar called the parent by its first message until a reload.
  */
 export function applyToRoster(
-  queryClient: Pick<QueryClient, "setQueryData" | "invalidateQueries">,
+  queryClient: QueryClient,
   activity: ChannelActivityEvent,
 ): void {
   let listed = true;
@@ -430,7 +449,14 @@ export function applyToRoster(
       return data;
     },
   );
-  if (listed) return;
+  if (listed) {
+    const list = queryClient
+      .getQueryCache()
+      .find({ queryKey: channelKeys.list(), exact: true });
+    if (list?.state.fetchStatus === "fetching")
+      readAgainWhenLanded(queryClient, list);
+    return;
+  }
   // An unknown channel id means the roster is stale; refetch rather than patch.
   void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
   const line = botLineOf(activity);
