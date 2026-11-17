@@ -392,6 +392,12 @@ export const ALLOWED: Allowed[] = [
     rule: "third-party",
     why: "image registries, never OpenBot's server",
   },
+  {
+    file: "scripts/model-compat.ts",
+    what: /^(fetch\(\)|\/health|\/api\/agents\/openbot\/generate)$/,
+    rule: "third-party",
+    why: "model providers' listings and the harness images the model check starts on this machine, never OpenBot's server",
+  },
   // Scripts that run and stop a server on this machine.
   {
     file: "scripts/update-local.ts",

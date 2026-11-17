@@ -22,8 +22,8 @@
  * A Claude plan runs through the same bundled CLI as an Anthropic key, so the key's rows cover it.
  *
  * Keys come from the environment (or --env-file), one per provider: ANTHROPIC_API_KEY,
- * OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, UNBIASED_API_KEY. A provider with no key is
- * reported as skipped, not failed. Keys are never printed: every detail is scrubbed of them.
+ * OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY. A provider with no key is reported as skipped,
+ * not failed. Keys are never printed: every detail is scrubbed of them.
  *
  *   bun scripts/model-compat.ts [--env-file .env] [--harness agent-claude-sdk,...]
  *     [--provider anthropic,...] [--model <regex>] [--tags latest,source] [--concurrency 6]
@@ -219,7 +219,7 @@ export type Harness = {
   runPath: string;
 };
 
-export type ProviderId = "openai" | "anthropic" | "google" | "xai" | "unbiased";
+export type ProviderId = "openai" | "anthropic" | "google" | "xai";
 
 export type Provider = {
   id: ProviderId;
@@ -300,13 +300,16 @@ export const PROVIDERS: readonly Provider[] = [
     listing: listedAt("https://api.x.ai/v1/language-models"),
     ...compatible("https://api.x.ai/v1"),
   },
+];
+
+/**
+ * Providers the Desktop offers by address that this check leaves out on purpose, with why. A
+ * gateway serves its own aliases, not a provider's models.
+ */
+export const NOT_CHECKED: readonly { baseUrl: string; why: string }[] = [
   {
-    id: "unbiased",
-    label: "Unbiased AI",
-    secret: "UNBIASED_API_KEY",
-    source: "gateway",
-    listing: listedAt("https://api.unbiased.ai/v1/models"),
-    ...compatible("https://api.unbiased.ai/v1"),
+    baseUrl: "https://api.unbiased.ai/v1",
+    why: "Unbiased AI is a gateway serving its own `pareto` model, not a provider's listing",
   },
 ];
 

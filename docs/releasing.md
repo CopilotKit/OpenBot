@@ -1022,8 +1022,9 @@ own words, to the run's summary. On any failure the run fails and opens or updat
 schedule or by hand on `main`, never on a pull request.
 
 Each provider needs its key as a repository secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`GEMINI_API_KEY` (Google, also used for Antigravity), `XAI_API_KEY` and `UNBIASED_API_KEY`. A provider
-without one is reported as skipped, not failed, and the summary names the missing secrets.
+`GEMINI_API_KEY` (Google, also used for Antigravity) and `XAI_API_KEY`. A provider without one is
+reported as skipped, not failed, and the summary names the missing secrets. Unbiased AI is not
+checked: it is a gateway serving its own model, not a provider's listing.
 
 **When it fails**, read the provider's words in the table:
 

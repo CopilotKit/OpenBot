@@ -8,6 +8,7 @@ import {
   codexGate,
   type Harness,
   type MatrixRow,
+  NOT_CHECKED,
   PROVIDERS,
   parseCapabilities,
   providersFor,
@@ -191,7 +192,6 @@ test("the matrix has one row per harness, image tag and model, and skips a provi
     skipped.map((row) => [row.harness.image, row.provider]).sort(),
   ).toEqual([
     ["agent-agno", "google"],
-    ["agent-agno", "unbiased"],
     ["agent-agno", "xai"],
     ["agent-antigravity", "google"],
   ]);
@@ -370,9 +370,10 @@ test("every provider the Desktop offers by address is checked", () => {
     (match) => match[1]!.replace(/\/+$/, ""),
   );
   expect(presets.length).toBeGreaterThan(0);
-  const checked = PROVIDERS.map((provider) =>
-    provider.baseUrl?.replace(/\/+$/, ""),
-  );
+  const checked = [
+    ...PROVIDERS.map((provider) => provider.baseUrl),
+    ...NOT_CHECKED.map((left) => left.baseUrl),
+  ].map((url) => url?.replace(/\/+$/, ""));
   for (const preset of presets) expect(checked).toContain(preset);
 });
 
