@@ -1179,6 +1179,12 @@ export function Composer({
           url: attachmentAddress(attachment.source.value),
           alt: attachment.filename,
           loading: attachment.status === "uploading",
+          // What the tile says the file is, if the browser cannot draw the picture.
+          name: attachment.filename,
+          size: attachment.size,
+          ...(attachment.source.type === "url" && attachment.source.mimeType
+            ? { mimeType: attachment.source.mimeType }
+            : {}),
         })),
     [staged],
   );
