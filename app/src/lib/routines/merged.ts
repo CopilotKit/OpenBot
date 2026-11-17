@@ -30,7 +30,7 @@ export type MergedRoutine =
     };
 
 /** Whether a row is working now: on, active, not paused. Working rows come first. */
-function working(row: MergedRoutine): boolean {
+export function isWorking(row: MergedRoutine): boolean {
   switch (row.kind) {
     case "routine":
       return row.routine.enabled;
@@ -99,7 +99,7 @@ export function mergeRoutines({
     .map((row, index) => ({ row, index }))
     .sort(
       (a, b) =>
-        Number(working(b.row)) - Number(working(a.row)) ||
+        Number(isWorking(b.row)) - Number(isWorking(a.row)) ||
         KIND_ORDER[a.row.kind] - KIND_ORDER[b.row.kind] ||
         a.index - b.index,
     )

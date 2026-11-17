@@ -3,7 +3,6 @@ import {
   IconClock,
   IconPlayerPause,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import { LoadingRows } from "@/components/layout/loading-rows";
@@ -28,27 +27,13 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import { proactiveSettingsQueryOptions } from "@/lib/proactive";
-import {
-  type ResponsibilityRecord,
-  responsibilitiesQueryOptions,
-} from "@/lib/responsibilities";
+import type { ResponsibilityRecord } from "@/lib/responsibilities";
 import { describeEvent } from "@/lib/routines/events";
-import {
-  goalCanEnd,
-  goalStarts,
-  mergeRoutines,
-  routineDoes,
-} from "@/lib/routines/merged";
-import {
-  type RoutineRecord,
-  routinesQueryOptions,
-} from "@/lib/routines/queries";
+import { goalCanEnd, goalStarts, routineDoes } from "@/lib/routines/merged";
+import type { RoutineRecord } from "@/lib/routines/queries";
+import { useMergedRoutines } from "@/lib/routines/use-merged";
 import { NewRoutineButton } from "./new-routine-button";
 import { lastRunLabel, scheduleWords } from "./routine-page";
-
-type BotDirectory = Map<string, AgentProfile>;
 
 /**
  * A scheduled routine's row, the same shape as a goal's and a check-in's: what it does (its title,
@@ -243,36 +228,10 @@ export function RoutinesList({
   /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
 } = {}) {
-  const routines = useQuery(routinesQueryOptions());
-  const goals = useQuery(responsibilitiesQueryOptions());
-  const checkIns = useQuery(proactiveSettingsQueryOptions());
+  const { rows, bots, pending, failed, routinesFailed } =
+    useMergedRoutines(agentId);
   const blocked = useCheckInsBlocked();
-  /* Names and faces for each row's Bot, hidden Bots included: a routine outlives hiding its Bot. */
-  const shownBots = useQuery(agentListQueryOptions());
-  const hiddenBots = useQuery({
-    ...agentListQueryOptions(true),
-    enabled: agentId === undefined,
-  });
-  const bots: BotDirectory = new Map(
-    [...(shownBots.data ?? []), ...(hiddenBots.data ?? [])].map((bot) => [
-      bot.id,
-      bot,
-    ]),
-  );
-
-  const rows = mergeRoutines({
-    routines: routines.data?.routines ?? [],
-    goals: goals.data ?? [],
-    checkIns: checkIns.data ?? [],
-    agentId,
-  });
   const showBot = agentId === undefined;
-  const pending = routines.isPending || goals.isPending || checkIns.isPending;
-  const failed = [
-    routines.error ? "routines" : null,
-    goals.error ? "goals" : null,
-    checkIns.error ? "check-ins" : null,
-  ].filter((name): name is string => name !== null);
 
   return (
     <PageSection className={embedded ? "mt-0" : undefined}>
@@ -323,7 +282,7 @@ export function RoutinesList({
                   }
                   agentId={agentId}
                   goal={row.goal}
-                  routines={routines.error ? undefined : row.routines}
+                  routines={routinesFailed ? undefined : row.routines}
                 />
               ) : (
                 <SettingRow
