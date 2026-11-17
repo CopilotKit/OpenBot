@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildMatrix,
+  classifyMastra,
   classifyRun,
   codexGate,
   type Harness,
@@ -254,6 +255,43 @@ test("a run that finished without a reply, or answered with an error as text, fa
   });
   expect(asText.status).toBe("fail");
   expect(asText.detail).toContain("model not supported");
+});
+
+test("a reply that arrives only as a messages snapshot, as CrewAI's bridge sends it, passes", () => {
+  const crewaiReply = [
+    'data: {"type":"RUN_STARTED","threadId":"t","runId":"r"}',
+    'data: {"type":"MESSAGES_SNAPSHOT","messages":[{"id":"u","role":"user","content":"Reply with the single word OK."},{"id":"a","role":"assistant","content":"OK"}]}',
+    'data: {"type":"RUN_FINISHED","threadId":"t","runId":"r"}',
+  ].join("\n\n");
+  expect(classifyRun({ status: 200, body: crewaiReply })).toEqual({
+    status: "pass",
+    detail: "OK",
+  });
+  // The person's own message in the snapshot is not a reply.
+  const onlyThePrompt = crewaiReply.replace(
+    ',{"id":"a","role":"assistant","content":"OK"}',
+    "",
+  );
+  expect(classifyRun({ status: 200, body: onlyThePrompt }).status).toBe("fail");
+});
+
+test("Mastra's own API answer is read as a reply or a refusal", () => {
+  expect(
+    classifyMastra({
+      status: 200,
+      body: '{"text":"OK","finishReason":"stop"}',
+    }),
+  ).toEqual({ status: "pass", detail: "OK" });
+  expect(
+    classifyMastra({
+      status: 500,
+      body: '{"error":"This model is only supported in v1/responses and not in v1/chat/completions."}',
+    }),
+  ).toEqual({
+    status: "fail",
+    detail:
+      "HTTP 500: This model is only supported in v1/responses and not in v1/chat/completions.",
+  });
 });
 
 test("a refused request fails with its status and body", () => {

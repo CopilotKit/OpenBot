@@ -45,6 +45,16 @@ const MODELS_DEV = "https://models.dev/api.json";
 const CODEX_CATALOGUE =
   "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
 const PROMPT = "Reply with the single word OK.";
+/** One tool the prompt has no use for, so the request takes the client's tool path. */
+const PROBE_TOOL = {
+  name: "look_up_order",
+  description: "Look up the status of an order by its number.",
+  parameters: {
+    type: "object",
+    properties: { order: { type: "string", description: "The order number." } },
+    required: ["order"],
+  },
+};
 const RUN_TIMEOUT_MS = 300_000;
 const START_TIMEOUT_MS = 120_000;
 
@@ -400,8 +410,11 @@ export function classifyRun(response: {
       status: "fail",
       detail: `HTTP ${response.status}: ${oneLine(response.body)}`,
     };
-  let text = "";
+  let streamed = "";
+  // Some bridges (CrewAI's) send the reply only as the conversation's new state.
+  let snapshot = "";
   let finished = false;
+  let calledTool = false;
   for (const line of response.body.split("\n")) {
     if (!line.startsWith("data:")) continue;
     let event: Record<string, unknown>;
@@ -417,19 +430,64 @@ export function classifyRun(response: {
         event.type === "TEXT_MESSAGE_CHUNK") &&
       typeof event.delta === "string"
     )
-      text += event.delta;
+      streamed += event.delta;
+    if (event.type === "MESSAGES_SNAPSHOT" && Array.isArray(event.messages)) {
+      const last = event.messages.at(-1) as
+        | { role?: unknown; content?: unknown }
+        | undefined;
+      snapshot =
+        last?.role === "assistant" && typeof last.content === "string"
+          ? last.content
+          : "";
+    }
+    if (event.type === "TOOL_CALL_START") calledTool = true;
     if (event.type === "RUN_FINISHED") finished = true;
   }
+  return judgeReply(
+    streamed || snapshot,
+    calledTool
+      ? "the model called the probe's tool instead of replying"
+      : finished
+        ? "the run finished without a reply"
+        : "the stream ended without finishing the run",
+  );
+}
+
+function judgeReply(text: string, silence: string): Outcome {
   if (/\bok(ay)?\b/i.test(text))
     return { status: "pass", detail: oneLine(text, 80) };
   if (text)
     return { status: "fail", detail: `answered without OK: ${oneLine(text)}` };
-  return {
-    status: "fail",
-    detail: finished
-      ? "the run finished without a reply"
-      : "the stream ended without finishing the run",
-  };
+  return { status: "fail", detail: silence };
+}
+
+/**
+ * Mastra serves no AG-UI route: OpenBot reaches it through Mastra's own agent API, so its run is a
+ * `generate` call on that API, answered with the reply's `text` or an `error`.
+ */
+export function classifyMastra(response: {
+  status: number;
+  body: string;
+}): Outcome {
+  let parsed: { text?: unknown; error?: unknown; message?: unknown } = {};
+  try {
+    parsed = JSON.parse(response.body);
+  } catch {
+    // Not JSON: reported as it is, below.
+  }
+  if (response.status !== 200) {
+    const said = [parsed.error, parsed.message].find(
+      (value): value is string => typeof value === "string" && !!value,
+    );
+    return {
+      status: "fail",
+      detail: `HTTP ${response.status}: ${oneLine(said ?? response.body)}`,
+    };
+  }
+  return judgeReply(
+    typeof parsed.text === "string" ? parsed.text : "",
+    "the agent answered without text",
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -785,28 +843,42 @@ async function runOne(
       };
     }
     const id = randomBytes(6).toString("hex");
+    const mastra = harness.image === "agent-mastra";
     let response: { status: number; body: string };
     try {
-      const reply = await fetch(`${base}${harness.runPath || "/"}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "text/event-stream",
-          "x-openbot-agent-token": token,
+      const reply = await fetch(
+        mastra
+          ? `${base}/api/agents/openbot/generate`
+          : `${base}${harness.runPath || "/"}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: mastra ? "application/json" : "text/event-stream",
+            "x-openbot-agent-token": token,
+          },
+          body: JSON.stringify(
+            mastra
+              ? { messages: [{ role: "user", content: PROMPT }] }
+              : {
+                  threadId: `model-compat-${id}`,
+                  runId: `run-${id}`,
+                  state: {},
+                  messages: [
+                    { id: `message-${id}`, role: "user", content: PROMPT },
+                  ],
+                  // A Bot's run always carries tools, and a client's tool path is where models
+                  // part ways (Responses-only models, parallel tool calls), so this one does too.
+                  tools: [PROBE_TOOL],
+                  context: [],
+                  // What the server tells the LangGraph and Claude Agent SDK harnesses; the others
+                  // read BOT_MODEL, set above.
+                  forwardedProps: { openbotModel: { model: row.model } },
+                },
+          ),
+          signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
         },
-        body: JSON.stringify({
-          threadId: `model-compat-${id}`,
-          runId: `run-${id}`,
-          state: {},
-          messages: [{ id: `message-${id}`, role: "user", content: PROMPT }],
-          tools: [],
-          context: [],
-          // What the server tells the LangGraph and Claude Agent SDK harnesses; the others read
-          // BOT_MODEL, set above.
-          forwardedProps: { openbotModel: { model: row.model } },
-        }),
-        signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
-      });
+      );
       response = { status: reply.status, body: await reply.text() };
     } catch (error) {
       return {
@@ -814,7 +886,7 @@ async function runOne(
         detail: scrub(`no answer: ${oneLine(String(error))}`),
       };
     }
-    const outcome = classifyRun(response);
+    const outcome = mastra ? classifyMastra(response) : classifyRun(response);
     if (outcome.status === "fail" && !response.body.includes("RUN_ERROR")) {
       // A harness that swallowed the error still logged it.
       const logs = await exec(["docker", "logs", "--tail", "40", name]);
