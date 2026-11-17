@@ -34,8 +34,17 @@ import {
  * The person's own files draw as tiles in a row under their message. This is one file in the Bot's
  * answer, so it is one card the width of the column (up to a comfortable reading width), with the
  * same border, fill and corners as those tiles.
+ *
+ * COMPACT, for a list (an approval of a reply that carries the file): no margin and no picture
+ * across the card, the picture shrunk into the icon's place, still opening full size.
  */
-export function SentFileCard({ file }: { file: SentFile }) {
+export function SentFileCard({
+  file,
+  compact = false,
+}: {
+  file: SentFile;
+  compact?: boolean;
+}) {
   const address = attachmentAddress(file.url);
   const picture = file.mimeType.toLowerCase().startsWith("image/");
   const [failedToLoad, setFailedToLoad] = useState(false);
@@ -44,7 +53,7 @@ export function SentFileCard({ file }: { file: SentFile }) {
   if (failedToLoad || gone) {
     return (
       <div
-        className="my-2 flex w-full max-w-sm items-center gap-3 rounded-xl border border-destructive border-dashed p-3 text-destructive"
+        className={`${compact ? "" : "my-2 "}flex w-full max-w-sm items-center gap-3 rounded-xl border border-destructive border-dashed p-3 text-destructive`}
         role="note"
       >
         <IconAlertTriangle aria-hidden className="size-5 shrink-0" />
@@ -56,9 +65,9 @@ export function SentFileCard({ file }: { file: SentFile }) {
   return (
     <figure
       aria-label={`File from the Bot: ${file.name}`}
-      className="my-2 flex w-full max-w-sm flex-col overflow-hidden rounded-xl border border-border bg-muted/40"
+      className={`${compact ? "" : "my-2 "}flex w-full max-w-sm flex-col overflow-hidden rounded-xl border border-border bg-muted/40`}
     >
-      {picture ? (
+      {picture && !compact ? (
         <AttachmentLightbox filename={file.name} url={address}>
           <img
             alt={file.name}
@@ -69,11 +78,22 @@ export function SentFileCard({ file }: { file: SentFile }) {
         </AttachmentLightbox>
       ) : null}
       <figcaption
-        className={`flex items-center gap-3 p-3 ${picture ? "border-border border-t" : ""}`}
+        className={`flex items-center gap-3 p-3 ${picture && !compact ? "border-border border-t" : ""}`}
       >
-        <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-border bg-background text-muted-foreground">
-          <FileIcon mimeType={file.mimeType} />
-        </span>
+        {picture && compact ? (
+          <AttachmentLightbox filename={file.name} url={address}>
+            <img
+              alt={file.name}
+              className="size-10 shrink-0 rounded-lg border border-border bg-muted object-cover"
+              onError={() => setFailedToLoad(true)}
+              src={address}
+            />
+          </AttachmentLightbox>
+        ) : (
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-border bg-background text-muted-foreground">
+            <FileIcon mimeType={file.mimeType} />
+          </span>
+        )}
         <span className="min-w-0 flex-1">
           {/* `title` because a long name is cut, not wrapped, in the narrow column. */}
           <span
@@ -94,7 +114,10 @@ export function SentFileCard({ file }: { file: SentFile }) {
           variant="outline"
         >
           <IconDownload data-icon="inline-start" />
-          Download
+          {/* In a list on a phone the button is its icon, so the file's name and size keep the room. */}
+          <span className={compact ? "max-sm:sr-only" : undefined}>
+            Download
+          </span>
         </Button>
       </figcaption>
     </figure>
