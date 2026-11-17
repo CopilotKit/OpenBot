@@ -951,10 +951,11 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 | `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
 | `app (real browser)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark |
 | `tests` | a decision made wrongly, in isolation |
-| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses, or a Compose file an older Compose cannot read |
+| `python harness (<harness>)` | a provider-boundary regression in one of the Python Bot harnesses, one check per harness |
+| `compose file` | a Compose file the harness pick, or the oldest Compose the desktop app meets, cannot read |
 | `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
-| `component dockerfiles` | a Dockerfile a release would publish that no longer builds, or one the publish list has stopped covering |
+| `component list`, `component dockerfile (<image>)` | a Dockerfile the publish list has stopped covering, or one a release would publish that no longer builds, one check per image |
 
 None of these runs the OpenBot server. It comes as published images, which a release pins by digest
 and refuses to publish without (see [What merging does](#what-merging-does)).
@@ -972,7 +973,7 @@ release commit:
   `backend-images.env` and the `openbot-desktop` version line in
   `desktop/src-tauri/Cargo.toml` and `Cargo.lock`, which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
   exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
-  skips `component dockerfiles` unless it was labelled `full-ci`. A run still in progress is waited for, up to 40 minutes. In
+  skips the component dockerfile checks unless it was labelled `full-ci`. A run still in progress is waited for, up to 40 minutes. In
   their place the job re-runs the checks that read the files the release did change: formatting and
   lint, the desktop version against `package.json`, and every test that names
   `CHANGELOG.md` or `release-policy.json`.

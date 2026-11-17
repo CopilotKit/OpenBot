@@ -270,37 +270,10 @@ jobs:
           print(f"Verified packaged Mac version: {build['version']}")
           PY
       # Frontend assets and platform dependencies are ready after the packaged build.
-      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in, apart from
-      # the image download's on Linux, below.
+      # Include main.rs regressions as well as lib.rs. The ignored live tests, which need Docker, run
+      # in desktop.yml's own `live` job, beside this build rather than after it.
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
-        working-directory: desktop/src-tauri
-      # The back end's image download against a real containerd: the k3s node the CLI creates, a
-      # registry and a throttling proxy, on the runner's Docker. Linux runners have Docker; the
-      # others do not.
-      - name: Back end image download regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib local_images::live -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # An announced release's images downloaded while the version that runs stays up, against the
-      # same node, registry and proxy, with Docker as OpenBot's engine: the update afterwards
-      # downloads nothing, and a disk short of room downloads nothing at all.
-      - name: Update download ahead regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib update_ready::live -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # OpenBot's machine on Windows shares one network namespace with every WSL distro, so a
-      # stopped machine's port rules outlive it. Reproduced on real netavark, both generations
-      # Podman runs on WSL, in a privileged lab on the runner's Docker, then cleared.
-      - name: Stale port rule regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib netavark_rules::live -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # The folder sandbox on the runner's Docker: what a Bot is told when its command fails, runs
-      # too long or out of memory, or cannot start, for each way that happens.
-      - name: Folder sandbox answer regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib host_access::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from
