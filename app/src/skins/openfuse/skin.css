@@ -353,6 +353,16 @@
   [data-openfuse-menu] {
   left: max(0px, calc(68px - (100vw - 100% - 40px) / 2));
 }
+/*
+ * The menu and bell discs sit on the window buttons' row: 44px tall, centred on their 29px middle,
+ * so they start 7px down rather than 16px, level with the Bot's picture between them. Lower, the
+ * menu disc read as a fourth button that had slipped.
+ */
+:root[data-skin="openfuse"][data-desktop-titlebar="overlay"]
+  .openfuse-frame
+  :is([data-openfuse-menu], [data-openfuse-bell]) {
+  top: 7px;
+}
 :root[data-skin="openfuse"][data-desktop-titlebar="overlay"]
   .openfuse-frame
   > aside {

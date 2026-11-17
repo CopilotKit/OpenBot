@@ -42,6 +42,8 @@ type Case = {
   skin: "openduet" | "opendots" | "openfuse";
   path: string;
   width: number;
+  /** The window's height, when not 800px. The desktop's shortest is 560px. */
+  height?: number;
   /** Whether the desktop app offers an update, so the update notice is drawn across the top. */
   update?: boolean;
   /** What to do once the frame is drawn, such as opening a drawer. */
@@ -147,6 +149,26 @@ const CASES: Case[] = [
     corner: ['button[aria-label="Open conversations and menu"]'],
   },
   {
+    name: "openfuse-narrowest-menu",
+    skin: "openfuse",
+    path: "/",
+    width: NARROWEST_WIDTH,
+    height: 560,
+    prepare: async (page) => {
+      await page
+        .getByRole("button", { name: "Open conversations and menu" })
+        .click();
+      await page.getByRole("button", { name: "Close" }).waitFor();
+      // The card slides in; it is measured where it comes to rest.
+      await page.waitForFunction(() =>
+        document
+          .getAnimations()
+          .every((animation) => animation.playState !== "running"),
+      );
+    },
+    corner: ['[data-slot="dialog-title"]'],
+  },
+  {
     name: "openfuse-update",
     skin: "openfuse",
     path: "/",
@@ -243,7 +265,7 @@ async function open(
   theme: "light" | "dark" = "light",
 ): Promise<Page> {
   const page = await browser.newPage({
-    viewport: { width: shown.width, height: 800 },
+    viewport: { width: shown.width, height: shown.height ?? 800 },
     deviceScaleFactor: 2,
   });
   page.on("pageerror", (error) => console.error(error));
@@ -357,9 +379,24 @@ const overlayScript = (() => {
  * bar spans, pressed every 8px on two rows, leaving out the window's buttons themselves. Whether a
  * press drags is Tauri's own rule (tauri 2.12, window/scripts/drag.js `isDragRegion`), copied here:
  * walking up from what was pressed, a button or link without a mark stops it, "deep" drags from
- * anything inside, and a bare mark drags only from the marked element itself.
+ * anything inside, and a bare mark drags only from the marked element itself. Where no mark moves
+ * the window, the script's own top strip must: a press there is sent to the page, with Tauri's
+ * `invoke` recorded. A press on a control must never move the window, so one that does is listed
+ * too.
  */
 async function deadStrip(page: Page): Promise<string[]> {
+  await page.evaluate(() => {
+    const calls: string[] = [];
+    Object.assign(window, {
+      __stripCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: (command: string) => {
+          calls.push(command);
+          return Promise.resolve();
+        },
+      },
+    });
+  });
   await page.evaluate(overlayScript);
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => resolve(0))),
@@ -393,8 +430,8 @@ async function deadStrip(page: Page): Promise<string[]> {
       ROLES.has(el.getAttribute("role") ?? "");
     /** "drag", "control" or "dead", for a press on `target`. */
     const press = (target: Element) => {
-      // An open drawer's scrim closes it when pressed, as it should.
-      if (target.getAttribute("data-slot") === "sheet-overlay")
+      // An open drawer's or dialog's scrim closes it when pressed, as it should.
+      if (/(overlay|backdrop)$/.test(target.getAttribute("data-slot") ?? ""))
         return "control";
       for (let el: Element | null = target; el; el = el.parentElement) {
         if (!(el instanceof HTMLElement)) continue;
@@ -419,13 +456,34 @@ async function deadStrip(page: Page): Promise<string[]> {
         )
           continue;
         const target = document.elementFromPoint(x, y);
-        if (!target || press(target) !== "dead") continue;
+        if (!target) continue;
+        const marked = press(target);
+        if (marked === "drag") continue;
+        // The press itself, with no release, so a control under it is not clicked.
+        const calls = (window as unknown as { __stripCalls: string[] })
+          .__stripCalls;
+        const before = calls.length;
+        target.dispatchEvent(
+          new MouseEvent("mousedown", {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            button: 0,
+            detail: 1,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+        const moved = calls
+          .slice(before)
+          .includes("plugin:window|start_dragging");
+        if (marked === "control" ? !moved : moved) continue;
         const name =
           target.getAttribute("aria-label") ??
           target.getAttribute("data-slot") ??
           target.className;
         dead.push(
-          `${x},${y} ${target.tagName.toLowerCase()} ${String(name).slice(0, 40)}`,
+          `${x},${y} ${marked === "control" ? "control moved the window: " : ""}${target.tagName.toLowerCase()} ${String(name).slice(0, 40)}`,
         );
       }
     }
@@ -445,7 +503,7 @@ describe.skipIf(!asked)("the skins and the window's buttons", () => {
     }, 30_000);
   }
 
-  for (const shown of CASES.filter((each) => !each.update)) {
+  for (const shown of CASES) {
     test(`${shown.name} at ${shown.width}px: in the macOS desktop, the whole top strip moves the window`, async () => {
       const page = await open(shown, true);
       try {
@@ -511,6 +569,9 @@ describe.skipIf(!asked)("the skins and the window's buttons", () => {
       },
       "openfuse-narrowest": {
         'button[aria-label="Open conversations and menu"]': { x: 20, y: 16 },
+      },
+      "openfuse-narrowest-menu": {
+        '[data-slot="dialog-title"]': { x: 385, y: 305 },
       },
       "openfuse-update": {
         '[aria-label="OpenBot update"] p': { x: 16, y: 11 },

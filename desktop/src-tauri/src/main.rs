@@ -7402,6 +7402,12 @@ itself while the sidebar is hidden, onboarding's header, which has no sidebar be
 place a skin marks `data-desktop-drag` (its top bar, its rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
+
+Under the marks, the window's whole top strip works as a Mac title bar: a press in the top 40px
+(`TOP_STRIP`, the window buttons' row) on anything but a control moves the window, and a double
+press zooms it. The marks cover only the places a page names. A page that names none (a settings
+screen's margin beside the sidebar, an update notice, a drawer, a page from before the marks) left
+dead spots, and a person who pressed there could not move the window.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -7432,6 +7438,74 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
       else main.removeAttribute(DRAG);
     }
   };
+  // The top strip. Tauri's own drag script (tauri 2.12, window/scripts/drag.js) acts on the marks,
+  // so this acts only where it would not, with the same idea of a control.
+  const TOP_STRIP = 40;
+  const CONTROL_TAGS = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "LABEL", "SUMMARY"]);
+  const CONTROL_ROLES = new Set([
+    "button", "link", "menuitem", "tab", "checkbox", "radio", "switch", "option",
+  ]);
+  const isControl = (el) =>
+    CONTROL_TAGS.has(el.tagName) ||
+    el.isContentEditable ||
+    (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") ||
+    CONTROL_ROLES.has(el.getAttribute("role"));
+  // Tauri's rule for its marks: true when its script moves the window for this press.
+  const markedDrag = (path) => {
+    for (const el of path) {
+      if (!(el instanceof HTMLElement)) continue;
+      const attr = el.getAttribute(DRAG);
+      if (isControl(el) && attr === null) return false;
+      if (attr === null) continue;
+      if (attr === "false") return false;
+      if (attr === "deep") return true;
+      if (attr === "" || attr === "true") return el === path[0];
+    }
+    return false;
+  };
+  // A press the strip may take: on no control, no place marked not to drag, and no drawer's or
+  // dialog's scrim, which closes what it covers.
+  const free = (path) => {
+    for (const el of path) {
+      if (!(el instanceof HTMLElement)) continue;
+      if (isControl(el) || el.getAttribute(DRAG) === "false") return false;
+      if (/(overlay|backdrop)$/.test(el.dataset.slot || "")) return false;
+    }
+    return true;
+  };
+  const takes = (event) =>
+    event.button === 0 &&
+    event.clientY >= 0 &&
+    event.clientY < TOP_STRIP &&
+    !event.defaultPrevented &&
+    free(event.composedPath()) &&
+    !markedDrag(event.composedPath());
+  const invoke = (command) =>
+    window.__TAURI_INTERNALS__?.invoke(`plugin:window|${command}`).catch(() => {});
+  // As macOS does it, and Tauri's script: the zoom on the second press's release, and only if the
+  // pointer has not moved since that press.
+  let zoomAt = null;
+  // Listen once, however many times the shell runs this in one page.
+  const listening = window.__openbotTopStrip;
+  window.__openbotTopStrip = true;
+  if (!listening) window.addEventListener("mousedown", (event) => {
+    zoomAt = null;
+    if (!takes(event)) return;
+    if (event.detail === 2) {
+      zoomAt = [event.clientX, event.clientY];
+      return;
+    }
+    if (event.detail !== 1) return;
+    event.preventDefault();
+    invoke("start_dragging");
+  });
+  if (!listening) window.addEventListener("mouseup", (event) => {
+    const at = zoomAt;
+    zoomAt = null;
+    if (at && event.detail === 2 && event.clientX === at[0] && event.clientY === at[1] && takes(event)) {
+      invoke("internal_toggle_maximize");
+    }
+  });
   let queued = false;
   new MutationObserver(() => {
     if (queued) return;
