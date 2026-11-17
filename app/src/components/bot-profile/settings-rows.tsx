@@ -43,6 +43,7 @@ import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { teamBotsQueryOptions } from "@/lib/team-bots";
 import { connectorCount } from "./access";
+import { TellItWhen } from "./tell-it-when";
 import { useBotDelegation, useBotPlugins } from "./use-bot-reads";
 
 /** The four groups the rows sit under, in the order they are drawn. */
@@ -258,6 +259,11 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
         if (inGroup.length === 0) return null;
         return (
           <PageSection key={group} title={group}>
+            {group === "When it works" ? (
+              <div className="mt-4">
+                <TellItWhen agent={agent} />
+              </div>
+            ) : null}
             <PageRows>
               {inGroup.map(({ to, title, icon: Icon, summary }, index) => (
                 <Fragment key={to}>

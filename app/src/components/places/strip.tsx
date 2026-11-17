@@ -34,6 +34,7 @@ import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { PLACES, type PlaceId } from "@/lib/places/places";
 import { setPlace, usePlaceId, usePlaceOrder } from "@/lib/places/store";
 import { cn } from "@/lib/utils";
+import { NewMenu } from "./new-menu";
 import { PLACE_LISTS } from "./place-panel";
 import type { PlaceEntry } from "./place-row";
 
@@ -122,6 +123,26 @@ function StripMenu({
   );
 }
 
+/** The "+": the New menu, which offers a conversation, a Bot, a routine or a recorded task. */
+function NewButton() {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <Tooltip>
+      <NewMenu
+        onNavigate={() => setOpenMobile(false)}
+        trigger={
+          <TooltipTrigger
+            render={<Toolbar.Button className={stripButtonClassName} />}
+          >
+            <IconPlus className="size-5" />
+          </TooltipTrigger>
+        }
+      />
+      <TooltipContent side="right">New</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /**
  * The main menu's destinations that are not places. Bots and Routines are places of their own, so
  * they are not repeated here. While a Recorder records, More and Skills carry its red dot: teaching
@@ -200,7 +221,7 @@ function AccountButton({
 }
 
 /**
- * The places down the sidebar's left edge, then New conversation, More and the account menu at
+ * The places down the sidebar's left edge, then New, More and the account menu at
  * the foot. One tab stop: the arrow keys move between its buttons.
  */
 export function Strip({
@@ -223,20 +244,7 @@ export function Strip({
         ) : null;
       })}
       <div className="flex-1" />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Toolbar.Link
-              aria-label="New conversation"
-              className={stripButtonClassName}
-              render={<Link to="/channel/new" />}
-            />
-          }
-        >
-          <IconPlus className="size-5" />
-        </TooltipTrigger>
-        <TooltipContent side="right">New conversation</TooltipContent>
-      </Tooltip>
+      <NewButton />
       <MoreMenu />
       <AccountButton accountMenu={accountMenu} />
     </Toolbar.Root>

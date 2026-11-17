@@ -121,8 +121,15 @@ export async function startWithModel(input: {
  * was being made is not pulled back; the conversation is in their sidebar, and its first message
  * stays stashed until they open it, which is when it is sent. Going back to the placeholder opens
  * it too (`settlePendingStart`).
+ *
+ * The conversation replaces the screen it was started from in history (`replace`, on by default,
+ * for compose screens); pass `replace: false` from a page Back should return to.
  */
-export function useStartChannel() {
+export function useStartChannel({
+  replace = true,
+}: {
+  replace?: boolean;
+} = {}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const router = useRouter();
@@ -172,7 +179,7 @@ export function useStartChannel() {
         }
         await navigate({
           params: { channelId },
-          replace: true,
+          replace,
           to: "/channel/$channelId",
         });
       },
@@ -206,7 +213,7 @@ export function useStartChannel() {
       open: (channelId) =>
         navigate({
           params: { channelId },
-          replace: true,
+          replace,
           to: "/group/$channelId",
         }),
     });
