@@ -19328,7 +19328,10 @@ mod tests {
     /// recording each stop that began and each that finished. One cut short leaves the stack
     /// "stopping", half stopped, as a real stop cancelled partway would. The tests below never
     /// depend on how long it takes; it only gives a cancel that should not happen time to land.
-    #[cfg(unix)]
+    ///
+    /// Like the CLI, it holds a lock while a `local` command runs and answers `local_command_busy`
+    /// while another holds it. A stop killed partway leaves the lock behind, as the CLI's does on
+    /// Windows, where stopping a process tree is a hard kill that runs none of its cleanup.
     const STOPPING_CLI: &str = r##"
 use std::{env, fs, io::Write, time::{Duration, Instant}};
 fn main() {
@@ -19338,6 +19341,11 @@ fn main() {
     let mut calls = fs::OpenOptions::new().create(true).append(true).open(here.join("calls")).unwrap();
     assert_eq!(args[..2], ["local", "stop"], "{args:?}");
     let stack = &args[3];
+    if fs::OpenOptions::new().write(true).create_new(true).open(here.join("lock")).is_err() {
+        writeln!(calls, "busy {}", std::process::id()).unwrap();
+        println!(r#"{{"version":1,"command":"local stop","status":"blocked","error":null,"nextAction":{{"reason":"local_command_busy","resumeCommand":"copilotkit local stop --stack {stack} --json"}},"diagnostics":[]}}"#);
+        std::process::exit(2);
+    }
     writeln!(calls, "began {}", std::process::id()).unwrap();
     fs::write(here.join("stack"), "stopping").unwrap();
     let until = Instant::now() + Duration::from_secs(60);
@@ -19349,25 +19357,24 @@ fn main() {
     std::thread::sleep(Duration::from_millis(500));
     fs::write(here.join("stack"), "stopped").unwrap();
     writeln!(calls, "finished {}", std::process::id()).unwrap();
+    fs::remove_file(here.join("lock")).unwrap();
     println!(r#"{{"version":1,"command":"local stop","status":"completed","stack":{{"id":"{stack}","installedRelease":"0.15.0","step":"ready","urls":{{"api":"http://localhost:8082","dashboard":"http://intelligence.localhost:8080","gateway":"ws://[::1]:4401"}},"failedStep":null,"update":null}},"auth":{{"running":false}},"nextAction":null,"error":null,"diagnostics":[]}}"#);
 }
 "##;
 
     /// A local Intelligence OpenBot created, stopped through the production Stop and Quit steps
     /// by `STOPPING_CLI`. Sets the process's CLI, so only in an isolated test.
-    #[cfg(unix)]
     struct StoppingBackend {
         cli: PathBuf,
         root: PathBuf,
     }
 
-    #[cfg(unix)]
     impl StoppingBackend {
         fn new(label: &str) -> Self {
             let cli = temp_root(&format!("{label}-cli"));
             std::fs::create_dir_all(&cli).unwrap();
             std::fs::write(cli.join("cli.rs"), STOPPING_CLI).unwrap();
-            let program = cli.join("cli");
+            let program = cli.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
             crate::test_support::compile_fixture(&cli.join("cli.rs"), &program);
             use sha2::Digest;
             let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
@@ -19452,7 +19459,6 @@ fn main() {
         }
     }
 
-    #[cfg(unix)]
     impl Drop for StoppingBackend {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.cli);
@@ -19466,7 +19472,6 @@ fn main() {
     said some of OpenBot's services didn't stop. Both now finish, neither says anything failed, and
     the stack is stopped.
     */
-    #[cfg(unix)]
     #[test]
     fn two_stops_at_once_stop_the_backend_and_neither_reports_a_failure() {
         if test_support::isolated_process(
@@ -19498,7 +19503,6 @@ fn main() {
     Stop pressed while Quit is asking the CLI to stop the local Intelligence. Quit's own stop is
     never cancelled: Quit finishes it and says nothing failed, and the Stop leaves it to Quit.
     */
-    #[cfg(unix)]
     #[test]
     fn a_stop_during_quit_leaves_quits_own_stop_to_finish() {
         if test_support::isolated_process(
@@ -19523,15 +19527,16 @@ fn main() {
     }
 
     /**
-    Quit while a Stop is asking the CLI to stop the local Intelligence. Quit does not wait behind
-    it: it cancels that stop, leaving the stack half stopped for a moment, and stops the stack
-    itself. The stack ends stopped, and the Stop, whose work Quit took over, reports no failure.
+    Quit while a Stop is asking the CLI to stop the local Intelligence. Quit used to cancel that
+    stop and run its own; on Windows the cancel is a hard kill, the killed CLI's lock outlived it,
+    and Quit's own stop was refused as busy, leaving the stack running. Quit now waits for the
+    Stop's stop and takes its answer as its own: one stop, run to the end, and neither says
+    anything failed.
     */
-    #[cfg(unix)]
     #[test]
-    fn quit_during_a_stop_takes_over_its_stop_and_finishes_it() {
+    fn quit_during_a_stop_waits_for_its_stop_and_takes_its_answer() {
         if test_support::isolated_process(
-            "tests::quit_during_a_stop_takes_over_its_stop_and_finishes_it",
+            "tests::quit_during_a_stop_waits_for_its_stop_and_takes_its_answer",
         ) {
             return;
         }
@@ -19541,15 +19546,22 @@ fn main() {
         backend.wait_for_a_stop_running();
         let (closed, quit_closed) = std::sync::mpsc::channel();
         let quitting = backend.quit(&shell, Some(closed));
-        // Quit has closed local evaluation for good, which cancels the Stop's CLI stop.
+        // Quit has closed local evaluation for good and is taking OpenBot's containers down.
         quit_closed.recv().unwrap();
         backend.let_stops_finish();
 
         assert_eq!(stopping.join().unwrap(), Stopped::default());
         assert_eq!(quitting.join().unwrap(), Stopped::default());
         assert_eq!(backend.stack(), "stopped");
-        // The Stop's was cut short; Quit's own ran to the end.
-        assert_eq!((backend.calls("began"), backend.calls("finished")), (2, 1));
+        // The Stop's stop was the only one, and it ran to the end.
+        assert_eq!(
+            (
+                backend.calls("began"),
+                backend.calls("finished"),
+                backend.calls("busy")
+            ),
+            (1, 1, 0)
+        );
     }
 
     #[test]
