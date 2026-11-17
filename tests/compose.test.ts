@@ -506,6 +506,12 @@ test("runs the TypeScript LangGraph engine beside the others", () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
     '"127.0.0.1:${LANGGRAPH_TS_PORT:-4215}:4215"',
   );
+  // The port its image listens on, as its Dockerfile says.
+  const dockerfile = readFileSync(
+    join(import.meta.dir, "..", "agent-langgraph-ts", "Dockerfile"),
+    "utf8",
+  );
+  expect(/^EXPOSE (\d+)$/m.exec(dockerfile)?.[1]).toBe("4215");
 
   // The server finds it by name, on the compose network, when the deployment says it runs.
   const told = runComposeConfig({
