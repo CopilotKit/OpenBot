@@ -1070,6 +1070,57 @@ it when it is not. Signed desktop builds are the exception: they read the `macos
 `windows-signing` environments described above and in [Windows signing](windows-signing.md).
 Downloads sync signs in to AWS with GitHub's OIDC token rather than a stored key.
 
+## Model compatibility
+
+The model picker lists each provider's models live, but every harness image carries its model
+client at a fixed version: the Claude Agent SDK harness bundles a Claude Code CLI (through
+`claude-agent-sdk` in `agent-claude-sdk/requirements.txt`), the LangGraph harness sends the ChatGPT
+plan's backend a fixed Codex client version (`DEFAULT_CLIENT_VERSION` in
+`agent-langgraph-agui/src/chatgpt_models.py`), and the others carry the provider SDKs they were built
+with. A provider can refuse a new model to an older client while the picker keeps offering it:
+"Claude Code 2.1.259 does not support this model; version 2.1.290 or newer is required".
+
+**Model compatibility** (`.github/workflows/model-compat.yml`) checks for that daily, and by hand
+from the Actions tab. One job per harness in `.github/published-images.json` runs
+[`scripts/model-compat.ts`](../scripts/model-compat.ts), which:
+
+- lists each provider's models from the same source, with the same filter, as the picker (see
+  [The model list](configuration.md#the-model-list));
+- starts the harness image on each provider the way the Desktop configures it, and sends one AG-UI
+  run per model, so the harness's own client makes the call. It checks `latest`, the published
+  image people run, and `source`, the image built from this commit;
+- compares the LangGraph harness's Codex client version with the minimum each ChatGPT plan model
+  needs, from openai/codex's published model catalogue. A plan sign-in cannot run in CI. A Claude
+  plan runs through the same Claude Code CLI as an Anthropic key, so the key's rows cover it.
+
+It writes a pass, fail or skipped row per harness, image, provider and model, with the provider's
+own words, to the run's summary. On any failure the run fails and opens or updates one issue,
+**Model compatibility check failing**, and the first passing run closes it. It runs only on a
+schedule or by hand on `main`, never on a pull request.
+
+Each provider needs its key as a repository secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY` (Google, also used for Antigravity), `XAI_API_KEY` and `UNBIASED_API_KEY`. A provider
+without one is reported as skipped, not failed, and the summary names the missing secrets.
+
+**When it fails**, read the provider's words in the table:
+
+- A version refusal (a model "not supported" by the client's version, or a ChatGPT plan model that
+  needs a newer Codex) means bumping the pinned client: `claude-agent-sdk` in
+  `agent-claude-sdk/requirements.txt` (each release bundles a newer Claude Code CLI), or
+  `DEFAULT_CLIENT_VERSION` in `agent-langgraph-agui/src/chatgpt_models.py`, or the harness's
+  provider SDK in its `requirements.txt` or `package.json`. Run the check by hand: the `source` rows
+  show whether the bump fixed it before a release ships it, and the `latest` rows stay red until
+  one does.
+- Billing, rate limits or a refused key are the key's problem, not a client's: fix the key.
+
+To run it locally (needs Docker), with keys in the environment or an env file:
+
+```sh
+bun scripts/model-compat.ts --env-file .env --harness agent-claude-sdk --provider anthropic
+```
+
+`--model <regex>` narrows the models, `--tags latest` skips building from source.
+
 ## The one thing CI cannot do
 
 The smoke journey in `tests/smoke` is the only check that proves the parts are wired to each other:
