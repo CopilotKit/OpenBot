@@ -2,6 +2,7 @@ import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
+import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +22,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import {
+  brokeredConsentFor,
+  type ConsentHandoff,
+} from "@/lib/plugins/consent-handoff";
 import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
   type BrokerField,
@@ -275,6 +280,12 @@ export type BrokeredAccount = {
   disconnectAccount: (accountId: string) => void;
   /** Which account a press is in flight for, so only its buttons wait. */
   changingAccount: string | null;
+  /** A sign-in through Composio held for OpenBot's step before it, or null. */
+  handoff: ConsentHandoff | null;
+  /** Go on to the sign-in the step is holding. */
+  continueHandoff: () => void;
+  /** Drop the sign-in the step is holding, and open nothing. */
+  cancelHandoff: () => void;
 };
 
 export function useBrokeredAccount(input: {
@@ -405,6 +416,22 @@ export function useBrokeredAccount(input: {
   };
 
   /*
+   * THROUGH COMPOSIO, OPENBOT'S STEP COMES FIRST. Its own page and then the app's sign-in both name
+   * Composio, so the row holds the sign-in here and the dialog says what is coming before it goes
+   * (`ConsentHandoffDialog`). Anything else leaves at once, as it always did.
+   */
+  const [handoff, setHandoff] = useState<ConsentHandoff | null>(null);
+  const leaveFor = async (authorizationUrl: string) => {
+    const consent = await brokeredConsentFor(queryClient, serverId);
+    if (consent) {
+      setHandoff({ ...consent, url: authorizationUrl });
+      return;
+    }
+    finishReturn();
+    window.location.href = authorizationUrl;
+  };
+
+  /*
    * Find out whether the key still works, when somebody presses for it and at no other time.
    *
    * Deliberately not a second effect beside the confirm above. Composio never re-checks a key once
@@ -478,8 +505,7 @@ export function useBrokeredAccount(input: {
         );
         return;
       }
-      finishReturn();
-      window.location.href = start.authorizationUrl;
+      return leaveFor(start.authorizationUrl);
     },
   });
 
@@ -644,8 +670,7 @@ export function useBrokeredAccount(input: {
         );
         return;
       }
-      finishReturn();
-      window.location.href = start.authorizationUrl;
+      return leaveFor(start.authorizationUrl);
     },
   });
   const makeDefault = useMutation({
@@ -792,6 +817,14 @@ export function useBrokeredAccount(input: {
       : disconnectAccount.isPending
         ? (disconnectAccount.variables?.accountId ?? null)
         : null,
+    handoff,
+    continueHandoff: () => {
+      if (!handoff) return;
+      setHandoff(null);
+      finishReturn();
+      window.location.href = handoff.url;
+    },
+    cancelHandoff: () => setHandoff(null),
   };
 }
 
@@ -1390,6 +1423,12 @@ export function BrokeredAccountRow({
             />
           ))
         : null}
+
+      <ConsentHandoffDialog
+        handoff={account.handoff}
+        onCancel={account.cancelHandoff}
+        onContinue={account.continueHandoff}
+      />
 
       <Dialog onOpenChange={setAsking} open={asking}>
         <DialogContent>

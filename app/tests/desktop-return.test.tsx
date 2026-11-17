@@ -8,11 +8,12 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   DESKTOP_LINK,
   DesktopReturn,
 } from "@/components/desktop/desktop-return";
+import { CONSENT_COUNTDOWN_SECONDS } from "@/lib/plugins/consent-handoff";
 import { routeTree } from "@/routeTree.gen";
 import { connectionsProblem } from "./connections-api";
 
@@ -20,9 +21,10 @@ import { connectionsProblem } from "./connections-api";
  * The page an app's sign-in started in OpenBot Desktop comes back to, in the person's own browser.
  *
  * That browser is not the window, and the personal edition only admits requests carrying its
- * install's token, which only the window has. So the page asks the API nothing: it follows
- * `openbot://open` to bring the Desktop window forward, which confirms the account itself when it has
- * the focus again. Loaded in the window itself, it goes to the account's page.
+ * install's token, which only the window has. So the page asks the API nothing: it says how the
+ * sign-in went, counts down so it can be read, then follows `openbot://open` to bring the Desktop
+ * window forward, which confirms the account itself when it has the focus again. Loaded in the
+ * window itself, it goes to the account's page.
  */
 
 const realFetch = globalThis.fetch;
@@ -36,7 +38,7 @@ afterEach(() => {
 afterAll(() => GlobalRegistrator.unregister());
 
 /** The page, with an API that refuses the person's browser, as it does without the token. */
-function show(app: string | undefined) {
+function show(app: string | undefined, status?: string) {
   const asked: string[] = [];
   const opened: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -54,7 +56,11 @@ function show(app: string | undefined) {
         getParentRoute: () => root,
         path: "/desktop-return",
         component: () => (
-          <DesktopReturn app={app} openDesktop={(link) => opened.push(link)} />
+          <DesktopReturn
+            app={app}
+            openDesktop={(link) => opened.push(link)}
+            status={status}
+          />
         ),
       }),
       createRoute({
@@ -76,26 +82,52 @@ function show(app: string | undefined) {
   return { asked, opened, router, view };
 }
 
-test("in the browser, it asks the API nothing and brings OpenBot Desktop forward", async () => {
-  const { asked, opened, view } = show("gmail");
+test("in the browser, it says the app is connected, counts down, then brings OpenBot Desktop forward", async () => {
+  const { asked, opened, view } = show("composio-gmail", "success");
 
   expect(
-    await view.findByRole("heading", { name: "Back to OpenBot" }),
+    await view.findByRole("heading", { name: "Gmail is connected" }),
   ).toBeTruthy();
+  expect(view.getByText("Bots that have Gmail can use it now.")).toBeTruthy();
+  // It stays to be read: the countdown starts at 5 and nothing has handed back yet.
+  expect(view.getByTestId("return-countdown").textContent).toBe(
+    `Back to OpenBot in ${CONSENT_COUNTDOWN_SECONDS}`,
+  );
+  expect(opened).toEqual([]);
+
+  // At 0 it hands back by itself.
+  await waitFor(() => expect(opened).toEqual([DESKTOP_LINK]), {
+    timeout: (CONSENT_COUNTDOWN_SECONDS + 2) * 1_000,
+  });
   expect(
     view.getByText("OpenBot opens on its own. You can close this tab."),
   ).toBeTruthy();
-  await waitFor(() => expect(opened).toEqual([DESKTOP_LINK]));
   expect(asked).toEqual([]);
   expect(
     view.getByRole("link", { name: "Open OpenBot" }).getAttribute("href"),
   ).toBe("openbot://open");
+}, 15_000);
+
+test("a sign-in the broker reports as failed says nothing was connected", async () => {
+  const { view } = show("composio-slack", "failed");
+
+  expect(
+    await view.findByRole("heading", { name: "Couldn't connect Slack" }),
+  ).toBeTruthy();
+  expect(
+    view.getByText("Nothing was connected. You can try again in OpenBot."),
+  ).toBeTruthy();
 });
 
-test("with no app named, it hands back the same way", async () => {
-  const { asked, opened } = show(undefined);
+test("with no app named, Back to OpenBot now hands back at once", async () => {
+  const { asked, opened, view } = show(undefined);
 
-  await waitFor(() => expect(opened).toEqual([DESKTOP_LINK]));
+  expect(
+    await view.findByRole("heading", { name: "Back to OpenBot" }),
+  ).toBeTruthy();
+  expect(opened).toEqual([]);
+  fireEvent.click(view.getByText("Back to OpenBot now"));
+  expect(opened).toEqual([DESKTOP_LINK]);
   expect(asked).toEqual([]);
 });
 

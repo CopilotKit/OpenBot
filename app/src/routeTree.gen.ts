@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthedRouteImport } from './routes/_authed'
+import { Route as ConnectingRouteImport } from './routes/connecting'
 import { Route as DesktopReturnRouteImport } from './routes/desktop-return'
 import { Route as SignRouteImport } from './routes/sign'
 import { Route as AuthedAppRouteImport } from './routes/_authed/_app'
@@ -134,6 +135,11 @@ import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_au
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectingRoute = ConnectingRouteImport.update({
+  id: '/connecting',
+  path: '/connecting',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DesktopReturnRoute = DesktopReturnRouteImport.update({
@@ -798,6 +804,7 @@ const AuthedAdminPluginsKeyToolsToolRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedAppIndexRoute
+  '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
   '/admin': typeof AuthedAdminRouteRouteWithChildren
@@ -919,6 +926,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
+  '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
   '/onboarding': typeof AuthedOnboardingRoute
@@ -1039,6 +1047,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
+  '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
   '/_authed/admin': typeof AuthedAdminRouteRouteWithChildren
@@ -1165,6 +1174,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/connecting'
     | '/desktop-return'
     | '/sign'
     | '/admin'
@@ -1286,6 +1296,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/connecting'
     | '/desktop-return'
     | '/sign'
     | '/onboarding'
@@ -1405,6 +1416,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_authed'
+    | '/connecting'
     | '/desktop-return'
     | '/sign'
     | '/_authed/admin'
@@ -1530,6 +1542,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
+  ConnectingRoute: typeof ConnectingRoute
   DesktopReturnRoute: typeof DesktopReturnRoute
   SignRoute: typeof SignRoute
 }
@@ -1541,6 +1554,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connecting': {
+      id: '/connecting'
+      path: '/connecting'
+      fullPath: '/connecting'
+      preLoaderRoute: typeof ConnectingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desktop-return': {
@@ -2693,6 +2713,7 @@ const AuthedRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
+  ConnectingRoute: ConnectingRoute,
   DesktopReturnRoute: DesktopReturnRoute,
   SignRoute: SignRoute,
 }
