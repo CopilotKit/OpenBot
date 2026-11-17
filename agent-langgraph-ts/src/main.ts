@@ -2,8 +2,12 @@
  * LangGraph in TypeScript, as an OpenBot engine: the default for new Bots on an API key, a Gemini
  * sign-in or a ChatGPT plan. See server.ts for the surface and run.ts for the graph.
  */
+import "./json-modules.ts";
 import { listenPort } from "../../shared/listen-port.ts";
-import { createEngine } from "./server.ts";
+
+// After the hook above is registered: a static import is resolved, JSON and all, before any module
+// body runs, so the engine (which reaches shared/model-providers.ts) is imported once it is in place.
+const { createEngine } = await import("./server.ts");
 
 const port = listenPort(process.env.PORT, 4215);
 if (!port.ok) {

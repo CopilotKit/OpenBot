@@ -177,6 +177,8 @@ test("Without a full prompt, the standing role and holdings are the system promp
   try {
     const env = {
       BOT_PROVIDER: "openai",
+      // On Chat Completions, whose request this test reads.
+      BOT_MODEL: "gpt-5.2",
       OPENAI_API_KEY: "sk-test",
       OPENAI_BASE_URL: `${provider.base}/v1`,
     };
