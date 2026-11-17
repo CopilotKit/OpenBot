@@ -21,6 +21,7 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { CommandMenu } from "@/components/navigation/command-menu";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/toast";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
@@ -160,6 +161,7 @@ function renderSidebar(
           {/* Mounted once by the signed-in layout; here so the entry has something to open. */}
           <TeamFeaturesDialog />
           <CommandMenu />
+          <Toaster />
         </SidebarProvider>
       ),
     }),
@@ -425,4 +427,34 @@ test("the sidebar has no command palette row: Cmd/Ctrl+K opens it", async () => 
   await view.findByRole("link", { name: "Routines" });
   expect(view.queryByRole("button", { name: /Command palette/ })).toBeNull();
   expect(view.queryByRole("button", { name: /Search and jump/ })).toBeNull();
+});
+
+test("a sign-out the server refuses still says so after the menu has closed", async () => {
+  const { view, user } = renderSidebar("user");
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  const menu = await view.findByRole("menu");
+  // The server refuses the sign-out; everything else is not served.
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/auth/sign-out")
+        ? Response.json(
+            {
+              code: "SERVICE_UNAVAILABLE",
+              message: "Signing out did not finish. Try again.",
+            },
+            { status: 503 },
+          )
+        : Response.json({ error: "not served" }, { status: 404 }),
+    { preconnect: originalFetch.preconnect },
+  );
+  await user.click(within(menu).getByRole("menuitem", { name: "Sign out" }));
+  // Clicking closes the menu and with it the items that started the sign-out.
+  await waitFor(() => expect(view.queryByRole("menu")).toBeNull());
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll("[data-slot=toast]")].map(
+        (toast) => toast.textContent,
+      ),
+    ).toEqual(["Signing out did not finish. Try again."]),
+  );
 });
