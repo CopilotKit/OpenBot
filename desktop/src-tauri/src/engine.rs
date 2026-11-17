@@ -374,6 +374,20 @@ impl Address {
             .map(|out| out.status.success() && !out.stdout.is_empty())
             .unwrap_or(false)
     }
+
+    /// `responds`, giving up after `limit`: `None` when it was still running then, which is not
+    /// answering either.
+    pub fn responds_within(&self, limit: std::time::Duration) -> Option<bool> {
+        match crate::quiet::output_within(
+            self.command()
+                .args(["version", "--format", "{{.Server.APIVersion}}"]),
+            limit,
+        ) {
+            Ok(out) => Some(out.status.success() && !out.stdout.is_empty()),
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => None,
+            Err(_) => Some(false),
+        }
+    }
 }
 
 fn nonsecret_endpoint(value: String) -> Result<String, String> {
