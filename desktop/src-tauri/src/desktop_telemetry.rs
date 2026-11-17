@@ -1230,10 +1230,17 @@ fn main() {
     if dir.join("slow").exists() {
         std::thread::sleep(std::time::Duration::from_secs(30));
     }
-    if let Ok(answer) = std::fs::read_to_string(dir.join("answer")) {
-        print!("{answer}");
-        let code = std::fs::read_to_string(dir.join("exit")).unwrap_or_default();
-        std::process::exit(code.trim().parse().unwrap_or(0));
+    // An answer for this command (`local update` reads `answer-update`), else for every call.
+    let command = args.get(1).cloned().unwrap_or_default();
+    for (answer, exit) in [
+        (format!("answer-{command}"), format!("exit-{command}")),
+        ("answer".to_owned(), "exit".to_owned()),
+    ] {
+        if let Ok(answer) = std::fs::read_to_string(dir.join(answer)) {
+            print!("{answer}");
+            let code = std::fs::read_to_string(dir.join(exit)).unwrap_or_default();
+            std::process::exit(code.trim().parse().unwrap_or(0));
+        }
     }
     println!("{{\"type\":\"skipped\"}}");
 }
@@ -1273,6 +1280,12 @@ fn main() {
         pub(crate) fn answer(&self, stdout: &str, exit: i32) {
             std::fs::write(self.dir.join("answer"), stdout).unwrap();
             std::fs::write(self.dir.join("exit"), exit.to_string()).unwrap();
+        }
+
+        /// Answer later `local <command>` calls with `stdout` and `exit`, ahead of `answer`.
+        pub(crate) fn answer_to(&self, command: &str, stdout: &str, exit: i32) {
+            std::fs::write(self.dir.join(format!("answer-{command}")), stdout).unwrap();
+            std::fs::write(self.dir.join(format!("exit-{command}")), exit.to_string()).unwrap();
         }
 
         /// Every call so far, one line each, arguments space-separated.
