@@ -26,8 +26,8 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogle } from "@langchain/google";
 import { ChatOpenAI } from "@langchain/openai";
+import { PlanHarnessChatModel } from "./plan-model.ts";
 import { HarnessRunError, MODEL_UNREACHABLE } from "./errors.ts";
-import { claudeThreadId, PlanHarnessChatModel } from "./plan-model.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -406,12 +406,7 @@ function routedModel(run: RunModel, env: Env): BaseChatModel | undefined {
       model: run.model,
       effort: run.effort,
       botId: run.botId,
-      ...(claude
-        ? {
-            threadId: claudeThreadId(run.botId ?? "", run.threadId ?? ""),
-            signal: run.signal,
-          }
-        : {}),
+      ...(claude ? { threadId: run.threadId ?? "", signal: run.signal } : {}),
     });
   }
   if (!route.token)

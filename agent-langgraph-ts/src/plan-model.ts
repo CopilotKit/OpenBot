@@ -59,7 +59,10 @@ export type PlanHarnessFields = {
   model?: string;
   effort?: string;
   botId?: string;
-  /** The thread every call goes under (a Claude plan's query); otherwise a fresh one per call. */
+  /**
+   * The run's thread. On a Claude plan every call goes under one query per (Bot, thread)
+   * (`claudeThreadId`); a ChatGPT plan's calls each go under a fresh thread.
+   */
   threadId?: string;
   /** The run's stop, which cancels a Claude plan's query. */
   signal?: AbortSignal;
@@ -211,15 +214,18 @@ export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> 
   private streaming = false;
   /** Calls the Claude query made that wait on their results. */
   private pending = 0;
+  /** The Claude query's thread, which every call of the run goes under. */
+  private readonly query?: string;
 
   constructor(fields: PlanHarnessFields) {
     super({});
     this.fields = fields;
-    const { signal, threadId } = fields;
-    if (fields.plan === "claude" && signal && threadId)
-      signal.addEventListener("abort", () => void this.cancel(threadId), {
-        once: true,
-      });
+    if (fields.plan !== "claude" || fields.threadId === undefined) return;
+    const query = claudeThreadId(fields.botId ?? "", fields.threadId);
+    this.query = query;
+    fields.signal?.addEventListener("abort", () => void this.cancel(query), {
+      once: true,
+    });
   }
 
   _llmType(): string {
@@ -271,7 +277,7 @@ export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> 
     const { messages: conversation, context } = planRequest(messages);
     const { model, effort, botId } = this.fields;
     return {
-      threadId: this.fields.threadId ?? `plan-${randomUUID()}`,
+      threadId: this.query ?? `plan-${randomUUID()}`,
       runId: randomUUID(),
       messages: conversation,
       tools: answerOnly ? [] : (options.tools ?? []),
