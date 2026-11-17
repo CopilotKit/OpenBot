@@ -239,6 +239,11 @@ describe("what a Bot runs from the spec file", () => {
       provider: "openai",
       model: "gpt-4o-mini",
     });
+    // The default engine for new Bots starts where the Python LangGraph harness does.
+    expect(botSettings("agent-langgraph-ts", {})).toEqual({
+      provider: "openai",
+      model: "gpt-4o-mini",
+    });
     expect(botSettings("agent-agno", {})).toEqual({
       provider: "openai",
       model: "gpt-5.5",

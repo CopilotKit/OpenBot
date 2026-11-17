@@ -312,6 +312,7 @@ export const CreateBotAgentBody = zod
         "llamaindex",
         "agno",
         "langgraph",
+        "langgraph-ts",
         "google-adk",
         "antigravity",
         "pydantic-ai",
