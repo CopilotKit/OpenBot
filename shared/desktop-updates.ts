@@ -63,6 +63,25 @@ export type PanelState =
   | "updated"
   | "failed";
 
+/** The title of each panel state. A finished or failed update has none: its outcome names it. */
+export const PANEL_TITLES: Record<PanelState, string> = {
+  available: "Update available",
+  downloading: "Downloading update",
+  ready: "Update ready",
+  restarting: "Restarting",
+  updated: "",
+  failed: "",
+};
+
+/** Under the panel's line when an update is available: what the update leaves alone. */
+export const UPDATE_KEEPS_DATA = "Your Bots and data stay as they are.";
+
+/** Under the panel's line while an update downloads: this version keeps running. */
+export const UPDATE_KEEP_WORKING = "You can keep working.";
+
+/** Under the panel's line when an update is ready: what the install does. It says no duration. */
+export const UPDATE_RESTARTS = "OpenBot restarts to finish the update.";
+
 /**
  * Which state the update panel is in, or null when it has nothing to say. An install in progress
  * comes first, then the last update's outcome, then a newer version (offered or minimized) by how

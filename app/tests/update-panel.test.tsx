@@ -140,6 +140,69 @@ test("a newer version is offered with Update and restart, and a click installs i
   expect(fetches).toEqual([]);
 });
 
+test("the panel says what the update leaves alone, in available, downloading and ready only", async () => {
+  inDesktop();
+  const view = show();
+  const box = await view.findByRole("complementary", panel);
+  expect(box.textContent).toContain("Your Bots and data stay as they are.");
+  offer = { ...offer, ready: { state: "preparing", done: 1, total: 10 } };
+  await queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate });
+  await waitFor(() =>
+    expect(box.textContent).toContain("You can keep working."),
+  );
+  offer = { ...offer, ready: { state: "ready" } };
+  await queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate });
+  await waitFor(() =>
+    expect(box.textContent).toContain("OpenBot restarts to finish the update."),
+  );
+});
+
+test("restarting, updated and failed say nothing of what is left alone", async () => {
+  inDesktop();
+  const lines = [
+    "Your Bots and data stay as they are.",
+    "You can keep working.",
+    "OpenBot restarts to finish the update.",
+  ];
+  const states: DesktopAppUpdate[] = [
+    {
+      version: "0.3.2",
+      current: "0.3.1",
+      installing: { downloaded: 1, total: 2, restarting: false },
+    },
+    {
+      version: null,
+      current: "0.3.2",
+      installing: null,
+      outcome: {
+        version: "0.3.2",
+        release: "ok",
+        backEnd: "ok",
+        failedStep: null,
+      },
+    },
+    {
+      version: null,
+      current: "0.3.1",
+      installing: null,
+      outcome: {
+        version: "0.3.2",
+        release: "failed",
+        backEnd: "ok",
+        failedStep: null,
+      },
+    },
+  ];
+  for (const next of states) {
+    offer = next;
+    const view = show();
+    const box = await view.findByRole("complementary", panel);
+    for (const line of lines) expect(box.textContent).not.toContain(line);
+    cleanup();
+    queryClient.clear();
+  }
+});
+
 test("it is fixed in the corner, so the page under it does not move", async () => {
   inDesktop();
   const view = show();

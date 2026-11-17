@@ -5,7 +5,11 @@ import {
   DOESNT_UPDATE_ITSELF,
   installProgressSaid,
   outcomeSaid,
+  PANEL_TITLES,
   panelState,
+  UPDATE_KEEP_WORKING,
+  UPDATE_KEEPS_DATA,
+  UPDATE_RESTARTS,
   UPDATING_LEDE,
   type UpdateOutcome,
   updatingTitle,
@@ -155,4 +159,27 @@ test("install progress reads as a person would say it", () => {
   expect(
     installProgressSaid({ downloaded: 200, total: 200, restarting: true }),
   ).toBe("Restarting…");
+});
+
+test("the lines on what an update leaves alone are one sentence each and say no duration", () => {
+  expect(UPDATE_KEEPS_DATA).toBe("Your Bots and data stay as they are.");
+  expect(UPDATE_KEEP_WORKING).toBe("You can keep working.");
+  expect(UPDATE_RESTARTS).toBe("OpenBot restarts to finish the update.");
+  for (const line of [
+    UPDATE_KEEPS_DATA,
+    UPDATE_KEEP_WORKING,
+    UPDATE_RESTARTS,
+  ]) {
+    expect(line.match(/[.!?]/g)?.length).toBe(1);
+    expect(line).not.toMatch(/minute|second|hour|\d/i);
+  }
+});
+
+test("the panel titles are said for the states that have one", () => {
+  expect(PANEL_TITLES.available).toBe("Update available");
+  expect(PANEL_TITLES.downloading).toBe("Downloading update");
+  expect(PANEL_TITLES.ready).toBe("Update ready");
+  expect(PANEL_TITLES.restarting).toBe("Restarting");
+  expect(PANEL_TITLES.updated).toBe("");
+  expect(PANEL_TITLES.failed).toBe("");
 });

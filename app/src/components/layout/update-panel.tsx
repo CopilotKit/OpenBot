@@ -1,8 +1,11 @@
 import {
   installProgressSaid,
   outcomeSaid,
-  type PanelState,
+  PANEL_TITLES,
   panelState,
+  UPDATE_KEEP_WORKING,
+  UPDATE_KEEPS_DATA,
+  UPDATE_RESTARTS,
   updateOffered,
 } from "@openbot/shared/desktop-updates";
 import { IconMinus, IconX } from "@tabler/icons-react";
@@ -19,15 +22,6 @@ import {
 import { desktopAppUpdateQueryOptions } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { queryClient } from "@/query-client";
-
-const TITLES: Record<PanelState, string> = {
-  available: "Update available",
-  downloading: "Downloading update",
-  ready: "Update ready",
-  restarting: "Restarting",
-  updated: "",
-  failed: "",
-};
 
 /**
  * OpenBot Desktop's update panel: one card in the bottom-right corner of the page that says a newer
@@ -76,13 +70,21 @@ export function UpdatePanel() {
 
   const outcome = data.outcome ?? null;
   const said = outcome ? outcomeSaid(outcome) : null;
-  const title = said?.title ?? TITLES[state];
+  const title = said?.title ?? PANEL_TITLES[state];
   const line =
     state === "restarting"
       ? installProgressSaid(data.installing)
       : said
         ? said.body
         : updateOffered(version ?? minimized ?? "", data.ready);
+  const kept =
+    state === "available"
+      ? UPDATE_KEEPS_DATA
+      : state === "downloading"
+        ? UPDATE_KEEP_WORKING
+        : state === "ready"
+          ? UPDATE_RESTARTS
+          : null;
   const busy = install.isPending;
 
   // A share from 0 to 100, or null when there is no bar or no total to measure by.
@@ -145,6 +147,7 @@ export function UpdatePanel() {
           {line}
         </p>
       ) : null}
+      {kept ? <p className="text-muted-foreground">{kept}</p> : null}
       {showBar ? (
         <div
           aria-label={title}
