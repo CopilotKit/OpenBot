@@ -1034,6 +1034,9 @@ without one is reported as skipped, not failed, and the summary names the missin
   provider SDK in its `requirements.txt` or `package.json`. Run the check by hand: the `source` rows
   show whether the bump fixed it before a release ships it, and the `latest` rows stay red until
   one does.
+- A refused parameter or endpoint (a model that takes tools only through `/v1/responses`, or
+  refuses a `temperature`) means that harness builds its request in a way the model no longer
+  accepts: fix how the harness sets up its model, or bump the framework if a newer one does.
 - Billing, rate limits or a refused key are the key's problem, not a client's: fix the key.
 
 To run it locally (needs Docker), with keys in the environment or an env file:
