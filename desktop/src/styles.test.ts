@@ -33,20 +33,15 @@ function rule(selector: string): Record<string, string> {
   );
 }
 
-test("the update offer is painted above the fixed backdrop, as the step is", () => {
+test("the step is painted above the fixed backdrop", () => {
   const backdrop = rule(".backdrop");
-  const offer = rule(".update-offer");
   const step = rule("main");
   expect(backdrop.position).toBe("fixed");
-  for (const above of [offer, step]) {
-    expect(above.position).toBe("relative");
-    expect(Number(above["z-index"])).toBeGreaterThan(
-      Number(backdrop["z-index"]),
-    );
-  }
+  expect(step.position).toBe("relative");
+  expect(Number(step["z-index"])).toBeGreaterThan(Number(backdrop["z-index"]));
 });
 
-test("the offer and the step together are the window's height, and a taller step scrolls in its card", () => {
+test("the step is the window's height, and a taller step scrolls in its card", () => {
   expect(rule("#root")).toMatchObject({
     height: "100vh",
     display: "flex",
@@ -55,7 +50,6 @@ test("the offer and the step together are the window's height, and a taller step
   const step = rule("main");
   expect(step.flex).toBe("1 1 0");
   expect(step["min-height"]).toBe("0");
-  expect(rule(".update-offer").flex).toBe("none");
   expect(rule("main > .sheet")).toMatchObject({
     "max-height": "100%",
     "overflow-y": "auto",

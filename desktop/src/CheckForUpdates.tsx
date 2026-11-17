@@ -9,8 +9,8 @@ import {
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 
 /**
- * What the shell offers. The same answer OpenBot's own page reads for its update banner, so the
- * setup window and the app never offer two different things, and closing one closes both.
+ * The shell's update status. It is the same status OpenBot's own page reads. This window uses it
+ * to show the install's progress in the Updates section.
  */
 export type AppUpdate = {
   /** The version to offer; null when there is none, or the person closed the offer on it. */
