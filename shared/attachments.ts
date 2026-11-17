@@ -78,6 +78,17 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_DOCUMENT_BYTES = MAX_IMAGE_BYTES;
 
 /**
+ * The largest picture drawn in place in a conversation. A larger one is shown as its file (its
+ * name, kind and size) with a way to open it full size, and is fetched only when somebody does.
+ *
+ * Pictures go up to 100MB on an install with an object store, and a thumbnail is drawn from the
+ * whole file: drawing every picture would cost each reader that much on first paint. Set to the
+ * image limit every install had before (`MAX_IMAGE_BYTES`), so every picture drawn in place before
+ * larger ones were allowed is still drawn in place.
+ */
+export const LARGEST_PICTURE_DRAWN_INLINE = MAX_IMAGE_BYTES;
+
+/**
  * How large an attached file of each kind may be, in bytes, as one server answers it.
  *
  * THE CONSTANTS ABOVE ARE THE DEFAULT, NOT THE ONLY ANSWER. A server may take larger files, and
@@ -480,7 +491,12 @@ export type AttachmentSource =
 export type AttachmentPart = {
   type: "image" | "document";
   source: AttachmentSource;
-  metadata?: { attachmentId: string; filename?: string };
+  metadata?: {
+    attachmentId: string;
+    filename?: string;
+    /** The file's size, so a reader can decide how to show it without fetching it. */
+    sizeBytes?: number;
+  };
 };
 
 /** The relative URL form stored in a sent message. Resolved server-side, never by a provider. */

@@ -227,6 +227,50 @@ test("a picture the browser cannot draw is drawn as its file, with a download, w
   ]);
 });
 
+/** A stored picture as a sent message carries it now: the server's type and the file's size. */
+function sizedImagePart(id: string, filename: string, sizeBytes: number) {
+  return {
+    type: "image" as const,
+    source: {
+      type: "url" as const,
+      value: attachmentUrl(id),
+      mimeType: "image/png",
+    },
+    metadata: { attachmentId: id, filename, sizeBytes },
+  };
+}
+
+/*
+ * A PICTURE OVER 8MB IS NOT DOWNLOADED TO DRAW A THUMBNAIL. Pictures go up to 100MB on an install
+ * with an object store, and a tile that draws one fetches all of it, for every reader, on first
+ * paint. Over the old image limit the tile is the file instead: what it is, how large, a way to open
+ * it full size (which fetches it then) and a Download.
+ */
+test("a picture over 8MB is drawn as its file, with Open and Download, and nothing draws its bytes", () => {
+  const { getByRole, getByText, queryByRole } = renderTranscript([
+    userMessage([sizedImagePart("att-big", "site-survey.png", 99_553_808)]),
+  ]);
+
+  expect(queryByRole("img")).toBeNull();
+  expect(getByText("site-survey.png")).toBeTruthy();
+  expect(getByText("PNG image · 95 MB")).toBeTruthy();
+  expect(getByRole("button", { name: "Open site-survey.png" })).toBeTruthy();
+  const download = getByRole("button", { name: "Download site-survey.png" });
+  expect(download.getAttribute("href")).toBe(attachmentPath("att-big"));
+  // Not asked about either: the size is on the message, and a probe is a request.
+  expect(probes).toEqual([]);
+});
+
+test("a picture of 8MB or less still draws as its thumbnail", () => {
+  const { getByRole } = renderTranscript([
+    userMessage([sizedImagePart("att-small", "photo.png", 8 * 1024 * 1024)]),
+  ]);
+
+  expect(
+    getByRole("img", { name: "Attachment: photo.png" }).getAttribute("src"),
+  ).toBe(attachmentPath("att-small"));
+});
+
 test("an off-site attachment url is never fetched, it is reported missing", () => {
   // An absolute url cannot have come from this app's composer, and drawing it would have the
   // reader's browser announce to a third party that they opened this channel.

@@ -10,6 +10,7 @@ import {
   ACCEPTED_TEXT_MIME,
   type AttachmentLimits,
   attachmentUrl,
+  classifyAttachment,
   largestAttachmentBytes,
 } from "@/lib/channels/attachments";
 import { ClientError } from "@/lib/client";
@@ -228,6 +229,11 @@ export function attachmentsConfigFor(
   onUploaded: (attachmentId: string) => void,
   /** The limits `screenPickedFiles` screened against, so the two agree. */
   limits: AttachmentLimits,
+  /**
+   * Each object URL made for a picture's chip, so the composer can revoke it once the chip has
+   * gone. See {@link previewUrlOf}.
+   */
+  onPreview: (previewUrl: string) => void = () => {},
 ): AttachmentsConfig {
   const upload = uploadToChannel(channelId, uploadGroup);
   return {
@@ -235,7 +241,21 @@ export function attachmentsConfigFor(
     accept: "*/*",
     maxSize: largestAttachmentBytes(limits),
     onUpload: async (file) => {
-      const uploaded = await upload(file);
+      const answer = await upload(file);
+      /*
+       * A PICTURE'S CHIP IS DRAWN FROM THE FILE ON THIS DEVICE. Drawn from the server's address, the
+       * browser downloaded the whole file again straight after uploading it, to draw an 80px square,
+       * and pictures go up to 100MB. Only for a file the server read as a picture.
+       */
+      let uploaded = answer;
+      if (answer.mimeType && classifyAttachment(answer.mimeType) === "image") {
+        const previewUrl = URL.createObjectURL(file);
+        onPreview(previewUrl);
+        uploaded = {
+          ...answer,
+          metadata: { ...answer.metadata, previewUrl },
+        };
+      }
       const rowId = stagedRowId(uploaded);
       /*
        * `uploadToChannel` has already refused any answer without a non-empty `id`
@@ -294,6 +314,16 @@ export function heldAttachmentsConfig(
     },
     onUploadFailed,
   };
+}
+
+/** The object URL a picture's chip is drawn from, when this tab has the file. */
+export function previewUrlOf(
+  carrier: { metadata?: unknown } | undefined,
+): string | undefined {
+  const metadata = carrier?.metadata as { previewUrl?: unknown } | undefined;
+  return typeof metadata?.previewUrl === "string" && metadata.previewUrl
+    ? metadata.previewUrl
+    : undefined;
 }
 
 /** The file a held composer is keeping for an attachment, or `undefined` for a stored one. */

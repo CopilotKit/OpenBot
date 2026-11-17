@@ -110,10 +110,17 @@ export function AttachmentLightbox({
   children,
   filename,
   url,
+  trigger,
 }: {
   children: React.ReactNode;
   filename?: string;
   url: string;
+  /**
+   * What opens it, when that is not the thumbnail: the app's own button, for a picture too large to
+   * draw in place. The picture is inside the popup, which is not mounted while it is closed, so it
+   * is fetched only once somebody opens it.
+   */
+  trigger?: React.ReactElement;
 }) {
   const label = filename ?? "Attachment";
   /*
@@ -129,8 +136,14 @@ export function AttachmentLightbox({
         // A button, not a link: it opens something on this page, and a middle-click offering a new
         // tab to a raw image file is not the promise this makes. `block` so the tile is not sitting
         // on a text baseline with a stray gap under it.
-        className="block cursor-zoom-in overflow-hidden rounded-xl"
-        render={<button aria-label={`Open ${label}`} type="button" />}
+        className={
+          trigger
+            ? undefined
+            : "block cursor-zoom-in overflow-hidden rounded-xl"
+        }
+        render={
+          trigger ?? <button aria-label={`Open ${label}`} type="button" />
+        }
       >
         {children}
       </DialogTrigger>

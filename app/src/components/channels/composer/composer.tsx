@@ -49,6 +49,7 @@ import {
   FILE_PICKER_ACCEPT,
   heldAttachmentsConfig,
   heldFileOf,
+  previewUrlOf,
   stagedRowId,
 } from "./attachments";
 import {
@@ -572,6 +573,7 @@ export function Composer({
             recordRejection,
             recordUpload,
             limits,
+            recordHeld,
           )
         : holdsFilesUntilSent
           ? heldAttachmentsConfig(recordRejection, recordHeld, limits)
@@ -769,7 +771,10 @@ export function Composer({
       return;
     }
     const drawn = new Set(
-      attachments.map((attachment) => attachment.source.value),
+      attachments.flatMap((attachment) => [
+        attachment.source.value,
+        previewUrlOf(attachment) ?? "",
+      ]),
     );
     for (const previewUrl of heldPreviews.current) {
       if (!drawn.has(previewUrl)) {
@@ -1176,7 +1181,10 @@ export function Composer({
           // Where the tile loads the picture from. While it uploads that is the browser's own
           // preview; once the server has it, the upload answers with the form a sent message
           // stores, and the file is read from the API's address for it.
-          url: attachmentAddress(attachment.source.value),
+          // A picture uploaded from this tab is drawn from the file here, not fetched back.
+          url:
+            previewUrlOf(attachment) ??
+            attachmentAddress(attachment.source.value),
           alt: attachment.filename,
           loading: attachment.status === "uploading",
           // What the tile says the file is, if the browser cannot draw the picture.
