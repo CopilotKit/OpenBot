@@ -306,15 +306,43 @@ def fitted_result(content):
 
 
 class ModelRefusedError(Exception):
-    """The model provider refused the run, in Claude Code's words for it.
+    """The model provider answered the run with an error, in Claude Code's words for it.
 
-    Claude Code answers a refusal (out of credit, a rate limit, an unknown model, a prompt too long,
-    the API down) with an assistant message of its own, marked with `error`. Streamed as one, it read
-    as the Bot's answer: "API Error: Request rejected (429) · This request would exceed the rate
-    limit …", and the turn finished as if it had worked. It ends the run as a RUN_ERROR instead,
-    coded `OPENBOT_MODEL_REFUSED`, and the server says it in words
-    (server/src/agents/provider-refusal.ts).
+    Claude Code answers a failed request (out of credit, a rate limit, a plan's limit, an unknown
+    model, a prompt too long, the API down, a dropped connection) with an assistant message of its
+    own, marked with `error`. Streamed as one, it read as the Bot's answer: "API Error: Request
+    rejected (429) · This request would exceed the rate limit …", and the turn finished as if it had
+    worked. It ends the run as a RUN_ERROR instead, coded `OPENBOT_MODEL_REFUSED`, and the server says
+    it in words.
+
+    `category` is Claude Code's own name for what went wrong (`error_category`), sent on the
+    RUN_ERROR as `metadata.errorCategory`. Only "refusal" says the model declined to answer; the
+    others say why the request failed. The code stays the one every server reads, so a server that
+    predates the category still places the words as it did.
     """
+
+    def __init__(self, text, category=None):
+        super().__init__(text)
+        self.category = category
+
+
+# What Claude Code calls an error on its message: `AssistantMessageError` in claude-agent-sdk
+# 0.2.152 ("authentication_failed", "billing_error", "rate_limit", "invalid_request",
+# "server_error", "unknown"), and the few more its CLI writes ("model_not_found", "account_on_hold",
+# "oauth_org_not_allowed"). A name, never words: anything else is sent as "unknown".
+CATEGORY = re.compile(r"^[a-z][a-z_]{0,39}$")
+
+
+def error_category(message):
+    """Claude Code's category for a failed message, or "refusal" when the model declined.
+
+    Claude declining to answer is the one real refusal. Claude Code marks it `invalid_request`,
+    the same as a malformed request, and tells them apart only by the message's stop reason.
+    """
+    if getattr(message, "stop_reason", None) == "refusal":
+        return "refusal"
+    error = message.error
+    return error if isinstance(error, str) and CATEGORY.match(error) else "unknown"
 
 
 class ModelUnreachableError(Exception):
@@ -969,7 +997,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     logger.warning("The model couldn't be reached: %s", refusal_text(message))
                     raise ModelUnreachableError(unreachable_message(model_address()))
                 if isinstance(message, AssistantMessage) and message.error:
-                    raise ModelRefusedError(refusal_text(message))
+                    category = error_category(message)
+                    if category == "refusal":
+                        logger.warning("The model declined to answer: %s", refusal_text(message))
+                    else:
+                        logger.warning(
+                            "The model request failed (%s): %s", category, refusal_text(message)
+                        )
+                    raise ModelRefusedError(refusal_text(message), category)
                 if (
                     isinstance(message, StreamEvent)
                     and message.event.get("type") == "message_start"
@@ -1124,9 +1159,12 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     RunErrorEvent(message=START_FAILED, code="OPENBOT_HARNESS_START_FAILED")
                 )
                 return
+            category = error.category if isinstance(error, ModelRefusedError) else None
             await turn.queue.put(
                 RunErrorEvent(
                     message=str(error),
+                    # Claude Code's own category, which the server tells the person by.
+                    metadata={"errorCategory": category} if category else None,
                     code="OPENBOT_MODEL_AUTH_REQUIRED"
                     if isinstance(error, ModelAuthenticationError)
                     else "OPENBOT_MODEL_REFUSED"

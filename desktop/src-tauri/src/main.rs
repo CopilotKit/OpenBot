@@ -8777,6 +8777,29 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         let found = engine::detect();
         found.address.filter(|_| found.responding)
     });
+    // The server container's recent log, for what a model provider really said: the server keeps
+    // those words in its own log (`model-provider-refused`), and only there. Only an OpenBot this
+    // session started, whose engine and folder it knows, as Restart asks.
+    let server_log = {
+        let shell = app.state::<Shell>();
+        let root = shell.root.lock().unwrap().clone();
+        let address = shell
+            .containers
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|owned| Some(&owned.root) == root.as_ref())
+            .map(|owned| owned.address.clone());
+        match (root, address) {
+            (Some(root), Some(address)) => Some(stack::service_log(
+                &address,
+                &root,
+                "server",
+                troubleshooting::SERVER_LOG_LINES,
+            )),
+            _ => None,
+        }
+    };
     let text = troubleshooting::gather(troubleshooting::Sources {
         desktop: format!(
             "OpenBot Desktop {} ({})",
@@ -8791,6 +8814,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         log_folder: folder.as_deref(),
         home: home.as_deref(),
         engine,
+        server_log,
     });
     log::info!("[logs] gathered troubleshooting logs");
     text
