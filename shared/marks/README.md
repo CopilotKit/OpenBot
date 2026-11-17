@@ -11,7 +11,14 @@ own repository:
 | `agno.svg` | [`agno-agi/docs`](https://github.com/agno-agi/docs) `favicon.png`, embedded unchanged in an SVG |
 | `langgraph.svg` | LangChain's own symbol, `LangChain_Symbol_Black.svg` from the brand pack on [langchain.com/brand-assets](https://www.langchain.com/brand-assets) (downloaded 2026-11-09), verbatim apart from a `<title>`. Named for the harness id it belongs to |
 | `langroid.svg` | [`langroid/langroid`](https://github.com/langroid/langroid) `public/logo_light.png`, scaled to 128 px and embedded in an SVG |
+| `kubernetes.svg` | The Kubernetes icon from the CNCF's own artwork repository, [`cncf/artwork`](https://github.com/cncf/artwork) `projects/kubernetes/icon/color/kubernetes-icon-color.svg`, verbatim apart from a `<title>`. Used under the Linux Foundation's trademark usage guidelines, to name the project |
 | `unbiased.svg` | Unbiased AI's own icon, as served at `platform.unbiased.ai/logos/unbiased-icon.svg` and supplied by Unbiased AI for this row, verbatim apart from a `<title>` and `1em` sizing |
+
+The clouds on Desktop's OpenBot for Business choice come from that set too, as its colour marks:
+`aws.svg` (`aws-color.svg`), `azure.svg` (`azure-color.svg`) and `google-cloud.svg`
+(`googlecloud-color.svg`), all from `@lobehub/icons-static-svg@1.103.0`, verbatim. Each names a
+cloud OpenBot for Business can run on, beside the words "Your own cloud or on-prem", and nothing
+more: no badge, no claim of partnership.
 
 Google has two from that set. `google.svg` is the single-colour G the model rows use.
 `google-color.svg` is the standard colour G, and it is the one that goes beside a sign-in: Google's

@@ -61,6 +61,7 @@ type Page = {
 type Browser = {
   newPage(options: {
     viewport: { width: number; height: number };
+    colorScheme?: "light" | "dark";
   }): Promise<Page>;
   close(): Promise<void>;
 };
@@ -229,7 +230,7 @@ async function buildWindow(): Promise<Window> {
               args.path === "event"
                 ? FAKE_EVENT
                 : args.path === "mark"
-                  ? "export const Mark = () => null; export const ButtonMark = () => null;"
+                  ? "export const Mark = () => null; export const ButtonMark = () => null; export const MarkImage = () => null;"
                   : FAKE_CORE,
             loader: "js",
           }));
@@ -746,44 +747,82 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
  */
 describe.skipIf(!asked)("the first screen at the window's default size", () => {
   // The window opens at 1000x800 (tauri.conf.json); a title bar takes some of that. Seen on
-  // Windows: once the first screen listed where OpenBot runs and what Self-hosted needs, the card
+  // Windows: once the first screen listed where OpenBot runs and what this computer needs, the card
   // showed a scrollbar for a few pixels at that size. Everything on it has to show without one.
-  test("at 1000x760, everything on it shows without the card scrolling", async () => {
-    const page = await browser.newPage({
-      viewport: { width: 1000, height: 760 },
-    });
-    try {
-      await open(page);
-      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      await page.waitForTimeout(400);
-      const overflow = await page.evaluate(() => {
-        const card = document.querySelector("main > .sheet") as HTMLElement;
-        return card.scrollHeight - card.clientHeight;
+  for (const theme of ["light", "dark"] as const) {
+    test(`at 1000x760 (${theme}), everything on it shows without the card scrolling, OpenBot for Business's two ways stacked`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+        colorScheme: theme,
       });
-      expect(overflow).toBeLessThanOrEqual(0);
-      // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
-      await page.getByRole("button", { name: "Connect to it" }).click();
-      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
-      await page.waitForTimeout(400);
-      expect(
-        await page.evaluate(() => {
+      try {
+        await open(page);
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page.waitForTimeout(400);
+        const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
-          return card.scrollHeight - card.clientHeight;
-        }),
-      ).toBeLessThanOrEqual(0);
-      expect(await page.getByRole("button", { name: "Connect" }).count()).toBe(
-        1,
-      );
-    } finally {
-      await page.close();
-    }
-  });
+          const group = document.querySelector(".tile-group") as HTMLElement;
+          const [cloud, own] = [
+            ...document.querySelectorAll(".tile-option"),
+          ].map((option) => option.getBoundingClientRect());
+          const marks = [...document.querySelectorAll(".cloud-mark")].map(
+            (mark) => mark.getBoundingClientRect(),
+          );
+          const box = group.getBoundingClientRect();
+          return {
+            overflow: card.scrollHeight - card.clientHeight,
+            // One above the other, the same width, inside the Business card.
+            stacked:
+              !!cloud &&
+              !!own &&
+              own.top >= cloud.bottom &&
+              cloud.width === own.width &&
+              own.right <= box.right &&
+              own.bottom <= box.bottom,
+            // The four clouds' marks on Self-Hosted's own line, inside its row.
+            marks:
+              marks.length === 4 &&
+              !!own &&
+              marks.every(
+                (mark) =>
+                  mark.top >= own.top &&
+                  mark.bottom <= own.bottom &&
+                  mark.right <= own.right &&
+                  mark.top === marks[0]?.top,
+              ),
+            // Each choice's name and line on one line.
+            oneLine: [...document.querySelectorAll(".tile-option-text")].every(
+              (text) => text.getBoundingClientRect().height <= 21,
+            ),
+          };
+        });
+        const { overflow, ...laid } = shape;
+        expect(overflow).toBeLessThanOrEqual(0);
+        expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
+        // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
+        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page.waitForTimeout(400);
+        expect(
+          await page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            return card.scrollHeight - card.clientHeight;
+          }),
+        ).toBeLessThanOrEqual(0);
+        expect(
+          await page.getByRole("button", { name: "Connect" }).count(),
+        ).toBe(1);
+      } finally {
+        await page.close();
+      }
+    });
+  }
 
   /*
-   * OpenBot for Business books a call: picked, it shows the app's OpenBot for Business view, what it
-   * adds and the booking calendar, where it used to show an address field. Taller than the window,
-   * it scrolls in the card as any tall step does; the page never does, nothing runs off the card's
-   * side, and the calendar takes the height Calendly reports.
+   * OpenBot for Business books a call: either of its two ways to run, picked, shows the app's
+   * OpenBot for Business view, what it adds and the booking calendar, where it used to show an
+   * address field. Taller than the window, it scrolls in the card as any tall step does; the page
+   * never does, nothing runs off the card's side, and the calendar takes the height Calendly reports.
    */
   test("at 1000x760, OpenBot for Business shows its booker in the card, which scrolls, and no address field", async () => {
     const page = await browser.newPage({
@@ -793,7 +832,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       await routeCalendar(page);
       await open(page);
       await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      await page.getByText("OpenBot for Business").click();
+      await page.getByText("Your own cloud or on-prem.").click();
+      await page.locator(".tile-option.chosen").waitFor();
+      await page.getByText("We run it for you.").click();
       await page
         .locator(
           '.booking-calendar[data-ready] iframe[title="Booking calendar"]',

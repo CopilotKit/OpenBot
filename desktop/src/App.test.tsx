@@ -92,6 +92,10 @@ mock.module("./Mark", () => ({
   // vendored file, which needs Vite's glob.
   ButtonMark: ({ id }: { id: string | null }) =>
     id ? <img alt="" data-mark={id} /> : null,
+  // A cloud's mark, named, as OpenBot for Business's Self-Hosted row lists them.
+  MarkImage: ({ id, name }: { id: string; name: string }) => (
+    <img alt={name} data-mark={id} />
+  ),
 }));
 
 const { App } = await import("./App");
@@ -636,38 +640,67 @@ async function chooseOpenAi(view: Awaited<ReturnType<typeof renderApp>>) {
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 }
 
-test("the first screen offers Self-hosted and OpenBot for Business, shows Cloud greyed, and says what this computer needs and why", async () => {
+/*
+ * The ways to run OpenBot, as they are sold: OpenBot (Self-Contained) on this computer, and OpenBot
+ * for Business, whose two ways to run (Cloud, and Self-Hosted on a company's own cloud or on-prem)
+ * both book a call. Before, Self-hosted meant this computer and OpenBot Cloud was a greyed tile of
+ * its own beside OpenBot for Business.
+ */
+test("the first screen offers OpenBot (Self-Contained), then OpenBot for Business with Cloud and Self-Hosted, and says what this computer needs and why", async () => {
   setupRootConfiguration("/tmp/local-eval-welcome", async () =>
     emptyConfiguration(),
   );
   withLocalCli({ "plugin:opener|open_url": null });
   const view = await renderApp();
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
-  // Three ways to run OpenBot. This app sets up the first and connects to the third; OpenBot Cloud
-  // is there to be seen.
-  const self = view.getByRole("radio", {
-    name: /^Self-hosted/,
-  }) as HTMLInputElement;
-  const cloud = view.getByRole("radio", {
-    name: /^OpenBot Cloud/,
-  }) as HTMLInputElement;
-  const business = view.getByRole("radio", {
-    name: /^OpenBot for Business/,
-  }) as HTMLInputElement;
-  expect([self.checked, self.disabled]).toEqual([true, false]);
-  expect([cloud.checked, cloud.disabled]).toEqual([false, true]);
-  expect([business.checked, business.disabled]).toEqual([false, false]);
-  expect(business.closest("label")?.textContent).toContain(
+  const radios = view.getAllByRole("radio") as HTMLInputElement[];
+  expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
+    "OpenBot (Self-Contained)Everything runs on this computer, for trying it or personal use.",
+    "CloudWe run it for you.",
+    "Self-HostedYour own cloud or on-prem.",
+  ]);
+  expect(radios.map((radio) => [radio.checked, radio.disabled])).toEqual([
+    [true, false],
+    [false, false],
+    [false, false],
+  ]);
+  // Cloud and Self-Hosted are OpenBot for Business's, in one group that says it books a call.
+  const business = view.getByRole("group", { name: "OpenBot for Business" });
+  expect(business.textContent).toContain(
     "For your whole team. Book a call to see it.",
   );
-  // What Self-hosted asks of this computer, and why: every part of OpenBot runs on it.
+  expect(
+    [...business.querySelectorAll('input[type="radio"]')].map(
+      (radio) => (radio as HTMLInputElement).value,
+    ),
+  ).toEqual(["business-cloud", "business-own-cloud"]);
+  // Self-Hosted names the clouds it runs on by their marks.
+  expect(
+    [
+      ...(radios[2]?.closest("label")?.querySelectorAll("img[data-mark]") ??
+        []),
+    ].map((mark) => [mark.getAttribute("data-mark"), mark.getAttribute("alt")]),
+  ).toEqual([
+    ["aws", "AWS"],
+    ["azure", "Azure"],
+    ["google-cloud", "Google Cloud"],
+    ["kubernetes", "Kubernetes"],
+  ]);
+  // No OpenBot Cloud of its own: it is part of OpenBot for Business.
+  expect(view.queryByText("OpenBot Cloud")).toBeNull();
+  expect(view.queryByText("Coming soon.")).toBeNull();
+  // "Self-hosted" is OpenBot for Business's word for a company's own cloud, and nothing else's.
+  expect(view.container.textContent?.match(/self-hosted/gi)).toEqual([
+    "Self-Hosted",
+  ]);
+  // What Self-Contained asks of this computer, and why: every part of OpenBot runs on it.
   expect(
     view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
   expect(
     [...view.container.querySelectorAll(".lede")].map((p) => p.textContent),
   ).toEqual([
-    "Self-hosted runs every part of OpenBot on this computer: the app, its server and database, your Bots' memory, and a computer for each Bot to work on.",
+    "Every part of OpenBot runs on this computer: the app, its server and database, your Bots' memory, and a computer for each Bot to work on.",
     "Setup takes 1 to 10 minutes, depending on your internet speed.",
   ]);
   expect(
@@ -710,14 +743,13 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   });
   const view = await renderApp();
   const business = view.getByRole("radio", {
-    name: /^OpenBot for Business/,
+    name: /^Cloud/,
   }) as HTMLInputElement;
   await userEvent.click(business);
   expect(business.checked).toBe(true);
-  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
-    "checked",
-    false,
-  );
+  expect(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  ).toHaveProperty("checked", false);
   // No address and no Connect: that is the link under the rows.
   expect(view.queryByLabelText("OpenBot address")).toBeNull();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
@@ -763,8 +795,18 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   expect(view.queryByText("Loading the calendar")).toBeNull();
   expect(calendar.style.height).toBe("640px");
   expectPlain(view);
-  // Self-hosted again: its needs and Install, as before.
-  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  // Self-Hosted, on a company's own cloud, books the same call on the same calendar.
+  const ownCloud = view.getByRole("radio", {
+    name: /^Self-Hosted/,
+  }) as HTMLInputElement;
+  await userEvent.click(ownCloud);
+  expect([business.checked, ownCloud.checked]).toEqual([false, true]);
+  expect(view.getByTitle("Booking calendar")).toBe(calendar);
+  expect(view.queryByLabelText("OpenBot address")).toBeNull();
+  // Self-Contained again: its needs and Install, as before.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
   expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   expect(view.queryByTitle("Booking calendar")).toBeNull();
   expect(localCliCalls()).toEqual([]);
@@ -780,9 +822,7 @@ test("a calendar that can't load gives way to Book a demo, which opens the OpenB
     "plugin:opener|open_url": null,
   });
   const view = await renderApp();
-  await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  );
+  await userEvent.click(view.getByRole("radio", { name: /^Cloud/ }));
   // Blocked: the frame errors.
   await act(async () => {
     view.getByTitle("Booking calendar").dispatchEvent(new Event("error"));
@@ -801,9 +841,10 @@ test("a calendar that can't load gives way to Book a demo, which opens the OpenB
     args: { url: "https://open.bot/business" },
   });
   // Opening it leaves the screen where it was.
-  expect(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  ).toHaveProperty("checked", true);
+  expect(view.getByRole("radio", { name: /^Cloud/ })).toHaveProperty(
+    "checked",
+    true,
+  );
   expect(localCliCalls()).toEqual([]);
 });
 
@@ -823,9 +864,7 @@ test("offline, OpenBot for Business offers Book a demo in the browser straight a
     get: () => false,
   });
   try {
-    await userEvent.click(
-      view.getByRole("radio", { name: /^OpenBot for Business/ }),
-    );
+    await userEvent.click(view.getByRole("radio", { name: /^Cloud/ }));
     expect(view.queryByTitle("Booking calendar")).toBeNull();
     expect(
       view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
@@ -956,13 +995,18 @@ function connectedShell(answers: Record<string, unknown>) {
 test("Connect to it asks for an address in place of Install, and going back brings Install back", async () => {
   const view = await chooseConnect();
   const business = view.getByRole("radio", {
-    name: /^OpenBot for Business/,
+    name: /^Cloud/,
   }) as HTMLInputElement;
   const self = view.getByRole("radio", {
-    name: /^Self-hosted/,
+    name: /^OpenBot \(Self-Contained\)/,
   }) as HTMLInputElement;
-  // None of the three: this app connects to an OpenBot that already runs.
-  expect([self.checked, business.checked]).toEqual([false, false]);
+  // None of the choices: this app connects to an OpenBot that already runs.
+  expect(
+    (view.getAllByRole("radio") as HTMLInputElement[]).map(
+      (radio) => radio.checked,
+    ),
+  ).toEqual([false, false, false]);
+  expect(self.checked).toBe(false);
   const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
   // The link brought the person to the field.
   expect(document.activeElement).toBe(field);
@@ -973,7 +1017,7 @@ test("Connect to it asks for an address in place of Install, and going back brin
       "You'll sign in to it in your browser. Nothing is installed on this computer.",
     ),
   ).toBeTruthy();
-  // What Self-hosted asks of this computer, and its Install, are not this choice's.
+  // What Self-Contained asks of this computer, and its Install, are not this choice's.
   expect(buttons(view)).toEqual([
     "Connect",
     "Use OpenBot on this computer instead",
@@ -989,11 +1033,6 @@ test("Connect to it asks for an address in place of Install, and going back brin
   );
   // The link that led here is gone while its form shows.
   expect(view.queryByText(/Already have OpenBot at work/)).toBeNull();
-  // OpenBot Cloud is still to come.
-  expect(view.getByRole("radio", { name: /^OpenBot Cloud/ })).toHaveProperty(
-    "disabled",
-    true,
-  );
   expectPlain(view);
   // Back, by the control that says so, and by the rows themselves.
   await userEvent.type(field, "openbot.example.com");
@@ -1014,7 +1053,9 @@ test("Connect to it asks for an address in place of Install, and going back brin
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe("openbot.example.com");
-  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
   expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   expect(
     view.getByRole("heading", { name: "What this computer needs" }),
@@ -1185,13 +1226,13 @@ test("a launch after the sign-in ended says so once, with the address filled in 
   const view = await renderApp(true);
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   // The connect form, which is none of the three rows: OpenBot for Business books a call.
-  expect(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  ).toHaveProperty("checked", false);
-  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
+  expect(view.getByRole("radio", { name: /^Cloud/ })).toHaveProperty(
     "checked",
     false,
   );
+  expect(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  ).toHaveProperty("checked", false);
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
@@ -1224,9 +1265,10 @@ test("asked from Settings to choose where OpenBot runs, the first screen opens o
   });
   const view = await renderApp();
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
-  expect(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  ).toHaveProperty("checked", false);
+  expect(view.getByRole("radio", { name: /^Cloud/ })).toHaveProperty(
+    "checked",
+    false,
+  );
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
@@ -1240,8 +1282,10 @@ test("asked from Settings to choose where OpenBot runs, the first screen opens o
     "connection",
     "take_connection_notice",
   ]);
-  // Picking Self-hosted switches the saved choice, then setup carries on as it does today.
-  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  // Picking Self-Contained switches the saved choice, then setup carries on as it does today.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
   await view.findByRole("button", { name: "Install" });
   const commands = asked().map((call) => call.command);
   expect(commands.indexOf("use_this_computer")).toBe(2);
@@ -1271,10 +1315,9 @@ test("asked from Settings on an install on this computer, the first screen shows
   expect(
     await view.findByRole("heading", { name: "Set up OpenBot" }),
   ).toBeTruthy();
-  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
-    "checked",
-    true,
-  );
+  expect(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  ).toHaveProperty("checked", true);
   // OpenBot is already installed here: the way on is Continue, not Install.
   expect(buttons(view)).toEqual(["Connect to it", "Continue"]);
   expect(view.queryByText(/Setup takes/)).toBeNull();
@@ -1300,7 +1343,9 @@ test("asked from Settings on an install on this computer, the first screen shows
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
-  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
   expect(started()).toEqual([]);
   // Continue: today's relaunch, which starts the saved installation and opens OpenBot.
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
@@ -1362,10 +1407,9 @@ test("Use OpenBot on this computer instead switches a saved connection back, and
   const commands = asked().map((call) => call.command);
   expect(commands.indexOf("use_this_computer")).toBe(2);
   expect(commands.indexOf("default_root")).toBeGreaterThan(2);
-  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
-    "checked",
-    true,
-  );
+  expect(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  ).toHaveProperty("checked", true);
   expect(
     view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
@@ -5801,13 +5845,13 @@ test("a clean Windows machine without WSL opens at the choice, and nothing about
   cleanWindowsWithoutWsl();
   const view = await renderApp();
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
-  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
-    "checked",
-    true,
-  );
   expect(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  ).toHaveProperty("disabled", false);
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  ).toHaveProperty("checked", true);
+  expect(view.getByRole("radio", { name: /^Cloud/ })).toHaveProperty(
+    "disabled",
+    false,
+  );
   expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(view.queryByText("Before OpenBot can start")).toBeNull();
@@ -5815,7 +5859,7 @@ test("a clean Windows machine without WSL opens at the choice, and nothing about
   expect(installationCalls()).toEqual([]);
 });
 
-test("on that machine, Install with Self-hosted chosen shows what Windows needs, as it always has", async () => {
+test("on that machine, Install with Self-Contained chosen shows what Windows needs, as it always has", async () => {
   cleanWindowsWithoutWsl();
   const view = await renderApp();
   await installLocal(view);
@@ -5932,18 +5976,17 @@ test("a clean computer's first screen downloads nothing, and connecting to an Op
   });
   const view = await renderApp();
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
-  // Self-hosted is picked to begin with: that alone is not a choice of this computer.
-  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
-    "checked",
-    true,
-  );
+  // Self-Contained is picked to begin with: that alone is not a choice of this computer.
+  expect(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  ).toHaveProperty("checked", true);
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(earlyDownloadCalls()).toEqual([]);
   // Back and forth between the two, then the company's OpenBot and its address.
+  await userEvent.click(view.getByRole("radio", { name: /^Cloud/ }));
   await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
   );
-  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(earlyDownloadCalls()).toEqual([]);
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
@@ -5958,7 +6001,7 @@ test("a clean computer's first screen downloads nothing, and connecting to an Op
   expect(installationCalls()).toEqual([]);
 });
 
-test("on a clean computer, Install with Self-hosted chosen starts the downloads, then waits for their look at the disk before building anything", async () => {
+test("on a clean computer, Install with Self-Contained chosen starts the downloads, then waits for their look at the disk before building anything", async () => {
   const looked = deferred<unknown>();
   const preparation = deferred<void>();
   cleanComputer({

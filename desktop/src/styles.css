@@ -732,9 +732,9 @@ button.text-link.change-provider {
 }
 
 /*
- * The ways to run OpenBot, on the first screen. Self-hosted is the one this app sets up, and
- * OpenBot for Business is the one it connects to. OpenBot Cloud is shown so a person knows it
- * exists, greyed and not choosable.
+ * The ways to run OpenBot, on the first screen. OpenBot (Self-Contained) is the one this app sets
+ * up. OpenBot for Business is one card holding its two ways to run, each a smaller row inside it,
+ * and either books a call.
  */
 fieldset.picker.hosting {
   max-height: none;
@@ -751,19 +751,135 @@ fieldset.picker.hosting .tile.chosen {
   cursor: default;
 }
 
-fieldset.picker.hosting .tile.unavailable,
-fieldset.picker.hosting .tile.unavailable:hover,
-fieldset.picker.hosting .tile.unavailable:active {
-  cursor: not-allowed;
+/*
+ * OpenBot for Business: drawn as a row, mark and name and summary where every row has them, with
+ * its two choices stacked under the summary. Not itself a choice, so no hover of its own; while one
+ * of its choices is picked its edge is the chosen row's ring.
+ */
+.tile-group {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  grid-template-areas:
+    "mark name"
+    "mark summary"
+    ". options";
+  align-items: center;
+  column-gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  line-height: 1.5;
+}
+
+.tile-group.chosen {
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
+}
+
+.tile-options {
+  grid-area: options;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* One of Business's ways to run: the row's shape, smaller, its words on one line. */
+.tile-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  cursor: pointer;
+  transition:
+    border-color 100ms ease,
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.tile-option:hover {
+  background: color-mix(in srgb, var(--muted) 60%, var(--card));
+}
+
+.tile-option:active {
+  background: var(--muted);
+}
+
+.tile-option.chosen,
+.tile-option.chosen:hover {
+  cursor: default;
+  background: color-mix(in srgb, var(--ring) 6%, var(--card));
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
+}
+
+.tile-option.held,
+.tile-option.held:hover,
+.tile-option.held:active {
+  cursor: default;
   background: var(--card);
 }
 
-fieldset.picker.hosting .tile.unavailable .tile-name {
+.tile-option:has(.tile-input:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--lilac-30);
+}
+
+.tile-option-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
   color: var(--text-secondary);
 }
 
-fieldset.picker.hosting .tile.unavailable .mark-tile {
-  opacity: 0.45;
+.tile-option-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.tile-option-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tile-option-summary {
+  color: var(--text-secondary);
+}
+
+/* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
+.cloud-marks {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.cloud-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--mark-ground);
+}
+
+.cloud-mark img {
+  width: 100%;
+  height: 100%;
 }
 
 /*
