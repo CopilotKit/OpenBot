@@ -162,18 +162,29 @@ export function consentHandoffWords(handoff: {
  * Whether a consent OpenBot is about to open for this app goes through Composio, and the app's
  * name and sign-in page if so. Null otherwise: an Arcade deployment, an app OpenBot signs in to
  * itself, or a read that failed (the sign-in then opens straight away, as it always did).
+ *
+ * FROM WHAT THE SCREEN ALREADY HOLDS. The screen that drew Connect read how apps are set up and
+ * which apps there are, and neither fact this asks changes between the read and the press. Asking
+ * the server again at the press made the step hang on one more round trip, and a re-read that
+ * failed, or was cancelled by another refetch it had joined, dropped the step and opened the
+ * sign-in straight away. Only an app the screen has not read yet (one Browse apps has just added)
+ * is read again.
  */
 export async function brokeredConsentFor(
   queryClient: QueryClient,
   serverId: string,
 ): Promise<Omit<ConsentHandoff, "url"> | null> {
   try {
-    const [setup, apps] = await Promise.all([
-      queryClient.fetchQuery(appSetupQueryOptions()),
-      queryClient.fetchQuery(appsQueryOptions()),
-    ]);
+    const setup = await queryClient.ensureQueryData(appSetupQueryOptions());
     if (setup.directoryProvider !== "composio") return null;
-    const app = apps.find((each) => each.id === serverId);
+    const held = queryClient
+      .getQueryData(appsQueryOptions().queryKey)
+      ?.find((each) => each.id === serverId);
+    const app =
+      held ??
+      (
+        await queryClient.fetchQuery({ ...appsQueryOptions(), staleTime: 0 })
+      ).find((each) => each.id === serverId);
     if (app?.source !== "directory") return null;
     return {
       app: app.title,

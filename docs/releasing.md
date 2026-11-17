@@ -646,7 +646,9 @@ by hand. Each run:
 - checks it carries `latest.json` and every installer under its fixed download name, and that each
   versioned installer is the same file as its fixed-name copy, so both are the signed build;
 - compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
-  invalidates `/latest/*` only when something under `latest/` changed.
+  invalidates `/latest/*` only when something under `latest/` changed;
+- removes the installers of every release older than the Latest one from `releases/<tag>/`, and
+  invalidates each removed path ([Older installers](#older-installers)).
 
 It also copies everything else the Desktop app downloads for that release, so the app can fetch it
 all from this address and go to GitHub only when it does not answer
@@ -731,7 +733,8 @@ When the Latest release lacks some of those files, the run fails and changes not
 addresses keep serving the previous signed installers. A Latest release with none of them was
 published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
 "no signed installers yet; nothing to sync" and does not touch AWS. A release asked for by tag must
-have them all. Nothing is ever deleted.
+have them all. Apart from the installers of releases older than the Latest one
+([Older installers](#older-installers)), nothing is ever deleted.
 
 To run it by hand, from `main`:
 
@@ -759,8 +762,78 @@ Origin Shield in us-east-1, and uses the managed CachingOptimized policy, which 
 Cache-Control and leaves query strings out of the cache key. All of it is managed by hand in the
 console, not by infrastructure as code. The workflow signs in as the role `openbot-release-downloads`
 with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
-`main`, and may only read and write the bucket's objects and invalidate that distribution. The role
+`main`, and may only read and write the bucket's objects, delete those under `releases/` (the
+installers of older releases, [Older installers](#older-installers)), and invalidate that
+distribution. The role
 ARN, bucket and distribution are written in the workflow; none is a secret.
+
+### Older installers
+
+When a stable release becomes Latest, the installers of every older release are removed, from the
+GitHub releases and from `releases/<tag>/` in the bucket. A fresh install lays out the Latest
+release's server stack whatever installer started it, and an older app may not set that stack up
+as it needs: an installer from 1.0.3 or before writes no install token, which the 1.1 server
+requires, so it crash-loops. One rule decides what goes, for both places
+([`scripts/release-older-installers.sh`](../scripts/release-older-installers.sh)).
+
+- **Older** means a tag that is a version (`vX.Y.Z` or `vX.Y.Z-<pre>`) below the Latest one by
+  semver: a lower `X.Y.Z`, or a candidate or beta of the Latest version itself.
+- **Removed**, from each older release: every installer, under its versioned name and its fixed
+  name (`.dmg`, `.exe` and `-setup.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`), and each one's `.sig`.
+- **Kept**: everything else, on every release. `latest.json`, the updater archives
+  (`.app.tar.gz`) and their `.sig`, `container-images.json`, `desktop-images.json`, the source
+  archives, `release-manifest.json` and the provenance. Installed apps fetch
+  `container-images.json` and the source at run time to repair, and update from the Latest
+  release's feed. The Latest release, anything newer (such as the next candidate), and any tag that
+  is not a version keep everything.
+
+Both sides read the Latest release from GitHub, never from an argument, so a mistyped tag cannot
+remove the installers the website links to. Running either again changes nothing.
+
+When it runs:
+
+- **GitHub, signing path:** `scripts/release-make-latest.sh` runs
+  `scripts/release-older-installers.sh github` right after it makes the release Latest and starts
+  Downloads sync, with the attach job's `contents: write`. If a removal fails, the feed is still
+  checked and the job then fails, naming the command to run again.
+- **GitHub, finish at 100%:** by hand, as a step of [Ramp, finish and roll back](#ramp-finish-and-roll-back).
+- **Bucket, both paths:** the last step of Downloads sync, `scripts/release-older-installers.sh bucket`,
+  on every run for the Latest release (the one the signing run starts, the one step 3 of finish at
+  100% starts, and the scheduled ones), never on a run for one tag. It removes the selected objects
+  and invalidates each removed path on the distribution, as they were cached for a year. The role
+  `openbot-release-downloads` may delete only under `releases/` (`s3:DeleteObject` on
+  `arn:aws:s3:::copilotkit-openbot-downloads/releases/*`).
+
+Downloads sync has only `contents: read` on the repository, so it never touches the GitHub
+releases; the finish-at-100% path removes those by hand. To see what would go, and then remove it,
+from a checkout of `main` with `gh` signed in:
+
+```sh
+GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github --dry-run
+GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github
+```
+
+The bucket side lists the same way with admin credentials for the account:
+`GITHUB_REPOSITORY=CopilotKit/OpenBot DOWNLOADS_BUCKET=copilotkit-openbot-downloads DOWNLOADS_DISTRIBUTION_ID=EQ4EH8L79LPGX scripts/release-older-installers.sh bucket --dry-run`.
+
+**Restoring one.** The bucket is versioned, so a removal only adds a delete marker and the
+installer's earlier version is still there. Removing the marker brings it back, then invalidate its
+path. This needs admin credentials for the account, as deleting a version is not something the
+sync's role may do:
+
+```sh
+key=releases/v1.0.3/OpenBot_1.0.3_aarch64.dmg
+aws s3api list-object-versions --bucket copilotkit-openbot-downloads --prefix "$key" \
+  --query 'DeleteMarkers[?IsLatest].VersionId' --output text
+aws s3api delete-object --bucket copilotkit-openbot-downloads --key "$key" --version-id <that id>
+aws cloudfront create-invalidation --distribution-id EQ4EH8L79LPGX --paths "/$key"
+```
+
+On GitHub a removed asset is gone. To put one back, download it from the bucket (restored as above
+if needed) and attach it again: `gh release upload v1.0.3 OpenBot_1.0.3_aarch64.dmg -R CopilotKit/OpenBot`.
+The fixed-name copies and installer `.sig` files are not in the bucket, so they cannot be put back
+this way; the fixed names are the same files as the versioned ones, and can be uploaded again under
+their fixed names from those.
 
 ## Staged rollout
 
@@ -818,11 +891,15 @@ aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key
   2. Mark the release Latest on its release page, or `gh release edit v1.1.0 --latest`.
   3. Run Downloads sync for the Latest release, `gh workflow run downloads-sync.yml --ref main`, and
      wait for it to finish, so `latest/` serves the release.
-  4. Remove the function's association from the default behavior (console: the distribution,
+  4. Remove the installers of every older release from GitHub, which the signing run would have
+     done had it made the release Latest ([Older installers](#older-installers)):
+     `GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github`. The sync in
+     step 3 has already removed them from the bucket.
+  5. Remove the function's association from the default behavior (console: the distribution,
      Behaviors, the default behavior, Function associations, Viewer request: No association), then
      put `rollout-percent` to `0`.
 
-Between steps 3 and 4, `latest/` and `rollout/<tag>/` hold the same release, so nobody in the share
+Between steps 3 and 5, `latest/` and `rollout/<tag>/` hold the same release, so nobody in the share
 is sent back to the older one.
 
 The test path `/rollout-test/latest/<file>` routes the same way, to `latest/` or `rollout/<tag>/`.

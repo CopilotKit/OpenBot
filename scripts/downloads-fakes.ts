@@ -11,6 +11,9 @@
  * - `aws s3api head-object` fails with exit 254 and `(404)` for a missing key, and reports
  *   ChecksumSHA256 only with `--checksum-mode ENABLED` and only for an object uploaded with one.
  * - `aws s3api put-object --checksum-sha256` refuses a body that does not hash to it (BadDigest).
+ * - `aws s3api list-objects-v2 --prefix` lists every key under it, and prints no `Contents` when
+ *   there is none; `aws s3api delete-object` adds a delete marker in the versioned bucket, or fails
+ *   with AccessDenied for a role without s3:DeleteObject.
  * - `aws cloudfront create-invalidation` takes every path after one `--paths` and answers with the
  *   new invalidation's Id.
  * - `crane` (go-containerregistry) prints a manifest or a blob as the registry served it.
@@ -143,7 +146,7 @@ ${SHA}
 service="$1"
 command="$2"
 shift 2
-bucket=""; key=""; body=""; type=""; cache=""; checksum=""; mode=""; distribution=""; paths=()
+bucket=""; key=""; body=""; type=""; cache=""; checksum=""; mode=""; distribution=""; prefix=""; paths=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --bucket) bucket="$2"; shift ;;
@@ -154,6 +157,7 @@ while [ "$#" -gt 0 ]; do
     --checksum-sha256) checksum="$2"; shift ;;
     --checksum-mode) mode="$2"; shift ;;
     --distribution-id) distribution="$2"; shift ;;
+    --prefix) prefix="$2"; shift ;;
     --paths)
       while [ "$#" -gt 1 ] && [[ "$2" != --* ]]; do paths+=("$2"); shift; done
       ;;
@@ -194,6 +198,25 @@ case "$service $command" in
       '{ContentType: $type, CacheControl: $cache, ChecksumSHA256: $checksum}' > "$meta"
     jq -n --arg checksum "$checksum" '{ETag: "\\"etag\\"", ServerSideEncryption: "AES256", VersionId: "v1"}
       + (if $checksum != "" then {ChecksumSHA256: $checksum, ChecksumType: "FULL_OBJECT"} else {} end)'
+    ;;
+  "s3api list-objects-v2")
+    # Every key under the prefix, as the CLI prints them once it has read every page. With none, the
+    # CLI prints no Contents at all.
+    root="$FAKE_STATE/s3/$bucket"
+    (cd "$root" && find . -type f | sed 's|^\\./||; s|/\\.slash-object$|/|' | LC_ALL=C sort) |
+      jq -R -s --arg prefix "$prefix" '
+        split("\\n") | map(select(length > 0 and startswith($prefix)) | {Key: ., StorageClass: "STANDARD"})
+        | if length == 0 then {RequestCharged: null, Prefix: $prefix}
+          else {Contents: ., RequestCharged: null, Prefix: $prefix} end'
+    ;;
+  "s3api delete-object")
+    # A versioned bucket: the delete adds a delete marker, and the object's versions stay.
+    if [ -f "$FAKE_STATE/delete-denied" ]; then
+      printf '\\nAn error occurred (AccessDenied) when calling the DeleteObject operation: User: arn:aws:sts::604598162673:assumed-role/openbot-release-downloads/openbot-downloads-sync is not authorized to perform: s3:DeleteObject on resource: "arn:aws:s3:::%s/%s" because no identity-based policy allows the s3:DeleteObject action\\n' "$bucket" "$key" >&2
+      exit 254
+    fi
+    rm -f "$object" "$meta"
+    jq -n '{DeleteMarker: true, VersionId: "marker"}'
     ;;
   "cloudfront create-invalidation")
     n=$(( $(wc -l < "$FAKE_STATE/invalidations" | tr -d ' ') + 1 ))
@@ -281,6 +304,8 @@ export type FakeDownloads = {
   remove(key: string): void;
   /** From now on every read of the bucket is refused, as it is for credentials without access. */
   deny(): void;
+  /** From now on every delete is refused, as it is for a role without s3:DeleteObject. */
+  denyDeletes(): void;
   /** From now on CloudFront answers 403 for this key, whatever the bucket holds. */
   refuse(key: string): void;
   /** Each invalidation, as "<distribution> <paths>". */
@@ -402,6 +427,7 @@ export function fakeDownloads(): FakeDownloads {
       rmSync(join(metas, `${key}.json`));
     },
     deny: () => writeFileSync(join(state, "denied"), ""),
+    denyDeletes: () => writeFileSync(join(state, "delete-denied"), ""),
     refuse: (key) =>
       writeFileSync(join(state, "refused"), `${key}\n`, { flag: "a" }),
     invalidations: () =>

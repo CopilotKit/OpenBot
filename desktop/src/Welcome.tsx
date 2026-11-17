@@ -1,16 +1,54 @@
-import { IconBuilding, IconCloud, IconDeviceLaptop } from "@tabler/icons-react";
-import { type ReactNode, useState } from "react";
+import {
+  IconBuilding,
+  IconCloud,
+  IconDeviceLaptop,
+  IconServer2,
+} from "@tabler/icons-react";
+import { type ReactNode, useEffect, useState } from "react";
+import { BusinessBooker } from "./BusinessBooker";
 import { ConnectToOpenBot, useConnectToOpenBot } from "./ConnectToOpenBot";
 import {
   EarlyDownloadsLine,
   earlyDownloadsMeasured,
   useEarlyDownloads,
 } from "./EarlyDownloads";
-import { ExternalLink } from "./ExternalLink";
+import { MarkImage } from "./Mark";
 import type { Problem } from "./Problem";
 
-/** OpenBot's one booking link. */
-export const BOOK_A_DEMO = "https://open.bot/business";
+/** What the first choice is: OpenBot, whole, on this computer. */
+export const SELF_CONTAINED_SUMMARY =
+  "Everything runs on this computer, for trying it or personal use.";
+
+/** OpenBot for Business's two ways to run. Either one books a call (`BusinessBooker`). */
+type BusinessChoice = "cloud" | "own-cloud";
+
+const BUSINESS_CHOICES: readonly {
+  id: BusinessChoice;
+  name: string;
+  summary: string;
+  icon: typeof IconCloud;
+}[] = [
+  {
+    id: "cloud",
+    name: "Cloud",
+    summary: "We run it for you.",
+    icon: IconCloud,
+  },
+  {
+    id: "own-cloud",
+    name: "Self-Hosted",
+    summary: "Your own cloud or on-prem.",
+    icon: IconServer2,
+  },
+];
+
+/** The clouds a company runs OpenBot for Business on, by their vendored marks (`shared/marks`). */
+const CLOUDS = [
+  { id: "aws", name: "AWS" },
+  { id: "azure", name: "Azure" },
+  { id: "google-cloud", name: "Google Cloud" },
+  { id: "kubernetes", name: "Kubernetes" },
+] as const;
 
 /**
  * The least a computer needs to run every part of OpenBot itself.
@@ -20,7 +58,7 @@ export const BOOK_A_DEMO = "https://open.bot/business";
  * 8 GiB of memory while 4 GiB is kept for the computer itself (`machine_size.rs`). Memory is said as
  * 16 GB, room for that plus the person's own apps, as decided with David on 13 Nov 2026.
  */
-export const SELF_HOSTED_NEEDS = [
+export const SELF_CONTAINED_NEEDS = [
   "A Mac or a 64-bit Windows PC",
   "16 GB of memory or more",
   "4 CPU cores or more",
@@ -28,20 +66,24 @@ export const SELF_HOSTED_NEEDS = [
 ] as const;
 
 /** Where OpenBot runs: on this computer, or at an address this app connects to. */
-export type Hosting = "self-hosted" | "connect";
+export type Hosting = "this-computer" | "connect";
 
 /**
  * Where OpenBot runs, and what that asks of this computer, before it asks for anything else.
  *
- * First the three ways to run OpenBot, of which two can be chosen here: Self-hosted runs
- * everything on this computer, and OpenBot for Business connects this app to the OpenBot a company
- * runs, at its address. OpenBot Cloud is shown greyed. Then what the choice needs. For Self-hosted
- * that is what this computer needs and why, which is that every part of OpenBot runs on it, how
- * long setup takes, and Install. For OpenBot for Business it is the address and Connect
- * (`ConnectToOpenBot`). The one booking link, for a company that has no OpenBot yet, is under the
- * Business row whichever choice is picked. Either
- * way it fits the window's default size (1000×800, less a title bar) with no scrollbar. Usage data
- * is not said here: it is the last screen's choice (`UsageDataChoice`).
+ * First the ways to run OpenBot. OpenBot (Self-Contained) runs everything on this computer, for
+ * trying it or personal use. OpenBot for Business is one card with its two ways to run, Cloud and
+ * Self-Hosted on a company's own cloud or on-prem, and either books a call with us: OpenBot for
+ * Business is a meeting booker. Then what the choice needs. For Self-Contained that is what this
+ * computer needs and why, which is that every part of OpenBot runs on it, how long setup takes, and
+ * Install, and it fits the window's default size (1000×800, less a title bar) with no scrollbar.
+ * For OpenBot for Business it is the app's OpenBot for Business view: what it adds and the booking
+ * calendar (`BusinessBooker`), which scrolls in the card as any tall step does.
+ *
+ * Connecting this app to the OpenBot a company already runs is the link under the rows ("Already
+ * have OpenBot at work?"), which opens the address and Connect (`ConnectToOpenBot`). While that
+ * shows, no row is picked: it is none of them. Usage data is not said here: it is the last
+ * screen's choice (`UsageDataChoice`).
  *
  * The big downloads start with Install (`startDownloads`), the moment the person chooses this
  * computer, and never before: somebody who connects to their company's OpenBot downloads nothing.
@@ -67,13 +109,13 @@ export function Welcome({
   hosting: Hosting;
   /**
    * OpenBot is already set up on this computer, and the person asked from Settings to choose where
-   * it runs. Self-hosted's way on is Continue, which goes on with that setup; there is nothing to
+   * it runs. Self-Contained's way on is Continue, which goes on with that setup; there is nothing to
    * install or download first.
    */
   resumes?: boolean;
-  /** OpenBot for Business was picked. */
+  /** Connecting to the OpenBot a company already runs was picked. */
   onConnect: () => void;
-  /** Self-hosted was picked again. May fail, when a saved connection has to be switched first. */
+  /** This computer was picked again. May fail, when a saved connection has to be switched first. */
   onThisComputer: () => void | Promise<void>;
   /** What is known of an OpenBot connected to before (`useConnectToOpenBot`). */
   saved?: {
@@ -91,7 +133,25 @@ export function Welcome({
   failure?: ReactNode;
 }) {
   const connecting = useConnectToOpenBot({ ...saved, onThisComputer });
-  const connect = hosting === "connect";
+  // One of OpenBot for Business's two picked: its booker shows, whatever the app holds as the choice.
+  const [business, setBusiness] = useState<BusinessChoice | null>(null);
+  const shown = business ? "business" : hosting;
+  // While it checks an address or waits on the browser, Cancel is the way out.
+  const held = shown === "connect" && connecting.busy;
+  const rowClass = (chosen: boolean, base = "tile") =>
+    chosen ? `${base} chosen` : held ? `${base} held` : base;
+  // Asked for by the link under the rows: the address field has the focus once it shows.
+  const [focusField, setFocusField] = useState(false);
+  useEffect(() => {
+    if (!focusField || shown !== "connect") return;
+    connecting.field.current?.focus();
+    setFocusField(false);
+  }, [focusField, shown, connecting.field]);
+  const connectToIt = () => {
+    setBusiness(null);
+    setFocusField(true);
+    if (hosting !== "connect") onConnect();
+  };
   return (
     <div className="sheet">
       <div className="lockup">
@@ -106,71 +166,98 @@ export function Welcome({
       <h1>Set up OpenBot</h1>
       <fieldset className="picker hosting">
         <legend className="sr-only">Where OpenBot runs</legend>
-        <label
-          className={
-            connect ? (connecting.busy ? "tile held" : "tile") : "tile chosen"
-          }
-        >
+        <label className={rowClass(shown === "this-computer")}>
           <input
             type="radio"
             name="hosting"
             className="tile-input"
-            value="self-hosted"
-            checked={!connect}
-            // While it checks an address or waits on the browser, Cancel is the way out.
-            disabled={connect && connecting.busy}
-            onChange={() => void connecting.leave()}
+            value="this-computer"
+            checked={shown === "this-computer"}
+            disabled={held}
+            onChange={() => {
+              setBusiness(null);
+              if (hosting === "connect") void connecting.leave();
+            }}
           />
           <HostingMark>
             <IconDeviceLaptop stroke={1.75} />
           </HostingMark>
-          <span className="tile-name">Self-hosted</span>
-          <span className="tile-summary">
-            Everything runs on this computer.
-          </span>
+          <span className="tile-name">OpenBot (Self-Contained)</span>
+          <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
         </label>
-        <label className="tile unavailable">
-          <input
-            type="radio"
-            name="hosting"
-            className="tile-input"
-            value="cloud"
-            disabled
-          />
-          <HostingMark>
-            <IconCloud stroke={1.75} />
-          </HostingMark>
-          <span className="tile-name">OpenBot Cloud</span>
-          <span className="tile-summary">Coming soon.</span>
-        </label>
-        <label className={connect ? "tile chosen" : "tile"}>
-          <input
-            type="radio"
-            name="hosting"
-            className="tile-input"
-            value="business"
-            checked={connect}
-            onChange={onConnect}
-          />
+        {/* OpenBot for Business, its two ways in one card: both book a call. */}
+        <fieldset
+          className={rowClass(shown === "business", "tile-group")}
+          aria-labelledby="business-name"
+        >
           <HostingMark>
             <IconBuilding stroke={1.75} />
           </HostingMark>
-          <span className="tile-name">OpenBot for Business</span>
-          <span className="tile-summary">
-            For your whole team. Connect to the OpenBot your company runs.
+          <span className="tile-name" id="business-name">
+            OpenBot for Business
           </span>
-        </label>
-        {/* Under the Business row and not part of it: a company with no OpenBot of its own has no
-            address to type, and opening the link does not pick the row. */}
-        <p className="tile-aside">
-          No OpenBot at your company yet?{" "}
-          <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink>.
-        </p>
+          <span className="tile-summary">
+            For your whole team. Book a call to see it.
+          </span>
+          <div className="tile-options">
+            {BUSINESS_CHOICES.map((choice) => (
+              <label
+                key={choice.id}
+                className={rowClass(business === choice.id, "tile-option")}
+              >
+                <input
+                  type="radio"
+                  name="hosting"
+                  className="tile-input"
+                  value={`business-${choice.id}`}
+                  checked={business === choice.id}
+                  disabled={held}
+                  onChange={() => setBusiness(choice.id)}
+                />
+                <choice.icon
+                  className="tile-option-icon"
+                  aria-hidden="true"
+                  stroke={1.75}
+                />
+                <span className="tile-option-text">
+                  <span className="tile-option-name">{choice.name}</span>
+                  <span className="tile-option-summary">{choice.summary}</span>
+                </span>
+                {choice.id === "own-cloud" && (
+                  <span className="cloud-marks">
+                    {CLOUDS.map((cloud) => (
+                      <span className="cloud-mark" key={cloud.id}>
+                        <MarkImage id={cloud.id} name={cloud.name} />
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        {/* Under the rows and not one of them: somebody whose company already runs OpenBot connects
+            this app to it. Gone while the address shows, since that is where it leads. */}
+        {shown !== "connect" && (
+          <p className="tile-aside">
+            Already have OpenBot at work?{" "}
+            <button
+              type="button"
+              className="text-link inline-link"
+              onClick={connectToIt}
+            >
+              Connect to it
+            </button>
+            .
+          </p>
+        )}
       </fieldset>
-      {connect ? (
+      {shown === "connect" ? (
         <ConnectToOpenBot connecting={connecting} />
+      ) : shown === "business" ? (
+        <BusinessBooker />
       ) : (
-        <SelfHosted
+        <SelfContained
           startDownloads={startDownloads}
           onInstall={onInstall}
           failure={failure}
@@ -181,8 +268,8 @@ export function Welcome({
   );
 }
 
-/** What Self-hosted asks of this computer and why, then the way on. */
-function SelfHosted({
+/** What Self-Contained asks of this computer and why, then the way on. */
+function SelfContained({
   startDownloads,
   onInstall,
   failure,
@@ -198,12 +285,12 @@ function SelfHosted({
       <section className="needs" aria-labelledby="needs-heading">
         <h2 id="needs-heading">What this computer needs</h2>
         <p className="lede">
-          Self-hosted runs every part of OpenBot on this computer: the app, its
-          server and database, your Bots&apos; memory, and a computer for each
-          Bot to work on.
+          Every part of OpenBot runs on this computer: the app, its server and
+          database, your Bots&apos; memory, and a computer for each Bot to work
+          on.
         </p>
         <ul className="needs-list">
-          {SELF_HOSTED_NEEDS.map((need) => (
+          {SELF_CONTAINED_NEEDS.map((need) => (
             <li key={need}>{need}</li>
           ))}
         </ul>
