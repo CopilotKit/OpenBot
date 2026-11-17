@@ -81,7 +81,12 @@ test("a bad day for the runner takes nothing away", () => {
         "fail",
         "the harness never became healthy: exit 1",
       ),
-      row("claude-opus-5-5", "fail", "no answer: TimeoutError"),
+      // What Antigravity said for gemma-4-31b-it on 2026-11-17, while it answered on `latest`.
+      row(
+        "claude-opus-5-5",
+        "fail",
+        'AntigravityExecutionError: Agent execution terminated due to error. ("agent executor error: Error 429, Message: Resource has been exhausted")',
+      ),
     ],
   };
   const after = buildLock(before, [flaky], "2026-11-18");

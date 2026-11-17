@@ -1259,8 +1259,12 @@ export function providerIdOf(row: {
 const INCONCLUSIVE =
   /^(no answer:|the harness did not start|the harness never became healthy|the harness published no port|could not get |the stream ended without finishing the run)/;
 
+/** A provider limiting how fast the check's key may call it: about the key's day, not the model. */
+const RATE_LIMITED =
+  /\b429\b|rate.?limit|RESOURCE_EXHAUSTED|too many requests/i;
+
 export function inconclusive(detail: string): boolean {
-  return INCONCLUSIVE.test(detail);
+  return INCONCLUSIVE.test(detail) || RATE_LIMITED.test(detail);
 }
 
 function sortedRecord<T>(record: Record<string, T>): Record<string, T> {

@@ -1,4 +1,1118 @@
 {
   "checkedAt": "2026-11-17",
-  "engines": {}
+  "engines": {
+    "agent-adk": {
+      "clients": {
+        "google-adk": "2.14.1",
+        "google-genai": "2.34.0",
+        "litellm": "1.105.7",
+        "openai": "2.54.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'...",
+            "gemini-decision-1": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+            "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-ag2": {
+      "clients": {
+        "ag2": "1.3.2",
+        "anthropic": "2.10.0",
+        "openai": "3.53.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "NotFoundError('Error code: 404')",
+            "gemini-decision-1": "NotFoundError('Error code: 404')",
+            "gemini-omni-1.1-flash": "BadRequestError('Error code: 400')",
+            "gemini-omni-1.2-flash": "BadRequestError('Error code: 400')"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.5",
+            "o3"
+          ],
+          "refused": {
+            "gpt-5-pro": "NotFoundError('Error code: 404 - This model is only supported in v1/responses and not in v1/chat/completions.')",
+            "gpt-5.2-pro": "NotFoundError('Error code: 404 - This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?')",
+            "gpt-5.4-pro": "NotFoundError('Error code: 404 - This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?')",
+            "gpt-5.5-pro": "NotFoundError('Error code: 404 - This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?')",
+            "gpt-5.6-luna": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-5.6-sol": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-5.6-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-5.6-terra": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-5.6-terra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6-astra": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6-luna": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6-sol": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6.1-sol": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6.1-terra": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6.1-terra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6.2-astra": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6.2-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "gpt-6.2-sol": "BadRequestError(\"Error code: 400 - Function tools with reasoning_effort are not supported for gpt-6.2-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\")",
+            "o3-pro": "NotFoundError('Error code: 404 - This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?')"
+          }
+        }
+      }
+    },
+    "agent-agno": {
+      "clients": {
+        "agno": "3.2.1",
+        "litellm": "1.105.7",
+        "openai": "2.54.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [],
+          "refused": {
+            "gemini-2.5-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-2.5-flash-lite": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-2.5-pro": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3-flash-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.1-flash-lite": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.1-flash-lite-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.1-pro-preview": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.1-pro-preview-customtools": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.5-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.5-flash-lite": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.6-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.7-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-3.8-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-4-argon": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-4-carbon": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-4-hydrogen": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-decision-1": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-flash-latest": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-flash-lite-latest": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemini-pro-latest": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemma-4-26b-a4b-it": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei...",
+            "gemma-4-31b-it": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'Invalid JSON payload received. Unknown name \"external_execution\" at \\'tools[0].function\\': Cannot find field.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': [{'field': 'tools[0].function', 'description': 'Invalid JSON payload recei..."
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-antigravity": {
+      "clients": {
+        "google-genai": "3.4.0"
+      },
+      "providers": {
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 404, Message: This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started)., Status: NOT_FOUND, De...",
+            "gemini-decision-1": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 404, Message: models/gemini-decision-1 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods., Status: NOT_FOUND, Details: []: Error 404, Message: models/gemini-decision-1 is not found ...",
+            "gemini-omni-1.1-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)",
+            "gemini-omni-1.2-flash": "AntigravityExecutionError: Agent execution terminated due to error. (\"agent executor error: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []: Error 400, Message: This model only supports Interactions API., Status: INVALID_ARGUMENT, Details: []\") (HTTP 400)"
+          }
+        }
+      }
+    },
+    "agent-claude-sdk": {
+      "clients": {
+        "ag-ui-claude-sdk": "0.1.5",
+        "anthropic": "2.10.0",
+        "claude-agent-sdk": "0.2.152",
+        "claude-code": "2.1.259"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {
+            "claude-fable-5-2": "API Error: 400 Claude Code 2.1.259 does not support this model; version 2.1.290 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.",
+            "claude-opus-5-5": "API Error: 400 Claude Code 2.1.259 does not support this model; version 2.1.280 or newer is required. Run 'claude update', or update the Claude desktop app, then try again."
+          }
+        }
+      }
+    },
+    "agent-crewai": {
+      "clients": {
+        "crewai": "1.15.41",
+        "litellm": "1.105.7",
+        "openai": "2.54.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "thread=model-compat-30ca7c4c01cd run=run-30ca7c4c01cd: CrewAI flow failed; see server logs",
+            "gemini-decision-1": "thread=model-compat-8ced77214a09 run=run-8ced77214a09: CrewAI flow failed; see server logs",
+            "gemini-omni-1.1-flash": "thread=model-compat-b983fa720574 run=run-b983fa720574: CrewAI flow failed; see server logs",
+            "gemini-omni-1.2-flash": "thread=model-compat-55d32045e810 run=run-55d32045e810: CrewAI flow failed; see server logs"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-langgraph-agui": {
+      "clients": {
+        "anthropic": "2.10.0",
+        "google-genai": "2.34.0",
+        "langchain-anthropic": "1.7.10",
+        "langchain-core": "1.8.1",
+        "langchain-google-genai": "4.4.3",
+        "langchain-openai": "1.8.1",
+        "langgraph": "1.2.22",
+        "openai": "3.53.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "chatgpt": {
+          "verified": [
+            "gpt-5.5",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "Error code: 404",
+            "gemini-decision-1": "Error code: 404",
+            "gemini-omni-1.1-flash": "Error code: 400",
+            "gemini-omni-1.2-flash": "Error code: 400"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-langroid": {
+      "clients": {
+        "google-genai": "3.4.0",
+        "langroid": "0.69.24",
+        "litellm": "1.105.7",
+        "openai": "2.54.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "Agent error: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'}}]",
+            "gemini-decision-1": "Agent error: Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+            "gemini-omni-1.1-flash": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemini-omni-1.2-flash": "Agent error: Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano"
+          ],
+          "refused": {
+            "gpt-5-pro": "Agent error: Error code: 404 - {'error': {'message': 'This model is only supported in v1/responses and not in v1/chat/completions.', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}",
+            "gpt-5.2-pro": "Agent error: Error code: 404 - {'error': {'message': 'This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}",
+            "gpt-5.4-pro": "Agent error: Error code: 404 - {'error': {'message': 'This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}",
+            "gpt-5.5": "Agent error: Error code: 400 - {'error': {'message': \"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.\", 'type': 'invalid_request_error', 'param': 'temperature', 'code': 'unsupported_value'}}",
+            "gpt-5.5-pro": "Agent error: Error code: 404 - {'error': {'message': 'This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}",
+            "gpt-5.6-luna": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-5.6-sol": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-5.6-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-5.6-terra": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-5.6-terra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6-astra": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6-luna": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6-sol": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6.1-sol": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6.1-terra": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6.1-terra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6.2-astra": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6.2-astra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "gpt-6.2-sol": "Agent error: Error code: 400 - {'error': {'message': \"Function tools with reasoning_effort are not supported for gpt-6.2-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.\", 'type': 'invalid_request_error', 'param': 'reasoning_effort', 'code': None}}",
+            "o3": "Agent error: Error code: 400 - {'error': {'message': \"Unsupported parameter: 'parallel_tool_calls' is not supported with this model.\", 'type': 'invalid_request_error', 'param': 'parallel_tool_calls', 'code': 'unsupported_parameter'}}",
+            "o3-pro": "Agent error: Error code: 404 - {'error': {'message': 'This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?', 'type': 'invalid_request_error', 'param': 'model', 'code': None}}"
+          }
+        }
+      }
+    },
+    "agent-llamaindex": {
+      "clients": {
+        "litellm": "1.105.7",
+        "llama-index-core": "0.14.26",
+        "openai": "2.54.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'...",
+            "gemini-decision-1": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+            "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-mastra": {
+      "clients": {
+        "@ai-sdk/anthropic": "4.0.97",
+        "@ai-sdk/openai": "4.0.109",
+        "@mastra/core": "1.82.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "HTTP 500: Not Found; logged: stack: \"AI_APICallError: Not Found\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/...",
+            "gemini-decision-1": "HTTP 500: Not Found; logged: stack: \"AI_APICallError: Not Found\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/...",
+            "gemini-omni-1.1-flash": "HTTP 500: Bad Request; logged: stack: \"AI_APICallError: Bad Request\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sd...",
+            "gemini-omni-1.2-flash": "HTTP 500: Bad Request; logged: stack: \"AI_APICallError: Bad Request\\n at <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:4216:15)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sdk/provider-utils/dist/index.js:3618:30)\\n at async <anonymous> (/app/.mastra/output/node_modules/@ai-sd..."
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-microsoft": {
+      "clients": {
+        "agent-framework-core": "1.26.0",
+        "anthropic": "1.17.0",
+        "openai": "3.53.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [],
+          "refused": {
+            "gemini-2.5-flash": "An internal error has occurred while streaming events.",
+            "gemini-2.5-flash-lite": "An internal error has occurred while streaming events.",
+            "gemini-2.5-pro": "An internal error has occurred while streaming events.",
+            "gemini-3-flash-preview": "An internal error has occurred while streaming events.",
+            "gemini-3.1-flash-lite": "An internal error has occurred while streaming events.",
+            "gemini-3.1-flash-lite-preview": "An internal error has occurred while streaming events.",
+            "gemini-3.1-pro-preview": "An internal error has occurred while streaming events.",
+            "gemini-3.1-pro-preview-customtools": "An internal error has occurred while streaming events.",
+            "gemini-3.5-flash": "An internal error has occurred while streaming events.",
+            "gemini-3.5-flash-lite": "An internal error has occurred while streaming events.",
+            "gemini-3.6-flash": "An internal error has occurred while streaming events.",
+            "gemini-3.7-flash": "An internal error has occurred while streaming events.",
+            "gemini-3.8-flash": "An internal error has occurred while streaming events.",
+            "gemini-4-argon": "An internal error has occurred while streaming events.",
+            "gemini-4-carbon": "An internal error has occurred while streaming events.",
+            "gemini-4-hydrogen": "An internal error has occurred while streaming events.",
+            "gemini-decision-1": "An internal error has occurred while streaming events.",
+            "gemini-flash-latest": "An internal error has occurred while streaming events.",
+            "gemini-flash-lite-latest": "An internal error has occurred while streaming events.",
+            "gemini-omni-1.1-flash": "An internal error has occurred while streaming events.",
+            "gemini-omni-1.2-flash": "An internal error has occurred while streaming events.",
+            "gemini-pro-latest": "An internal error has occurred while streaming events.",
+            "gemma-4-26b-a4b-it": "An internal error has occurred while streaming events.",
+            "gemma-4-31b-it": "An internal error has occurred while streaming events."
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-pydantic-ai": {
+      "clients": {
+        "anthropic": "1.17.0",
+        "google-genai": "2.34.0",
+        "openai": "3.53.0",
+        "pydantic-ai-slim": "2.69.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [],
+          "refused": {
+            "gemini-2.5-flash": "status_code: 404, model_name: gemini-2.5-flash, body:",
+            "gemini-2.5-flash-lite": "status_code: 404, model_name: gemini-2.5-flash-lite, body:",
+            "gemini-2.5-pro": "status_code: 404, model_name: gemini-2.5-pro, body:",
+            "gemini-3-flash-preview": "status_code: 404, model_name: gemini-3-flash-preview, body:",
+            "gemini-3.1-flash-lite": "status_code: 404, model_name: gemini-3.1-flash-lite, body:",
+            "gemini-3.1-flash-lite-preview": "status_code: 404, model_name: gemini-3.1-flash-lite-preview, body:",
+            "gemini-3.1-pro-preview": "status_code: 404, model_name: gemini-3.1-pro-preview, body:",
+            "gemini-3.1-pro-preview-customtools": "status_code: 404, model_name: gemini-3.1-pro-preview-customtools, body:",
+            "gemini-3.5-flash": "status_code: 404, model_name: gemini-3.5-flash, body:",
+            "gemini-3.5-flash-lite": "status_code: 404, model_name: gemini-3.5-flash-lite, body:",
+            "gemini-3.6-flash": "status_code: 404, model_name: gemini-3.6-flash, body:",
+            "gemini-3.7-flash": "status_code: 404, model_name: gemini-3.7-flash, body:",
+            "gemini-3.8-flash": "status_code: 404, model_name: gemini-3.8-flash, body:",
+            "gemini-4-argon": "status_code: 404, model_name: gemini-4-argon, body:",
+            "gemini-4-carbon": "status_code: 404, model_name: gemini-4-carbon, body:",
+            "gemini-4-hydrogen": "status_code: 404, model_name: gemini-4-hydrogen, body:",
+            "gemini-decision-1": "status_code: 404, model_name: gemini-decision-1, body:",
+            "gemini-flash-latest": "status_code: 404, model_name: gemini-flash-latest, body:",
+            "gemini-flash-lite-latest": "status_code: 404, model_name: gemini-flash-lite-latest, body:",
+            "gemini-omni-1.1-flash": "status_code: 404, model_name: gemini-omni-1.1-flash, body:",
+            "gemini-omni-1.2-flash": "status_code: 404, model_name: gemini-omni-1.2-flash, body:",
+            "gemini-pro-latest": "status_code: 404, model_name: gemini-pro-latest, body:",
+            "gemma-4-26b-a4b-it": "status_code: 404, model_name: gemma-4-26b-a4b-it, body:",
+            "gemma-4-31b-it": "status_code: 404, model_name: gemma-4-31b-it, body:"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    },
+    "agent-strands": {
+      "clients": {
+        "litellm": "1.105.7",
+        "openai": "2.54.0",
+        "strands-agents": "1.65.0"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {}
+        },
+        "google": {
+          "verified": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-4-hydrogen",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it"
+          ],
+          "refused": {
+            "gemini-2.5-pro": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use models/gemini-3.1-pro-preview for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'...",
+            "gemini-decision-1": "litellm.NotFoundError: NotFoundError: OpenAIException - Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-decision-1 is not found for API version v1main, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+            "gemini-omni-1.1-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]",
+            "gemini-omni-1.2-flash": "litellm.BadRequestError: OpenAIException - Error code: 400 - [{'error': {'code': 400, 'message': 'This model only supports Interactions API.', 'status': 'INVALID_ARGUMENT'}}]"
+          }
+        },
+        "openai": {
+          "verified": [
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5.1",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-6-astra",
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "o3",
+            "o3-pro"
+          ],
+          "refused": {}
+        }
+      }
+    }
+  }
 }
