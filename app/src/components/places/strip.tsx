@@ -1,7 +1,8 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { IconDots, IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useId, useState } from "react";
+import { Reorder, useReducedMotion } from "motion/react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import {
   accountMenuClassName,
   UserAvatar,
@@ -19,6 +20,12 @@ import {
 import { BrandName } from "@/components/edition/brand-name";
 import { buttonVariants } from "@/components/ui/button";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -31,8 +38,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
-import { PLACES, type PlaceId } from "@/lib/places/places";
-import { setPlace, usePlaceId, usePlaceOrder } from "@/lib/places/store";
+import { movePlace, PLACES, type PlaceId } from "@/lib/places/places";
+import {
+  setPlace,
+  setPlaceOrder,
+  usePlaceId,
+  usePlaceOrder,
+} from "@/lib/places/store";
 import { cn } from "@/lib/utils";
 import { NewMenu } from "./new-menu";
 import { PLACE_LISTS } from "./place-panel";
@@ -44,42 +56,110 @@ const stripButtonClassName = cn(
   "relative hover:bg-foreground/5 aria-pressed:bg-foreground/5 dark:hover:bg-foreground/5",
 );
 
-/** A place's button: it changes the list beside the strip and leaves the page where it is. */
+/** The places that are drawn: those with a list. */
+function drawnPlaces(order: readonly PlaceId[]): PlaceId[] {
+  return order.filter((id) => PLACE_LISTS[id] !== undefined);
+}
+
+/** The stored order for a new drawn order: a place with no list yet is kept, after the drawn ones, and not drawn. */
+function withUndrawn(
+  order: readonly PlaceId[],
+  drawn: readonly PlaceId[],
+): PlaceId[] {
+  return [...drawn, ...order.filter((id) => PLACE_LISTS[id] === undefined)];
+}
+
+/** A press that moves less than this is a click, not a drag. */
+const DRAG_THRESHOLD_PX = 4;
+
+/**
+ * A place's button: it changes the list beside the strip and leaves the page where it is. It is
+ * dragged up or down the strip, and its context menu moves it too.
+ */
 function PlaceButton({
   id,
   entry,
   current,
+  order,
 }: {
   id: PlaceId;
   entry: PlaceEntry;
   current: boolean;
+  /** The stored order, which the drawn places are a part of. */
+  order: readonly PlaceId[];
 }) {
   const { label, icon: PlaceIcon } = PLACES[id];
   const descId = useId();
+  const drawn = drawnPlaces(order);
+  const move = (delta: -1 | 1) =>
+    setPlaceOrder(withUndrawn(order, movePlace(drawn, id, delta)));
+  const reduceMotion = useReducedMotion();
+  // The browser still sends a click when the pointer is released over the button, and motion reports
+  // a drag's end only after that click, so the press is measured from the button's own pointer and
+  // click events. A click with no pointer (`detail` 0: the keyboard) is never a drag.
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Toolbar.Button
-            aria-describedby={entry.Badge ? descId : undefined}
-            aria-label={label}
-            aria-pressed={current}
-            className={stripButtonClassName}
-            onClick={() => setPlace(id)}
-          />
-        }
-      >
-        <PlaceIcon className="size-5" />
-        {entry.Badge ? (
-          <span id={descId}>
-            <entry.Badge />
-          </span>
-        ) : null}
-      </TooltipTrigger>
-      <TooltipContent side="right">
-        <BrandName>{label}</BrandName>
-      </TooltipContent>
-    </Tooltip>
+    <Reorder.Item
+      as="div"
+      transition={reduceMotion ? { duration: 0 } : undefined}
+      value={id}
+    >
+      <ContextMenu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ContextMenuTrigger
+                render={
+                  <Toolbar.Button
+                    aria-describedby={entry.Badge ? descId : undefined}
+                    aria-label={label}
+                    aria-pressed={current}
+                    className={stripButtonClassName}
+                    onClick={(e) => {
+                      const start = pressStart.current;
+                      pressStart.current = null;
+                      if (
+                        e.detail > 0 &&
+                        start &&
+                        Math.hypot(e.clientX - start.x, e.clientY - start.y) >=
+                          DRAG_THRESHOLD_PX
+                      ) {
+                        return;
+                      }
+                      setPlace(id);
+                    }}
+                    onPointerDown={(e) => {
+                      pressStart.current = { x: e.clientX, y: e.clientY };
+                    }}
+                  />
+                }
+              />
+            }
+          >
+            <PlaceIcon className="size-5" />
+            {entry.Badge ? (
+              <span id={descId}>
+                <entry.Badge />
+              </span>
+            ) : null}
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            <BrandName>{label}</BrandName>
+          </TooltipContent>
+        </Tooltip>
+        <ContextMenuContent>
+          <ContextMenuItem disabled={id === drawn[0]} onClick={() => move(-1)}>
+            Move up
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={id === drawn[drawn.length - 1]}
+            onClick={() => move(1)}
+          >
+            Move down
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    </Reorder.Item>
   );
 }
 
@@ -232,17 +312,29 @@ export function Strip({
 }) {
   const place = usePlaceId();
   const order = usePlaceOrder();
+  const drawn = drawnPlaces(order);
   return (
     <Toolbar.Root
       className="flex w-12 shrink-0 flex-col items-center gap-1 py-2"
       orientation="vertical"
     >
-      {order.map((id) => {
-        const entry = PLACE_LISTS[id];
-        return entry ? (
-          <PlaceButton current={id === place} entry={entry} id={id} key={id} />
-        ) : null;
-      })}
+      <Reorder.Group
+        as="div"
+        axis="y"
+        className="flex flex-col items-center gap-1"
+        onReorder={(next) => setPlaceOrder(withUndrawn(order, next))}
+        values={drawn}
+      >
+        {drawn.map((id) => (
+          <PlaceButton
+            current={id === place}
+            entry={PLACE_LISTS[id] as PlaceEntry}
+            id={id}
+            key={id}
+            order={order}
+          />
+        ))}
+      </Reorder.Group>
       <div className="flex-1" />
       <NewButton />
       <MoreMenu />
