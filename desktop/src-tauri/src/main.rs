@@ -2179,7 +2179,11 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                     true
                 },
                 || {
-                    let answer = feed.read();
+                    // The release notes ride on the same read; they are kept beside the version.
+                    let (answer, notes) = match feed.read_with_notes() {
+                        Ok((newer, notes)) => (Ok(newer), Some(notes)),
+                        Err(error) => (Err(error), None),
+                    };
                     match &answer {
                         Ok(Some(newer)) => log::info!("[app update] {newer} is available"),
                         Ok(None) => log::info!("[app update] up to date"),
@@ -2188,6 +2192,9 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                         }
                     }
                     handle.state::<Shell>().app_update.record(&answer);
+                    if let Some(notes) = notes {
+                        handle.state::<Shell>().app_update.record_notes(notes);
+                    }
                     if matches!(answer, Ok(Some(_))) {
                         handle.state::<Shell>().update_ready.nudge();
                     }
