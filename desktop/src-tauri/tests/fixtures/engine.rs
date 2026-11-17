@@ -125,7 +125,11 @@ fn main() {
             ) && value.contains(" --filter label=com.docker.compose.service=") => {}
         "compose ps --format {{.Ports}}" => {
             if SCENARIO == "harness" {
-                println!("127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp");
+                // The default Bot's port (4215) among them, so a Start in these tests keeps it as
+                // the stack's own rather than probing it while another test's Start probes it too.
+                println!(
+                    "127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp, 127.0.0.1:4215->4215/tcp"
+                );
             }
         }
         value
