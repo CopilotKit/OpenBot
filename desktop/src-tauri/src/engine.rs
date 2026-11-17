@@ -374,6 +374,17 @@ impl Address {
             .map(|out| out.status.success() && !out.stdout.is_empty())
             .unwrap_or(false)
     }
+
+    /// `responds`, giving up after `limit`: an engine still not answering then is not answering.
+    pub fn responds_within(&self, limit: std::time::Duration) -> bool {
+        crate::quiet::output_within(
+            self.command()
+                .args(["version", "--format", "{{.Server.APIVersion}}"]),
+            limit,
+        )
+        .map(|out| out.status.success() && !out.stdout.is_empty())
+        .unwrap_or(false)
+    }
 }
 
 fn nonsecret_endpoint(value: String) -> Result<String, String> {

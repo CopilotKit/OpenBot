@@ -47,6 +47,49 @@ pub(crate) fn compile_fixture(source: &std::path::Path, binary: &std::path::Path
     );
 }
 
+/// A command-line program that stands in for one the shell probes: `say` writes to both streams
+/// and exits 3; `hang <marker>` sleeps for two seconds and then writes `marker`, so a marker that
+/// never appears proves it was stopped rather than left to finish. Copied to a name of its own
+/// (`powershell`, `wsl`), it is that program hanging whatever it is asked, and writes
+/// `<name>-outlived` beside itself if it is not stopped.
+#[allow(dead_code)] // The library's probe tests use it; the binary shares this file.
+pub(crate) fn probe_cli(label: &str) -> PathBuf {
+    let dir = temp_root(label);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("probe_cli.rs");
+    std::fs::write(
+        &source,
+        r#"
+fn main() {
+    let me = std::env::current_exe().unwrap();
+    let name = me.file_stem().unwrap().to_string_lossy().into_owned();
+    if name != "probe-cli" {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::fs::write(me.with_file_name(format!("{name}-outlived")), "outlived its limit").unwrap();
+        return;
+    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("say") => {
+            print!("said on stdout");
+            eprint!("said on stderr");
+            std::process::exit(3);
+        }
+        Some("hang") => {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            std::fs::write(&args[1], "outlived its limit").unwrap();
+        }
+        _ => std::process::exit(99),
+    }
+}
+"#,
+    )
+    .unwrap();
+    let binary = dir.join(format!("probe-cli{}", std::env::consts::EXE_SUFFIX));
+    compile_fixture(&source, &binary);
+    binary
+}
+
 /// Tests that replace the process environment run in their own exact-test child. The normal
 /// parent suite stays parallel; unrelated HTTP, compiler, and ownership tests keep their PATH.
 /// Return true in the parent after the child passes, so the caller can return immediately.

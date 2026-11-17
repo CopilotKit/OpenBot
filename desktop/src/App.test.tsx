@@ -46,6 +46,8 @@ const progressListeners = new Set<
 >();
 type QuitEvent = { seq: number; steps: ProgressEvent[] };
 const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
+/** The window's ear for "Windows is busy installing an update" (`setup:windows-busy`). */
+const windowsBusyListeners = new Set<() => void>();
 
 /** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
 let localSteps: unknown = null;
@@ -74,9 +76,12 @@ mock.module("@tauri-apps/api/event", () => ({
     if (name === "setup:progress") progressListeners.add(listener);
     const quit = listener as unknown as (event: { payload: QuitEvent }) => void;
     if (name === "quit:progress") quitListeners.add(quit);
+    const windowsBusy = listener as unknown as () => void;
+    if (name === "setup:windows-busy") windowsBusyListeners.add(windowsBusy);
     return () => {
       progressListeners.delete(listener);
       quitListeners.delete(quit);
+      windowsBusyListeners.delete(windowsBusy);
     };
   },
 }));
@@ -110,6 +115,7 @@ afterEach(() => {
   localSteps = null;
   progressListeners.clear();
   quitListeners.clear();
+  windowsBusyListeners.clear();
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -6018,6 +6024,68 @@ test("disabled Virtual Machine Platform displays its feature-specific fix and bl
       ),
     ),
   ).toBe(false);
+});
+
+/*
+ * Seen on Windows Server 2022 after OpenBot updated itself: the window sat on "Checking your saved
+ * setup…" for minutes while Windows's own servicing held the Windows check. It says why while it
+ * waits, and carries on once the check answers.
+ */
+const WINDOWS_BUSY =
+  "Windows is finishing an update. This can take a few minutes.";
+
+test("while Windows is busy updating, the saved-setup check says so and then carries on", async () => {
+  setupRootConfiguration("/tmp/openbot-windows-busy", async () => ({
+    ...emptyConfiguration(),
+    installation: { harness: { id: "mastra" } },
+  }));
+  const check = deferred<null>();
+  withLocalCli({ windows_blocker: () => check.promise });
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(invokeCalls.some((call) => call.command === "windows_blocker")).toBe(
+      true,
+    ),
+  );
+  expect(
+    view.getByRole("heading", { name: "Getting OpenBot ready" }),
+  ).toBeTruthy();
+  expect(view.getByRole("status").textContent).toBe(
+    "Checking your saved setup…",
+  );
+  await act(async () => {
+    for (const listener of windowsBusyListeners) listener();
+  });
+  expect(view.getByRole("status").textContent).toBe(WINDOWS_BUSY);
+  await act(async () => check.resolve(null));
+  await waitFor(() =>
+    expect(
+      view.queryByRole("heading", { name: "Getting OpenBot ready" }),
+    ).toBeNull(),
+  );
+  expect(view.queryByText(WINDOWS_BUSY)).toBeNull();
+});
+
+test("Install says Windows is busy updating while its Windows check waits on it", async () => {
+  setupRootConfiguration("/tmp/openbot-windows-busy-install", async () =>
+    emptyConfiguration(),
+  );
+  const check = deferred<null>();
+  withLocalCli({ windows_blocker: () => check.promise });
+  const view = await renderApp();
+  await installLocal(view);
+  expect(view.getByRole("status").textContent).toBe("Checking this computer…");
+  await act(async () => {
+    for (const listener of windowsBusyListeners) listener();
+  });
+  expect(view.getByRole("status").textContent).toBe(WINDOWS_BUSY);
+  await act(async () => check.resolve(null));
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "prepare_installation"),
+    ).toBe(true),
+  );
+  expect(view.queryByText(WINDOWS_BUSY)).toBeNull();
 });
 
 type ExistingConfigurationValues = {

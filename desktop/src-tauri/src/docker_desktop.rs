@@ -145,6 +145,11 @@ pub fn answers() -> bool {
     engine::Address::new(Engine::Docker, None).responds()
 }
 
+/// `answers`, giving up after `limit`, for a check that must not wait on a Docker that hangs.
+pub fn answers_within(limit: Duration) -> bool {
+    engine::Address::new(Engine::Docker, None).responds_within(limit)
+}
+
 /// What `start_with` needs from the machine, so its decisions can be tested without one.
 pub(crate) struct Machine<'a> {
     /// Whether Docker answers now: `answers`.
