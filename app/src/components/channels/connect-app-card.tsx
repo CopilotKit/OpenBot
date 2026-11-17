@@ -49,6 +49,7 @@ export function ConnectAppCard({
     blockedUrl,
     pending,
     error,
+    consentStep,
   } = useConnectInNewTab();
   const connections = useQuery({
     ...connectionsQueryOptions(),
@@ -153,6 +154,7 @@ export function ConnectAppCard({
           ) : null}
         </div>
       )}
+      {consentStep}
     </div>
   );
 }

@@ -427,6 +427,8 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
           </>
         )}
       </PageSection>
+      {/* OpenBot's step before a sign-in, in OpenBot Desktop's window. */}
+      {tab.consentStep}
     </PageShell>
   );
 }

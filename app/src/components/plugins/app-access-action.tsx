@@ -164,6 +164,32 @@ export function AppAccessAction({
    * swap: it is navigated, and the button that replaced the first one goes on waiting for it.
    */
   const tab = useConnectInNewTab();
+  /*
+   * OpenBot's step before a sign-in, in OpenBot Desktop's window. Drawn whichever button is: the
+   * one that pressed Connect can be swapped for another while the step is on screen.
+   */
+  return (
+    <>
+      {appAccessButton({ access, agentId, personal, role: me?.role, tab })}
+      {tab.consentStep}
+    </>
+  );
+}
+
+/** Which of the buttons below an app's state calls for, or nothing where it is ready. */
+function appAccessButton({
+  access,
+  agentId,
+  personal,
+  role,
+  tab,
+}: {
+  access: AppAccess;
+  agentId: string;
+  personal: boolean;
+  role: string | null | undefined;
+  tab: ConnectInNewTab;
+}) {
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
   if (
@@ -182,7 +208,7 @@ export function AppAccessAction({
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
     return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
-  if (isOrganizationAdmin(me?.role))
+  if (isOrganizationAdmin(role))
     return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
 }

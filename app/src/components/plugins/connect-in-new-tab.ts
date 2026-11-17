@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { desktopShell } from "@/lib/desktop/shell";
 import {
   brokeredConsentFor,
+  type ConsentHandoff,
   consentHandoffAddress,
   storeConsentHandoff,
 } from "@/lib/plugins/consent-handoff";
@@ -48,6 +50,9 @@ export function useConnectInNewTab() {
   const stopWaiting = useCallback(() => setWaiting(false), []);
   /** The tab the consent is open in, while there is one to watch. */
   const handle = useRef<Window | null>(null);
+  /** OpenBot's step, while it is on screen in OpenBot Desktop's window, and the tab it holds. */
+  const [handoff, setHandoff] = useState<ConsentHandoff | null>(null);
+  const held = useRef<Window | null>(null);
 
   /*
    * A CLOSED TAB ENDS THE WAIT ONCE THIS TAB HAS THE FOCUS BACK. Somebody who closes the sign-in
@@ -195,31 +200,66 @@ export function useConnectInNewTab() {
     }
     const { authorizationUrl } = start;
     /*
-     * THROUGH COMPOSIO, THE TAB SHOWS OPENBOT'S STEP FIRST: what the next pages will say, for a
-     * countdown, and then the sign-in (`routes/connecting.tsx`). Anything else goes straight there.
-     *
-     * NOT IN OPENBOT DESKTOP'S WINDOW. It opens no tab of its own (the window denies `window.open`
-     * and hands sites outside OpenBot to the browser), so what is offered there is the link, and a
-     * link to one of OpenBot's own pages would open nowhere. The browser has none of this tab's
-     * storage either.
+     * THROUGH COMPOSIO, OPENBOT'S STEP COMES FIRST: what the next pages will say, for a countdown,
+     * and then the sign-in. Anything else goes straight there.
      */
-    const consent = desktopShell()
-      ? null
-      : await brokeredConsentFor(queryClient, serverId);
+    const consent = await brokeredConsentFor(queryClient, serverId);
+    /*
+     * IN OPENBOT DESKTOP'S WINDOW THE STEP IS A DIALOG HERE, and the sign-in opens after it. The
+     * window opens no tab of its own: its tab is a stand-in that hands its address to the person's
+     * browser, and the browser has none of this window's storage, so the step's own page
+     * (`/connecting`) would open nowhere. The stand-in is held until the countdown ends or Continue
+     * now is pressed, and then pointed at the sign-in exactly as it was before the step.
+     */
+    if (consent && desktopShell()) {
+      held.current = tab;
+      setHandoff({ ...consent, url: authorizationUrl });
+      return;
+    }
+    // In a browser the new tab shows the step as a page (`routes/connecting.tsx`), then goes on.
     const destination = consent
       ? consentHandoffAddress(
           storeConsentHandoff({ ...consent, url: authorizationUrl }),
         )
       : authorizationUrl;
+    leaveFor(tab, destination);
+  };
+
+  /** Send the claimed tab to `destination`, and watch for the person to come back from it. */
+  const leaveFor = (tab: Window | null, destination: string) => {
     setWaiting(true);
     if (tab) tab.location.replace(destination);
     // The tab was blocked. The url is still good, so offer it as something to click.
     else setBlockedUrl(destination);
   };
 
+  const continueHandoff = (step: ConsentHandoff) => {
+    setHandoff(null);
+    const tab = held.current;
+    held.current = null;
+    leaveFor(tab, step.url);
+  };
+  // Cancel opens nothing: the held tab goes, and nothing is left waiting for it.
+  const cancelHandoff = () => {
+    setHandoff(null);
+    held.current?.close();
+    held.current = null;
+    handle.current = null;
+  };
+  const consentStep = createElement(ConsentHandoffDialog, {
+    handoff,
+    onCancel: cancelHandoff,
+    onContinue: continueHandoff,
+  });
+
   return {
     open,
     openAfter,
+    /**
+     * OpenBot's step before a sign-in through Composio, as a dialog, in OpenBot Desktop's window.
+     * Whoever draws the buttons draws this beside them; it is empty everywhere else.
+     */
+    consentStep,
     /** A consent is open in the other tab; whoever drew the button should be watching. */
     waiting,
     /** Called once the server lists the connection, so the button stops saying it is waiting. */
