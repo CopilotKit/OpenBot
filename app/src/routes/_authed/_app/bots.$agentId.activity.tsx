@@ -1,25 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { BotActivitySections } from "@/components/bot-profile/activity";
-import { BotSubpage } from "@/components/bot-profile/bot-subpage";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/** The Activity page is a tab of the Bot's own page now. */
 export const Route = createFileRoute("/_authed/_app/bots/$agentId/activity")({
-  component: ActivityPage,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/bots/$agentId",
+      params: { agentId: params.agentId },
+      search: { tab: "activity" },
+      replace: true,
+    });
+  },
 });
-
-/**
- * The tasks, routines and goals this Bot is doing, has lined up and has finished, on a page of its
- * own, and a row to every action it took. On the Bot's own page the three lists ran on for screens
- * and pushed its settings out of reach; there, one row counts them and opens this.
- */
-function ActivityPage() {
-  const { agentId } = Route.useParams();
-  return (
-    <BotSubpage
-      agentId={agentId}
-      description="Review the tasks, routines and goals this Bot is running, has scheduled and has finished."
-      title="Activity"
-    >
-      {(agent) => <BotActivitySections agentId={agent.id} />}
-    </BotSubpage>
-  );
-}

@@ -26,7 +26,7 @@ import { notificationsResponse } from "./notifications-api";
 import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
-/** The "Settings for this Bot" card: each row says its current answer and opens its page. */
+/** The Bot's settings rows, in four groups: each row says its current answer and opens its page. */
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -236,6 +236,21 @@ test("the team edition keeps the order, with Memory, then Sharing and Reaching y
     "Sharing",
     "Reaching you",
   ]);
+});
+
+test("the rows sit under When it works, What it knows, What it uses and This Bot, in that order", async () => {
+  serving("user");
+  const view = draw(BOT);
+  expect(await view.findByText("Reaching you")).toBeTruthy();
+  expect(
+    view.getAllByRole("heading").map((heading) => heading.textContent),
+  ).toEqual(["When it works", "What it knows", "What it uses", "This Bot"]);
+  const groupOf = (title: string) =>
+    view.getByText(title).closest("section")?.querySelector("h2")?.textContent;
+  expect(groupOf("Routines")).toBe("When it works");
+  expect(groupOf("Skills")).toBe("What it knows");
+  expect(groupOf("Approvals")).toBe("What it uses");
+  expect(groupOf("Setup")).toBe("This Bot");
 });
 
 test("an administrator sees Sharing on somebody else's Bot", async () => {

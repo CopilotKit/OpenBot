@@ -45,7 +45,16 @@ import { teamBotsQueryOptions } from "@/lib/team-bots";
 import { connectorCount } from "./access";
 import { useBotDelegation, useBotPlugins } from "./use-bot-reads";
 
+/** The four groups the rows sit under, in the order they are drawn. */
+export const SETTINGS_GROUPS = [
+  "When it works",
+  "What it knows",
+  "What it uses",
+  "This Bot",
+] as const;
+
 type Row = {
+  group: (typeof SETTINGS_GROUPS)[number];
   to:
     | "/bots/$agentId/routines"
     | "/bots/$agentId/memory"
@@ -63,9 +72,10 @@ type Row = {
 };
 
 /**
- * Settings for this Bot: the things a Bot has, in the fixed order (`lib/primitives.ts`), then its
- * Setup, then in the team edition Sharing and Reaching you. Each row states its current answer and
- * opens the page that changes it.
+ * The Bot's settings, in four groups (`SETTINGS_GROUPS`): when it works (Routines), what it knows
+ * (Memory, Skills), what it uses (Apps, Computer, Approvals) and This Bot (Setup, Agents, then in the
+ * team edition Sharing and Reaching you). Each row states its current answer and opens the page that
+ * changes it; a group with no rows is not drawn.
  *
  * Both editions draw the same rows. A row shows only where it has something to set
  * (`docs/how-openbot-works.md`): Conversations and Activity are never rows, Memory only where
@@ -100,9 +110,11 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
 
   const row = (
     id: "routines" | "memory" | "skills" | "apps" | "computer" | "approvals",
+    group: Row["group"],
     to: Row["to"],
     summary: string,
   ): Row => ({
+    group,
     to,
     title: primitive(id).label,
     icon: primitive(id).icon,
@@ -112,6 +124,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const rows: Row[] = [
     row(
       "routines",
+      "When it works",
       "/bots/$agentId/routines",
       // Its routines, goals and check-ins, counted as the Routines list draws them.
       routines.data && goals.data && checkIns.data
@@ -132,6 +145,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       ? [
           row(
             "memory",
+            "What it knows",
             "/bots/$agentId/memory",
             sources.data
               ? memorySummary(
@@ -144,6 +158,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       : []),
     row(
       "skills",
+      "What it knows",
       "/bots/$agentId/skills",
       plugins.data
         ? countLabel(plugins.data.skills.length, "skill", "skills", "No skills")
@@ -151,6 +166,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     ),
     row(
       "apps",
+      "What it uses",
       "/bots/$agentId/apps",
       plugins.data
         ? countLabel(connectorCount(plugins.data), "app", "apps", "No apps")
@@ -160,6 +176,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       ? [
           row(
             "computer",
+            "What it uses",
             "/bots/$agentId/computer",
             agent.isolated
               ? agent.isolationActive
@@ -173,6 +190,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       : []),
     row(
       "approvals",
+      "What it uses",
       "/bots/$agentId/approvals",
       approvals.data
         ? countLabel(
@@ -187,12 +205,14 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
         : "",
     ),
     {
+      group: "This Bot",
       to: "/bots/$agentId/setup",
       title: SETUP.label,
       icon: SETUP.icon,
       summary: setupSummary(agent, personal ? "personal" : "team"),
     },
     {
+      group: "This Bot",
       to: "/bots/$agentId/agents",
       title: "Agents",
       icon: IconSitemap,
@@ -201,6 +221,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     ...(canShare
       ? [
           {
+            group: "This Bot" as const,
             to: "/bots/$agentId/sharing" as const,
             title: "Sharing",
             icon: IconUsersGroup,
@@ -215,6 +236,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       ? []
       : [
           {
+            group: "This Bot" as const,
             to: "/bots/$agentId/reach" as const,
             title: "Reaching you",
             icon: IconDeviceMobile,
@@ -230,29 +252,37 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   ];
 
   return (
-    <PageSection title="Settings for this Bot">
-      <PageRows>
-        {rows.map(({ to, title, icon: Icon, summary }, index) => (
-          <Fragment key={to}>
-            {index > 0 ? <Separator /> : null}
-            <Item
-              render={<Link params={{ agentId: agent.id }} to={to} />}
-              size="sm"
-            >
-              <ItemMedia variant="icon">
-                <Icon />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{title}</ItemTitle>
-                <ItemDescription>{summary}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <IconChevronRight className="size-4 text-muted-foreground" />
-              </ItemActions>
-            </Item>
-          </Fragment>
-        ))}
-      </PageRows>
-    </PageSection>
+    <>
+      {SETTINGS_GROUPS.map((group) => {
+        const inGroup = rows.filter((row) => row.group === group);
+        if (inGroup.length === 0) return null;
+        return (
+          <PageSection key={group} title={group}>
+            <PageRows>
+              {inGroup.map(({ to, title, icon: Icon, summary }, index) => (
+                <Fragment key={to}>
+                  {index > 0 ? <Separator /> : null}
+                  <Item
+                    render={<Link params={{ agentId: agent.id }} to={to} />}
+                    size="sm"
+                  >
+                    <ItemMedia variant="icon">
+                      <Icon />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{title}</ItemTitle>
+                      <ItemDescription>{summary}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <IconChevronRight className="size-4 text-muted-foreground" />
+                    </ItemActions>
+                  </Item>
+                </Fragment>
+              ))}
+            </PageRows>
+          </PageSection>
+        );
+      })}
+    </>
   );
 }

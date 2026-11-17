@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -11,7 +11,7 @@ import {
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BotProfileRoutePage } from "@/components/bot-profile/page";
-import type { AgentProfile } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { getGetComputerUrl } from "@/lib/api/generated/computers/computers";
 import { organizationId } from "@/lib/api/request";
 import { queryClient } from "@/query-client";
@@ -160,6 +160,16 @@ function answerExpenses(path: string): Response {
   return Response.json({});
 }
 
+/**
+ * Reads the list of Bots while the page is up, as the Profile tab's Needs you card does, so the
+ * delete's re-read of the list keeps the page up until it comes back. Delete is on the Settings
+ * tab, which reads no list of its own.
+ */
+function BotListReader() {
+  useQuery(agentListQueryOptions());
+  return null;
+}
+
 function drawAt(path: string) {
   const root = createRootRoute();
   const router = createRouter({
@@ -168,7 +178,12 @@ function drawAt(path: string) {
       createRoute({
         getParentRoute: () => root,
         path: "/bots/$agentId",
-        component: () => <BotProfileRoutePage agentId={EXPENSES.id} />,
+        component: () => (
+          <>
+            <BotListReader />
+            <BotProfileRoutePage agentId={EXPENSES.id} tab="settings" />
+          </>
+        ),
       }),
       createRoute({
         getParentRoute: () => root,

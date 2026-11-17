@@ -6,7 +6,6 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import type * as React from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
@@ -45,7 +44,7 @@ import {
   useNotificationPermission,
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
-import { BotActivityGlance, BotActivityRow } from "./activity";
+import { BotActivitySections } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
@@ -82,22 +81,12 @@ export function BotProfileHeader({
 }
 
 /**
- * A Bot's own page: what it needs from you, its state for you, what it is doing, the tasks you marked
- * done this week, its settings, and what can be done to it.
+ * The Profile tab of a Bot's page: who it is, whether it is paused, what it needs from you, and its
+ * state for you. What it is doing is on the Activity tab (`BotActivityTab`); its settings and what
+ * can be done to it are on the Settings tab.
  */
-export function BotProfile({
-  agent,
-  settings,
-  manage,
-}: {
-  agent: AgentProfile;
-  /** The "Settings for this Bot" card. */
-  settings?: React.ReactNode;
-  /** Pin, hide, duplicate, reset, delete. */
-  manage?: React.ReactNode;
-}) {
+export function BotProfile({ agent }: { agent: AgentProfile }) {
   const lifecycle = useQuery(botLifecycleQueryOptions(agent.id));
-  const { done } = useNeedsYou(agent.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
   // The browser's answer, shared with the prompt a conversation offers, so a yes there shows here.
@@ -239,15 +228,23 @@ export function BotProfile({
                 <IconChevronRight className="size-4 text-muted-foreground" />
               </ItemActions>
             </Item>
-            <BotActivityRow agentId={agent.id} />
           </PageRows>
         )}
       </PageSection>
+    </>
+  );
+}
 
-      <BotActivityGlance agentId={agent.id} />
+/**
+ * The Activity tab of a Bot's page: the tasks you marked done this week, then everything it is
+ * doing and has done, grouped by where it stands.
+ */
+export function BotActivityTab({ agentId }: { agentId: string }) {
+  const { done } = useNeedsYou(agentId);
+  return (
+    <>
       <DoneTasks done={done} />
-      {settings}
-      {manage}
+      <BotActivitySections agentId={agentId} />
     </>
   );
 }

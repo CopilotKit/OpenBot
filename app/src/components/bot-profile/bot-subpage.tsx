@@ -29,7 +29,12 @@ export function BotSubpage({
       action={action}
       backButton={{
         label: agent.data?.name ?? "Bot",
-        linkProps: { params: { agentId }, to: "/bots/$agentId" },
+        // A settings page goes back to the Settings tab, where its row is.
+        linkProps: {
+          params: { agentId },
+          to: "/bots/$agentId",
+          search: { tab: "settings" },
+        },
       }}
       description={description}
       title={title}
