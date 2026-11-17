@@ -878,6 +878,7 @@ export const NODE_CLIENTS = [
   "@langchain/core",
   "@langchain/anthropic",
   "@langchain/openai",
+  "@langchain/google",
   "@langchain/google-genai",
   "@ag-ui/core",
   "@ag-ui/client",
