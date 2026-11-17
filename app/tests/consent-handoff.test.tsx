@@ -568,6 +568,29 @@ describe.skipIf(!asked)(
     }
 
     for (const name of engines) {
+      test(`in ${name}: Connect on Gmail's page shows the step even when the apps can't be read again at the press`, async () => {
+        const { page, window } = await launchDesktop(name);
+        await page.goto(inWindow("/connections/composio-gmail"), {
+          waitUntil: "domcontentloaded",
+        });
+        const connect = page.getByRole("button", {
+          name: "Connect",
+          exact: true,
+        });
+        await connect.waitFor();
+        // From here on the apps list fails: the page already holds Gmail, and so does the step.
+        await page.route(
+          (url) => url.pathname === APPS_PATH,
+          (route) =>
+            route.fulfill({ status: 503, json: { error: "try again" } }),
+        );
+        await connect.click();
+
+        await expectStep(page);
+        await page.waitForTimeout(1_000);
+        expect(window.opened).toEqual([]);
+      }, 30_000);
+
       test(`in ${name}: Connect on Gmail's page shows the step in the window, and the browser opens only at 0`, async () => {
         const { page, server, window } = await launchDesktop(name);
         await page.goto(inWindow("/connections/composio-gmail"), {
