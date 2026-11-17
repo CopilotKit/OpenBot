@@ -2050,7 +2050,8 @@ async fn upgrade_and_start_now(
         let kept = deployment::installed(&selected)
             .map(|found| found.version)
             .unwrap_or_default();
-        start_stack(app, root, api_url, gateway_ws_url, model, harness).await?;
+        start_stack(app.clone(), root, api_url, gateway_ws_url, model, harness).await?;
+        desktop_telemetry::installation_settled(&app);
         return Ok(upgrade::Outcome::unchanged(kept));
     };
     refresh_menus(&app);
@@ -2070,6 +2071,7 @@ async fn upgrade_and_start_now(
                     .logged(format!("OpenBot is on {}.", planned.to)),
             );
             remove_superseded_images(&app, &selected);
+            desktop_telemetry::installation_settled(&app);
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::moved(&planned))
         }
@@ -12723,6 +12725,13 @@ fn main() {
             {
                 remember_selected_root(&app.state::<Shell>(), &root);
             }
+            // The first launch of a new version says the update that brought it, once, with the
+            // installation's release to know where it came from and whether a move is still due.
+            let installed = (!connected)
+                .then(|| deployment::installed(&selected_root_or_default(app.handle())))
+                .flatten()
+                .map(|found| found.version);
+            desktop_telemetry::observe_launch(app.handle(), installed.as_deref());
             // Where the Compose provider OpenBot installs itself lives, OpenBot's own Docker
             // configuration (the one without the person's credential helper) and the registry
             // mirror k3d writes into a new back end node. Before anything asks for an engine.

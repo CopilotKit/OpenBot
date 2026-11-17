@@ -1145,6 +1145,24 @@ fn release_version(tag: &str) -> Option<telemetry::AppVersion> {
     telemetry::AppVersion::from_package(tag.strip_prefix('v').unwrap_or(tag))
 }
 
+/// This launch's version against the one that last ran (`Telemetry::observe_launch`), with the
+/// release of the installation on this computer, when there is one (`deployment::installed`).
+pub fn observe_launch<R: tauri::Runtime>(app: &tauri::AppHandle<R>, installed: Option<&str>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        state
+            .emitter
+            .observe_launch(installed.and_then(release_version));
+    }
+}
+
+/// The installation is on this app's release, moved there or already there
+/// (`Telemetry::installation_settled`).
+pub fn installation_settled<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        state.emitter.installation_settled();
+    }
+}
+
 /// A Start's move from release `from` to `to` failed, and `from` is back, its database included
 /// (`upgrade::Ran::Kept` and `Back`, and an upgrade the app stopped part way put back).
 pub fn update_restored<R: tauri::Runtime>(app: &tauri::AppHandle<R>, from: &str, to: &str) {
