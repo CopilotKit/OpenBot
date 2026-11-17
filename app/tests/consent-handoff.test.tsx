@@ -4,7 +4,13 @@ import { dirname, join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 import { ME_PATH } from "./accounts-api";
-import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
+import {
+  APPS_PATH,
+  type AppsFixture,
+  answerAppsApi,
+  appBody,
+  type TodayServer,
+} from "./apps-api";
 import {
   confirmationResponse,
   connectionPage,
@@ -53,6 +59,8 @@ const ORIGIN = "http://openbot.test";
 const CONSENT = "https://consent.test";
 /** The countdown, as the step starts it. Kept here rather than imported so main can run this. */
 const SECONDS = 5;
+/** What this OpenBot is (getDeployment), which says which edition it runs. */
+const DEPLOYMENT_PATH = "/api/v2/organizations/default/deployment";
 
 function gmail(id: string, title: string): TodayServer {
   return {
@@ -182,10 +190,62 @@ afterAll(async () => {
   await Promise.all(browsers.map((browser) => browser.close()));
 });
 
+/**
+ * OPENBOT DESKTOP'S WINDOW, AS THE PAGE FINDS IT. The shell serves OpenBot from this computer
+ * (a loopback address), gives the page Tauri's `__TAURI_INTERNALS__` (`desktopShell()` reads its
+ * `invoke` and `transformCallback`), and injects its outside-links shim on every load, which turns
+ * `window.open` into a tab that hands its address to a navigation. The window's guard then cancels
+ * any navigation to a site outside OpenBot and opens it in the person's default browser instead,
+ * while the page stays (`outside_links_guard` in desktop/src-tauri/src/main.rs). Here a request for
+ * the consent page is that guard: it is written down as opened in the browser, and answered 204,
+ * which a browser takes as "stay where you are".
+ */
+const DESKTOP_ORIGIN = "http://127.0.0.1:38173";
+const OUTSIDE_LINKS = readFileSync(
+  join(APP, "..", "desktop", "src-tauri", "src", "outside-links.js"),
+  "utf8",
+);
+const TAURI_INTERNALS = `(() => {
+  let next = 1;
+  window.__shellCalls = [];
+  window.__TAURI_INTERNALS__ = {
+    transformCallback: () => next++,
+    unregisterCallback: () => {},
+    invoke: (command, args) => {
+      window.__shellCalls.push(command);
+      return Promise.resolve(null);
+    },
+  };
+})();`;
+
+/** What the Desktop window's guard did: every consent address it handed to the browser. */
+type DesktopWindow = { opened: string[] };
+
+/** Gmail in Composio's directory, as Browse apps lists it before it is added. */
+const GMAIL_IN_DIRECTORY = {
+  slug: "gmail",
+  name: "Gmail",
+  description: "Read, send and organize your email.",
+  actionCount: 40,
+  connection: { kind: "consent" as const },
+};
+
 /** The server, as it answers right before anybody has connected Gmail or Slack. */
-async function serve(context: BrowserContext, theme: "light" | "dark") {
+async function serve(
+  context: BrowserContext,
+  theme: "light" | "dark",
+  desktop?: { servers: TodayServer[]; window: DesktopWindow },
+) {
   const connects: string[] = [];
-  await context.route(`${ORIGIN}/**`, async (route) => {
+  const origin = desktop ? DESKTOP_ORIGIN : ORIGIN;
+  const deployment: AppsFixture = desktop
+    ? {
+        ...DEPLOYMENT,
+        servers: desktop.servers,
+        directory: [GMAIL_IN_DIRECTORY],
+      }
+    : DEPLOYMENT;
+  await context.route(`${origin}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/app.js")
@@ -217,7 +277,18 @@ async function serve(context: BrowserContext, theme: "light" | "dark") {
       if (call?.operation === "confirm")
         return answer(confirmationResponse(false));
       if (call?.operation === "list") return answer(connectionPage([]));
-      const apps = answerAppsApi(url.toString(), init, DEPLOYMENT);
+      if (desktop) {
+        // OpenBot Desktop runs the personal edition.
+        if (url.pathname === DEPLOYMENT_PATH)
+          return route.fulfill({ json: { edition: "personal" } });
+        // Browse apps adds an app from the directory, and the server answers the app it made.
+        if (url.pathname === APPS_PATH && init.method === "POST") {
+          const added = gmail("composio-gmail", "Gmail");
+          desktop.servers.push(added);
+          return route.fulfill({ status: 201, json: appBody(added) });
+        }
+      }
+      const apps = answerAppsApi(url.toString(), init, deployment);
       if (apps) return answer(apps);
       return route.fulfill({ status: 404, json: { error: "not here" } });
     }
@@ -229,12 +300,21 @@ async function serve(context: BrowserContext, theme: "light" | "dark") {
     });
   });
   // The consent page itself: the provider's, outside OpenBot.
-  await context.route(`${CONSENT}/**`, (route) =>
-    route.fulfill({
+  await context.route(`${CONSENT}/**`, (route) => {
+    if (desktop) {
+      // The Desktop window's guard: into the person's browser, and the window stays.
+      desktop.window.opened.push(route.request().url());
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Consent</title><p>The provider's consent page</p>",
-    }),
-  );
+    });
+  });
+  if (desktop)
+    await context.addInitScript({
+      content: `${TAURI_INTERNALS}\n${OUTSIDE_LINKS}`,
+    });
   return { connects };
 }
 
@@ -262,6 +342,45 @@ async function launch(
   return { browser, context, page, server };
 }
 
+/**
+ * The same, in OpenBot Desktop's window: the personal edition, with Gmail added from Composio's
+ * directory and not connected (`servers`), or not added yet (none).
+ */
+async function launchDesktop(
+  name: "chromium" | "webkit",
+  options: { theme?: "light" | "dark"; added?: boolean } = {},
+) {
+  const theme = options.theme ?? "light";
+  const playwright = await import("playwright-core");
+  const engine = playwright[name];
+  const browser =
+    name === "chromium"
+      ? await engine.launch({ channel: "chromium" })
+      : await engine.launch();
+  browsers.push(browser);
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 860 },
+    deviceScaleFactor: 2,
+    colorScheme: theme,
+  });
+  const window: DesktopWindow = { opened: [] };
+  const servers =
+    options.added === false ? [] : [gmail("composio-gmail", "Gmail")];
+  const server = await serve(context, theme, { servers, window });
+  // The window opens no tab of its own: a second page here would be a tab the shell never makes.
+  let first: Page | undefined;
+  context.on("page", (opened) => {
+    if (first) window.opened.push(`new tab: ${opened.url()}`);
+  });
+  const page = await context.newPage();
+  first = page;
+  page.on("pageerror", (error) => console.error(error));
+  return { page, server, window };
+}
+
+/** A path in OpenBot Desktop's window. */
+const inWindow = (path: string) => `${DESKTOP_ORIGIN}${path}`;
+
 /** An app's page under Connections, with its Connect on screen. */
 async function accountPage(page: Page, app: string) {
   await page.goto(`${ORIGIN}/connections/${app}`, {
@@ -281,6 +400,21 @@ async function countdown(page: Page): Promise<string> {
 }
 
 const MS = (seconds: number) => seconds * 1_000;
+
+/** Wait for what the browser was handed to become `want`, then hold it to that. */
+async function opensIn(
+  window: DesktopWindow,
+  want: string[],
+  timeout: number,
+): Promise<void> {
+  const until = Date.now() + timeout;
+  while (
+    Date.now() < until &&
+    JSON.stringify(window.opened) !== JSON.stringify(want)
+  )
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(window.opened).toEqual(want);
+}
 
 describe.skipIf(!asked)("a sign-in through Composio", () => {
   for (const name of engines) {
@@ -405,6 +539,155 @@ describe.skipIf(!asked)("a sign-in through Composio", () => {
   }
 });
 
+/**
+ * THE SAME STEP IN OPENBOT DESKTOP'S WINDOW, where the sign-in opens in the person's browser.
+ *
+ * Reported from OpenBot Desktop 1.1.0-rc.2 on a Mac: Add in Browse apps and Connect on Gmail's
+ * page both opened the browser straight on Google's sign-in, with no step at all. Here the
+ * window is the real shell's page as far as the page can tell (`launchDesktop`), Gmail is the
+ * personal edition's row as the server lists it (Composio's directory, each person's own
+ * account), and a consent address reaching the window's guard is the browser opening.
+ */
+describe.skipIf(!asked)(
+  "a sign-in through Composio in OpenBot Desktop's window",
+  () => {
+    /** The step in the window: its heading, its words and where its countdown stands. */
+    async function expectStep(page: Page) {
+      const step = page.getByRole("dialog");
+      await step.waitFor({ timeout: 5_000 });
+      expect(await countdown(page)).toBe(`Taking you to Google in ${SECONDS}`);
+      expect(
+        await step.getByRole("heading", { name: "Connecting Gmail" }).count(),
+      ).toBe(1);
+      expect((await step.textContent()) ?? "").toContain(
+        "Next, Google will ask you to allow Composio to access your Google Account.",
+      );
+      // The page and the dialog with the app's stylesheet, so its buttons are where a person sees them.
+      await styled(page);
+      return step;
+    }
+
+    for (const name of engines) {
+      test(`in ${name}: Connect on Gmail's page shows the step in the window, and the browser opens only at 0`, async () => {
+        const { page, server, window } = await launchDesktop(name);
+        await page.goto(inWindow("/connections/composio-gmail"), {
+          waitUntil: "domcontentloaded",
+        });
+        const connect = page.getByRole("button", {
+          name: "Connect",
+          exact: true,
+        });
+        await connect.waitFor();
+        await connect.click();
+
+        await expectStep(page);
+        expect(server.connects).toEqual(["composio-gmail"]);
+        expect(window.opened).toEqual([]);
+
+        // Two seconds on, still counting, and the browser has not been sent anywhere.
+        await page.waitForTimeout(2_000);
+        expect(await countdown(page)).toMatch(
+          /^Taking you to Google in [2-4]$/,
+        );
+        expect(window.opened).toEqual([]);
+
+        // At 0 the browser opens on exactly the address the server answered, and the window stays.
+        await opensIn(window, [`${CONSENT}/composio-gmail`], MS(SECONDS + 2));
+        expect(page.url()).toBe(inWindow("/connections/composio-gmail"));
+      }, 30_000);
+
+      test(`in ${name}: on Gmail's page, Cancel opens nothing and Continue now opens the browser at once`, async () => {
+        const { page, window } = await launchDesktop(name);
+        await page.goto(inWindow("/connections/composio-gmail"), {
+          waitUntil: "domcontentloaded",
+        });
+        const connect = page.getByRole("button", {
+          name: "Connect",
+          exact: true,
+        });
+        await connect.waitFor();
+
+        await connect.click();
+        let step = await expectStep(page);
+        await step.getByRole("button", { name: "Cancel" }).click();
+        await step.waitFor({ state: "hidden", timeout: 3_000 });
+        // Past where the countdown would have ended: nothing went to the browser.
+        await page.waitForTimeout(MS(SECONDS + 1));
+        expect(window.opened).toEqual([]);
+
+        await connect.click();
+        step = await expectStep(page);
+        await step.getByRole("button", { name: "Continue now" }).click();
+        await opensIn(window, [`${CONSENT}/composio-gmail`], 2_000);
+        expect(page.url()).toBe(inWindow("/connections/composio-gmail"));
+      }, 40_000);
+
+      test(`in ${name}: Add in Browse apps shows the step in the window before the browser opens`, async () => {
+        const { page, server, window } = await launchDesktop(name, {
+          added: false,
+        });
+        await page.goto(inWindow("/connections/browse/composio"), {
+          waitUntil: "domcontentloaded",
+        });
+        const add = page
+          .getByTestId("directory-gmail")
+          .getByRole("button", { name: "Add" });
+        await add.waitFor();
+        await add.click();
+
+        const step = await expectStep(page);
+        expect(server.connects).toEqual(["composio-gmail"]);
+        await page.waitForTimeout(2_000);
+        expect(window.opened).toEqual([]);
+        expect(page.url()).toBe(inWindow("/connections/browse/composio"));
+
+        await step.getByRole("button", { name: "Continue now" }).click();
+        await opensIn(window, [`${CONSENT}/composio-gmail`], 2_000);
+        expect(page.url()).toBe(inWindow("/connections/browse/composio"));
+      }, 30_000);
+
+      test(`in ${name}: Connect on Gmail's row in Browse apps, added and not connected, shows the step in the window`, async () => {
+        const { page, window } = await launchDesktop(name);
+        await page.goto(inWindow("/connections/browse/composio"), {
+          waitUntil: "domcontentloaded",
+        });
+        const connect = page
+          .getByTestId("directory-gmail")
+          .getByRole("button", { name: "Connect" });
+        await connect.waitFor();
+        await connect.click();
+
+        await expectStep(page);
+        await page.waitForTimeout(2_000);
+        expect(window.opened).toEqual([]);
+        await opensIn(window, [`${CONSENT}/composio-gmail`], MS(SECONDS + 2));
+        expect(page.url()).toBe(inWindow("/connections/browse/composio"));
+      }, 30_000);
+
+      test(`in ${name}: a Bot's Connect card shows the step in the window, and Cancel opens nothing`, async () => {
+        const { page, window } = await launchDesktop(name);
+        await page.goto(inWindow("/card/composio-gmail"), {
+          waitUntil: "domcontentloaded",
+        });
+        const connect = page.getByRole("button", { name: "Connect" });
+        await connect.waitFor();
+
+        await connect.click();
+        const step = await expectStep(page);
+        await step.getByRole("button", { name: "Cancel" }).click();
+        await step.waitFor({ state: "hidden", timeout: 3_000 });
+        await page.waitForTimeout(MS(SECONDS + 1));
+        expect(window.opened).toEqual([]);
+
+        await connect.click();
+        await expectStep(page);
+        await opensIn(window, [`${CONSENT}/composio-gmail`], MS(SECONDS + 2));
+        expect(page.url()).toBe(inWindow("/card/composio-gmail"));
+      }, 40_000);
+    }
+  },
+);
+
 /*
  * THE SCREENS, SAVED FOR A PERSON TO LOOK AT, in light and dark. Only with OPENBOT_APP_SHOTS set:
  * nothing is asserted here that the cases above do not already.
@@ -467,7 +750,33 @@ describe.skipIf(!asked || !shots)("the screens, for a look", () => {
         // The button eases its colours in once styled; let it land.
         await page.waitForTimeout(1_200);
         await page.screenshot({ path: file("Gmail-return") });
-      }, 120_000);
+
+        // The step in OpenBot Desktop's window: over Gmail's page, over Browse apps and over a card.
+        for (const [path, screen, button] of [
+          ["/connections/composio-gmail", "desktop-Gmail-page", "Connect"],
+          ["/connections/browse/composio", "desktop-browse", "Add"],
+          ["/card/composio-gmail", "desktop-card", "Connect"],
+        ] as const) {
+          const desktop = await launchDesktop(name, {
+            theme,
+            added: screen !== "desktop-browse",
+          });
+          await desktop.page.goto(inWindow(path), {
+            waitUntil: "domcontentloaded",
+          });
+          const press = desktop.page
+            .getByRole("button", { name: button, exact: true })
+            .first();
+          await press.waitFor();
+          await styled(desktop.page);
+          await press.click();
+          await desktop.page.getByRole("dialog").waitFor();
+          await styled(desktop.page);
+          await desktop.page.waitForTimeout(1_200);
+          await desktop.page.screenshot({ path: file(screen) });
+          await desktop.page.getByRole("button", { name: "Cancel" }).click();
+        }
+      }, 180_000);
     }
   }
 });
