@@ -23,6 +23,11 @@ on:
         type: string
         default: ""
         required: false
+      rollout:
+        description: With a stable tag, also put its signed installers and feed under rollout/<tag>/, for a staged rollout. latest/ is left alone.
+        type: boolean
+        default: false
+        required: false
   schedule:
     - cron: "17 */6 * * *"
 
@@ -47,6 +52,7 @@ jobs:
       DOWNLOADS_BUCKET: copilotkit-openbot-downloads
       DOWNLOADS_DISTRIBUTION_ID: EQ4EH8L79LPGX
       DOWNLOADS_TAG: ${{ inputs.tag }}
+      DOWNLOADS_ROLLOUT: ${{ inputs.rollout }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
