@@ -14,6 +14,7 @@ import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { BackButton } from "@/components/places/back-button";
 import { TaskDetails } from "@/components/tasks/task-details";
 import { Button } from "@/components/ui/button";
 import { conversationLoadFailure } from "@/lib/channels/load-failure";
@@ -168,6 +169,7 @@ function RouteComponent() {
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
             <SidebarToggle />
+            <BackButton />
             <motion.div
               animate={{ opacity: 1 }}
               className="shrink-0"

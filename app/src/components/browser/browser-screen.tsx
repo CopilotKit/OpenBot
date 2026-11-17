@@ -8,6 +8,7 @@ import {
 } from "@/components/computer/live-screen";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { BackButton } from "@/components/places/back-button";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -148,7 +149,12 @@ export function ScreenBrowser({
               onNew={() =>
                 tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
               }
-              start={<SidebarToggle />}
+              start={
+                <>
+                  <SidebarToggle />
+                  <BackButton />
+                </>
+              }
             />
             <TabPanel active={active} className="flex flex-col" ids={ids}>
               <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
@@ -317,6 +323,7 @@ export function OpeningBrowser({
           <div className="flex min-w-0 items-end gap-1 border-border border-b bg-sidebar px-2 pt-1.5">
             <div className="flex shrink-0 items-center self-center pb-1.5">
               <SidebarToggle />
+              <BackButton />
             </div>
             <div
               aria-hidden="true"

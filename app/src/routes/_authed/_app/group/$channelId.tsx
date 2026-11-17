@@ -5,6 +5,7 @@ import { ChannelAvatar } from "@/components/channels/avatar";
 import { GroupChat } from "@/components/channels/group-chat";
 import { GroupPeopleButton } from "@/components/channels/group-people";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { BackButton } from "@/components/places/back-button";
 import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
 import { channelQueryOptions } from "@/lib/channels/queries";
 
@@ -24,6 +25,7 @@ function RouteComponent() {
         data-slot="conversation-header"
       >
         <SidebarToggle />
+        <BackButton />
         <ChannelAvatar
           participantIds={channel.data?.agentIds ?? []}
           size={22}

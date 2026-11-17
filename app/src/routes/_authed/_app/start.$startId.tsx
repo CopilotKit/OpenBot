@@ -1,6 +1,6 @@
+import type { Message } from "@ag-ui/core";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import type { Message } from "@ag-ui/core";
 import { useLayoutEffect, useState } from "react";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import {
@@ -10,6 +10,7 @@ import {
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { BackButton } from "@/components/places/back-button";
 import { agentListQueryOptions, agentQueryOptions } from "@/lib/agents/queries";
 import {
   readPendingStart,
@@ -90,6 +91,7 @@ function RouteComponent() {
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <SidebarToggle />
+          <BackButton />
           {agentId ? (
             <ChannelAvatar participantIds={[agentId]} size={22} />
           ) : null}

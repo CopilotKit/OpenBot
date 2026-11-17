@@ -1,6 +1,7 @@
 import { IconLayoutSidebar } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 
+import { BackButton } from "@/components/places/back-button";
 import { Button } from "@/components/ui/button";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
 import {
@@ -116,12 +117,15 @@ export function SidebarToggle({ className }: { className?: string }) {
  * most of the time. That is deliberate: reserving it means the screen beneath does not jump by 48px
  * each time the sidebar is collapsed and the toggle reappears.
  *
+ * While places are on, the bar also holds Back, right after the toggle.
+ *
  * `children` sit at the band's right end, so a screen can put something there without a second bar.
  */
 export function SidebarToggleBar({ children }: { children?: ReactNode }) {
   return (
     <div className="h-12 shrink-0 flex items-center px-3">
       <SidebarToggle />
+      <BackButton />
       {children ? <div className="ml-auto">{children}</div> : null}
     </div>
   );

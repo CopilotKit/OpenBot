@@ -1,6 +1,8 @@
 import { IconChevronLeft } from "@tabler/icons-react";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
+import { BackButton } from "@/components/places/back-button";
+import { usePlacesEnabled } from "@/lib/places/store";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { PageColumn, PageHeader, type ShellWidth } from "./page-parts";
@@ -59,9 +61,12 @@ export function PageShell({
    * keeps the two from drifting apart and reintroducing that empty band. It also still answers false
    * on `/assist` and `/link/slack`, which draw PageShell directly under `_authed` with no sidebar
    * provider at all, so there is nothing for a toggle to act on there.
+   *
+   * With places on the bar is always drawn, because the one Back button lives in it.
    */
   const showToggle = useSidebarToggleVisible();
-  const bar = showToggle || !!backButton;
+  const placesOn = usePlacesEnabled();
+  const bar = showToggle || !!backButton || placesOn;
 
   const header = (
     <PageHeader title={title} action={action} description={description} />
@@ -70,9 +75,10 @@ export function PageShell({
   const barRow = bar ? (
     <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
       {showToggle ? <SidebarToggle /> : null}
+      <BackButton />
       {!backButton ? null : backButton.disabled ? (
         <Button disabled variant="ghost">
-          <IconChevronLeft />
+          {placesOn ? null : <IconChevronLeft />}
           {backButton.label}
         </Button>
       ) : (
@@ -80,7 +86,7 @@ export function PageShell({
           variant="ghost"
           render={(props) => <Link {...backButton.linkProps} {...props} />}
         >
-          <IconChevronLeft />
+          {placesOn ? null : <IconChevronLeft />}
           {backButton.label}
         </Button>
       )}

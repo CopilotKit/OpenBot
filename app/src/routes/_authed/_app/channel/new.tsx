@@ -19,6 +19,7 @@ import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { BackButton } from "@/components/places/back-button";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import {
   Combobox,
@@ -278,6 +279,7 @@ function NewConversation({ composition }: { composition: string }) {
         data-slot="conversation-header"
       >
         <SidebarToggle className="mr-1" />
+        <BackButton className="mr-1" />
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
           // Do not auto-open when a recipient is already chosen; the field is already answered.

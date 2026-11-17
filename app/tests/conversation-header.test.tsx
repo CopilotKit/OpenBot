@@ -17,7 +17,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import { queryClient } from "@/query-client";
 import { Route as ChannelRoute } from "@/routes/_authed/_app/channel/$channelId";
 
@@ -41,6 +41,8 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   queryClient.clear();
+  localStorage.removeItem("openbot-places");
+  gate = Promise.resolve();
 });
 afterAll(async () => {
   globalThis.fetch = originalFetch;
@@ -114,3 +116,35 @@ test("a conversation that could not be loaded is headed Conversation, never Chan
   );
   expect(view.container.textContent).not.toContain("Channel");
 }, 15_000);
+
+test("with places on, the conversation's header has one Back", async () => {
+  localStorage.setItem("openbot-places", "on");
+  let release: () => void = () => {};
+  gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const view = opened();
+  try {
+    await waitFor(() => header(view.container));
+    expect(
+      within(header(view.container)).getByRole("button", { name: "Back" }),
+    ).toBeTruthy();
+    expect(view.getAllByRole("button", { name: "Back" })).toHaveLength(1);
+  } finally {
+    release();
+  }
+});
+
+test("with places off, the conversation's header has no Back", async () => {
+  let release: () => void = () => {};
+  gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const view = opened();
+  try {
+    await waitFor(() => header(view.container));
+    expect(view.queryByRole("button", { name: "Back" })).toBeNull();
+  } finally {
+    release();
+  }
+});
