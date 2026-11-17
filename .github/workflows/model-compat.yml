@@ -12,6 +12,10 @@ name: Model compatibility
 # not failed. On any failure the run fails and opens (or updates) one issue titled "Model
 # compatibility check failing"; a passing run closes it.
 #
+# What answered on the `source` image is the model lock (shared/model-lock.json), the models the
+# picker may offer for each harness. When a model newly answers or stops answering, the run opens
+# or updates one pull request that refreshes the lock. See docs/releasing.md, "Model lock".
+#
 # Runs only on a schedule and by hand, on main: never on a pull request, so no fork's code ever
 # runs with these keys.
 on:
@@ -158,3 +162,95 @@ jobs:
         run: |
           echo "::error::Model compatibility check failing. See the summary above and the issue titled \"$ISSUE_TITLE\"."
           exit 1
+
+  lock:
+    name: Refresh the model lock
+    needs: [harnesses, check]
+    if: always() && needs.harnesses.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push the one refresh branch
+      pull-requests: write # open or update its pull request
+    env:
+      BRANCH: model-lock/refresh
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: model-compat-*
+          path: ${{ runner.temp }}/results
+          merge-multiple: true
+      - name: Write the lock from the source images' results
+        id: lock
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=("$RUNNER_TEMP"/results/*.json)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No harness job wrote results; the lock stays as it is."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bun scripts/model-compat.ts lock --changes "$RUNNER_TEMP/lock-changes.md" "${files[@]}"
+          if git diff --quiet -- shared/model-lock.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            { echo "## Model lock changes"; echo; cat "$RUNNER_TEMP/lock-changes.md"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # GITHUB_TOKEN's pull requests get CI runs that wait for a maintainer to approve them. A
+      # GitHub App installation token, when one is configured, has no such limit.
+      - id: app-token
+        if: steps.lock.outputs.changed == 'true' && vars.OPENBOT_UPGRADE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.OPENBOT_UPGRADE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENBOT_UPGRADE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open or update the refresh pull request
+        if: steps.lock.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          TOKEN_KIND: ${{ steps.app-token.outputs.token && 'app' || 'github-token' }}
+          # Credentials for this one push, through gh, and no hook can run.
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: credential.helper
+          GIT_CONFIG_VALUE_0: ""
+          GIT_CONFIG_KEY_1: credential.helper
+          GIT_CONFIG_VALUE_1: "!gh auth git-credential"
+          GIT_CONFIG_KEY_2: core.hooksPath
+          GIT_CONFIG_VALUE_2: /dev/null
+        run: |
+          set -euo pipefail
+          git switch -C "$BRANCH"
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Refresh the model lock from the daily model check" -- shared/model-lock.json
+          git push --force "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
+          body="$RUNNER_TEMP/lock-pr.md"
+          {
+            echo "The daily model check found models that started or stopped answering through the clients the harnesses ship. This refreshes \`shared/model-lock.json\`, the models the picker may offer for each harness."
+            echo
+            cat "$RUNNER_TEMP/lock-changes.md"
+            echo
+            echo "From $RUN_URL. Every run that finds a change updates this pull request. See docs/releasing.md, \"Model lock\"."
+            if [ "$TOKEN_KIND" != app ]; then
+              echo
+              echo "**CI must be started by hand.** This pull request was opened with \`GITHUB_TOKEN\`, so its CI runs wait for a maintainer to approve them."
+            fi
+          } > "$body"
+          number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq ".[0].number // empty")
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$body"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+              --title "Refresh the model lock" --body-file "$body"
+          fi
