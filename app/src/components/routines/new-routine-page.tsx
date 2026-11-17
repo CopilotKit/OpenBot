@@ -1,4 +1,4 @@
-import { useForm, useSelector } from "@tanstack/react-form";
+import { useSelector } from "@tanstack/react-form";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
@@ -8,6 +8,10 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import {
+  ScheduleWhen,
+  useRoutineForm,
+} from "@/components/routines/schedule-when";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -42,18 +46,12 @@ import {
   browserTimeZone,
   DOES,
   EVENT_SOURCES,
-  MONTH_DAYS,
   NEW_CONVERSATION,
-  REPEAT_LABEL,
-  REPEATS,
-  type Repeat,
   ROUTINE_FORM_DEFAULTS,
   type RoutineEventSource,
   type RoutineFormValues,
   routineFormSchema,
   STARTS,
-  scheduleSentence,
-  WEEKDAY_LABEL,
 } from "@/lib/routines/form";
 import { CHECK_IN_INTERVALS } from "@/lib/routines/merged";
 import {
@@ -152,14 +150,6 @@ function sameMessages(a: Messages, b: Messages): boolean {
     names.every((name) => a[name] === b[name])
   );
 }
-
-const MONTH_DAY_LABEL = Object.fromEntries(
-  MONTH_DAYS.map((day) => [day, day]),
-) as Record<string, string>;
-
-const WEEKDAY_ITEMS = Object.fromEntries(
-  WEEKDAY_LABEL.map((label, index) => [String(index), label]),
-) as Record<string, string>;
 
 type Does = (typeof DOES)[number];
 
@@ -261,23 +251,20 @@ export function NewRoutinePage({
     };
   }, []);
 
-  const form = useForm({
-    defaultValues,
-    onSubmit: async ({ value }) => {
-      if (saved) return;
-      // Answers that break a rule write nothing. Pressing Create shows every message (`shown`).
-      if (Object.keys(brokenRules(value, allowed, checkIns.data)).length > 0)
-        return;
-      try {
-        // A tell with check-ins off is held by the rule on It should, so this is what was chosen.
-        await createFromPlan.mutateAsync(planRoutine(value, timeZone));
-      } catch {
-        // The alert under the form says what happened, from `createFromPlan.error`.
-        return;
-      }
-      // The person may have left, by the sidebar, while this ran; then there is nowhere to send them.
-      if (open.current) await navigate(after(value.agentId));
-    },
+  const form = useRoutineForm(defaultValues, async (value) => {
+    if (saved) return;
+    // Answers that break a rule write nothing. Pressing Create shows every message (`shown`).
+    if (Object.keys(brokenRules(value, allowed, checkIns.data)).length > 0)
+      return;
+    try {
+      // A tell with check-ins off is held by the rule on It should, so this is what was chosen.
+      await createFromPlan.mutateAsync(planRoutine(value, timeZone));
+    } catch {
+      // The alert under the form says what happened, from `createFromPlan.error`.
+      return;
+    }
+    // The person may have left, by the sidebar, while this ran; then there is nowhere to send them.
+    if (open.current) await navigate(after(value.agentId));
   });
 
   /**
@@ -624,175 +611,18 @@ export function NewRoutinePage({
                           </form.Field>
 
                           {starts === "schedule" ? (
-                            <Field>
-                              <FieldLabel htmlFor="repeat">When</FieldLabel>
-                              <div className="flex flex-wrap gap-3">
-                                <form.Field name="repeat">
-                                  {(field) => (
-                                    <Select
-                                      disabled={saved}
-                                      items={REPEAT_LABEL}
-                                      onValueChange={(value) =>
-                                        field.handleChange(value as Repeat)
-                                      }
-                                      value={field.state.value}
-                                    >
-                                      <SelectTrigger
-                                        className="min-w-40 flex-1"
-                                        id="repeat"
-                                      >
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectGroup>
-                                          {REPEATS.map((repeat) => (
-                                            <SelectItem
-                                              key={repeat}
-                                              value={repeat}
-                                            >
-                                              {REPEAT_LABEL[repeat]}
-                                            </SelectItem>
-                                          ))}
-                                        </SelectGroup>
-                                      </SelectContent>
-                                    </Select>
-                                  )}
-                                </form.Field>
-                                <form.Subscribe
-                                  selector={(state) => state.values.repeat}
-                                >
-                                  {(repeat) => (
-                                    <>
-                                      {repeat === "weekly" ? (
-                                        <form.Field name="weekday">
-                                          {(field) => (
-                                            <Select
-                                              disabled={saved}
-                                              items={WEEKDAY_ITEMS}
-                                              onValueChange={(value) =>
-                                                field.handleChange(
-                                                  String(value),
-                                                )
-                                              }
-                                              value={field.state.value}
-                                            >
-                                              <SelectTrigger
-                                                aria-label="Day of the week"
-                                                className="min-w-36 flex-1"
-                                              >
-                                                <SelectValue />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectGroup>
-                                                  {WEEKDAY_LABEL.map(
-                                                    (label, index) => (
-                                                      <SelectItem
-                                                        key={label}
-                                                        value={String(index)}
-                                                      >
-                                                        {label}
-                                                      </SelectItem>
-                                                    ),
-                                                  )}
-                                                </SelectGroup>
-                                              </SelectContent>
-                                            </Select>
-                                          )}
-                                        </form.Field>
-                                      ) : null}
-                                      {repeat === "monthly" ? (
-                                        <form.Field name="monthDay">
-                                          {(field) => (
-                                            <Select
-                                              disabled={saved}
-                                              items={MONTH_DAY_LABEL}
-                                              onValueChange={(value) =>
-                                                field.handleChange(
-                                                  String(value),
-                                                )
-                                              }
-                                              value={field.state.value}
-                                            >
-                                              <SelectTrigger
-                                                aria-label="Day of the month"
-                                                className="min-w-24"
-                                              >
-                                                <SelectValue />
-                                              </SelectTrigger>
-                                              <SelectContent>
-                                                <SelectGroup>
-                                                  {MONTH_DAYS.map((day) => (
-                                                    <SelectItem
-                                                      key={day}
-                                                      value={day}
-                                                    >
-                                                      {day}
-                                                    </SelectItem>
-                                                  ))}
-                                                </SelectGroup>
-                                              </SelectContent>
-                                            </Select>
-                                          )}
-                                        </form.Field>
-                                      ) : null}
-                                      {repeat === "hourly" ? null : (
-                                        <form.Field name="time">
-                                          {(field) => {
-                                            const isInvalid =
-                                              field.name in shown;
-                                            return (
-                                              <>
-                                                <Input
-                                                  disabled={saved}
-                                                  aria-invalid={isInvalid}
-                                                  aria-describedby={
-                                                    isInvalid
-                                                      ? errorId(field.name)
-                                                      : undefined
-                                                  }
-                                                  aria-label="Time"
-                                                  className="w-32"
-                                                  onBlur={field.handleBlur}
-                                                  onChange={(event) =>
-                                                    field.handleChange(
-                                                      event.target.value,
-                                                    )
-                                                  }
-                                                  step={900}
-                                                  type="time"
-                                                  value={field.state.value}
-                                                />
-                                                {isInvalid ? (
-                                                  <FieldError
-                                                    id={errorId(field.name)}
-                                                  >
-                                                    {shown[field.name]}
-                                                  </FieldError>
-                                                ) : null}
-                                              </>
-                                            );
-                                          }}
-                                        </form.Field>
-                                      )}
-                                    </>
-                                  )}
-                                </form.Subscribe>
-                              </div>
-                              <form.Subscribe
-                                selector={(state) => state.values}
-                              >
-                                {(values) => (
-                                  <FieldDescription>
-                                    <span className="font-medium text-foreground">
-                                      {scheduleSentence(values)}
-                                    </span>
-                                    , your time ({timeZone}). For anything else,
-                                    like every other Tuesday, ask the Bot in a
-                                    conversation.
-                                  </FieldDescription>
-                                )}
-                              </form.Subscribe>
-                            </Field>
+                            <ScheduleWhen
+                              describe={
+                                <>
+                                  , your time ({timeZone}). For anything else,
+                                  like every other Tuesday, ask the Bot in a
+                                  conversation.
+                                </>
+                              }
+                              disabled={saved}
+                              form={form}
+                              timeError={shown.time}
+                            />
                           ) : null}
 
                           {starts === "event" ? (

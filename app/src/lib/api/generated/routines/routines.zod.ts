@@ -56,6 +56,11 @@ export const ListRoutinesResponse = zod.object({
           id: zod.string().describe("The routine's id."),
           botId: zod.string().describe("The Bot that carries it out."),
           schedule: zod.string().describe("When it runs, as text to show."),
+          cron: zod
+            .string()
+            .describe(
+              "The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.",
+            ),
           timezone: zod
             .string()
             .describe("The IANA time zone the schedule is read in."),
@@ -143,7 +148,7 @@ export const ListRoutinesResponse = zod.object({
 });
 
 /**
- * Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. There is no operation to change a routine: that is done by asking its Bot. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. updateRoutine changes one. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create a routine
  */
 
@@ -236,6 +241,183 @@ export const CreateRoutineResponse = zod.object({
       id: zod.string().describe("The routine's id."),
       botId: zod.string().describe("The Bot that carries it out."),
       schedule: zod.string().describe("When it runs, as text to show."),
+      cron: zod
+        .string()
+        .describe(
+          "The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.",
+        ),
+      timezone: zod
+        .string()
+        .describe("The IANA time zone the schedule is read in."),
+      instruction: zod.string().describe("What the Bot does on each run."),
+      title: zod
+        .string()
+        .nullable()
+        .describe(
+          "What the person called it, or null when they named it nothing.",
+        ),
+      conversation: zod
+        .object({
+          id: zod.string().describe("The conversation's id."),
+          name: zod
+            .string()
+            .nullable()
+            .describe(
+              "The names of the Bots in it, or null when the conversation is gone entirely.",
+            ),
+          title: zod
+            .string()
+            .nullable()
+            .describe(
+              "The conversation as the sidebar titles it, which is what a person knows it by. Null when it is gone entirely.",
+            ),
+          gone: zod
+            .boolean()
+            .describe(
+              "Whether the conversation was deleted. Such a routine is shown, not hidden.",
+            ),
+        })
+        .describe("Where a routine posts."),
+      enabled: zod
+        .boolean()
+        .describe("False while it is paused. A paused routine never runs."),
+      nextRunAt: zod.iso
+        .datetime({ offset: true })
+        .describe("When it runs next, if it is on."),
+      lastRun: zod
+        .union([
+          zod.object({
+            status: zod
+              .union([
+                zod.literal("succeeded"),
+                zod.literal("failed"),
+                zod.literal("skipped"),
+                zod.literal("waiting"),
+                zod.literal(null),
+              ])
+              .nullable()
+              .describe(
+                "How it ended, or null while it is still open. Only failed is a failure.",
+              ),
+            at: zod.iso
+              .datetime({ offset: true })
+              .nullable()
+              .describe("When it finished, or null while it is still open."),
+          }),
+          zod.null(),
+        ])
+        .describe("Its newest run, or null when it has never run."),
+      goalId: zod
+        .string()
+        .nullable()
+        .describe("The goal it runs, or null when it runs none."),
+      createdAt: zod.iso
+        .datetime({ offset: true })
+        .describe("When it was made."),
+    })
+    .describe(
+      "One of a person's routines. schedule is display text and never a value to parse: words for the schedules OpenBot can describe, the five cron fields for anything stranger. nextRunAt is the one time to rely on.",
+    ),
+});
+
+/**
+ * Change one of the caller's routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine's, and its next run is worked out from now. One that does not exist, or is somebody else's, is not found. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Change a routine
+ */
+
+export const updateRoutinePathRoutineIdMax = 200;
+
+export const updateRoutinePathRoutineIdRegExp = new RegExp("\\S");
+
+export const UpdateRoutineParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  routineId: zod
+    .string()
+    .min(1)
+    .max(updateRoutinePathRoutineIdMax)
+    .regex(updateRoutinePathRoutineIdRegExp)
+    .describe("The routine's id."),
+});
+
+export const updateRoutineHeaderIdempotencyKeyMax = 128;
+
+export const UpdateRoutineHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(updateRoutineHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const updateRoutineBodyTitleMax = 100;
+
+export const updateRoutineBodyInstructionMax = 2000;
+
+export const updateRoutineBodyInstructionRegExp = new RegExp("\\S");
+export const updateRoutineBodyCronMax = 200;
+
+export const updateRoutineBodyCronRegExp = new RegExp("\\S");
+export const updateRoutineBodyTimezoneMax = 100;
+
+export const updateRoutineBodyTimezoneRegExp = new RegExp("\\S");
+
+export const UpdateRoutineBody = zod
+  .object({
+    title: zod
+      .string()
+      .max(updateRoutineBodyTitleMax)
+      .optional()
+      .describe(
+        "A new name, at most 100 characters. Empty takes the name away, and the routine is called by what it does.",
+      ),
+    instruction: zod
+      .string()
+      .min(1)
+      .max(updateRoutineBodyInstructionMax)
+      .regex(updateRoutineBodyInstructionRegExp)
+      .optional()
+      .describe(
+        "What the Bot does on each run from now on. At most 2,000 characters.",
+      ),
+    cron: zod
+      .string()
+      .min(1)
+      .max(updateRoutineBodyCronMax)
+      .regex(updateRoutineBodyCronRegExp)
+      .optional()
+      .describe(
+        "A new schedule, as five cron fields: minute, hour, day of month, month, day of week. The same rules as a new routine's.",
+      ),
+    timezone: zod
+      .string()
+      .min(1)
+      .max(updateRoutineBodyTimezoneMax)
+      .regex(updateRoutineBodyTimezoneRegExp)
+      .optional()
+      .describe("A new IANA time zone to read the schedule in."),
+  })
+  .describe(
+    "What to change. Only the fields sent change, and at least one must be sent.",
+  );
+
+export const UpdateRoutineResponse = zod.object({
+  routine: zod
+    .object({
+      id: zod.string().describe("The routine's id."),
+      botId: zod.string().describe("The Bot that carries it out."),
+      schedule: zod.string().describe("When it runs, as text to show."),
+      cron: zod
+        .string()
+        .describe(
+          "The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.",
+        ),
       timezone: zod
         .string()
         .describe("The IANA time zone the schedule is read in."),
