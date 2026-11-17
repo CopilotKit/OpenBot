@@ -88,6 +88,8 @@ const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
 // Signed in already, the CLI taking two seconds to say so, as on Windows G.
 const slowCheck = location.hash === "#licence-slow";
+// A first install whose connect step stops partway, as on a Mac on 1.1.0-rc.1.
+const connectFails = location.hash === "#connect-fails";
 const licence = location.hash === "#licence" || installing || slowCheck;
 let finishInstall;
 const installed = new Promise((resolve) => (finishInstall = resolve));
@@ -168,7 +170,9 @@ export async function invoke(command) {
     case "local_eval_download":
       return fake.download;
     case "connect_local_eval":
-      return { outcome: "completed", stack, reason: null, conflicted: false };
+      return connectFails
+        ? { outcome: "failed", stack: null, reason: "local-command-failed", conflicted: false }
+        : { outcome: "completed", stack, reason: null, conflicted: false };
     case "run_local_eval":
       return status("ready", "valid");
     // OpenBot's own start, the step's last row: it stays there for the test to look at.
@@ -1056,8 +1060,8 @@ describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
 });
 
 /** Goes from the first screen to "Connect your AI", as a first run does. */
-async function toTheAiStep(page: Page) {
-  await open(page);
+async function toTheAiStep(page: Page, hash = "") {
+  await open(page, hash);
   await page.getByRole("button", { name: "Install", exact: true }).click();
   await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
   // The entrance animation settles before anything is measured.
@@ -1383,6 +1387,67 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
       }
     }, 40_000);
   }
+});
+
+/*
+ * Seen on a Mac's first install: on Finishing setup, "Connecting OpenBot" stopped with "Setup
+ * stopped partway through with an error. Retry. If it stops again, copy the logs below.", and the
+ * card had nothing below it but Retry. The logs it names are in the card now, and in view.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the stopped card.
+ */
+describe.skipIf(!asked)("Finishing setup when a step stops", () => {
+  test("offers the logs its sentence names, in view", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toTheAiStep(page, "#connect-fails");
+      await page.getByText("Anthropic", { exact: true }).click();
+      await page
+        .getByRole("tab", { name: "Use an API key", exact: true })
+        .click();
+      await page
+        .getByLabel("Anthropic API key", { exact: true })
+        .fill("a-key-for-this-test");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByRole("heading", { name: "Finishing setup" }).waitFor();
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as { __fake: { finishSetUp: () => void } }
+        ).__fake.finishSetUp(),
+      );
+      await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
+      await page.waitForTimeout(600);
+      const shots = process.env.OPENBOT_APP_SHOTS;
+      if (shots)
+        await page.screenshot({
+          path: `${shots}/finishing-setup-stopped-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+        });
+      const connect = await page
+        .getByRole("listitem", { name: "Connecting OpenBot" })
+        .textContent();
+      expect(connect).toContain("copy the logs below");
+      const copy = page.getByRole("button", { name: "Copy logs", exact: true });
+      expect(await copy.count()).toBe(1);
+      expect(
+        await page
+          .getByRole("button", { name: "Save to a file", exact: true })
+          .count(),
+      ).toBe(1);
+      // In the window as it opens, under the row that names it: nothing to scroll to.
+      const [row, button] = await Promise.all([
+        page
+          .getByRole("listitem", { name: "Connecting OpenBot" })
+          .boundingBox(),
+        copy.boundingBox(),
+      ]);
+      expect(button).not.toBeNull();
+      expect(button?.y ?? 0).toBeGreaterThan(row?.y ?? 0);
+      expect((button?.y ?? 0) + (button?.height ?? 0)).toBeLessThanOrEqual(800);
+    } finally {
+      await page.close();
+    }
+  }, 40_000);
 });
 
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */

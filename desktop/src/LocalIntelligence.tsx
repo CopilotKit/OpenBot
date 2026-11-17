@@ -1199,6 +1199,19 @@ export function LocalIntelligence({
           )}
         </div>
       )}
+      {/* A stop said on its row ("Retry. If it stops again, copy the logs below.") has its logs
+          here, under Retry, as the status card on the other screens has (`LocalStatus`). A failure
+          with a problem has them in its own card (`Failure`), a stop the person clears (signing
+          in, the agreement, Start fresh) has its own action instead, and their own Cancel is no
+          failure to troubleshoot. */}
+      {stopped &&
+        !problem &&
+        !waitingOn &&
+        !needsPerson(sequence) &&
+        sequence.blocked &&
+        sequence.blocked.said !== said("cancelled") && (
+          <TroubleshootingLogs problem={{ said: sequence.blocked.said }} />
+        )}
     </section>
   );
 }
