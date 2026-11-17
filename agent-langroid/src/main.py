@@ -42,8 +42,8 @@ def _model_id() -> str:
     `parallel_tool_calls` whatever the model, which `o3` refuses. litellm reads each model's row and
     leaves out what the model does not take (Langroid turns on litellm's `drop_params` for that).
 
-    A model that takes function tools only on the Responses API (`gpt-5.6` and later, the `-pro`
-    models) gets litellm's `responses/` route, which sends the same chat to `/v1/responses` and
+    A model that takes function tools only on the Responses API (`gpt-5.6` and later, `gpt-5.4` and
+    `gpt-5.5` once a run carries an effort, the `-pro` models) gets litellm's `responses/` route, which sends the same chat to `/v1/responses` and
     hands the answer back as a chat completion. That is decided by the model, as every Bot in the box
     decides it, so a gateway in front of OpenAI gets the Responses API for those models too.
 
