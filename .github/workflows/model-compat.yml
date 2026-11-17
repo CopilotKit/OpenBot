@@ -1,0 +1,161 @@
+name: Model compatibility
+
+# Does every model the picker offers still answer through the clients OpenBot ships? The picker
+# lists each provider's models live, but every harness image carries its model client at a fixed
+# version (the Claude Agent SDK harness bundles a Claude Code CLI, the LangGraph harness sends the
+# ChatGPT plan's backend a fixed Codex client version, the others carry the provider SDKs they were
+# built with), and a provider can refuse a new model to an older client. scripts/model-compat.ts
+# starts each harness image, one job per harness, and sends it one request per listed model on
+# every provider that has a key here. See docs/releasing.md, "Model compatibility".
+#
+# Keys are repository secrets, one per provider. A provider without one is reported as skipped,
+# not failed. On any failure the run fails and opens (or updates) one issue titled "Model
+# compatibility check failing"; a passing run closes it.
+#
+# Runs only on a schedule and by hand, on main: never on a pull request, so no fork's code ever
+# runs with these keys.
+on:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: Harness images to check, comma-separated. `latest` is the published release people run; `source` is built from this commit, which is what the next release ships.
+        type: string
+        default: latest,source
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: model-compat
+  cancel-in-progress: false
+
+jobs:
+  harnesses:
+    name: List the published harnesses
+    if: github.repository == 'CopilotKit/OpenBot' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: list
+        run: echo "images=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: ${{ matrix.harness }}
+    needs: harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: ${{ fromJSON(needs.harnesses.outputs.images) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      # Writes its results and exits 0 whatever they say: the report job below decides.
+      - name: One request per model through this harness
+        env:
+          HARNESS: ${{ matrix.harness }}
+          TAGS: ${{ inputs.tags || 'latest,source' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          UNBIASED_API_KEY: ${{ secrets.UNBIASED_API_KEY }}
+        run: >-
+          bun scripts/model-compat.ts --harness "$HARNESS" --tags "$TAGS" --exit-zero
+          --out "$RUNNER_TEMP/model-compat-$HARNESS.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: model-compat-${{ matrix.harness }}
+          path: ${{ runner.temp }}/model-compat-${{ matrix.harness }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  report:
+    name: Report
+    needs: [harnesses, check]
+    if: always() && needs.harnesses.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write # open, update or close the one "Model compatibility check failing" issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_TITLE: Model compatibility check failing
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: model-compat-*
+          path: ${{ runner.temp }}/results
+          merge-multiple: true
+      - name: Summarize
+        id: summary
+        run: |
+          set +e
+          shopt -s nullglob
+          bun scripts/model-compat.ts report --summary "$RUNNER_TEMP/summary.md" \
+            --issue "$RUNNER_TEMP/issue-table.md" "$RUNNER_TEMP"/results/*.json
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ -f "$RUNNER_TEMP/summary.md" ]; then cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          exit 0
+      - name: Open or update the issue
+        if: steps.summary.outputs.code != '0'
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/issue.md"
+          {
+            echo "The model compatibility check failed on $(date -u +%Y-%m-%d): $RUN_URL"
+            echo
+            echo "A model refused by a pinned client means that client needs bumping: see docs/releasing.md, \"Model compatibility\". This issue is updated by every failing run and closed by the first passing one."
+            echo
+            if [ -f "$RUNNER_TEMP/issue-table.md" ]; then
+              cat "$RUNNER_TEMP/issue-table.md"
+            else
+              echo "No harness job wrote results. See the run."
+            fi
+          } > "$body"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number,title --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$body"
+          fi
+      - name: Close the issue when everything passes
+        if: steps.summary.outputs.code == '0'
+        run: |
+          set -euo pipefail
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number,title --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Passing again: $RUN_URL"
+          fi
+      - name: Fail when a model failed
+        if: steps.summary.outputs.code != '0'
+        run: |
+          echo "::error::Model compatibility check failing. See the summary above and the issue titled \"$ISSUE_TITLE\"."
+          exit 1
