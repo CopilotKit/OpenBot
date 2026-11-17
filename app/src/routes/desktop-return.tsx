@@ -8,10 +8,18 @@ import { searchTextEntry } from "@/lib/search-text";
  * carrying its install's token, which only the window has. See `DesktopReturn`.
  */
 export const Route = createFileRoute("/desktop-return")({
-  validateSearch: (search: Record<string, unknown>): { app?: string } =>
-    searchTextEntry("app", search.app),
+  /*
+   * `status` is the broker's own report, added to the address on the way back (`success` or
+   * `failed`). It decides only what the page says; the window confirms the account itself.
+   */
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { app?: string; status?: string } => ({
+    ...searchTextEntry("app", search.app),
+    ...searchTextEntry("status", search.status),
+  }),
   component: function DesktopReturnRoute() {
-    const { app } = Route.useSearch();
-    return <DesktopReturn app={app} />;
+    const { app, status } = Route.useSearch();
+    return <DesktopReturn app={app} status={status} />;
   },
 });

@@ -20,6 +20,16 @@ import ts from "typescript";
  */
 const REPO = join(import.meta.dir, "..");
 const WORD = /\bComposio\b/;
+
+/**
+ * The one place a person is told the name, and why. Before a sign-in through Composio, Composio's
+ * own page and then the provider's consent page ("Composio wants access to your Google Account")
+ * both name it, so OpenBot's step before them says who Composio is first. Every sentence that does
+ * lives in this one file; anything else that names it still fails here.
+ */
+const NAMES_COMPOSIO_ON_PURPOSE = new Set([
+  "app/src/lib/plugins/consent-handoff.ts",
+]);
 /** An interpolation of the broker's display name. */
 const VENDOR_NAME =
   /^(BROKERED_PROFILE\[[^\]]+\]\.vendor|activeVendor|profile\.vendor|vendor)$/;
@@ -139,7 +149,9 @@ function shown(): string[] {
     ...["desktop/src", "app/src", "extension/src", "shared"].flatMap((root) => [
       ...files(join(REPO, root), /\.tsx?$/),
     ]),
-  ].flatMap(scriptText);
+  ]
+    .filter((path) => !NAMES_COMPOSIO_ON_PURPOSE.has(relative(REPO, path)))
+    .flatMap(scriptText);
   found.push(
     ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
       nativeText,

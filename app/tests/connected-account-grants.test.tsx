@@ -931,6 +931,8 @@ test("in OpenBot Desktop, a Composio consent is confirmed on return and never op
   try {
     const view = renderScreen();
     fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+    // Through Composio, OpenBot's step comes first, in the window as anywhere else.
+    fireEvent.click(await view.findByRole("button", { name: "Continue now" }));
     await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
 
     window.dispatchEvent(new Event("focus"));
