@@ -78,6 +78,74 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_DOCUMENT_BYTES = MAX_IMAGE_BYTES;
 
 /**
+ * How large an attached file of each kind may be, in bytes, as one server answers it.
+ *
+ * THE CONSTANTS ABOVE ARE THE DEFAULT, NOT THE ONLY ANSWER. A server may take larger files, and
+ * says so in the API's `deployment` (`attachmentLimits`). The composer refuses at pick time with the
+ * server's numbers, and the server refuses again on arrival with the same ones, so the two refusals
+ * still agree: they are one answer read from one place, now the server rather than this file.
+ *
+ * What reaches the model is a separate limit and is the server's alone. A file larger than a model
+ * provider takes is still stored and downloadable; the server hands the model what it can read, or a
+ * note saying the file is too large for it to view.
+ */
+export type AttachmentLimits = {
+  /** An image. */
+  imageBytes: number;
+  /** A document whose text the server reads out (a PDF). */
+  documentBytes: number;
+  /** Text and every other accepted kind. */
+  fileBytes: number;
+};
+
+/** The limits a server that does not publish its own takes: the constants above. */
+export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
+  imageBytes: MAX_IMAGE_BYTES,
+  documentBytes: MAX_DOCUMENT_BYTES,
+  fileBytes: MAX_FILE_BYTES,
+};
+
+/**
+ * The limits a server published, read field by field.
+ *
+ * Absent reads as today's numbers: an older server publishes nothing and takes exactly the defaults,
+ * so assuming more would have the composer pass files that server then refuses. A field that is not
+ * a positive whole number is read the same way, rather than as a limit of zero that refuses every
+ * file or one of infinity that refuses none.
+ */
+export function attachmentLimitsFrom(published: unknown): AttachmentLimits {
+  const fields =
+    typeof published === "object" && published !== null
+      ? (published as Record<string, unknown>)
+      : {};
+  const read = (key: keyof AttachmentLimits): number => {
+    const value = fields[key];
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+      ? value
+      : DEFAULT_ATTACHMENT_LIMITS[key];
+  };
+  return {
+    imageBytes: read("imageBytes"),
+    documentBytes: read("documentBytes"),
+    fileBytes: read("fileBytes"),
+  };
+}
+
+/** The largest file of any kind these limits take: the ceiling for a file whose kind is not known yet. */
+export function largestAttachmentBytes(limits: AttachmentLimits): number {
+  return Math.max(limits.imageBytes, limits.documentBytes, limits.fileBytes);
+}
+
+/**
+ * A limit as a person reads it: whole megabytes, counted in 1,048,576 bytes as the limits are
+ * ("8MB", "1MB", "100MB"). One function for the composer and the server, so a refusal names the same
+ * number whichever side said it.
+ */
+export function formatAttachmentLimit(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
+}
+
+/**
  * How much extracted text may reach the model from one file.
  *
  * The real limit on a text attachment is tokens, not bytes: a one-megabyte file is a few hundred

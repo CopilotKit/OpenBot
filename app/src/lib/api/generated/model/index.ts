@@ -144,6 +144,7 @@ export * from "./assignableRole";
 export * from "./assignTeamBotHeaders";
 export * from "./attachment";
 export * from "./attachmentConflictResponse";
+export * from "./attachmentLimits";
 export * from "./attachmentNotFoundResponse";
 export * from "./attachmentUpload";
 export * from "./auditActorParameter";

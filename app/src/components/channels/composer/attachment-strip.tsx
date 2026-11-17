@@ -46,7 +46,7 @@ export type StagedFile = {
   loading: boolean;
   /**
    * The model reads at most MAX_EXTRACTED_CHARACTERS of a text file, while
-   * the pick ceiling is MAX_FILE_BYTES. A file over the first may be read
+   * the pick ceiling is the server's limit for files. A file over the first may be read
    * truncated — warned on the tile, never refused.
    */
   mayTruncate?: boolean;
@@ -236,9 +236,9 @@ function RemoveButton({
 }
 
 /**
- * Whole kilobytes below a megabyte and one decimal above it. A staged attachment is capped at 8MB
- * (`shared/attachments.ts`), so this never has to reach gigabytes, and "0.1MB" for a 100KB text
- * file tells the reader less than "98KB" does.
+ * Whole kilobytes below a megabyte and one decimal above it. A staged attachment is capped at the
+ * server's limit (8MB by default, 100MB at the most any server takes today), so this never has to
+ * reach gigabytes, and "0.1MB" for a 100KB text file tells the reader less than "98KB" does.
  */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
