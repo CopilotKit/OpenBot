@@ -187,34 +187,144 @@ export function mayBeTruncatedForModel(sizeBytes: number): boolean {
 }
 
 /**
- * `image/svg+xml` is deliberately absent.
+ * EVERY KIND OF FILE OPENBOT TAKES, IN ONE LIST, AND THE ONE PLACE TO ADD ONE.
  *
- * An SVG is an image and can also carry script. Served inline from this app's own origin, one
- * pasted into a channel is stored XSS against everybody in it. Nobody pastes an SVG expecting a
- * model to read it, so it is refused at the door rather than sanitised.
+ * What a person may attach and what a Bot may send from its computer are both read from here: the
+ * composer's picker and its refusals, the server's sniff and its refusals, the Bot's send tool, its
+ * description and its refusal sentence. So the two can never take different files, and a kind added
+ * here is added everywhere at once.
+ *
+ * A row is the media type the server serves the file as, its kind (which decides its size limit and
+ * how the model reads it), the name a person reads, and the extensions that claim it. A Bot's file
+ * has no browser to name its type, so its extension is the claim; the bytes still decide.
+ *
+ * ADDING A ROW IS NOT ALL OF ADDING A KIND. The server must recognise it by its bytes (images and
+ * documents by their signatures, text only when it is UTF-8), and the model must have a way to read
+ * it (a document's text is extracted on the server). Without both, a row makes a file the composer
+ * offers and the server refuses. The test beside this file pins today's set, so a change here is one
+ * somebody decided on.
+ *
+ * `image/svg+xml` is deliberately absent. An SVG is an image and can also carry script. Served inline
+ * from this app's own origin, one pasted into a channel is stored XSS against everybody in it. Nobody
+ * pastes an SVG expecting a model to read it, so it is refused at the door rather than sanitised.
+ *
+ * PDF is the one document today: its text is extracted before the model sees it. It is accepted only
+ * when the bytes start with the PDF signature; a claim of `application/pdf` on anything else is
+ * refused. Served back as a download, never inline, like every type that is not an image.
  */
-export const ACCEPTED_IMAGE_MIME = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-] as const;
+export const ACCEPTED_FILE_TYPES = [
+  { mimeType: "image/png", kind: "image", name: "PNG", extensions: ["png"] },
+  {
+    mimeType: "image/jpeg",
+    kind: "image",
+    name: "JPEG",
+    extensions: ["jpg", "jpeg"],
+  },
+  { mimeType: "image/gif", kind: "image", name: "GIF", extensions: ["gif"] },
+  { mimeType: "image/webp", kind: "image", name: "WebP", extensions: ["webp"] },
+  {
+    mimeType: "application/pdf",
+    kind: "document",
+    name: "PDF",
+    extensions: ["pdf"],
+  },
+  {
+    mimeType: "text/plain",
+    kind: "text",
+    name: "text",
+    extensions: ["txt", "text", "log"],
+  },
+  {
+    mimeType: "text/markdown",
+    kind: "text",
+    name: "Markdown",
+    extensions: ["md", "markdown"],
+  },
+  { mimeType: "text/csv", kind: "text", name: "CSV", extensions: ["csv"] },
+  {
+    mimeType: "application/json",
+    kind: "text",
+    name: "JSON",
+    extensions: ["json"],
+  },
+] as const satisfies readonly {
+  mimeType: string;
+  kind: "image" | "text" | "document";
+  name: string;
+  extensions: readonly string[];
+}[];
 
-export const ACCEPTED_TEXT_MIME = [
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-] as const;
+export type AcceptedFileType = (typeof ACCEPTED_FILE_TYPES)[number];
+
+type MimeTypeOf<Kind extends AcceptedFileType["kind"]> = Extract<
+  AcceptedFileType,
+  { kind: Kind }
+>["mimeType"];
+
+/** The media types of one kind, from {@link ACCEPTED_FILE_TYPES}. */
+function mimeTypesOf<Kind extends AcceptedFileType["kind"]>(
+  kind: Kind,
+): readonly MimeTypeOf<Kind>[] {
+  return ACCEPTED_FILE_TYPES.filter((type) => type.kind === kind).map(
+    (type) => type.mimeType as MimeTypeOf<Kind>,
+  );
+}
+
+export const ACCEPTED_IMAGE_MIME = mimeTypesOf("image");
+
+export const ACCEPTED_TEXT_MIME = mimeTypesOf("text");
+
+/** Documents whose text the server extracts before the model sees them. Today that is PDF alone. */
+export const ACCEPTED_DOCUMENT_MIME = mimeTypesOf("document");
+
+/** The accepted type a media type names, or undefined for one OpenBot does not take. */
+export function acceptedFileTypeOf(
+  mimeType: string,
+): AcceptedFileType | undefined {
+  const mediaType = mediaTypeOf(mimeType);
+  return ACCEPTED_FILE_TYPES.find((type) => type.mimeType === mediaType);
+}
 
 /**
- * Documents whose text the server extracts before the model sees them. Today that is PDF alone.
- *
- * Accepted only when the bytes start with the PDF signature (`attachment-mime.ts` on the server);
- * a claim of `application/pdf` on anything else is refused. Served back as a download, never inline,
- * like every type that is not an image.
+ * The type a file's name claims, for the server's sniff to corroborate. Blank for an extension no
+ * accepted type has, which the sniff reads as a claim that names nothing.
  */
-export const ACCEPTED_DOCUMENT_MIME = ["application/pdf"] as const;
+export function claimedTypeOfName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return "";
+  const extension = name.slice(dot + 1).toLowerCase();
+  return (
+    ACCEPTED_FILE_TYPES.find((type) =>
+      (type.extensions as readonly string[]).includes(extension),
+    )?.mimeType ?? ""
+  );
+}
+
+/**
+ * What can be sent, as a person or a model reads it: "images (PNG, JPEG, GIF, WebP), PDFs, and text,
+ * Markdown, CSV or JSON files". Built from {@link ACCEPTED_FILE_TYPES}, so it never lists a kind the
+ * server refuses or leaves out one it takes.
+ */
+export function acceptedFilesInWords(): string {
+  const names = (kind: AcceptedFileType["kind"]) =>
+    ACCEPTED_FILE_TYPES.filter((type) => type.kind === kind).map(
+      (type) => type.name,
+    );
+  const either = (words: string[]) =>
+    words.length < 2
+      ? words.join("")
+      : `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
+  const images = names("image");
+  const documents = names("document");
+  const texts = names("text");
+  const groups = [
+    images.length > 0 ? `images (${images.join(", ")})` : "",
+    ...documents.map((name) => `${name}s`),
+    texts.length > 0 ? `${either(texts)} files` : "",
+  ].filter(Boolean);
+  if (groups.length < 2) return groups.join("");
+  return `${groups.slice(0, -1).join(", ")}, and ${groups[groups.length - 1]}`;
+}
 
 /**
  * THE MEDIA TYPE ON ITS OWN: LOWER CASE, PARAMETERS GONE — AND THE ONLY FORM ANYTHING HERE COMPARES.

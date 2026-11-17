@@ -38,3 +38,45 @@ test("a long label wraps rather than running past the column, and the detail giv
     cleanup();
   }
 });
+
+/**
+ * A refused or failed step's detail is the reason, and the reason has to be read in full. Cut off
+ * with an ellipsis, "budget.xlsx can't be sent. Bots c..." told the person on a phone neither why
+ * nor what a Bot can send, and every other refusal's reason was cut the same way. So on those rows
+ * the detail wraps, under the label when it does not fit beside it; every other row keeps its
+ * one-line rhythm, with the detail truncated as before.
+ */
+const REASON =
+  "budget.xlsx can't be sent. Bots can send images (PNG, JPEG, GIF, WebP), PDFs, and text, Markdown, CSV or JSON files.";
+
+test("a refused or failed step's reason wraps in full instead of being cut off", () => {
+  for (const state of [{ refused: true }, { failed: true }]) {
+    const view = render(
+      <ToolLine
+        attempted="Send a file"
+        detail={REASON}
+        label="Sent a file"
+        {...state}
+      />,
+    );
+    const detail = view.getByText(REASON);
+    const classes = detail.className.split(/\s+/);
+    expect(classes).not.toContain("truncate");
+    expect(classes).toContain("min-w-0");
+    expect(classes).toContain("break-words");
+    // The row lets the reason move under the label when it does not fit beside it.
+    expect(
+      (detail.parentElement as HTMLElement).className.split(/\s+/),
+    ).toContain("flex-wrap");
+    cleanup();
+  }
+});
+
+test("a step that went through keeps its one line, with the detail truncated", () => {
+  const view = render(<ToolLine detail={REASON} label="Sent a file" />);
+  const detail = view.getByText(REASON);
+  expect(detail.className.split(/\s+/)).toContain("truncate");
+  expect(
+    (detail.parentElement as HTMLElement).className.split(/\s+/),
+  ).not.toContain("flex-wrap");
+});
