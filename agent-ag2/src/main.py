@@ -26,7 +26,8 @@ def _config() -> AnthropicConfig | OpenAICompletionsConfig | OpenAIResponsesConf
     endpoint included. Each SDK reads its own key from the environment.
 
     An OpenAI model takes AG2's Responses config when it takes function tools only there
-    (`gpt-5.6` and later, the `-pro` models: "To use function tools, use /v1/responses"), and the
+    (`gpt-5.6` and later, `gpt-5.4` and `gpt-5.5` once a run carries an effort, the `-pro` models:
+    "To use function tools, use /v1/responses"), and the
     Chat Completions config otherwise, which every OpenAI-compatible endpoint serves. Both are
     named explicitly: AG2 1.4.0 turns the bare `OpenAIConfig` into the Responses config, which
     would move every compatible endpoint onto an API most of them do not serve.
