@@ -132,10 +132,15 @@ fn main() {
                 );
             }
         }
+        // `up`, with the profiles of whatever it names: the picked Bot's, a plan engine's.
         value
-            if value.starts_with("compose up -d --no-build --pull never ")
-                || value
-                    .starts_with("compose --profile harness up -d --no-build --pull never ") =>
+            if {
+                let mut rest = value.strip_prefix("compose ").unwrap_or("");
+                while let Some(after) = rest.strip_prefix("--profile ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                rest.starts_with("up -d --no-build --pull never ")
+            } =>
         {
             if SCENARIO == "up-fails" {
                 eprintln!("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");

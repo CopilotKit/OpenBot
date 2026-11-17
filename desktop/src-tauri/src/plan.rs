@@ -479,14 +479,15 @@ pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";
 ///
 /// The same image as the sign-in, run as a service beside the Bot. The Bot itself is the TypeScript
 /// LangGraph image, and LangChain's ChatGPT plan model exists only in Python, so the Bot sends its
-/// model calls here, and so do the server's own Bots on that plan. Started only on a ChatGPT plan
-/// (`crate::stack::selected_services`), so every other installation runs one Bot image, not two.
-pub const CHATGPT_PLAN_SERVICE: &str = "agent-langgraph-agui";
+/// model calls here, and so do the server's own Bots on that plan. A service of its own behind its
+/// own profile, started only on a ChatGPT plan, at Start or alone when the plan is chosen in the
+/// app (`crate::ai_connection::Plan`), so every other installation runs one Bot image, not two.
+pub const CHATGPT_PLAN_SERVICE: &str = "agent-chatgpt-plan";
 
 /// Where the Bot and the server reach that service: its name on the Compose network and the port
-/// its Dockerfile fixes. Written to `.env` as `CHATGPT_PLAN_HARNESS_URL` on a ChatGPT plan, and
-/// written empty on any other answer.
-pub const CHATGPT_PLAN_URL: &str = "http://agent-langgraph-agui:4206";
+/// its Dockerfile fixes. Written to `.env` as `CHATGPT_PLAN_HARNESS_URL` on every Start, so a plan
+/// chosen in the app reaches it with no restart.
+pub const CHATGPT_PLAN_URL: &str = "http://agent-chatgpt-plan:4206";
 
 /// Where the vendor's login persists what it gets.
 const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";

@@ -1475,6 +1475,12 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           }}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
+            // A choice made here wins over one made in the app since: OpenBot's server imports it
+            // at its next start. Recording it changes nothing about this Start, so a failure is
+            // only logged.
+            invoke("record_ai_connection_chosen", { root: root.trim() }).catch(
+              (error) => console.warn("record_ai_connection_chosen", error),
+            );
             chosenModel.current = choice;
             setModel(choice);
             // The go-ahead: OpenBot starts once Intelligence is ready, wherever it has got to.

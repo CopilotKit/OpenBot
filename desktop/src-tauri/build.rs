@@ -68,6 +68,17 @@ fn main() {
                     // Settings' AI model row, and its Change. See `src/ai_connection.rs`.
                     "ai_connection",
                     "change_ai_connection",
+                    // The AI connection changed in the app with no stop: the sign-ins that run
+                    // here, and the one engine a connection needs. See `src/ai_connection.rs`.
+                    "ai_providers",
+                    "begin_plan_sign_in",
+                    "finish_plan_sign_in",
+                    "cancel_plan_sign_in",
+                    "begin_provider_sign_in",
+                    "finish_provider_sign_in",
+                    "cancel_provider_sign_in",
+                    "prepare_ai_connection",
+                    "settle_ai_connection",
                     // Settings' Share usage data. See `src/usage_data.rs`.
                     "usage_data",
                     "set_usage_data",

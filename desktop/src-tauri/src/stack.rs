@@ -86,8 +86,8 @@ fn installation_uses(folder: &Path, service: &str) -> bool {
 }
 
 /// The services Start raises for the installation in `root`: [`SERVICES`], the `worker` its own
-/// Compose file uses, if it does (`installation_uses`), the Bot the person picked, and on a
-/// ChatGPT plan the service that holds the plan's model transport (`chatgpt_plan_runs`).
+/// Compose file uses, if it does (`installation_uses`), the Bot the person picked, and the engine of
+/// the plan the installation runs on, if it does (`plan_engine`).
 pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     let mut services = SERVICES.to_vec();
     if installation_uses(root, WORKER) {
@@ -95,33 +95,34 @@ pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     }
     if harness {
         services.push("agent-harness");
-        if chatgpt_plan_runs(root) {
-            services.push(crate::plan::CHATGPT_PLAN_SERVICE);
-        }
+    }
+    if let Some(plan) = plan_engine(root) {
+        services.push(plan.service);
     }
     services
 }
 
 /**
-Whether the installation in `root` runs the ChatGPT plan's model service beside its Bot.
+The engine of the plan the installation in `root` runs on: the Claude plan's, or the ChatGPT plan's,
+which holds the plan's model transport for the Bot and the server's own Bots. None on any other
+connection, so every other installation runs one Bot image, not two.
 
-Read from what the start before Compose wrote: `.env` names the service's address only on a ChatGPT
-plan (`crate::env::compose`), and empties it on any other answer. Read from the file rather than
-passed in so every path that raises the stack (Start, a restart, an update's start) asks the same
-question and gets the same answer. Only where the installation's own Compose file defines the
-service: an update that rolled back may have a file that does not, and Compose refuses a name its
-file does not define.
+Read from the connection recorded beside the installation, which Start records before Compose runs
+and a change in the app records too (`saved_intent`), so every path that raises the stack (Start, a
+restart, an update's start) asks the same question and gets the same answer. Only where the
+installation's own Compose file defines the service: an update that rolled back may have a file
+that does not, and Compose refuses a name its file does not define.
 */
-fn chatgpt_plan_runs(root: &Path) -> bool {
-    let named = crate::env::already_set(&root.join(".env"), &["CHATGPT_PLAN_HARNESS_URL"]);
-    named
-        .get("CHATGPT_PLAN_HARNESS_URL")
-        .is_some_and(|url| !url.trim().is_empty())
-        && std::fs::read_to_string(root.join("docker-compose.yml")).is_ok_and(|text| {
+pub fn plan_engine(root: &Path) -> Option<Alone> {
+    let plan = crate::ai_connection::Plan::of(crate::saved_intent::SavedIntent::read(root).model?)?;
+    let alone = plan.alone();
+    std::fs::read_to_string(root.join("docker-compose.yml"))
+        .is_ok_and(|text| {
             compose_service_names(&text)
                 .iter()
-                .any(|name| name == crate::plan::CHATGPT_PLAN_SERVICE)
+                .any(|name| name == alone.service)
         })
+        .then_some(alone)
 }
 
 /// [`selected_services`] and the one-shot `migrate`, where the file uses it: every service whose
@@ -1427,6 +1428,110 @@ pub fn up(
     })
 }
 
+/// A service behind a profile of its own, which OpenBot starts and stops alone: a plan's engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Alone {
+    pub profile: &'static str,
+    pub service: &'static str,
+}
+
+/**
+Start one service alone, and wait until it answers its health check, while everything else keeps
+running: the server, the database and every other Bot keep their containers. A service already
+running with the same settings is left as it is; one whose settings changed (a new plan token) is
+recreated. `--no-deps`, so nothing it might depend on is touched either.
+
+How a plan's engine starts the moment somebody signs in to the plan in the app.
+*/
+pub fn start_alone(
+    engine: &Address,
+    root: &Path,
+    alone: Alone,
+    secrets: &Secrets,
+) -> Result<(), Problem> {
+    crate::logging::timed("compose up one service", || {
+        let output = compose_command(engine, root, secrets)
+            .args(["--profile", alone.profile])
+            .args(["up", "-d", "--no-deps", "--no-build", "--pull", "never"])
+            .args(["--wait", "--wait-timeout", ALONE_PATIENCE])
+            .arg(alone.service)
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot couldn't start that engine. Try again.",
+                    format!("could not run {} compose: {error}", engine.engine.binary()),
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let raw = command_said(&output.stderr);
+        Err(Problem::with(crate::problem::said_about(&raw), raw))
+    })
+}
+
+/// How long [`start_alone`] and [`recreate_harness`] wait for the service's health check, in
+/// seconds. A plan's engine answers in seconds once its image is on the computer.
+const ALONE_PATIENCE: &str = "180";
+
+/**
+Recreate the picked harness alone, with the settings now in `.env`, and nothing else: a harness that
+fixes its provider when it starts has to start again to speak the new connection's wire. With the
+harness port overlay `up` uses, so it keeps its port.
+*/
+pub fn recreate_harness(engine: &Address, root: &Path, secrets: &Secrets) -> Result<(), Problem> {
+    crate::logging::timed("compose recreate the picked Bot", || {
+        let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
+        let output = command
+            .args(["--profile", "harness"])
+            .args(["up", "-d", "--no-deps", "--no-build", "--pull", "never"])
+            .args([
+                "--force-recreate",
+                "--wait",
+                "--wait-timeout",
+                ALONE_PATIENCE,
+            ])
+            .arg("agent-harness")
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot couldn't restart your Bot. Try again.",
+                    format!("could not run {} compose: {error}", engine.engine.binary()),
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let raw = command_said(&output.stderr);
+        Err(Problem::with(crate::problem::said_about(&raw), raw))
+    })
+}
+
+/// Stop and remove one service alone, if it runs, and nothing else. One that is not running is
+/// already where this leaves it.
+pub fn remove_alone(engine: &Address, root: &Path, alone: Alone) -> Result<(), Problem> {
+    crate::logging::timed("compose remove one service", || {
+        let output = compose_command(engine, root, &Secrets::new())
+            .args(["--profile", alone.profile])
+            .args(["rm", "--stop", "--force", alone.service])
+            .output()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot couldn't stop an engine it no longer needs.",
+                    format!("could not run {} compose: {error}", engine.engine.binary()),
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let raw = command_said(&output.stderr);
+        Err(Problem::with(
+            "OpenBot couldn't stop an engine it no longer needs.",
+            raw,
+        ))
+    })
+}
+
 /**
 Make the sign-in folder Compose bind-mounts into the server, as the person.
 
@@ -1637,8 +1742,11 @@ fn up_now(
      * it: its image comes from `.env`, and with nothing picked it is a stand-in docker-compose.yml
      * names so older Compose will read the file at all. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
+     *
+     * A plan's engine the same way, behind its own profile.
      */
     let requested = selected_services(root, harness);
+    let plan = plan_engine(root);
     // Before anything is raised: a routines sweep an earlier release left must not run beside a
     // server that does that work itself.
     remove_retired_containers(engine, root).map_err(|detail| {
@@ -1650,6 +1758,9 @@ fn up_now(
     let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
     if harness {
         command.args(["--profile", "harness"]);
+    }
+    if let Some(plan) = plan {
+        command.args(["--profile", plan.profile]);
     }
     let output = command
         .args(["up", "-d", "--no-build", "--pull", "never"])
@@ -9131,85 +9242,50 @@ fn main() {
     }
 
     /**
-    A ChatGPT plan keeps the Python LangGraph image running beside its Bot, and nothing else does.
+    Each plan raises its own engine with the stack, and nothing else does.
 
-    The Bot is the TypeScript engine, which sends a ChatGPT plan's model calls to the Python image
-    (`crate::plan::CHATGPT_PLAN_SERVICE`). Read from the `.env` the start wrote, as `crate::env`
-    writes it for each sign-in, so a key or a Claude plan raises one Bot image and not two.
+    A ChatGPT plan's Bot is the TypeScript engine, which sends the plan's model calls to the ChatGPT
+    plan's engine (`crate::plan::CHATGPT_PLAN_SERVICE`); a Claude plan's Bot is the Claude plan's
+    engine. Read from the connection recorded beside the installation, so a key raises one Bot
+    image and not two, and a change made in the app is what the next start raises.
     */
     #[test]
-    fn a_chatgpt_plan_raises_the_python_image_beside_its_bot_and_nothing_else_does() {
-        use crate::env::ModelCredential;
-        let root = temp_root("chatgpt-plan-services");
+    fn each_plan_raises_its_own_engine_and_nothing_else_does() {
+        use crate::saved_intent::ModelIntent;
+        let root = temp_root("plan-engine-services");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
-        let plan = crate::plan::CHATGPT_PLAN_SERVICE;
-        for (credential, raised) in [
-            (
-                ModelCredential::ChatGptPlan {
-                    store: "{\"tokens\":{}}".into(),
-                },
-                true,
-            ),
-            (
-                ModelCredential::OpenAi {
-                    api_key: "sk-test".into(),
-                },
-                false,
-            ),
-            (
-                ModelCredential::ClaudePlan {
-                    token: "plan".into(),
-                },
-                false,
-            ),
+        let claude = "agent-claude-plan";
+        let chatgpt = crate::plan::CHATGPT_PLAN_SERVICE;
+        for (intent, raised) in [
+            (ModelIntent::ChatGptPlan, Some(chatgpt)),
+            (ModelIntent::ClaudePlan, Some(claude)),
+            (ModelIntent::OpenAiApiKey, None),
+            (ModelIntent::AnthropicApiKey, None),
+            (ModelIntent::CompatibleEndpoint, None),
+            (ModelIntent::GoogleOauth, None),
         ] {
-            let settings = crate::env::compose(
-                &crate::env::Intelligence {
-                    api_url: "https://api.example".into(),
-                    gateway_ws_url: "wss://realtime.example".into(),
-                    api_key: "key".into(),
-                },
-                &crate::env::Model {
-                    credential: credential.clone(),
-                },
-                &crate::engine::EngineStatus {
-                    engine: None,
-                    address: None,
-                    responding: true,
-                    engine_socket: None,
-                    detail: String::new(),
-                },
-                &crate::env::Ports::default(),
-                &[],
-                None,
-                &std::collections::BTreeMap::new(),
-            );
-            crate::env::write(
-                &root.join(".env"),
-                &settings,
-                &std::collections::BTreeMap::new(),
-            )
-            .unwrap();
-            assert_eq!(
-                selected_services(&root, true).contains(&plan),
-                raised,
-                "{credential:?}"
-            );
-            // No Bot picked, no Bot to send the calls: nothing raised for it.
-            assert!(!selected_services(&root, false).contains(&plan));
+            crate::saved_intent::record_settled(&root, intent).unwrap();
+            for harness in [true, false] {
+                let services = selected_services(&root, harness);
+                assert_eq!(
+                    services.contains(&chatgpt),
+                    raised == Some(chatgpt),
+                    "{intent:?} {services:?}"
+                );
+                assert_eq!(
+                    services.contains(&claude),
+                    raised == Some(claude),
+                    "{intent:?} {services:?}"
+                );
+            }
+            assert_eq!(plan_engine(&root).map(|alone| alone.service), raised);
         }
         // An installation whose Compose file has no such service is never asked to raise it.
         std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
-        std::fs::write(
-            root.join(".env"),
-            format!(
-                "CHATGPT_PLAN_HARNESS_URL={}\n",
-                crate::plan::CHATGPT_PLAN_URL
-            ),
-        )
-        .unwrap();
-        assert!(!selected_services(&root, true).contains(&plan));
+        crate::saved_intent::record_settled(&root, ModelIntent::ChatGptPlan).unwrap();
+        assert!(!selected_services(&root, true).contains(&chatgpt));
+        assert_eq!(plan_engine(&root), None);
         std::fs::remove_dir_all(root).unwrap();
     }
 

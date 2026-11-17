@@ -200,6 +200,24 @@ services:
       # ChatGPT plan for a step (server/src/learning/model-endpoint.ts). OpenBot Desktop mints it
       # once per installation and gives it to this service and that agent alone.
       OPENBOT_LEARNING_MODEL_TOKEN: ${LEARNING_MODEL_TOKEN:-}
+      # The AI connection, which the person changes inside the app with no restart. The server keeps
+      # it and serves every engine's model calls through its model gateway, adding the live key per
+      # request. This token is how an engine proves itself there; OpenBot Desktop mints it once per
+      # installation and gives it to this service and the engines below, never to a Bot's computer.
+      MODEL_GATEWAY_TOKEN: ${MODEL_GATEWAY_TOKEN:-}
+      # The Claude plan's engine below, by name on this network, for the moment it is started; the
+      # ChatGPT plan's is CHATGPT_PLAN_HARNESS_URL above. OpenBot Desktop sets both whether or not
+      # one runs, so a plan picked in the app reaches its engine with no restart.
+      CLAUDE_PLAN_HARNESS_URL: ${CLAUDE_PLAN_HARNESS_URL:-}
+      # Which connection the setup window chose (`{"provider":"anthropic","login":"plan"}`, never a
+      # key) and when, so the server imports a newer choice made there and otherwise keeps the one
+      # changed in the app. Neither is a secret.
+      OPENBOT_AI_CONNECTION: ${OPENBOT_AI_CONNECTION:-}
+      OPENBOT_AI_CONNECTION_CHOSEN_AT: ${OPENBOT_AI_CONNECTION_CHOSEN_AT:-}
+      # The picked harness, read per run from a file in the sign-in folder mounted below, so OpenBot
+      # Desktop can point it at another engine without restarting the server. A host path here
+      # becomes the mount's; empty stays empty, and the PICKED_HARNESS_* settings apply.
+      OPENBOT_PICKED_HARNESS_FILE: ${OPENBOT_PICKED_HARNESS_FILE:+/openbot/picked-harness.json}
     # Who the server runs as. The image's own user by default. On Linux the desktop names the host's,
     # because the sign-in file below is the host user's and readable by nobody else, and a bind mount
     # there keeps the host's numbers; Docker Desktop's file sharing on macOS and Windows does not.
@@ -514,34 +532,98 @@ services:
       # Deployment-owned tools use the same signed callback as the managed Bot.
       OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
       AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
-      # Whichever the model screen chose. A harness reads the one its provider needs and ignores the
-      # rest, and the ones the choice did not imply are written empty rather than left stale: see
-      # `ModelCredential`.
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # THE MODEL GATEWAY, NOT A PROVIDER KEY. With MODEL_GATEWAY_TOKEN set (OpenBot Desktop mints
+      # one), the harness reaches every model through the server's gateway with that token, and the
+      # gateway adds the organisation's live key per request. So a key changed in the app reaches
+      # this Bot on its next request, and no provider key is in this container. A deployment
+      # without the token gives the harness its keys, as before.
+      #
+      # The addresses are the gateway's OpenAI and Anthropic wires, written by whoever sets the
+      # token: `MODEL_GATEWAY_OPENAI_URL` is `<gateway>/v1`, `MODEL_GATEWAY_ANTHROPIC_URL` is
+      # `<gateway>/anthropic`.
+      OPENBOT_MODEL_GATEWAY_URL: ${OPENBOT_MODEL_GATEWAY_URL:-}
+      OPENAI_API_KEY: ${MODEL_GATEWAY_TOKEN:-${OPENAI_API_KEY:-}}
+      OPENAI_BASE_URL: ${MODEL_GATEWAY_OPENAI_URL:-${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}}
+      ANTHROPIC_API_KEY: ${MODEL_GATEWAY_TOKEN:-${ANTHROPIC_API_KEY:-}}
+      ANTHROPIC_BASE_URL: ${MODEL_GATEWAY_ANTHROPIC_URL:-${ANTHROPIC_BASE_URL:-}}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
+      # Which wire the harness speaks, for one that fixes it at start. OpenBot Desktop rewrites this
+      # and restarts this container alone when the connection moves to the other family.
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The two plan engines, for a harness that sends its model calls to them per run (LangGraph
+      # TypeScript). NO PLAN TOKEN OR PLAN STORE HERE: each plan runs on an engine of its own below.
+      CLAUDE_PLAN_HARNESS_URL: ${CLAUDE_PLAN_HARNESS_URL:-}
+      CHATGPT_PLAN_HARNESS_URL: ${CHATGPT_PLAN_HARNESS_URL:-}
+      CHATGPT_PLAN_HARNESS_TOKEN: ${CHATGPT_PLAN_HARNESS_TOKEN:-}
       # Claude Code's tool search, on the Claude Agent SDK harness. Empty leaves it on, which is
       # what a Bot holding many app tools needs. `false` is for a gateway at ANTHROPIC_BASE_URL
       # that cannot pass the search on: every tool then goes with every request.
       ENABLE_TOOL_SEARCH: ${ENABLE_TOOL_SEARCH:-}
-      # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
-      # there either way; this variable is what tells the harness to read it.
-      CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
-      # Where the TypeScript LangGraph engine sends a ChatGPT plan's model calls, when it is the
-      # picked harness on a plan: the LangGraph harness below, which holds the token store. Empty on
-      # every other sign-in, and every other harness ignores it.
-      CHATGPT_PLAN_HARNESS_URL: ${CHATGPT_PLAN_HARNESS_URL:-}
-      CHATGPT_PLAN_HARNESS_TOKEN: ${CHATGPT_PLAN_HARNESS_TOKEN:-}
       # Empty when nobody named one, never a stand-in that looks like a choice. The server sends the
       # model on every run (`forwardedProps.openbotModel`): the one named here when the credential
       # lists it, otherwise the middle of the provider's line. A stand-in here was how a ChatGPT
       # plan ran gpt-5.5, which it refuses.
       BOT_MODEL: ${BOT_MODEL:-}
+    extra_hosts:
+      - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
+
+  # A CLAUDE PLAN'S ENGINE: the Claude Agent SDK harness, holding the plan token and nothing else.
+  #
+  # Its own service, behind its own profile, so OpenBot Desktop starts it alone the moment somebody
+  # signs in to a Claude plan in the app, while the server, the database and every other Bot keep
+  # running (`docker compose --profile claude-plan up -d --no-deps agent-claude-plan`). The server
+  # reaches it by name (CLAUDE_PLAN_HARNESS_URL): built-in Bots and LangGraph TypeScript Bots send
+  # their model calls to its `/model`, and a picked Claude Agent SDK Bot is this engine.
+  #
+  # Busybox when nothing is set, as for `agent-harness`: never pulled or started while the profile is
+  # off, and the desktop writes the image before it turns the profile on.
+  #
+  # Behind `harness` too, the profile of the Bots OpenBot Desktop starts on demand, so the Stop that
+  # names it (`compose --profile harness ... down`) takes this down with them. Naming `harness` on
+  # `up` still starts only the services named.
+  agent-claude-plan:
+    profiles: ["claude-plan", "harness"]
+    image: ${CLAUDE_PLAN_IMAGE:-busybox:1.37}
+    pull_policy: missing
+    environment:
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The server's model gateway, as every engine is told it. The plan's own calls go to Anthropic
+      # with the plan token, never through it.
+      OPENBOT_MODEL_GATEWAY_URL: ${OPENBOT_MODEL_GATEWAY_URL:-}
+      # Empty, and said so. The SDK prefers a key over the plan token, so a key here would quietly
+      # bill a person who signed in to a plan they already pay for; the harness refuses both.
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_BASE_URL: ""
+      BOT_PROVIDER: anthropic
+      ENABLE_TOOL_SEARCH: ${ENABLE_TOOL_SEARCH:-}
+    extra_hosts:
+      - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4212/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  # A CHATGPT PLAN'S ENGINE: the LangGraph harness, reading the plan's token store. Started alone,
+  # as `agent-claude-plan` above. The server reaches it by name (CHATGPT_PLAN_HARNESS_URL).
+  agent-chatgpt-plan:
+    profiles: ["chatgpt-plan", "harness"]
+    image: ${CHATGPT_PLAN_IMAGE:-busybox:1.37}
+    pull_policy: missing
+    environment:
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      # The store's path inside the mount below. The harness picks the plan's model from it.
+      CHATGPT_AUTH_FILE: /root/.langchain/chatgpt-auth.json
+      BOT_PROVIDER: openai
+      # The server's model gateway, as every engine is told it. The plan's own calls go to OpenAI
+      # with the plan's store, never through it.
+      OPENBOT_MODEL_GATEWAY_URL: ${OPENBOT_MODEL_GATEWAY_URL:-}
     extra_hosts:
       - "host.docker.internal:${OPENBOT_HOST_GATEWAY:-host-gateway}"
     volumes:
@@ -552,6 +634,11 @@ services:
       # The provider writes by atomically replacing the file with a sibling temporary file, so the
       # mount has to be the containing directory rather than the file mount point.
       - ./.langchain:/root/.langchain
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4206/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
 
   # The managed Bot: the one the deployment runs for itself, registered the way a customer's own Bot
   # is, as an AG-UI endpoint in the registry (the tenant package names it by MANAGED_AGENT_AG_UI_URL).
@@ -582,10 +669,13 @@ services:
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
       # The server sends this on every call to the managed Bot, which refuses every call without it.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # The model gateway with its token where one is set, and the deployment's keys otherwise:
+      # see `agent-harness` above.
+      OPENBOT_MODEL_GATEWAY_URL: ${OPENBOT_MODEL_GATEWAY_URL:-}
+      OPENAI_API_KEY: ${MODEL_GATEWAY_TOKEN:-${OPENAI_API_KEY:-}}
+      OPENAI_BASE_URL: ${MODEL_GATEWAY_OPENAI_URL:-${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}}
+      ANTHROPIC_API_KEY: ${MODEL_GATEWAY_TOKEN:-${ANTHROPIC_API_KEY:-}}
+      ANTHROPIC_BASE_URL: ${MODEL_GATEWAY_ANTHROPIC_URL:-${ANTHROPIC_BASE_URL:-}}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
       # Empty when nobody named one: the server sends the model on every run.
@@ -635,15 +725,20 @@ services:
       # The server sends this on every call, and the engine refuses every call without it.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # The model gateway with its token where one is set, and the deployment's keys otherwise:
+      # see `agent-harness` above. The server names the route per run.
+      OPENBOT_MODEL_GATEWAY_URL: ${OPENBOT_MODEL_GATEWAY_URL:-}
+      OPENAI_API_KEY: ${MODEL_GATEWAY_TOKEN:-${OPENAI_API_KEY:-}}
+      OPENAI_BASE_URL: ${MODEL_GATEWAY_OPENAI_URL:-${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}}
+      ANTHROPIC_API_KEY: ${MODEL_GATEWAY_TOKEN:-${ANTHROPIC_API_KEY:-}}
+      ANTHROPIC_BASE_URL: ${MODEL_GATEWAY_ANTHROPIC_URL:-${ANTHROPIC_BASE_URL:-}}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
       # Empty when nobody named one: the server sends the model on every run.
       BOT_MODEL: ${BOT_MODEL:-}
-      # Where a ChatGPT plan's model calls go, on a plan: the service above. Empty otherwise.
+      # Where a plan's model calls go: the Claude plan's engine and the ChatGPT plan's. Empty where
+      # the deployment runs neither.
+      CLAUDE_PLAN_HARNESS_URL: ${CLAUDE_PLAN_HARNESS_URL:-}
       CHATGPT_PLAN_HARNESS_URL: ${CHATGPT_PLAN_HARNESS_URL:-}
       CHATGPT_PLAN_HARNESS_TOKEN: ${CHATGPT_PLAN_HARNESS_TOKEN:-}
       # Where this Bot runs a tool: back through the deployment that granted it. See the managed Bot.
