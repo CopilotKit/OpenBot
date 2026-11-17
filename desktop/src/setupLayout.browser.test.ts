@@ -1676,9 +1676,65 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
  * under its progress says that everything runs on this computer, then offers OpenBot for Business
  * with a link to book a demo. That adds no click and no scroll: at the window's default size (1000x800
  * less a title bar), in light and dark, the card shows whole, the progress first, the note under it.
+ * Docker Desktop's three-line hand-off makes the journey 44px taller, which scrolled the card by
+ * 12px: while it shows, the note keeps its heading and the pitch and leaves out the sentence between.
  * Run with `OPENBOT_APP_ENGINE=webkit` too, the engine the Mac window draws with.
  * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, taken before anything is asserted.
  */
+const DOCKER_STARTING =
+  "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
+
+/** The update screen as a person sees it: its words, and where the progress and the note sit. */
+function updateScreen(page: Page) {
+  return page.evaluate(() => {
+    const sheet = document.querySelector("main > .sheet") as HTMLElement;
+    const note = document.querySelector(
+      "main > .sheet > .self-contained",
+    ) as HTMLElement | null;
+    const journey = document.querySelector(".journey");
+    const why = note?.querySelector(".self-contained-why") as HTMLElement;
+    const box = (element: Element | null | undefined) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { top: rect.top, bottom: rect.bottom } : null;
+    };
+    return {
+      heading: document.querySelector("main h1")?.textContent,
+      // What shows, as a person reads it.
+      note: note?.innerText ?? null,
+      // Whether the sentence that says why shows.
+      said: Boolean(why && why.offsetHeight > 0),
+      noteBox: box(note),
+      sheetBox: box(sheet),
+      journey: box(journey),
+      journeyHeight: journey?.getBoundingClientRect().height ?? 0,
+      rows: box(document.querySelector('[aria-label="Opening OpenBot"]')),
+      scrolls: sheet.scrollHeight - sheet.clientHeight,
+      page: document.documentElement.scrollHeight,
+      window: window.innerHeight,
+      cut: note ? note.scrollWidth > note.clientWidth : null,
+      buttons: note?.querySelectorAll("button").length ?? null,
+      link: note?.querySelector("a")?.getAttribute("href") ?? null,
+    };
+  });
+}
+
+/** The progress first, the note under it, all of the card in the window, nothing scrolled. */
+function expectWholeUnderProgress(
+  seen: Awaited<ReturnType<typeof updateScreen>>,
+) {
+  const { journey, rows, noteBox, sheetBox } = seen;
+  expect(journey && rows && noteBox && sheetBox).toBeTruthy();
+  if (journey && rows && noteBox && sheetBox) {
+    expect(noteBox.top).toBeGreaterThan(journey.bottom);
+    expect(noteBox.top).toBeGreaterThan(rows.bottom);
+    expect(noteBox.bottom).toBeLessThanOrEqual(sheetBox.bottom);
+    expect(sheetBox.bottom).toBeLessThanOrEqual(seen.window);
+  }
+  expect(seen.scrolls).toBeLessThanOrEqual(0);
+  expect(seen.page).toBeLessThanOrEqual(seen.window);
+  expect(seen.cut).toBe(false);
+}
+
 describe.skipIf(!asked)(
   "the Start screen that updates OpenBot says why",
   () => {
@@ -1707,55 +1763,53 @@ describe.skipIf(!asked)(
               path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}.png`,
             });
 
-          const seen = await page.evaluate(() => {
-            const sheet = document.querySelector(
-              "main > .sheet",
-            ) as HTMLElement;
-            const note = document.querySelector(
-              "main > .sheet > .self-contained",
-            ) as HTMLElement | null;
-            const journey = document.querySelector(".journey");
-            const box = (element: Element | null | undefined) => {
-              const rect = element?.getBoundingClientRect();
-              return rect ? { top: rect.top, bottom: rect.bottom } : null;
-            };
-            return {
-              heading: document.querySelector("main h1")?.textContent,
-              note: note?.textContent ?? null,
-              noteBox: box(note),
-              sheetBox: box(sheet),
-              journey: box(journey),
-              rows: box(
-                document.querySelector('[aria-label="Opening OpenBot"]'),
-              ),
-              scrolls: sheet.scrollHeight - sheet.clientHeight,
-              page: document.documentElement.scrollHeight,
-              window: window.innerHeight,
-              cut: note ? note.scrollWidth > note.clientWidth : null,
-              buttons: note?.querySelectorAll("button").length ?? null,
-              link: note?.querySelector("a")?.getAttribute("href") ?? null,
-            };
-          });
+          const seen = await updateScreen(page);
           expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
           expect(seen.note).toContain("Everything runs on this computer");
           expect(seen.note).toContain("This OpenBot is self-contained.");
+          expect(seen.said).toBe(true);
           expect(seen.note).toContain("OpenBot for Business");
           expect(seen.note).not.toMatch(/—/);
           // Nothing to click to go on: its one link opens a page, and the update carries on.
           expect(seen.buttons).toBe(0);
           expect(seen.link).toBe("https://open.bot/business");
-          // The progress first, the note under it, all of the card in the window, nothing scrolled.
-          const { journey, rows, noteBox, sheetBox } = seen;
-          expect(journey && rows && noteBox && sheetBox).toBeTruthy();
-          if (journey && rows && noteBox && sheetBox) {
-            expect(noteBox.top).toBeGreaterThan(journey.bottom);
-            expect(noteBox.top).toBeGreaterThan(rows.bottom);
-            expect(noteBox.bottom).toBeLessThanOrEqual(sheetBox.bottom);
-            expect(sheetBox.bottom).toBeLessThanOrEqual(760);
-          }
-          expect(seen.scrolls).toBeLessThanOrEqual(0);
-          expect(seen.page).toBeLessThanOrEqual(seen.window);
-          expect(seen.cut).toBe(false);
+          expectWholeUnderProgress(seen);
+
+          // Docker Desktop's hand-off, its three lines, while the update waits on Docker: the
+          // journey grows 44px. The note says less while it shows, and the card still doesn't scroll.
+          await emitProgress(page, {
+            step: "engine",
+            ok: true,
+            running: true,
+            elsewhere: true,
+            detail: DOCKER_STARTING,
+          });
+          await page.locator(".journey.handing-off").waitFor();
+          await page.waitForTimeout(400);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}-docker.png`,
+            });
+          const handingOff = await updateScreen(page);
+          expect(handingOff.journeyHeight).toBe(seen.journeyHeight + 44);
+          expect(handingOff.heading).toBe("Updating OpenBot (Self-Contained)");
+          expect(handingOff.note).toContain("Everything runs on this computer");
+          expect(handingOff.said).toBe(false);
+          expect(handingOff.note).toContain("OpenBot for Business");
+          expect(handingOff.link).toBe("https://open.bot/business");
+          expectWholeUnderProgress(handingOff);
+
+          // Docker answers and the hand-off goes: the note says all of it again.
+          await emitProgress(page, {
+            step: "engine",
+            ok: true,
+            running: false,
+            detail: "Docker is answering.",
+          });
+          await page
+            .locator(".journey.handing-off")
+            .waitFor({ state: "hidden" });
+          expect((await updateScreen(page)).said).toBe(true);
 
           // Book a demo opens OpenBot for Business's page in the person's browser.
           await page.getByRole("link", { name: "Book a demo" }).click();

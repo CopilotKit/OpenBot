@@ -13,7 +13,8 @@ export const UPDATING_SELF_CONTAINED = "Updating OpenBot (Self-Contained)";
  * without a screen like this one, and this says why this one has it.
  *
  * Under the progress and quieter than it: nothing to click to go on, and it fits the setup window's
- * default size with the progress card above it.
+ * default size with the progress card above it. While Docker Desktop's hand-off makes the progress
+ * taller, it leaves out its middle sentence (`styles.css`), so the card still doesn't scroll.
  */
 export function SelfContainedNote() {
   return (
@@ -26,7 +27,7 @@ export function SelfContainedNote() {
       </div>
       <div className="self-contained-words">
         <h2 id="self-contained-heading">Everything runs on this computer</h2>
-        <p>
+        <p className="self-contained-why">
           This OpenBot is self-contained. Its services run here, so they update
           here too.
         </p>
