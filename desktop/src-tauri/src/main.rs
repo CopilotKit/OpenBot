@@ -1600,18 +1600,107 @@ fn detect_engine<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> engine::EngineS
     status
 }
 
+/**
+What on this computer is in the way of OpenBot, for the setup window.
+
+Async, with the probes on a blocking thread. Tauri runs a command without `async` on the main
+thread (https://v2.tauri.app/develop/calling-rust/#async-commands), which on Windows is the
+window's own. This was such a command, running PowerShell, `wsl.exe` and `docker` with no limit,
+so any probe that hung held the setup window "Not Responding" while "Checking your saved setup"
+waited on it. Each probe is now bounded too (`win::blocker`, `win::nested_virtualization_blocker`,
+`DOCKER_ANSWERS`).
+*/
 #[tauri::command]
-fn windows_blocker<R: tauri::Runtime>(
+async fn windows_blocker<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<Option<win::Blocker>, Problem> {
-    // The rest of the machine is ready: ask WSL whether it can start a VM at all, unless Docker
-    // already answers, which proves it can.
-    let result = win::blocker().map(|found| {
+    windows_blocker_from(app, windows_blocker_here).await
+}
+
+/// `docker version` answers in well under a second when Docker is up and fails as fast when it is
+/// not; one still waiting after ten has nothing useful to say, and the WSL question that follows
+/// it is asked instead.
+const DOCKER_ANSWERS: std::time::Duration = std::time::Duration::from_secs(10);
+/// Past three seconds `docker version` is slow: well over its usual second, under a third of its
+/// limit.
+const DOCKER_SLOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The rest of the machine is ready: ask WSL whether it can start a VM at all, unless Docker
+/// already answers, which proves it can. Only on Windows, the one place either is asked. `tell`
+/// hears that Windows's own servicing holds the check, and of probes that ran long or timed out.
+fn windows_blocker_here(tell: &dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem> {
+    win::blocker(tell).map(|found| {
         found.or_else(|| {
-            (!openbot_desktop_lib::docker_desktop::answers())
-                .then(win::nested_virtualization_blocker)
+            if !cfg!(target_os = "windows") {
+                return None;
+            }
+            let asked = std::time::Instant::now();
+            let answers = openbot_desktop_lib::docker_desktop::answers_within(DOCKER_ANSWERS);
+            if let Some(heard) = win::heard_of(
+                telemetry::WindowsProbeKind::Docker,
+                answers.is_none(),
+                asked.elapsed(),
+                DOCKER_SLOW,
+            ) {
+                tell(heard);
+            }
+            (answers != Some(true))
+                .then(|| win::nested_virtualization_blocker(tell))
                 .flatten()
         })
+    })
+}
+
+/// The Windows check, given what to tell while it runs (`win::Heard`).
+type WindowsCheck = fn(&dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem>;
+
+/// The window's event for "Windows is busy installing an update, and the check waits on it".
+const WINDOWS_BUSY_EVENT: &str = "setup:windows-busy";
+
+/// `windows_blocker`, with `check` run on a blocking thread rather than the one that asked:
+/// `WINDOWS_BUSY_EVENT` sent to the window whenever it says Windows is busy, and a probe that ran
+/// long or timed out recorded in usage data (`windows_probe`) and the log.
+async fn windows_blocker_from<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    check: WindowsCheck,
+) -> Result<Option<win::Blocker>, Problem> {
+    let telling = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        check(&|heard| match heard {
+            win::Heard::ServicingBusy => {
+                log::info!("[windows check] Windows's servicing is busy; the check waits on it");
+                let _ = telling.emit(WINDOWS_BUSY_EVENT, ());
+            }
+            win::Heard::Probe {
+                probe,
+                outcome,
+                duration_ms,
+            } => {
+                log::warn!(
+                    "[windows check] the {} probe was {} after {duration_ms} ms",
+                    probe.as_str(),
+                    match outcome {
+                        telemetry::WindowsProbeOutcome::Slow => "slow",
+                        telemetry::WindowsProbeOutcome::TimedOut => "stopped",
+                    }
+                );
+                desktop_telemetry::record(
+                    &telling,
+                    telemetry::EventData::WindowsProbe {
+                        probe,
+                        outcome,
+                        duration_ms,
+                    },
+                );
+            }
+        })
+    })
+    .await
+    .unwrap_or_else(|error| {
+        Err(Problem::with(
+            "OpenBot could not check Windows setup. Close and reopen OpenBot to try again.",
+            error.to_string(),
+        ))
     });
     if cfg!(target_os = "windows") {
         use telemetry::WindowsStageOutcome as Outcome;
@@ -1693,6 +1782,11 @@ async fn windows_restart_pending(app: tauri::AppHandle) -> Result<bool, Problem>
     let Ok(data) = app.path().app_local_data_dir() else {
         return Ok(false);
     };
+    // Nothing recorded, nothing owed: Windows is not asked when it last started, which is a CIM
+    // query, on every launch.
+    if !win::restart_path(&data).exists() {
+        return Ok(false);
+    }
     tauri::async_runtime::spawn_blocking(move || Ok(win::restart_pending(&data, &win::boot()?)))
         .await
         .map_err(|error| {
@@ -18061,6 +18155,123 @@ mod tests {
             status_of(env!("CARGO_PKG_VERSION")),
             env!("CARGO_PKG_VERSION")
         );
+    }
+
+    /// The Windows check runs on a blocking thread, never the one that asked: Tauri runs a command
+    /// that is not `async` on the main thread, which is the window's, and the window then stops
+    /// painting for as long as a probe takes.
+    #[test]
+    fn the_windows_check_runs_off_the_thread_that_asked() {
+        static RAN_ON: Mutex<Option<std::thread::ThreadId>> = Mutex::new(None);
+        fn check(_tell: &dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem> {
+            *RAN_ON.lock().unwrap() = Some(std::thread::current().id());
+            Ok(Some(win::Blocker::WslNoKernel))
+        }
+        let app = tauri::test::mock_app();
+        let found =
+            tauri::async_runtime::block_on(windows_blocker_from(app.handle().clone(), check));
+        assert_eq!(found, Ok(Some(win::Blocker::WslNoKernel)));
+        let ran_on = RAN_ON.lock().unwrap().expect("the check ran");
+        assert_ne!(ran_on, std::thread::current().id());
+    }
+
+    /// While Windows's servicing holds the check, the window hears so, to say it in words; and a
+    /// probe that ran long or out of time is in usage data as `windows_probe`, by name, outcome and
+    /// duration only.
+    #[test]
+    fn a_check_held_by_windows_servicing_tells_the_window_and_usage_data() {
+        use tauri::Listener;
+        use telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
+        fn check(tell: &dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem> {
+            tell(win::Heard::ServicingBusy);
+            tell(win::Heard::Probe {
+                probe: Probe::WslFeature,
+                outcome: Outcome::TimedOut,
+                duration_ms: 30_004,
+            });
+            tell(win::Heard::Probe {
+                probe: Probe::WslSystemStart,
+                outcome: Outcome::Slow,
+                duration_ms: 21_500,
+            });
+            Ok(None)
+        }
+        let app = tauri::test::mock_builder()
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-windows-probe-telemetry"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let (heard, hearing) = std::sync::mpsc::channel();
+        app.listen_any(WINDOWS_BUSY_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+        let found =
+            tauri::async_runtime::block_on(windows_blocker_from(app.handle().clone(), check));
+        assert_eq!(found, Ok(None));
+        hearing
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the window was told Windows is busy");
+        let probes: Vec<_> = app
+            .state::<desktop_telemetry::DesktopTelemetry>()
+            .queued()
+            .into_iter()
+            .filter(|event| matches!(event, telemetry::EventData::WindowsProbe { .. }))
+            .collect();
+        assert_eq!(
+            probes,
+            [
+                telemetry::EventData::WindowsProbe {
+                    probe: Probe::WslFeature,
+                    outcome: Outcome::TimedOut,
+                    duration_ms: 30_004,
+                },
+                telemetry::EventData::WindowsProbe {
+                    probe: Probe::WslSystemStart,
+                    outcome: Outcome::Slow,
+                    duration_ms: 21_500,
+                },
+            ]
+        );
+        let wire = serde_json::to_value(&probes[0]).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "kind": "windows_probe",
+                "probe": "wsl_feature",
+                "outcome": "timed_out",
+                "duration_ms": 30_004
+            })
+        );
+    }
+
+    /// The command the window calls, through Tauri's own IPC: still answers, now as an async
+    /// command. Off Windows there is nothing in the way.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn the_windows_check_answers_through_ipc_as_an_async_command() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![windows_blocker])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let answer = tauri::test::get_ipc_response(
+            &window,
+            tauri::webview::InvokeRequest {
+                cmd: "windows_blocker".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        )
+        .map(|body| body.deserialize::<serde_json::Value>().unwrap());
+        assert_eq!(answer, Ok(serde_json::Value::Null));
     }
 
     /// Windows: Podman also answers on Docker's pipe, so a CLI not told the engine finds "the Docker

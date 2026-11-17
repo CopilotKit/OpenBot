@@ -117,6 +117,10 @@ function comeForward(why: string) {
 const SETUP_NEEDS_RESTART =
   "Windows needs to restart to finish setting up the software OpenBot runs on. OpenBot opens again after you sign back in.";
 
+/** What the window says while Windows's own servicing holds the Windows check. */
+const WINDOWS_BUSY =
+  "Windows is finishing an update. This can take a few minutes.";
+
 export function App() {
   return <Setup />;
 }
@@ -554,6 +558,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     }
   }, [root, model, harness, step]);
 
+  // Windows is busy installing an update, which holds the Windows check (`setup:windows-busy`).
+  const [windowsBusy, setWindowsBusy] = useState(false);
+
   /*
    * What this computer needs before OpenBot can run on it, which on Windows is WSL, a Windows
    * feature or a restart: looked at, and its screen shown, which then sets about it by itself
@@ -566,6 +573,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   const checkWindows = useCallback(async (): Promise<
     Blocker | "unknown" | null
   > => {
+    // The check says so while Windows's own servicing holds one of its questions: seen on Windows
+    // Server 2022 after an update, the window sat on "Checking your saved setup" for minutes.
+    const stopBusy = await listen("setup:windows-busy", () =>
+      setWindowsBusy(true),
+    ).catch(() => null);
     try {
       const found = await invoke<Blocker | null>("windows_blocker");
       setBlocker(found);
@@ -580,6 +592,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     } catch (error) {
       setBlockerFailure(asProblem(error));
       return "unknown";
+    } finally {
+      stopBusy?.();
+      setWindowsBusy(false);
     }
   }, []);
   // Nothing of OpenBot is on this computer and the person has not chosen it yet: Install asks.
@@ -1240,9 +1255,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <div className="sheet connection-sheet">
           <h1>Getting OpenBot ready</h1>
           <p className="lede" role="status">
-            {checkingWindows
-              ? "Checking this computer…"
-              : "Checking your saved setup…"}
+            {windowsBusy
+              ? WINDOWS_BUSY
+              : checkingWindows
+                ? "Checking this computer…"
+                : "Checking your saved setup…"}
           </p>
           <SetupProgress steps={steps} />
         </div>
