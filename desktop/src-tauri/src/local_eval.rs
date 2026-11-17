@@ -373,6 +373,11 @@ pub struct Stack {
     pub update_in_progress: bool,
     /// The update the CLI keeps on record because it did not finish, when its record names it.
     pub unfinished_update: Option<UnfinishedUpdate>,
+    /// An update the CLI keeps on record to the release a running stack already runs, or an older
+    /// one: settled (`settle_update`), so not `unfinished_update`, and never sent to the window.
+    /// Kept so `local update` is still read as the CLI runs it: it resumes this record first.
+    #[serde(skip)]
+    pub settled_update: Option<UnfinishedUpdate>,
     pub observed: Option<Observed>,
     /// The app folders the CLI records the stack for (`appPaths`), as it reported them. Kept only
     /// to tell OpenBot's own stack from another app's (`lists_folder`); never sent to the window.
@@ -816,7 +821,7 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
                 measured_shortfall(said)
             }
         });
-    Ok(Report {
+    Ok(settle_update(Report {
         outcome,
         stack: reported_stack(outcome, wire)?,
         reason,
@@ -826,7 +831,72 @@ fn report(command: &str, exit_code: i32, stdout: &[u8]) -> Result<Report, Failur
         update_to: None,
         checks_passed,
         shortfall,
-    })
+    }))
+}
+
+/// The settled update last written to the log, so a status polled every few seconds says it once.
+static SETTLED_LOGGED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/**
+`report`, with an update the CLI keeps on record settled when the running stack already runs the
+release it was moving to, or a newer one.
+
+THE PROBLEM. The CLI can keep an update on record whose release is the one the stack already runs
+(seen in production telemetry, with the update still `prepared`). It never resumes it: `local update`
+refuses any release not newer than the stack's ("Local update only moves to a newer release"), and
+no other command clears the record. Yet `local status` says `degraded` for as long as it stays,
+however well the stack answers, so the window took the stack for one on the release it had after an
+update that did not finish. It said "The OpenBot update didn't finish... It tries again the next
+time it starts" and waited for Show OpenBot, on every launch, with nothing left to try.
+
+THE RULE. On a completed report of a stack the CLI found `degraded`, a record whose release is not
+newer than the one installed, both read as versions, is settled: no update in progress, nothing
+unfinished, and `ready` when every check passed, as the CLI would say without the record. Never on a
+release that is newer (an update that really did not finish, resumed and said as before), one that
+cannot be read, or a stack that is stopped or still starting. The record stays in `settled_update`,
+so `local update` is still read as the CLI runs it (`update_releases`).
+*/
+fn settle_update(mut report: Report) -> Report {
+    if report.outcome != Outcome::Completed || report.readiness != Readiness::Degraded {
+        return report;
+    }
+    let Some(stack) = report.stack.as_mut() else {
+        return report;
+    };
+    let Some(update) = &stack.unfinished_update else {
+        return report;
+    };
+    let (Some(to), Some(runs)) = (
+        release_version(&update.to),
+        release_version(&stack.installed_release),
+    ) else {
+        return report;
+    };
+    if to > runs {
+        return report;
+    }
+    let entry = format!(
+        "[local update] the backend already runs {}; the update on record to {} is settled",
+        stack.installed_release, update.to
+    );
+    let mut logged = SETTLED_LOGGED
+        .lock()
+        .unwrap_or_else(|held| held.into_inner());
+    if logged.as_deref() != Some(entry.as_str()) {
+        log::info!("{entry}");
+        *logged = Some(entry);
+    }
+    stack.settled_update = stack.unfinished_update.take();
+    stack.update_in_progress = false;
+    if report.checks_passed {
+        report.readiness = Readiness::Ready;
+    }
+    report
+}
+
+/// A release as a version, `v` prefix or not. `None` for one that does not read as one.
+fn release_version(text: &str) -> Option<semver::Version> {
+    semver::Version::parse(text.trim().trim_start_matches('v')).ok()
 }
 
 /// The stack a report names. A completed command always names one.
@@ -2215,6 +2285,7 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
         has_failed_step,
         update_in_progress,
         unfinished_update,
+        settled_update: None,
         observed: observation(saved.get("observed"))?,
         app_paths: app_paths(saved.get("appPaths")),
     })
@@ -2547,13 +2618,18 @@ fn update_releases<'a>(report: &'a Report, target: Option<&'a str>) -> Option<(&
     if report.outcome != Outcome::Completed {
         return None;
     }
-    let version = |text: &str| semver::Version::parse(text.trim().trim_start_matches('v')).ok();
     let to = if stack.update_in_progress {
         stack.unfinished_update.as_ref()?.to.as_str()
+    } else if let Some(settled) = &stack.settled_update {
+        // The CLI resumes the record it keeps, settled or not, whatever this app's CLI installs.
+        settled.to.as_str()
     } else {
         target?
     };
-    Some((to, version(to)? > version(&stack.installed_release)?))
+    Some((
+        to,
+        release_version(to)? > release_version(&stack.installed_release)?,
+    ))
 }
 
 /**
@@ -4522,7 +4598,7 @@ fn update_resumes(
             ..
         }) => {
             let saved = repaired_before(stack, saved);
-            Ok(match saved.unfinished_update {
+            Ok(match saved.unfinished_update.or(saved.settled_update) {
                 Some(unfinished) => Some(Some(unfinished.to)),
                 // An update on record that does not name its release is the CLI's own business.
                 None if saved.update_in_progress => None,
@@ -5777,6 +5853,73 @@ mod tests {
                 ),
                 other
             );
+        }
+    }
+
+    /// An update the CLI keeps on record is settled only on a running stack it says is `degraded`,
+    /// and only when its release is not newer than the one installed: the CLI never resumes that
+    /// one. Settled, nothing is on record and the stack is ready when every check passed, while
+    /// `local update` is still read as the CLI runs it. Any other record is kept as reported.
+    #[test]
+    fn only_an_update_on_record_the_cli_never_resumes_is_settled() {
+        let on_record = |readiness: &str, installed: &str, to: &str, passed: bool| {
+            let mut input = canonical(readiness, "valid", Value::Null);
+            input["readiness"]["checks"] = json!([
+                { "name": "api", "ok": passed },
+                { "name": "gateway", "ok": passed },
+                { "name": "dashboard", "ok": true }
+            ]);
+            input["stack"]["installedRelease"] = json!(installed);
+            input["stack"]["update"] = json!({ "attemptedRelease": to, "state": "prepared" });
+            status(&input).unwrap()
+        };
+        let target = Some("0.16.0-rc.13");
+        for (installed, to) in [
+            ("0.16.0-rc.13", "0.16.0-rc.13"),
+            ("v0.16.0-rc.13", "0.16.0-rc.13"),
+            ("0.16.0-rc.13", "0.16.0-rc.12"),
+            ("0.16.0", "0.16.0-rc.13"),
+        ] {
+            let settled = on_record("degraded", installed, to, true);
+            assert_eq!(settled.readiness, Readiness::Ready, "{installed} {to}");
+            let stack = settled.stack.as_ref().unwrap();
+            assert!(!stack.update_in_progress);
+            assert_eq!(stack.unfinished_update, None);
+            assert_eq!(stack.settled_update.as_ref().unwrap().to, to);
+            // The window is sent nothing on record.
+            let wire = serde_json::to_value(&settled).unwrap();
+            assert_eq!(wire["stack"]["unfinishedUpdate"], Value::Null);
+            assert!(wire["stack"].get("settledUpdate").is_none(), "{wire}");
+            // Nothing to update, and a refused `local update` is nothing to update either,
+            // whatever release this app's CLI installs.
+            for target in [target, Some("0.16.0-rc.14"), None] {
+                assert_eq!(update_due(&settled, target), None);
+                assert!(already_on_release(&settled, target));
+            }
+            // A back end that does not answer stays degraded, with nothing on record.
+            let down = on_record("degraded", installed, to, false);
+            assert_eq!(down.readiness, Readiness::Degraded);
+            assert_eq!(down.stack.unwrap().unfinished_update, None);
+        }
+        // Kept as reported: a newer release, one that does not read, and a stack that is stopped
+        // or still starting.
+        for (readiness, installed, to) in [
+            ("degraded", "0.16.0-rc.12", "0.16.0-rc.13"),
+            ("degraded", "latest", "0.16.0-rc.13"),
+            ("degraded", "0.16.0-rc.13", "latest"),
+            ("stopped", "0.16.0-rc.13", "0.16.0-rc.13"),
+            ("starting", "0.16.0-rc.13", "0.16.0-rc.13"),
+        ] {
+            let kept = on_record(readiness, installed, to, true);
+            assert_ne!(
+                kept.readiness,
+                Readiness::Ready,
+                "{readiness} {installed} {to}"
+            );
+            let stack = kept.stack.unwrap();
+            assert!(stack.update_in_progress);
+            assert_eq!(stack.unfinished_update.unwrap().to, to);
+            assert_eq!(stack.settled_update, None);
         }
     }
 

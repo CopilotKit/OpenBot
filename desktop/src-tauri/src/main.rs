@@ -17077,6 +17077,7 @@ mod tests {
             has_failed_step: false,
             update_in_progress: false,
             unfinished_update: None,
+            settled_update: None,
             observed: None,
             app_paths: Vec::new(),
         }
@@ -21827,6 +21828,179 @@ fn main() {
                 }],
                 "{status}"
             );
+        }
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// `local status` for a running stack the CLI says is `degraded` while it keeps `update` on
+    /// record, every check passed and its licence valid, as the CLI's readiness check prints it.
+    fn status_degraded_on(installed: &str, update: serde_json::Value) -> String {
+        let mut status: serde_json::Value =
+            serde_json::from_str(&status_on(installed, update)).unwrap();
+        status["readiness"] = serde_json::json!({
+            "state": "degraded",
+            "checkedAt": "2026-11-16T09:00:00.000Z",
+            "checks": [
+                { "name": "api", "ok": true },
+                { "name": "gateway", "ok": true },
+                { "name": "dashboard", "ok": true }
+            ]
+        });
+        status["license"] = serde_json::json!({ "state": "valid", "expiresAt": null });
+        status.to_string()
+    }
+
+    /// An update the CLI keeps on record because it did not finish, moving to `to`.
+    fn update_on_record(to: &str) -> serde_json::Value {
+        serde_json::json!({
+            "attemptedRelease": to,
+            "state": "prepared",
+            "observedSchema": null,
+            "recoveryCommand": "copilotkit local update --stack local-abc123"
+        })
+    }
+
+    /// `local status` through `run_local_eval`, in a window that has just launched, against a CLI
+    /// that answers it with `status`: the answer as the window reads it, and the `setup_failed`
+    /// events it recorded.
+    fn status_through_the_command(
+        cli: &desktop_telemetry::fake_cli::FakeCli,
+        status: &str,
+        label: &str,
+    ) -> (serde_json::Value, Vec<telemetry::EventData>) {
+        cli.forget_calls();
+        cli.answer_to("status", status, 0);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root(&format!("{label}-telemetry")),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let report = tauri::async_runtime::block_on(run_local_eval(
+            app.handle().clone(),
+            format!("{label}-attempt"),
+            local_eval::Action::Status,
+            "local-abc123".into(),
+        ))
+        .expect("the CLI answered");
+        assert!(cli.calls().contains("local status"), "{}", cli.calls());
+        (serde_json::to_value(report).unwrap(), setup_failures(&app))
+    }
+
+    /// The window's reading of a status answer: OpenBot opens by itself, ready with a valid
+    /// licence and no update on record (`chatGate`), with nothing said about an update that did
+    /// not finish (`onInstalledRelease`) and no update to run first (`updateTo`).
+    fn opens_openbot(wire: &serde_json::Value) {
+        assert_eq!(wire["outcome"], "completed", "{wire}");
+        assert_eq!(wire["readiness"], "ready", "{wire}");
+        assert_eq!(wire["licence"], "valid", "{wire}");
+        assert_eq!(wire["checksPassed"], true, "{wire}");
+        assert_eq!(wire["updateTo"], serde_json::Value::Null, "{wire}");
+        assert_eq!(wire["stack"]["updateInProgress"], false, "{wire}");
+        assert_eq!(
+            wire["stack"]["unfinishedUpdate"],
+            serde_json::Value::Null,
+            "{wire}"
+        );
+    }
+
+    /**
+    Found on a real Mac, Internal build 1.0.4-internal.1265: the CLI kept an unfinished update on
+    record (`prepared`) moving to the release the stack already ran, 0.16.0-rc.13. It refuses to
+    resume one ("Local update only moves to a newer release") and no command clears it, so `local
+    status` says `degraded` for as long as it stays. Desktop logged that there was nothing to
+    update and sent no `setup_failed`, but read the record as an update that did not finish: the
+    window stopped on "The OpenBot update didn't finish... It tries again the next time it starts",
+    OpenBot opened only after Show OpenBot, and the record, still there, said it again on the next
+    launch. Now that record is settled: the window reads the stack ready with nothing on record and
+    opens OpenBot, on the first launch, after the refused update, and on a relaunch.
+    */
+    #[test]
+    fn an_update_on_record_to_the_release_the_stack_runs_opens_openbot_on_every_launch() {
+        if crate::test_support::isolated_process(
+            "tests::an_update_on_record_to_the_release_the_stack_runs_opens_openbot_on_every_launch",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-settled-update-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-settled-update-cli", false);
+        // On the release on record, and past it: the CLI resumes neither.
+        for installed in [BUNDLED_RELEASE, "0.16.0"] {
+            let status = status_degraded_on(installed, update_on_record(BUNDLED_RELEASE));
+            // The first launch.
+            let (wire, failures) =
+                status_through_the_command(&cli, &status, "openbot-settled-update-first");
+            opens_openbot(&wire);
+            assert_eq!(failures, vec![], "{installed}");
+            // The update the real Mac ran, refused, is nothing to update, and opens OpenBot too.
+            let (report, failures) = update_through_the_command(
+                &cli,
+                &update_refused(&format!(
+                    "This stack already runs {installed}. Local update only moves to a newer release."
+                )),
+                &status,
+                "openbot-settled-update-refused",
+            );
+            opens_openbot(&serde_json::to_value(report.expect("the CLI answered")).unwrap());
+            assert_eq!(failures, vec![], "{installed}");
+            // A relaunch, with the record still kept: the same, and no update is asked for.
+            let (wire, failures) =
+                status_through_the_command(&cli, &status, "openbot-settled-update-relaunch");
+            opens_openbot(&wire);
+            assert_eq!(failures, vec![], "{installed}");
+            assert!(!cli.calls().contains("local update"), "{}", cli.calls());
+        }
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// An update on record to a release newer than the stack's is one that really did not finish:
+    /// unchanged by the settled one above. The window still reads it on record, on the release it
+    /// had, and is asked to resume it before OpenBot starts, saying so while it does.
+    #[test]
+    fn an_update_on_record_to_a_newer_release_is_still_resumed() {
+        if crate::test_support::isolated_process(
+            "tests::an_update_on_record_to_a_newer_release_is_still_resumed",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-unfinished-update-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
+        let cli =
+            desktop_telemetry::fake_cli::FakeCli::pinned("openbot-unfinished-update-cli", false);
+        for to in [BUNDLED_RELEASE, "0.16.0"] {
+            let status = status_degraded_on("0.16.0-rc.2", update_on_record(to));
+            for label in [
+                "openbot-unfinished-update-first",
+                "openbot-unfinished-update-relaunch",
+            ] {
+                let (wire, failures) = status_through_the_command(&cli, &status, label);
+                assert_eq!(wire["outcome"], "completed", "{wire}");
+                assert_eq!(wire["readiness"], "degraded", "{wire}");
+                assert_eq!(wire["checksPassed"], true, "{wire}");
+                assert_eq!(wire["updateTo"], to, "{wire}");
+                assert_eq!(wire["stack"]["updateInProgress"], true, "{wire}");
+                assert_eq!(
+                    wire["stack"]["unfinishedUpdate"],
+                    serde_json::json!({
+                        "to": to,
+                        "prepared": true,
+                        "stoppedDownloading": false
+                    }),
+                    "{wire}"
+                );
+                assert_eq!(failures, vec![], "{to}");
+            }
         }
         let _ = std::fs::remove_dir_all(&cli.dir);
     }
