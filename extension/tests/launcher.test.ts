@@ -1056,6 +1056,10 @@ test("Stop leaves the recording it ended, by name, for OpenBot to confirm it wen
   expect((await launcher().state()).lastStopped).toBeUndefined();
   clock += 30_000;
   const stoppedAt = clock;
+  // Intelligence acknowledges the last of it after it has its events, as it can on a loaded machine: the batch
+  // before the last is held, so the last, with the closing outcome, can be held too.
+  const before = gateway.batches.length;
+  gateway.delayNextAck(200);
   const stopped = await launcher().record({ action: "stop" });
   expect(stopped).toMatchObject({
     ok: true,
@@ -1065,9 +1069,18 @@ test("Stop leaves the recording it ended, by name, for OpenBot to confirm it wen
     },
   });
   await until(
+    () => gateway.batches.length > before,
+    "the batch before the last",
+  );
+  gateway.delayNextAck(500);
+  await until(
     () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
     "the recording stopped",
   );
+  // Intelligence has the outcome, but the recording is still sending until its acknowledgement is back.
+  const drains = () =>
+    (fake.storage.local.get("drains") as DrainRecord[] | undefined) ?? [];
+  await until(() => drains().length === 0, "the last of it to be sent");
   // Nothing was done and nothing said in it: both counts say so, for OpenBot to say nothing was recorded.
   expect((await launcher().state()).lastStopped).toEqual({
     recordingId: recordingId ?? "",
