@@ -24,6 +24,7 @@ import {
   RoutineDetailMissing,
   useDeletedHere,
 } from "@/components/routines/routine-detail-missing";
+import { useRoutineRuns } from "@/components/routines/use-routine-runs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,6 +46,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { deleteQuestion } from "@/lib/delete-question";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
@@ -56,7 +58,6 @@ import {
 import {
   type RoutineRecord,
   type RoutineRunRecord,
-  routineRunsQueryOptions,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -158,7 +159,7 @@ const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
  * status. Polled with the routine's runs read, so the one Run now started appears without a reload.
  */
 function RoutineRuns({ routine }: { routine: RoutineRecord }) {
-  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  const runs = useRoutineRuns(routine.id);
   return (
     <PageSection title="Runs">
       {runs.isPending ? (
@@ -203,11 +204,11 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                       </ItemDescription>
                     ) : null}
                   </ItemContent>
-                  {routine.channel.gone ? null : (
+                  {routine.conversation.gone ? null : (
                     <ItemActions>
                       <Link
                         className="text-sm underline"
-                        params={{ channelId: routine.channel.id }}
+                        params={{ channelId: routine.conversation.id }}
                         to="/channel/$channelId"
                       >
                         Open conversation
@@ -261,14 +262,14 @@ export function RoutineRoutePage({
     );
   // A routine outlives hiding its Bot, so a hidden Bot still names it.
   const botName = [...(bots.data ?? []), ...(hidden.data ?? [])].find(
-    (bot) => bot.id === routine.agentId,
+    (bot) => bot.id === routine.botId,
   )?.name;
   return (
     <RoutinePage
       back={back}
       bot={
         agentId === undefined
-          ? { id: routine.agentId, name: botName ?? "A Bot" }
+          ? { id: routine.botId, name: botName ?? "A Bot" }
           : undefined
       }
       key={routine.id}
@@ -301,6 +302,8 @@ export function RoutinePage({
   const lastRun = lastRunLabel(routine.lastRun);
   const next = nextRunWords(routine);
   const does = routineDoes(routine);
+  // What the page's heading and the Routines list call it.
+  const named = routine.title ?? does;
   const facts = [
     {
       key: "schedule",
@@ -337,7 +340,7 @@ export function RoutinePage({
           ? `${routine.schedule} · ${routine.timezone} · Acts`
           : "Paused. Nothing starts it until you turn it on."
       }
-      title={routine.title ?? does}
+      title={named}
     >
       {/* What can be done to it now. The page title names it, so this section has no heading. */}
       <PageSection>
@@ -391,7 +394,7 @@ export function RoutinePage({
             </ItemContent>
           </Item>
           <Separator />
-          {routine.channel.gone ? (
+          {routine.conversation.gone ? (
             <Item size="sm">
               <ItemMedia variant="icon">
                 <IconMessageOff />
@@ -409,7 +412,7 @@ export function RoutinePage({
             <Item
               render={
                 <Link
-                  params={{ channelId: routine.channel.id }}
+                  params={{ channelId: routine.conversation.id }}
                   to="/channel/$channelId"
                 />
               }
@@ -421,7 +424,7 @@ export function RoutinePage({
               <ItemContent>
                 <ItemTitle>Open conversation</ItemTitle>
                 <ItemDescription>
-                  {routine.channel.title ?? "Untitled conversation"}
+                  {routine.conversation.title ?? "Untitled conversation"}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -511,11 +514,13 @@ export function RoutinePage({
 
       <RoutineRuns routine={routine} />
 
-      {/* It names the schedule, the words a person reads first on the row. */}
+      {/* It names the routine as its heading and its row do, never its schedule, which two can share. */}
       <Dialog onOpenChange={setConfirming} open={confirming}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete "{routine.schedule}"?</DialogTitle>
+            <DialogTitle>
+              {deleteQuestion(named, "Delete this routine?")}
+            </DialogTitle>
             <DialogDescription>
               This routine stops for good. You can't undo this.
             </DialogDescription>

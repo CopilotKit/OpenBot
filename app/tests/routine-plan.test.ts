@@ -23,8 +23,8 @@ describe("planRoutine", () => {
     expect(planRoutine(base, "UTC")).toEqual({
       kind: "routine",
       routine: {
-        agentId: "bot",
-        channelId: "c1",
+        botId: "bot",
+        conversationId: "c1",
         instruction: "Send the numbers",
         cron: "0 9 * * 1-5",
         timezone: "UTC",
@@ -118,8 +118,8 @@ describe("planRoutine", () => {
     ).toEqual({
       kind: "check-in",
       checkIn: {
-        agentId: "bot",
-        channelId: "c1",
+        botId: "bot",
+        conversationId: "c1",
         focus: "Send the numbers",
         subject: "Launch brief",
         intervalMinutes: 240,
@@ -142,8 +142,8 @@ describe("planRoutine", () => {
     ).toEqual({
       kind: "check-in",
       checkIn: {
-        agentId: "bot",
-        channelId: "c1",
+        botId: "bot",
+        conversationId: "c1",
         focus: "Send the numbers",
         subject: "Send the numbers",
         intervalMinutes: 1440,
@@ -245,13 +245,13 @@ describe("planRoutine", () => {
       "UTC",
     );
     if (routine.kind !== "routine") throw new Error("expected a routine");
-    expect(routine.routine.channelId).toBe(NEW_CONVERSATION);
+    expect(routine.routine.conversationId).toBe(NEW_CONVERSATION);
     const checkIn = planRoutine(
       { ...base, does: "tell", channelId: NEW_CONVERSATION },
       "UTC",
     );
     if (checkIn.kind !== "check-in") throw new Error("expected a check-in");
-    expect(checkIn.checkIn.channelId).toBe(NEW_CONVERSATION);
+    expect(checkIn.checkIn.conversationId).toBe(NEW_CONVERSATION);
   });
 
   test("answers are trimmed", () => {

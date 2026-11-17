@@ -13,6 +13,7 @@ import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
+import { stoppedByYou, taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -46,11 +47,56 @@ export function waitingOnYou(bot: BotAttention): number {
   return asksOf(bot) + bot.tasks.ready + bot.tasks.failed;
 }
 
+/**
+ * How many things wait on the person across all their Bots: the one number every badge, bell and tab
+ * shows, in OpenBot's sidebar and in every skin. Counted once, by the server's rule (`waitingOnYou`
+ * per Bot), so a skin never counts its own way: one that counted the approval inbox said 1 while
+ * the Bots badge said 2, because a failed task or a task waiting on a question is in one and not the
+ * other.
+ */
+export function waitingAcross(
+  bots: readonly BotAttention[] | undefined,
+): number {
+  return (bots ?? []).reduce((total, bot) => total + waitingOnYou(bot), 0);
+}
+
+/** {@link waitingAcross}, read live, for whatever draws the number. */
+export function useWaitingCount(): number {
+  return waitingAcross(useQuery(botAttentionQueryOptions()).data);
+}
+
+/**
+ * The same count, read live, for one Bot or, given none, across all of them: what a list of what
+ * waits on the person says beside its rows, so it says the badge's number and never its own.
+ */
+export function useWaitingOnYou(): (botId?: string) => number {
+  const bots = useQuery(botAttentionQueryOptions()).data;
+  return (botId) =>
+    waitingAcross(
+      botId === undefined ? bots : bots?.filter((bot) => bot.botId === botId),
+    );
+}
+
 const count = (total: number, one: string, many: string) =>
   `${total} ${total === 1 ? one : many}`;
 
-/** What the badge says, in words, for the row's accessible name and its tooltip. */
-export function attentionSummary(bot: BotAttention): string {
+/**
+ * How many of each Bot's tasks the person stopped, from the task list. The server counts a stopped
+ * task among the failed ones, since its status is failed; the words tell the two apart.
+ */
+export function useStoppedTasks(): (botId: string) => number {
+  const tasks = useQuery(taskListQueryOptions());
+  return (botId) =>
+    (tasks.data ?? []).filter(
+      (task) => task.agentId === botId && stoppedByYou(task),
+    ).length;
+}
+
+/**
+ * What the badge says, in words, for the row's accessible name and its tooltip. `stopped` is how
+ * many of its failed tasks the person stopped themselves: those are said as stopped, not failed.
+ */
+export function attentionSummary(bot: BotAttention, stopped = 0): string {
   const parts: string[] = [];
   if (bot.questions) parts.push(count(bot.questions, "question", "questions"));
   if (bot.approvals) parts.push(count(bot.approvals, "approval", "approvals"));
@@ -69,8 +115,10 @@ export function attentionSummary(bot: BotAttention): string {
     parts.push(count(bot.items, "thing needs you", "things need you"));
   if (bot.tasks.ready)
     parts.push(count(bot.tasks.ready, "task to review", "tasks to review"));
-  if (bot.tasks.failed)
-    parts.push(count(bot.tasks.failed, "failed task", "failed tasks"));
+  const byYou = Math.min(stopped, bot.tasks.failed);
+  const failed = bot.tasks.failed - byYou;
+  if (failed) parts.push(count(failed, "failed task", "failed tasks"));
+  if (byYou) parts.push(count(byYou, "stopped task", "stopped tasks"));
   if (bot.unread) parts.push(`${bot.unread} unread`);
   return parts.join(", ");
 }
@@ -96,7 +144,7 @@ const titleKey = (title: string) =>
  * something needs them, without a title it cannot name.
  */
 export function pingNotice(
-  items: Pick<ProactiveSuggestion, "agentId" | "title">[],
+  items: Pick<ProactiveSuggestion, "botId" | "title">[],
   botName: (agentId: string) => string | undefined,
 ): { title: string; body: string } {
   const seen = new Set<string>();
@@ -112,7 +160,7 @@ export function pingNotice(
       body: "Open Bots to see what's waiting.",
     };
   const lines = once.slice(0, PING_LISTED).map((item) => {
-    const bot = botName(item.agentId);
+    const bot = botName(item.botId);
     return bot ? `${bot}: ${item.title}` : item.title;
   });
   const more = once.length - PING_LISTED;
@@ -137,7 +185,7 @@ export function pingNotice(
 export function noticePath(bot: BotAttention): string {
   return bot.waitingIn
     ? `/channel/${encodeURIComponent(bot.waitingIn)}`
-    : `/bots/${encodeURIComponent(bot.agentId)}`;
+    : `/bots/${encodeURIComponent(bot.botId)}`;
 }
 
 /**
@@ -158,12 +206,12 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
   useEffect(() => {
     if (!bots) return;
     const previous = seen.current;
-    seen.current = new Map(bots.map((bot) => [bot.agentId, asksOf(bot)]));
+    seen.current = new Map(bots.map((bot) => [bot.botId, asksOf(bot)]));
     // The first answer is the state on arrival, not news.
     if (!previous) return;
     const rose = bots.filter(
       (bot) =>
-        bot.notify !== "none" && asksOf(bot) > (previous.get(bot.agentId) ?? 0),
+        bot.notify !== "none" && asksOf(bot) > (previous.get(bot.botId) ?? 0),
     );
     if (rose.length === 0) return;
     void notificationsAllowed().then((allowed) => {
@@ -176,7 +224,7 @@ function useAttentionNotifications(bots: BotAttention[] | undefined) {
           // The conversation's tag when it waits in one: its reply notice, if any, is replaced by this.
           tag: bot.waitingIn
             ? conversationTag(bot.waitingIn)
-            : `openbot-attention-${bot.agentId}`,
+            : `openbot-attention-${bot.botId}`,
           path: noticePath(bot),
         });
     });
@@ -216,8 +264,7 @@ function usePingNotifications(
       const { data } = await refetch();
       const notice = pingNotice(
         (data ?? []).filter((item) => item.pingId === lastPingId),
-        (agentId) =>
-          names.current?.find((bot) => bot.agentId === agentId)?.name,
+        (agentId) => names.current?.find((bot) => bot.botId === agentId)?.name,
       );
       // Bots lists what the ping carried first, under Needs you.
       showNotice({
@@ -249,7 +296,7 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
   useAttentionNotifications(attention.data);
   usePingNotifications(lastPing.data, attention.data);
   const bots = attention.data ?? [];
-  const waiting = bots.reduce((total, bot) => total + waitingOnYou(bot), 0);
+  const waiting = waitingAcross(bots);
   if (waiting > 0) {
     return (
       <span

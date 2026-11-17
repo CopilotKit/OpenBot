@@ -63,7 +63,7 @@ Keep the client ID and client secret for the next step.
 
 At `/admin/plugins/google-drive`:
 
-1. Turn on **Enable for this deployment**.
+1. Turn on **Enable for this organization**.
 2. Open **OAuth client** and paste the client ID and secret. The secret is encrypted with
    `KEY_ENCRYPTION_KEY` and never read back out to the browser.
 3. Press **Refresh tools**, which records the four read tools this connector implements.

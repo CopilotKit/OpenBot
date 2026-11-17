@@ -1,1 +1,0 @@
-ALTER TABLE "channels" ADD COLUMN "opening" text;

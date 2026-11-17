@@ -13,7 +13,6 @@ import {
 import {
   type LearningSpaceState,
   RECORDER_SIGNED_OUT,
-  recorderPaths,
 } from "@openbot/shared/recorder-api";
 import {
   type CapturedEvent,
@@ -103,21 +102,27 @@ function route(request: Request): Response | Promise<Response> | null {
   const path = new URL(request.url).pathname;
   const token =
     request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  if (path.startsWith("/api/recorder/"))
+  if (path.startsWith("/api/v2/organizations/default/recorder"))
     openbotAsked.push(`${request.method} ${path}`);
-  if (path === recorderPaths.connections && request.method === "POST")
+  if (
+    path === "/api/v2/organizations/default/recorder-connections" &&
+    request.method === "POST"
+  )
     return exchange();
-  if (path === recorderPaths.currentConnection && request.method === "DELETE") {
+  if (
+    path === "/api/v2/organizations/default/recorder-connections/current" &&
+    request.method === "DELETE"
+  ) {
     revokedTokens.push(token);
     liveTokens.delete(token);
     return new Response(null, { status: 204 });
   }
-  if (path === "/api/recorder/me") {
+  if (path === "/api/v2/organizations/default/recorder/me") {
     meAsked.push(token);
     if (!liveTokens.has(token))
       return Response.json(
         {
-          error: "This browser is no longer connected to OpenBot.",
+          detail: "This browser is no longer connected to OpenBot.",
           code: RECORDER_SIGNED_OUT,
           reason: "revoked",
         },
@@ -128,9 +133,9 @@ function route(request: Request): Response | Promise<Response> | null {
       connectionId: `c-${token}`,
     });
   }
-  if (path === recorderPaths.learning && learning)
+  if (path === "/api/v2/organizations/default/recorder/learning" && learning)
     return Response.json({ learning });
-  if (path.startsWith("/api/recorder/"))
+  if (path.startsWith("/api/v2/organizations/default/recorder"))
     return Response.json({ error: "Not found." }, { status: 404 });
   const pass = /^\/api\/copilotkit\/trajectory\/([^/]+)\/connect$/.exec(path);
   if (!pass || request.method !== "POST") return null;
@@ -693,9 +698,7 @@ test("an OpenBot browser shows no setup tab and no Connect page: none on a later
   fake.restartServiceWorker();
   startWorker();
   const before = fake.opened.length;
-  fake.fireInstalled("install");
-  await settle();
-  await settle();
+  await fake.fireInstalled("install");
   expect(fake.opened.length).toBe(before);
   // Desktop was not even asked for a code it would mint for nothing.
   expect(
@@ -1053,6 +1056,10 @@ test("Stop leaves the recording it ended, by name, for OpenBot to confirm it wen
   expect((await launcher().state()).lastStopped).toBeUndefined();
   clock += 30_000;
   const stoppedAt = clock;
+  // Intelligence acknowledges the last of it after it has its events, as it can on a loaded machine: the batch
+  // before the last is held, so the last, with the closing outcome, can be held too.
+  const before = gateway.batches.length;
+  gateway.delayNextAck(200);
   const stopped = await launcher().record({ action: "stop" });
   expect(stopped).toMatchObject({
     ok: true,
@@ -1062,9 +1069,18 @@ test("Stop leaves the recording it ended, by name, for OpenBot to confirm it wen
     },
   });
   await until(
+    () => gateway.batches.length > before,
+    "the batch before the last",
+  );
+  gateway.delayNextAck(500);
+  await until(
     () => names(trajectoryId).filter((name) => name === "outcome").length === 2,
     "the recording stopped",
   );
+  // Intelligence has the outcome, but the recording is still sending until its acknowledgement is back.
+  const drains = () =>
+    (fake.storage.local.get("drains") as DrainRecord[] | undefined) ?? [];
+  await until(() => drains().length === 0, "the last of it to be sent");
   // Nothing was done and nothing said in it: both counts say so, for OpenBot to say nothing was recorded.
   expect((await launcher().state()).lastStopped).toEqual({
     recordingId: recordingId ?? "",

@@ -11,11 +11,18 @@ import {
 } from "react-native";
 import {
   type ApprovalRule,
-  type ApprovalSettings,
-  api,
   BEHAVIOUR_LABELS,
+  loadApprovalSettings,
+  ME,
+  ORGANIZATION_ID,
   type RuleBehaviour,
 } from "../src/api";
+import {
+  createPersonApprovalRule,
+  deletePersonApprovalRule,
+  updateApprovalPreferences,
+  updatePersonApprovalRule,
+} from "../src/api/generated/approvals/approvals";
 import { authClient } from "../src/auth";
 import {
   card,
@@ -80,7 +87,7 @@ export default function RulesScreen() {
   const action = useAction();
   const [toolRef, setToolRef] = useState("");
   const [behaviour, setBehaviour] = useState<RuleBehaviour>("ask");
-  const load = useCallback(() => api<ApprovalSettings>("/api/approvals"), []);
+  const load = useCallback(() => loadApprovalSettings(), []);
   const settings = useLoad(load, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const data = settings.data;
@@ -92,17 +99,16 @@ export default function RulesScreen() {
   );
   const editable = data?.team?.customRulesEnabled !== false;
 
-  const setPreference = (body: Record<string, boolean>) =>
+  const setPreference = (change: { enabled?: boolean; autoReview?: boolean }) =>
     action.run("preferences", async () => {
-      await api("/api/approvals/preferences", { method: "PATCH", body });
+      await updateApprovalPreferences(ORGANIZATION_ID, ME, change);
       await settings.refresh();
     });
   /** A rule's behaviour is edited in place, so it keeps its id and its audit history. */
   const changeRule = (rule: ApprovalRule, next: RuleBehaviour) =>
     action.run(rule.id, async () => {
-      await api(`/api/approvals/rules/${encodeURIComponent(rule.id)}`, {
-        method: "PATCH",
-        body: { behaviour: next },
+      await updatePersonApprovalRule(ORGANIZATION_ID, ME, rule.id, {
+        behaviour: next,
       });
       await settings.refresh();
     });
@@ -199,9 +205,10 @@ export default function RulesScreen() {
                     style: "destructive",
                     onPress: () => {
                       void action.run(rule.id, async () => {
-                        await api(
-                          `/api/approvals/rules/${encodeURIComponent(rule.id)}`,
-                          { method: "DELETE" },
+                        await deletePersonApprovalRule(
+                          ORGANIZATION_ID,
+                          ME,
+                          rule.id,
                         );
                         await settings.refresh();
                       });
@@ -232,9 +239,10 @@ export default function RulesScreen() {
               disabled={Boolean(action.busy) || !toolRef.trim()}
               onPress={() => {
                 void action.run("add", async () => {
-                  await api("/api/approvals/rules", {
-                    method: "POST",
-                    body: { botId, toolRef: toolRef.trim(), behaviour },
+                  await createPersonApprovalRule(ORGANIZATION_ID, ME, {
+                    botId,
+                    toolRef: toolRef.trim(),
+                    behaviour,
                   });
                   setToolRef("");
                   await settings.refresh();

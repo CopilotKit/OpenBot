@@ -1,4 +1,3 @@
-import { IconMoon } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import React from "react";
 import {
@@ -11,18 +10,16 @@ import { MessageListPreference } from "@/components/settings/message-list-prefer
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
 import { StarOnGitHubSection } from "@/components/settings/star-on-github";
+import { ThemeRow } from "@/components/settings/theme-row";
 import { UsageDataSection } from "@/components/settings/usage-data";
-import { useTheme } from "@/components/theme-provider";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
 import { SkinPicker } from "@/skins/skin-picker";
 
@@ -31,8 +28,6 @@ export const Route = createFileRoute("/_authed/settings/")({
 });
 
 function RouteComponent() {
-  const { dark, setDark } = useTheme();
-
   /*
    * The measurements that used to be written out here now live in `PageShell`, which Skills, Admin
    * and this screen all render through. The reason they match is no longer that somebody remembered
@@ -63,24 +58,7 @@ function RouteComponent() {
       <UsageDataSection />
       <PageSection title="Appearance">
         <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconMoon />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Dark theme</ItemTitle>
-              <ItemDescription>
-                Use the dark appearance across OpenBot.
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-label="Dark theme"
-                checked={dark}
-                onCheckedChange={setDark}
-              />
-            </ItemActions>
-          </Item>
+          <ThemeRow />
           <Separator />
           <SkinPicker />
         </PageRows>

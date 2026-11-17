@@ -23,6 +23,11 @@
 //! And Quit (`quit`), for Ctrl+Q in the window on Windows (`QUIT_SHORTCUT_PAGE`), and Zoom
 //! (`zoom`), for the zoom keys no menu carries (`zoom::SHORTCUT_PAGE`). The setup and Status pages
 //! are granted both too (`capabilities/default.json`).
+//!
+//! And where OpenBot runs (`connection`, `sign_out`, `change_connection`, `set_organization`): on
+//! this computer, or at an address the app is connected to (`desktop_connected`). While it is
+//! connected, `status` answers the app's own facts only, and what is about an OpenBot on this
+//! computer (`restart`, `stop`, `intelligence`, `ai_connection`, `change_ai_connection`) is refused.
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -33,7 +38,11 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 21] = [
+pub const PERMISSIONS: [&str; 25] = [
+    "openbot-desktop:allow-connection",
+    "openbot-desktop:allow-sign-out",
+    "openbot-desktop:allow-change-connection",
+    "openbot-desktop:allow-set-organization",
     "openbot-desktop:allow-appearance",
     "openbot-desktop:allow-status",
     "openbot-desktop:allow-restart",
@@ -61,21 +70,21 @@ pub const PERMISSIONS: [&str; 21] = [
 The page's own light or dark, for the window: macOS draws a window's outline from the window's
 appearance, and a dark one is a black line around a light page.
 
+`system` says the page is following the system, and then the window follows it too and is not
+pinned (`window_theme`). An OpenBot from before it followed the system sends none, and is pinned.
+
 Its own command rather than the window plugin's `set_theme`: granted to this origin, that call was
 refused (the window stayed dark), and this one is ours to see.
 
 Async, like every command here: on Windows a sync one deadlocked the window (see the test below).
 */
 #[tauri::command]
-async fn appearance(window: tauri::Window, dark: bool) -> Result<(), String> {
+async fn appearance(window: tauri::Window, dark: bool, system: Option<bool>) -> Result<(), String> {
+    let system = system.unwrap_or(false);
     window
-        .set_theme(Some(if dark {
-            tauri::Theme::Dark
-        } else {
-            tauri::Theme::Light
-        }))
+        .set_theme(crate::window_theme(dark, system))
         .map_err(|error| error.to_string())?;
-    crate::page_appearance(&window, dark);
+    crate::page_appearance(&window, dark, system);
     Ok(())
 }
 
@@ -90,13 +99,57 @@ async fn status(
 
 #[tauri::command]
 pub async fn restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    crate::desktop_connected::nothing_here(&app)?;
     crate::restart_openbot_from(app, crate::AskedFrom::Settings).await
 }
 
 /// Stops everything, as the menu's Stop did. The page asking goes with it; the window shows setup.
+/// Refused while the app is connected to an OpenBot that runs elsewhere: there is none here.
 #[tauri::command]
-pub async fn stop<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+pub async fn stop<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    crate::desktop_connected::nothing_here(&app)?;
     crate::stop_from_menu(app, crate::AskedFrom::Settings);
+    Ok(())
+}
+
+/// Where OpenBot runs: on this computer, or at an address this app is connected to, with the
+/// organisation picked there. Never a token.
+#[tauri::command]
+async fn connection(app: tauri::AppHandle) -> crate::desktop_connected::Connection {
+    crate::desktop_connected::connection_now(&app, false)
+}
+
+/// Settings' Sign out, while connected: signed out of that OpenBot, and the setup window. The
+/// page asking goes with it.
+#[tauri::command]
+async fn sign_out(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::desktop_connected::sign_out_now(&app);
+        crate::show_setup(app)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Settings' Change on where OpenBot runs: the setup window at that choice, after signing out of
+/// the OpenBot the app is connected to, or after stopping the one on this computer.
+#[tauri::command]
+async fn change_connection(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::desktop_connected::change_connection_now(&app)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// The organisation the person picked in the switcher, which every request names from now on.
+/// None for no choice. Something that is not an organisation's id is refused.
+#[tauri::command]
+async fn set_organization(
+    app: tauri::AppHandle,
+    organization_id: Option<String>,
+) -> Result<(), String> {
+    crate::desktop_connected::set_organization_now(&app, organization_id)
 }
 
 /// `local status`, `start` or `stop` for the stack recorded for this installation.
@@ -105,6 +158,10 @@ async fn intelligence(
     app: tauri::AppHandle,
     action: local_eval::Action,
 ) -> Result<local_eval::Report, local_eval::Failure> {
+    // Connected to an OpenBot that runs elsewhere: there is no backend on this computer to ask.
+    if crate::desktop_connected::is_connected(&app) {
+        return Err(local_eval::Failure::Unavailable);
+    }
     let root = crate::cleanup_root(&app.state::<crate::Shell>(), &stack::default_root());
     let stack = local_eval_state::read(&root, None)
         .ok_or(local_eval::Failure::Unavailable)?
@@ -207,15 +264,20 @@ async fn notify(
 /// Settings' AI model row: the provider and sign-in OpenBot starts with, the model when one was
 /// named, and a custom address's host. Never a key or a token.
 #[tauri::command]
-async fn ai_connection(app: tauri::AppHandle) -> openbot_desktop_lib::ai_connection::AiConnection {
-    crate::ai_connection_now(&app)
+async fn ai_connection(
+    app: tauri::AppHandle,
+) -> Result<openbot_desktop_lib::ai_connection::AiConnection, String> {
+    crate::desktop_connected::nothing_here(&app)?;
+    Ok(crate::ai_connection_now(&app))
 }
 
 /// The AI model row's Change: Stop, then the setup window at its AI screen, the one its Change AI
 /// connection opens. The page asking goes with OpenBot, as with Stop.
 #[tauri::command]
-async fn change_ai_connection(app: tauri::AppHandle) {
+async fn change_ai_connection(app: tauri::AppHandle) -> Result<(), String> {
+    crate::desktop_connected::nothing_here(&app)?;
     crate::change_ai_connection_from_settings(app);
+    Ok(())
 }
 
 /// Settings' Share usage data: whether this installation shares, and whether the app's own
@@ -273,7 +335,11 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             usage_data,
             set_usage_data,
             quit,
-            zoom
+            zoom,
+            connection,
+            sign_out,
+            change_connection,
+            set_organization
         ])
         .build()
 }

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { NativeDevices, RecentDeliveries } from "@/components/settings/devices";
+import { devicePath, notificationsResponse } from "./notifications-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Settings → Notifications: the person's phones, and what was recently sent to them. */
@@ -25,21 +26,22 @@ function serving() {
   requests.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     requests.push(`${init?.method ?? "GET"} ${String(input)}`);
-    return Response.json({
-      bindings: [],
-      devices: [{ id: "d1", platform: "ios", enabled: true }],
-      deliveries: [
-        {
-          id: "x",
-          transport: "push",
-          kind: "question",
-          state: "sent",
-          error: null,
-          createdAt: "2026-10-09T10:00:00Z",
-        },
-      ],
-      available: { slack: false, teams: false, sms: false, push: true },
-    });
+    return (
+      notificationsResponse(init?.method ?? "GET", String(input), {
+        devices: [{ id: "d1", platform: "ios" }],
+        deliveries: [
+          {
+            id: "x",
+            transport: "push",
+            kind: "question",
+            state: "sent",
+            error: null,
+            createdAt: "2026-10-09T10:00:00Z",
+          },
+        ],
+        available: { push: true },
+      }) ?? new Response(null, { status: 404 })
+    );
   }) as unknown as typeof fetch;
 }
 
@@ -57,9 +59,7 @@ test("a registered phone is listed and can be removed", async () => {
   const view = draw(<NativeDevices />);
   expect(await view.findByText("iOS")).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Remove" }));
-  await waitFor(() =>
-    expect(requests).toContain("DELETE /api/delivery/devices/d1"),
-  );
+  await waitFor(() => expect(requests).toContain(`DELETE ${devicePath("d1")}`));
 });
 
 test("recent deliveries are listed, each by its kind and channel", async () => {

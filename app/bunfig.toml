@@ -8,5 +8,6 @@
 # a no-op, every Dialog mounts nothing, and each test that opens one waits out findByRole("dialog")
 # and fails at testing-library's one-second timeout, while passing from the root.
 #
-# server/tests/bunfig-preload.test.ts fails if this list stops agreeing with the root one.
-preload = ["../server/scripts/test-preload.ts", "./tests/preload.ts"]
+# tests/bunfig-preload.test.ts at the repository root fails if this list stops agreeing with the
+# root one.
+preload = ["../tests/support/network-guard.ts", "./tests/preload.ts"]

@@ -1,1 +1,0 @@
-ALTER TABLE "routines" ADD COLUMN "goal_linked_by_run" boolean DEFAULT false NOT NULL;

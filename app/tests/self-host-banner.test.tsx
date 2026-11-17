@@ -15,6 +15,7 @@ import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -30,10 +31,11 @@ beforeAll(() =>
 beforeEach(() => {
   requests = [];
   response = async () =>
-    Response.json({
+    preferencesResponse({
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: true,
+        starPromptAnswered: false,
       },
     });
   globalThis.fetch = Object.assign(
@@ -90,6 +92,7 @@ function setup({
   const preferences: UserPreferences = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: dismissed,
+    starPromptAnswered: false,
     narration: null,
     skin: "openbot",
     proactive: "on",
@@ -141,7 +144,7 @@ test("closing it hides it at once and saves the choice to this person's preferen
   );
   await waitFor(() => expect(requests.length).toBe(1));
   expect(requests[0]).toEqual({
-    path: "/api/settings/preferences",
+    path: PREFERENCES_PATH,
     method: "PATCH",
     body: JSON.stringify({ selfHostBannerDismissed: true }),
   });

@@ -19,6 +19,7 @@ import {
   within,
 } from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { botPath } from "./bots-api";
 import { Route as BotRoute } from "@/routes/_authed/_app/bot";
 
 let originalRect: typeof HTMLElement.prototype.getBoundingClientRect;
@@ -86,7 +87,8 @@ function queryClientWithAgentsAndFetchedAgent(
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === `/api/agents/${agentId}`) return response.clone();
+      // One Bot, read at the API's address (getBot), as the server answers it.
+      if (url === botPath(agentId)) return response.clone();
       throw new Error(`Unexpected fetch: ${url}`);
     },
     { preconnect: originalFetch.preconnect },
@@ -163,6 +165,7 @@ const PICKED_HARNESS = agent({
   builtIn: false,
   endpoint: "http://127.0.0.1:4201",
   id: "picked-harness",
+  packageBotId: "picked-harness",
   name: "LangGraph",
   title: "LangGraph",
 });
@@ -176,6 +179,34 @@ test("/bot defaults to the picked harness when this setup selected one", async (
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
     "picked-harness",
   );
+});
+
+/*
+ * A new organization has its own copies of the Bots OpenBot starts with, under generated ids. Each
+ * still says which package Bot it is, so /bot opens the picked harness there too.
+ */
+test("/bot defaults to a new organization's copy of the picked harness", async () => {
+  const view = renderBot(
+    queryClientWithAgents([
+      agent({
+        id: "bot_4f1c2a",
+        packageBotId: "general-assistant",
+        name: "General Assistant",
+        title: "Everyday work",
+      }),
+      agent({
+        builtIn: false,
+        endpoint: "http://127.0.0.1:4201",
+        id: "bot_9c2e7d",
+        packageBotId: "picked-harness",
+        name: "LangGraph",
+        title: "LangGraph",
+      }),
+    ]),
+  );
+
+  expect(await view.findByRole("heading", { name: "LangGraph" })).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("bot_9c2e7d");
 });
 
 test("/bot with an empty agent query uses the normal default Bot", async () => {
@@ -196,7 +227,7 @@ test("/bot reports a failed initial roster load instead of claiming there are no
   const view = renderBot(queryClientWithFailingAgents());
 
   expect(
-    await view.findByText("Couldn't load your Bots. Reload the page."),
+    await view.findByText("Couldn't load your Bots. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText("There are no Bots yet.")).toBeNull();
 });
@@ -242,7 +273,7 @@ test("/bot loads a hidden explicit agent from the detail endpoint", async () => 
     queryClientWithAgentsAndFetchedAgent(
       [GENERAL_ASSISTANT],
       "hidden-bot",
-      Response.json({ agent: hiddenBot }),
+      Response.json({ bot: hiddenBot }),
     ),
     "/bot?agent=hidden-bot",
   );
@@ -262,7 +293,7 @@ test("/bot hidden lookup does not collide with the shared agent detail cache", a
   const queryClient = queryClientWithAgentsAndFetchedAgent(
     [GENERAL_ASSISTANT],
     "hidden-bot",
-    Response.json({ agent: hiddenBot }),
+    Response.json({ bot: hiddenBot }),
   );
   queryClient.setQueryData(agentKeys.detail("hidden-bot"), hiddenBot);
   const view = renderBot(queryClient, "/bot?agent=hidden-bot");
@@ -283,7 +314,7 @@ test("/bot reports an explicit agent detail load failure", async () => {
   );
 
   expect((await view.findByRole("alert")).textContent).toBe(
-    "Couldn't load this Bot. Reload the page.",
+    "Couldn't load this Bot. Try again in a moment.",
   );
   expect(view.queryByTestId("copilot-chat")).toBeNull();
 });

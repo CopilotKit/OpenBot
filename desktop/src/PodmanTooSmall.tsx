@@ -13,6 +13,18 @@ import { Command } from "./WindowsBlocker";
 const COULD_NOT =
   "OpenBot couldn't resize your Podman machine. Use the steps below instead.";
 
+/** What the native side said when a resize did not end ready for setup (`ResizeStopped`). */
+function resizeStopped(error: unknown): { said: string; resized: boolean } {
+  if (typeof error === "string" && error)
+    return { said: error, resized: false };
+  if (error && typeof error === "object") {
+    const { said, resized } = error as { said?: unknown; resized?: unknown };
+    if (typeof said === "string" && said)
+      return { said, resized: resized === true };
+  }
+  return { said: COULD_NOT, resized: false };
+}
+
 /**
  * How setup's Podman machine would be made big enough, for the shortfall it stopped on, once the
  * native side has looked at the machine (`podmanMachinePlan`). Null until then, and whenever a
@@ -59,11 +71,15 @@ export function PodmanTooSmall({
 }) {
   const [resizing, setResizing] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const offered = plan.forThem && failed === null;
+  // Resized and running, but not ready to download in time: Retry alone, nothing left to do by hand.
+  const [notReady, setNotReady] = useState<string | null>(null);
+  const offered = plan.forThem && failed === null && notReady === null;
   const commands = podmanResizeCommands(shortfall, plan);
   const heading = offered
     ? "OpenBot can fix this for you"
-    : "Make your Podman machine bigger";
+    : notReady !== null
+      ? "Your Podman machine is bigger now"
+      : "Make your Podman machine bigger";
 
   function resize() {
     setResizing(true);
@@ -71,7 +87,9 @@ export function PodmanTooSmall({
       () => onRetry(),
       (error: unknown) => {
         setResizing(false);
-        setFailed(typeof error === "string" && error ? error : COULD_NOT);
+        const stopped = resizeStopped(error);
+        if (stopped.resized) setNotReady(stopped.said);
+        else setFailed(stopped.said);
       },
     );
   }
@@ -104,6 +122,15 @@ export function PodmanTooSmall({
               </button>
             </div>
           )}
+        </>
+      ) : notReady !== null ? (
+        <>
+          <p>{notReady}</p>
+          <div className="row">
+            <button type="button" onClick={onRetry}>
+              Retry
+            </button>
+          </div>
         </>
       ) : (
         <>

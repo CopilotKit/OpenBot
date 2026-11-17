@@ -14,6 +14,7 @@ import {
   channelQueryOptions,
 } from "@/lib/channels/queries";
 import { applyChannelWork } from "@/lib/channels/use-channel-events";
+import { conversationPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -123,12 +124,12 @@ test("goes when the list empties", () => {
  */
 test("comes back from the channel read after a reload", async () => {
   global.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input) === "/api/channels/channel-1") {
+    if (String(input) === conversationPath("channel-1")) {
       return Response.json({
-        channel: {
+        conversation: {
           id: "channel-1",
           name: "Assistant",
-          agentIds: ["assistant"],
+          botIds: ["assistant"],
           threadId: "thread-1",
           active: true,
           lastMessageAt: null,

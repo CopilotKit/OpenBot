@@ -22,3 +22,10 @@ test("a missing or broken logo uses the plug, and a new URL can load", () => {
     "https://example.com/new-logo.svg",
   );
 });
+
+test("an app's logo sits on a white tile in dark mode, so a black mark like GitHub's still shows", () => {
+  const view = render(<PluginLogo logo="https://example.com/github.svg" />);
+  expect(view.container.querySelector("img")?.className).toContain(
+    "dark:bg-white",
+  );
+});

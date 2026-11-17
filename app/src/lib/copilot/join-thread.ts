@@ -9,6 +9,14 @@
  * thing bringing the rest of that reply to this screen. Ended at the deadline, the reply stopped
  * where the join was, mid-word ("Which colour of apple do"), and stayed that way until a reload.
  * Nothing can be lost by letting it run: while it does the agent is running, so nothing is sent.
+ *
+ * UNLESS NOTHING CAN BE HEARD AT ALL. A join kept open for a turn is kept until the gateway says the
+ * turn is over, and a gateway that has stopped answering never says so. Opened then, with the
+ * roster saying the Bot was working (a message sent from this screen says so too), the conversation
+ * kept its join for good: no history, no notice, a Stop with no run behind it, and every message
+ * typed afterwards waiting on a join that was never going to end. So a turn the join has not heard
+ * for itself is checked with the runtime first (`reachable`), and a runtime that cannot answer is
+ * not carrying anyone's reply: the join is ended like any other at its deadline.
  */
 
 /**
@@ -20,12 +28,14 @@
  *
  * A join that is carrying a turn still going (`answering`) is not ended at the deadline: the caller
  * is told (`onAnswering`), so it can show what has arrived, and this resolves when the turn is over.
+ * When `reachable` is given it is asked first, and a join it answers false for is ended.
  */
 export async function joinWithin({
   connect,
   deadline,
   detach,
   answering = () => false,
+  reachable,
   onAnswering = () => {},
 }: {
   /** The join already in progress. Its rejection is an outcome, not a failure of this function. */
@@ -36,6 +46,11 @@ export async function joinWithin({
   detach: () => Promise<unknown>;
   /** Whether the join, at the deadline, is carrying a turn the Bot has not finished. */
   answering?: () => boolean;
+  /**
+   * Whether the turn the join would be kept for can still be heard. Asked once, at the deadline, and
+   * only when `answering` says there is a turn. Must settle: a caller bounds its own ask.
+   */
+  reachable?: () => Promise<boolean>;
   /** Called once, at the deadline, when the join is left to carry that turn to its end. */
   onAnswering?: () => void;
 }): Promise<"connected" | "deadline"> {
@@ -53,7 +68,15 @@ export async function joinWithin({
   if (outcome === "connected") {
     return outcome;
   }
-  if (answering()) {
+  // A connect that finishes while the runtime is being asked has answered the question itself.
+  const kept =
+    answering() &&
+    (reachable === undefined ||
+      (await Promise.race([
+        reachable().catch(() => false),
+        finished.then(() => true),
+      ])));
+  if (kept) {
     onAnswering();
     await finished;
     return "connected";

@@ -30,6 +30,7 @@ import { attachmentModality } from "@/components/channels/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import {
+  attachmentAddress,
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
   mayBeTruncatedForModel,
@@ -45,6 +46,7 @@ import {
   discardStagedAttachment,
   FILE_PICKER_ACCEPT,
   heldAttachmentsConfig,
+  heldFileOf,
   stagedRowId,
 } from "./attachments";
 import {
@@ -121,6 +123,16 @@ function stagedModality(attachment: Attachment) {
   const corroborated =
     source.type === "url" && source.mimeType ? source.mimeType : undefined;
   return attachmentModality(attachment.type, corroborated);
+}
+
+/**
+ * Whether a staged attachment is a document whose text the server extracts (a PDF), by the type the
+ * server sniffed when there is one, else the type the browser gave the picked file.
+ */
+function stagedIsDocument(attachment: Attachment): boolean {
+  const { source } = attachment;
+  const mimeType = source.mimeType ?? heldFileOf(attachment)?.type ?? "";
+  return classifyAttachment(mimeType) === "document";
 }
 
 const MAX_HEIGHT_PX = 220;
@@ -1138,7 +1150,10 @@ export function Composer({
         .filter((attachment) => stagedModality(attachment) === "image")
         .map((attachment) => ({
           id: attachment.id,
-          url: attachment.source.value,
+          // Where the tile loads the picture from. While it uploads that is the browser's own
+          // preview; once the server has it, the upload answers with the form a sent message
+          // stores, and the file is read from the API's address for it.
+          url: attachmentAddress(attachment.source.value),
           alt: attachment.filename,
           loading: attachment.status === "uploading",
         })),
@@ -1185,9 +1200,14 @@ export function Composer({
            * browser called a PNG and the server read as text lands in this strip,
            * goes down the extraction path, and is exactly the one that gets cut.
            */
+          /*
+           * NOT FOR A PDF. Its bytes are mostly fonts and layout, so its size says nothing about
+           * how many characters of text it holds, and a one-page invoice would be warned about.
+           */
           mayTruncate:
             attachment.status !== "uploading" &&
             attachment.size !== undefined &&
+            !stagedIsDocument(attachment) &&
             mayBeTruncatedForModel(attachment.size),
         })),
     [staged],

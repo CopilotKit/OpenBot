@@ -18,7 +18,9 @@ import {
   appAccessKeys,
   botAppQueryOptions,
 } from "@/lib/app-access/queries";
+import { appSetupQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { queryClient } from "@/query-client";
@@ -110,11 +112,11 @@ function disabledSentence(
   // Nobody else to ask in the personal edition: the person is told what is missing, and Set it up
   // beside the sentence goes to where it is fixed.
   if (edition === "personal")
-    return access.unavailable === "composio_unconfigured"
+    return access.unavailable === "directory_unavailable"
       ? `${name} isn't set up yet. Set it up to connect it.`
       : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
-    case "composio_unconfigured":
+    case "directory_unavailable":
       return `${name} isn't set up yet. An admin has to turn it on.`;
     case "scheme_unreadable":
     case "oauth_client_missing":
@@ -162,6 +164,32 @@ export function AppAccessAction({
    * swap: it is navigated, and the button that replaced the first one goes on waiting for it.
    */
   const tab = useConnectInNewTab();
+  /*
+   * OpenBot's step before a sign-in, in OpenBot Desktop's window. Drawn whichever button is: the
+   * one that pressed Connect can be swapped for another while the step is on screen.
+   */
+  return (
+    <>
+      {appAccessButton({ access, agentId, personal, role: me?.role, tab })}
+      {tab.consentStep}
+    </>
+  );
+}
+
+/** Which of the buttons below an app's state calls for, or nothing where it is ready. */
+function appAccessButton({
+  access,
+  agentId,
+  personal,
+  role,
+  tab,
+}: {
+  access: AppAccess;
+  agentId: string;
+  personal: boolean;
+  role: string | null | undefined;
+  tab: ConnectInNewTab;
+}) {
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
   if (
@@ -180,7 +208,7 @@ export function AppAccessAction({
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
     return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
-  if (me?.role === "admin")
+  if (isOrganizationAdmin(role))
     return <AdminAction agentId={agentId} access={access} />;
   return <RequestAction agentId={agentId} access={access} />;
 }
@@ -208,6 +236,7 @@ function AdminAction({
   const paths = useManagePaths();
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
   const approve = useMutation(approveBotAppMutationOptions(queryClient));
+  const setup = useQuery(appSetupQueryOptions()).data;
   const name = access.displayName;
 
   const oneClick =
@@ -251,10 +280,11 @@ function AdminAction({
     );
   }
 
+  // The directory's own page: Composio's unless this OpenBot's directory is Arcade's.
   const page =
     access.state === "disabled" &&
-    access.unavailable === "composio_unconfigured"
-      ? access.provider === "arcade"
+    access.unavailable === "directory_unavailable"
+      ? setup?.directoryProvider === "arcade"
         ? "arcade"
         : "composio"
       : access.key;
@@ -262,8 +292,11 @@ function AdminAction({
     access.state !== "shared_not_connected"
       ? ["Set it up", `Set up ${name}`]
       : access.requestKind
-        ? ["Connect the team account", `Connect the team ${name} account`]
-        : ["Reconnect the team account", `Reconnect the team ${name} account`];
+        ? ["Connect the shared account", `Connect the shared ${name} account`]
+        : [
+            "Reconnect the shared account",
+            `Reconnect the shared ${name} account`,
+          ];
   /*
    * A broker with no key is set up on its directory, which is a page of its own in the personal
    * edition. There `/connections/composio` would read as an app called "composio" and say there is

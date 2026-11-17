@@ -1,1 +1,0 @@
-CREATE INDEX "routines_by_owner_idx" ON "routines" USING btree ("owner_user_id","enabled");

@@ -1,1 +1,0 @@
-ALTER TABLE "approval_team_settings" ADD COLUMN "reviewer_guidance" text;

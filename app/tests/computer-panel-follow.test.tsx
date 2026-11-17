@@ -10,6 +10,7 @@ import {
   latestView,
   showComputerView,
 } from "@/lib/computers/panel-view";
+import { ME_PATH, meResponse } from "./accounts-api";
 
 /**
  * The Computer panel following the Bot, and Take control acting on the terminal when the terminal is
@@ -71,8 +72,8 @@ beforeAll(() => {
     if (path.endsWith("/control/take")) holder = "human";
     if (path.endsWith("/control/release")) holder = "bot";
     if (path.includes("/control")) return Response.json(controlState());
-    if (path === "/api/me")
-      return Response.json({ user: { id: "ada", name: "Ada" } });
+    if (path === ME_PATH)
+      return meResponse({ user: { id: "ada", name: "Ada" } });
     return Response.json({ error: "Not here." }, { status: 404 });
   }) as typeof fetch;
 });
@@ -180,7 +181,9 @@ test("Take control in the terminal gives the terminal the keyboard, says so in t
       "of the terminal and the screen. Click the terminal and type.",
     ),
   );
-  expect(asked).toContain("POST /api/computers/wheel-bot/control/take");
+  expect(asked).toContain(
+    "POST /api/v2/organizations/default/computers/wheel-bot/control/take",
+  );
   // The keyboard is the terminal's, and the full-size screen did not open over it.
   await waitFor(() =>
     expect(document.activeElement?.className).toContain(

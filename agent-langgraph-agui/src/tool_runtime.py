@@ -1,4 +1,4 @@
-"""The current run's tools, with the same ownership contract as agent-langgraph.
+"""The current run's tools, with the ownership contract every OpenBot harness keeps.
 
 Computer/UI tools finish the run for the surface to execute and resume. Only tools
 marked by OpenBot's server execute here, through its signed callback. The request
@@ -41,6 +41,9 @@ class RunTools:
     # chose none, and the deployment's own configuration applies.
     model: str = ""
     effort: str = ""
+    # The server retries this run itself (`openbotSendOnce`): the model is asked once per step and
+    # a failure is handed back, where the model's own client would have retried it twice first.
+    send_once: bool = False
 
 
 # The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
@@ -52,9 +55,11 @@ OPENBOT_PROPS = {
     "openbotRun",
     "openbotDeploymentTools",
     "openbotModel",
+    "openbotSendOnce",
     "openbot_run",
     "openbot_deployment_tools",
     "openbot_model",
+    "openbot_send_once",
 }
 
 
@@ -233,6 +238,80 @@ def provider_message(error: BaseException) -> str:
     return message
 
 
+def _links(error: BaseException):
+    """The error and every error it was raised from."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        yield error
+        error = error.__cause__
+
+
+def model_unreachable(error: BaseException) -> bool:
+    """Whether the run failed because nothing answered at the model's address.
+
+    The connection was refused, the host doesn't exist, or nothing answered in time: in each the
+    request never reached a model, so no provider said anything, and asking again a moment later
+    gets the same. Seen on OpenBot Desktop with an OpenAI-compatible base URL at
+    host.docker.internal:48123 and nothing listening there: `openai.APIConnectionError`, "All
+    connection attempts failed", and the person read only `RUN_FAILED`.
+
+    The SDKs' own classes, and httpx's for an SDK that lets them through (Google's). A tool's call
+    never raises one here: `_call_tool` answers its own transport errors.
+    """
+    unreached = []
+    for module, names in (
+        ("openai", ("APIConnectionError",)),  # `APITimeoutError` is one.
+        ("anthropic", ("APIConnectionError",)),
+        ("httpx", ("ConnectError", "TimeoutException")),
+        ("httpx2", ("ConnectError", "TimeoutException")),
+    ):
+        try:
+            loaded = __import__(module)
+        except ImportError:
+            continue
+        unreached.extend(getattr(loaded, name) for name in names if hasattr(loaded, name))
+    return any(isinstance(link, tuple(unreached)) for link in _links(error))
+
+
+def model_address(error: BaseException) -> str | None:
+    """Where the run tried to reach the model, as host and port.
+
+    Nothing else of the URL: a base URL can carry a user and password, and some gateways put a key
+    in the path. None when the request isn't known, or when it went to OpenBot's own sign-in proxy,
+    whose address is OpenBot's and not the model's.
+    """
+    for link in _links(error):
+        try:
+            request = getattr(link, "request", None)
+        except RuntimeError:  # httpx raises it for an error that has no request.
+            request = None
+        url = getattr(request, "url", None)
+        host = getattr(url, "host", None)
+        if not isinstance(host, str) or not host:
+            continue
+        if "/api/model-provider/" in str(getattr(url, "path", "")):
+            return None
+        shown = f"[{host}]" if ":" in host else host
+        port = getattr(url, "port", None)
+        return f"{shown}:{port}" if port else shown
+    return None
+
+
+# What the run ends with when nothing answered at the model's address, coded so the server can put
+# the step that fits its edition in place of the second sentence (it reads the address back out of
+# the first). The step here is right wherever the model is set.
+MODEL_UNREACHABLE = "OPENBOT_MODEL_UNREACHABLE"
+
+
+def unreachable_message(address: str | None) -> str:
+    at = f" at {address}" if address else ""
+    return (
+        f"OpenBot couldn't reach the AI model{at}. "
+        "Check that it's running and the address is right."
+    )
+
+
 # What a person reads when a run fails for a reason that is not the provider's.
 RUN_FAILED = "The Bot stopped before it finished answering. Try again."
 
@@ -241,10 +320,6 @@ _current: ContextVar[RunTools | None] = ContextVar("openbot_run_tools", default=
 
 def current_tools() -> RunTools:
     return _current.get() or RunTools()
-
-
-class UnofferedToolError(ValueError):
-    pass
 
 
 class ToolAwareAgent(WholeThreadAgent):
@@ -262,6 +337,7 @@ class ToolAwareAgent(WholeThreadAgent):
             assertion=assertion if isinstance(assertion, str) else "",
             model=model,
             effort=effort,
+            send_once=props.get("openbotSendOnce") is True,
         )
         # The maintained endpoint clones this subclass per request. ContextVar
         # also isolates graph tasks across concurrent requests and resets on
@@ -286,11 +362,6 @@ class ToolAwareAgent(WholeThreadAgent):
                     if event.type in (EventType.RUN_FINISHED, EventType.RUN_ERROR):
                         ended = True
                     yield event
-        except UnofferedToolError:
-            yield RunErrorEvent(
-                type=EventType.RUN_ERROR,
-                message="The model requested a tool that was not offered for this run.",
-            )
         except Exception as error:
             billing = billing_refusal(error)
             if billing:
@@ -311,6 +382,16 @@ class ToolAwareAgent(WholeThreadAgent):
                     type=EventType.RUN_ERROR,
                     message="Sign in to your model provider again.",
                     code="OPENBOT_MODEL_AUTH_REQUIRED",
+                )
+            elif model_unreachable(error):
+                # Nothing answered, so there is no provider's account to pass on: the person is
+                # told where OpenBot looked. The SDK's own words ("Connection error.") are the log's.
+                address = model_address(error)
+                logger.warning("The model couldn't be reached at %s: %r", address, error)
+                yield RunErrorEvent(
+                    type=EventType.RUN_ERROR,
+                    message=unreachable_message(address),
+                    code=MODEL_UNREACHABLE,
                 )
             elif provider_refusal(error):
                 # Raised, it ended the response stream after RUN_STARTED with no terminal event,
@@ -406,9 +487,13 @@ def next_step(state):
     context = current_tools()
     offered = {tool.name for tool in context.tools}
     if any(call["name"] not in offered for call in calls):
-        raise UnofferedToolError(
-            "The model requested a tool that was not offered for this run."
-        )
+        # A tool this run was not offered is never run here, but it does not end the run in an
+        # error either: it is handed back like a call the surface owns, and the caller answers it,
+        # running a tool the Bot holds through its own governance or refusing a name it holds
+        # nothing for, and the model goes on. FOUND ON WINDOWS: a model that called Google Sheets'
+        # "Format cell", which its Bot holds and this step was not sent, ended the run in red with
+        # "The model requested a tool that was not offered for this run."
+        return END
     # Mixed turns yield too: never invent results for a UI component or execute
     # a governed action while the surface still owns an unanswered call.
     if any(call["name"] not in context.deployment for call in calls):

@@ -1,7 +1,9 @@
 import { Redirect } from "expo-router";
 import { useCallback } from "react";
 import { Text } from "react-native";
-import { api, type Bot, type BotTask, type CheckInItem } from "../src/api";
+import { everyBot, everyPage, ORGANIZATION_ID } from "../src/api";
+import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
+import { listTasks } from "../src/api/generated/tasks/tasks";
 import { authClient } from "../src/auth";
 import {
   hideItem,
@@ -22,22 +24,31 @@ export default function NeedsYouScreen() {
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
   const loadItems = useCallback(
-    () => api<{ suggestions: CheckInItem[] }>("/api/proactive/suggestions"),
+    () =>
+      everyPage(
+        (page) => listCheckInItems(ORGANIZATION_ID, page),
+        (page) => page.checkInItems,
+      ),
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
-  const loadTasks = useCallback(
-    () => api<{ tasks: BotTask[] }>("/api/tasks"),
-    [],
-  );
+  const loadTasks = useCallback(async () => {
+    // Every page: the count of what waits on the person is of all of them.
+    return {
+      tasks: await everyPage(
+        (page) => listTasks(ORGANIZATION_ID, page),
+        (page) => page.tasks,
+      ),
+    };
+  }, []);
   const tasks = useLoad(loadTasks, Boolean(session));
-  const loadBots = useCallback(() => api<{ agents: Bot[] }>("/api/agents"), []);
+  const loadBots = useCallback(() => everyBot(), []);
   const bots = useLoad(loadBots, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   const nameOf = (agentId: string) =>
-    bots.data?.agents.find((bot) => bot.id === agentId)?.name ?? "A Bot";
+    bots.data?.find((bot) => bot.id === agentId)?.name ?? "A Bot";
   const waiting = waitingTasks(tasks.data?.tasks ?? []);
-  const found = items.data?.suggestions ?? [];
+  const found = items.data ?? [];
 
   return (
     <Screen
@@ -55,7 +66,7 @@ export default function NeedsYouScreen() {
         <ItemCard
           key={item.id}
           item={item}
-          botName={nameOf(item.agentId)}
+          botName={nameOf(item.botId)}
           busy={action.busy}
           onStart={() => {
             void action.run(`start:${item.id}`, async () => {
@@ -81,11 +92,7 @@ export default function NeedsYouScreen() {
       {waiting.length > 0 ? (
         <Section title="Tasks">
           {waiting.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              botName={nameOf(task.agentId)}
-            />
+            <TaskCard key={task.id} task={task} botName={nameOf(task.botId)} />
           ))}
         </Section>
       ) : null}

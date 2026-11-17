@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
-import type { GrantSetCheck } from "./translate";
+import { replayBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { type GrantSetCheck, grantSetCheckOf } from "./translate";
 
 /** One action a change turns on or off, with what it does. */
 export type ChangedAction = {
@@ -58,17 +59,20 @@ export function appGrantsReplayQueryOptions(
 ) {
   return queryOptions({
     queryKey: appGrantKeys.replay(agentId, app, grants),
-    queryFn: async (): Promise<AppGrantPreview> =>
-      (
-        await client(
-          `/api/plugins/for/${encodeURIComponent(agentId)}/apps/${encodeURIComponent(app)}/grants/replay`,
-          {
-            method: "POST",
-            body: { grants },
-            fallback: "Couldn't test these actions against recent activity.",
-          },
-        )
-      ).json(),
+    queryFn: async ({ signal }): Promise<AppGrantPreview> => {
+      // An action that saves nothing: each ask is its own, so each gets its own key.
+      const preview = await replayBotGrants(
+        organizationId(),
+        agentId,
+        { appId: app, grants: [...grants] },
+        { "Idempotency-Key": idempotencyKey() },
+        {
+          signal,
+          fallback: "Couldn't test these actions against recent activity.",
+        },
+      );
+      return { ...preview, check: grantSetCheckOf(preview.check) };
+    },
     retry: false,
     /*
      * Not kept once the draft closes. The answer is worked out against what the Bot holds now, and

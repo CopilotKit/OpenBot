@@ -4,18 +4,33 @@ import {
   IconPresentation,
   IconTable,
 } from "@tabler/icons-react";
-import type { ComponentProps } from "react";
+import { useRouter } from "@tanstack/react-router";
+import {
+  type ComponentProps,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 import {
   type CodeHighlighterPlugin,
   defaultRemarkPlugins,
+  type MathPlugin,
+  type PluginConfig,
+  Streamdown,
   type StreamdownProps,
 } from "streamdown";
+import { hasMaths, withMathDelimiters } from "@/lib/maths";
+import {
+  NO_SLACK_NAMES,
+  remarkSlackMentions,
+  type SlackNames,
+} from "@/lib/slack/mentions";
 
 /**
  * Shared markdown rendering for Bot prose and tool results.
  *
  * Links open in a new tab with `noreferrer` because content can come from a model or remote MCP
- * server.
+ * server. A link to a page of the app itself, such as a task thread, opens in place.
  */
 
 /**
@@ -74,8 +89,77 @@ export function documentChipKind(href: string | undefined) {
   return null;
 }
 
+/**
+ * The app's own address a link names, as a path, or null for a link that leaves the app.
+ *
+ * A Bot links to one of its task threads by the path the app opens it at (`/channel/…`), and may
+ * write it as a full address on this origin. Either is a page of the app, not somewhere else.
+ */
+export function inAppPath(
+  href: string | undefined,
+  origin = typeof window === "undefined" ? undefined : window.location.origin,
+): string | null {
+  if (!href) return null;
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+  if (!origin) return null;
+  try {
+    const url = new URL(href);
+    return url.origin === origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A link to a page of the app, opened in place the way the app's own links open. Sent to a new tab
+ * it opened a second window inside OpenBot Desktop, and lost the conversation the person was in.
+ * A modified click still does what the browser does with it.
+ */
+function AppLink({
+  path,
+  children,
+  // Streamdown hands every link a new tab; a page of the app keeps the window it is in.
+  target: _target,
+  rel: _rel,
+  ...rest
+}: ComponentProps<"a"> & { path: string }) {
+  const router = useRouter({ warn: false });
+  return (
+    <a
+      {...rest}
+      className="underline underline-offset-2 hover:no-underline"
+      href={path}
+      onClick={(event) => {
+        if (
+          !router ||
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        event.preventDefault();
+        void router.navigate({ to: path });
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 export const markdownComponents = {
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
+    const path = inAppPath(href);
+    if (path !== null)
+      return (
+        <AppLink {...rest} path={path}>
+          {children}
+        </AppLink>
+      );
     const kind = documentChipKind(href);
 
     if (kind) {
@@ -216,8 +300,8 @@ function breakLineEndings(node: MarkdownNode) {
 }
 
 /**
- * The remark plugins for a Bot's reply in a conversation: Streamdown's own, plus a single line ending
- * drawn as a line break.
+ * The remark plugins for a Bot's reply in a conversation: Streamdown's own, a single line ending
+ * drawn as a line break, and Slack's mention markup shown as names (`lib/slack/mentions.ts`).
  *
  * WHY. Markdown reads one line ending as a space and wants a blank line or two trailing spaces for a
  * new line. A Bot asked for something "one per line" writes `Red\nGreen\nBlue` and the reader saw
@@ -227,10 +311,108 @@ function breakLineEndings(node: MarkdownNode) {
  *
  * ONLY FOR REPLIES. A document, a SKILL.md or a tool's answer is markdown written to be read as
  * markdown, where a wrapped line is meant to join the line before it, and keeps Streamdown's
- * defaults. One array for the module, so Streamdown sees the same plugins on every render.
+ * defaults. One array per set of Slack names, so Streamdown sees the same plugins on every render
+ * while the conversation's names are the same.
  */
-export const replyRemarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> =
-  [
-    ...Object.values(defaultRemarkPlugins),
-    () => (tree: MarkdownNode) => breakLineEndings(tree),
-  ];
+const replyPlugins = new WeakMap<
+  SlackNames,
+  NonNullable<StreamdownProps["remarkPlugins"]>
+>();
+
+export function replyRemarkPluginsFor(
+  names: SlackNames,
+): NonNullable<StreamdownProps["remarkPlugins"]> {
+  let plugins = replyPlugins.get(names);
+  if (!plugins) {
+    plugins = [
+      ...Object.values(defaultRemarkPlugins),
+      () => (tree: MarkdownNode) => breakLineEndings(tree),
+      [remarkSlackMentions, { names: [...names] }],
+    ];
+    replyPlugins.set(names, plugins);
+  }
+  return plugins;
+}
+
+/** A reply with no conversation's Slack names to hand: mentions still never show as ids. */
+export const replyRemarkPlugins = replyRemarkPluginsFor(NO_SLACK_NAMES);
+
+let mathPlugin: MathPlugin | undefined;
+let mathLoad: Promise<void> | undefined;
+const mathListeners = new Set<() => void>();
+
+/** Streamdown's maths plugin and KaTeX's stylesheet, fetched the first time a formula is drawn. */
+function loadMathPlugin() {
+  mathLoad ??= import("@/lib/math-plugin")
+    .then(({ math }) => {
+      mathPlugin = math;
+      for (const listener of mathListeners) listener();
+    })
+    .catch((error: unknown) => {
+      // The formula stays drawn as its source; say why rather than leave it so for no reason.
+      console.error("Couldn't load maths rendering:", error);
+      mathLoad = undefined;
+    });
+  return mathLoad;
+}
+
+function onMathPlugin(listener: () => void) {
+  mathListeners.add(listener);
+  return () => {
+    mathListeners.delete(listener);
+  };
+}
+
+const currentMathPlugin = () => mathPlugin;
+
+/** One plugin set per set the caller passes, so Streamdown sees the same object on every render. */
+const withMath = new WeakMap<PluginConfig, PluginConfig>();
+const NO_PLUGINS: PluginConfig = {};
+
+function pluginsWithMath(
+  plugins: PluginConfig | undefined,
+  math: MathPlugin | undefined,
+): PluginConfig | undefined {
+  if (!math) return plugins;
+  const base = plugins ?? NO_PLUGINS;
+  let all = withMath.get(base);
+  if (!all) {
+    all = { ...base, math };
+    withMath.set(base, all);
+  }
+  return all;
+}
+
+/**
+ * Streamdown, for a Bot's words wherever they are drawn, with its maths drawn as formulas.
+ *
+ * Takes everything Streamdown takes. The markdown has its `\( \)` and `\[ \]` written in the `$$`
+ * the maths plugin reads (`lib/maths.ts`), and the plugin is added to the caller's plugins.
+ *
+ * LOADED WITH THE FIRST FORMULA, NOT WITH THE CHAT, as the code plugin is. KaTeX and its stylesheet
+ * are most of the weight of drawing maths, and most conversations have none. The first formula is
+ * drawn as its source for the moment the plugin takes to arrive, then as a formula; every one after
+ * that draws as a formula from the start. Once in, the plugin stays with every surface, so a reply
+ * that grows a formula as it streams keeps the same plugins.
+ */
+export function BotMarkdown({
+  children,
+  plugins,
+  ...props
+}: Omit<StreamdownProps, "children"> & { children: string }) {
+  const markdown = useMemo(() => withMathDelimiters(children), [children]);
+  const wantsMaths = hasMaths(markdown);
+  const math = useSyncExternalStore(
+    onMathPlugin,
+    currentMathPlugin,
+    currentMathPlugin,
+  );
+  useEffect(() => {
+    if (wantsMaths && !math) void loadMathPlugin();
+  }, [wantsMaths, math]);
+  return (
+    <Streamdown {...props} plugins={pluginsWithMath(plugins, math)}>
+      {markdown}
+    </Streamdown>
+  );
+}

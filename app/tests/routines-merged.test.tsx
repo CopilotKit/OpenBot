@@ -26,6 +26,14 @@ import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
 import { Route as ResponsibilitiesRoute } from "@/routes/_authed/_app/responsibilities";
+import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
+import {
+  answerScheduleLists,
+  GOALS_PATH,
+  pathOf,
+  ROUTINES_PATH,
+} from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -47,8 +55,8 @@ afterEach(() => {
 
 const goal = (id: string, agentId: string, title: string) => ({
   id,
-  agentId,
-  channelId: `channel-${agentId}`,
+  botId: agentId,
+  conversationId: `channel-${agentId}`,
   threadId: "thread",
   title,
   instruction: "Do it.",
@@ -59,7 +67,9 @@ const goal = (id: string, agentId: string, title: string) => ({
   subscriptions: [],
   recurring: false,
   endsWhenMet: false,
+  createdAt: "2026-10-09T10:00:00Z",
   updatedAt: "2026-10-09T10:00:00Z",
+  completedAt: null,
 });
 
 const routine = (
@@ -68,25 +78,29 @@ const routine = (
   overrides: Partial<RoutineRecord> = {},
 ): RoutineRecord => ({
   id,
-  agentId,
+  botId: agentId,
   schedule: "Weekdays at 09:00",
   timezone: "UTC",
   instruction: "Post the standup summary.",
   title: null,
-  channel: { id: "channel-1", name: null, title: "Standup", gone: false },
+  conversation: { id: "channel-1", name: null, title: "Standup", gone: false },
   enabled: true,
   nextRunAt: "2999-01-01T09:00:00.000Z",
   lastRun: null,
   goalId: null,
+  createdAt: "2026-10-09T10:00:00Z",
   ...overrides,
 });
 
 const checkIn = (id: string, agentId: string, subject: string) => ({
   id,
-  agentId,
-  channelId: `channel-${agentId}`,
+  botId: agentId,
+  conversationId: `channel-${agentId}`,
   focus: "",
   subject,
+  sourceLink: null,
+  createdAt: "2026-10-09T10:00:00Z",
+  updatedAt: "2026-10-09T10:00:00Z",
   enabled: true,
   intervalMinutes: 1440,
   nextRunAt: "2999-01-01T09:00:00.000Z",
@@ -117,7 +131,6 @@ function serving({
   ],
   routines = [] as RoutineRecord[],
   checkIns = [] as ReturnType<typeof checkIn>[],
-  working = true,
   routinesFail = false,
   goalsFail = false,
 } = {}) {
@@ -132,37 +145,38 @@ function serving({
       });
       return Response.json({ ok: true });
     }
-    if (url === "/api/responsibilities")
-      return goalsFail
-        ? new Response(null, { status: 500 })
-        : Response.json({ responsibilities: goals });
-    if (url === "/api/routines") {
-      if (routinesFail) return new Response(null, { status: 500 });
-      return Response.json({
-        routines,
-        sweep: { lastSweptAt: new Date().toISOString(), working },
-      });
-    }
-    if (url === "/api/proactive/settings")
-      return Response.json({ settings: checkIns, allowed: true });
-    if (url.startsWith("/api/channels")) {
-      return Response.json({
-        channels: [
+    if (
+      (pathOf(url) === GOALS_PATH && goalsFail) ||
+      (pathOf(url) === ROUTINES_PATH && routinesFail)
+    )
+      return new Response(null, { status: 500 });
+    const schedules = answerScheduleLists(input, init, {
+      goals,
+      routines,
+      checkIns,
+    });
+    if (schedules) return schedules;
+    if (url.split("?")[0] === CONVERSATIONS_PATH) {
+      return Response.json(
+        conversationPage([
           channel("channel-expenses", "Finance desk", ["expenses"]),
           channel("channel-knowledge", "Docs desk", ["knowledge"]),
-        ],
-        nextCursor: null,
-      });
+        ]),
+      );
     }
-    if (url.startsWith("/api/agents")) {
-      return Response.json({
-        agents: [
-          { id: "expenses", name: "Expenses" },
-          { id: "knowledge", name: "Knowledge" },
-        ],
-      });
-    }
-    return Response.json({ runs: [], triggers: [], requests: [] });
+    const bots = answerBotsList(input, init, {
+      visible: [
+        { id: "expenses", name: "Expenses" },
+        { id: "knowledge", name: "Knowledge" },
+      ],
+    });
+    if (bots) return bots;
+    return Response.json({
+      runs: [],
+      triggers: [],
+      requests: [],
+      nextCursor: null,
+    });
   }) as unknown as typeof fetch;
 }
 
@@ -265,23 +279,13 @@ test("a routine that runs a goal is one of that goal's starts, not a row of its 
   expect(view.queryByText("Run the goal.")).toBeNull();
 });
 
-test("a stopped worker is said when the only schedule is a goal's", async () => {
-  serving({
-    working: false,
-    routines: [routine("r1", "expenses", { goalId: "g1" })],
-  });
-  const view = draw();
-  await view.findByText("Reconcile receipts");
-  expect(view.getByText("Routines aren't running.")).toBeTruthy();
-});
-
 test("a goal's row claims no start when routines couldn't be read", async () => {
   serving({ routinesFail: true });
   const view = draw();
   const row = (await view.findByText("Reconcile receipts")).closest(
     "a, button",
   ) as HTMLElement;
-  await view.findByText("Couldn't load your routines. Reload the page.");
+  await view.findByText("Couldn't load your routines. Try again in a moment.");
   expect(row.textContent).not.toContain("When you ask");
 });
 
@@ -306,7 +310,7 @@ test("a routine that runs a goal, on a row of its own, says so and never shows t
     ],
   });
   const view = draw();
-  await view.findByText("Couldn't load your goals. Reload the page.");
+  await view.findByText("Couldn't load your goals. Try again in a moment.");
   // Named: the goal's title, as New routine names its routine, and what it does under it.
   const named = (await view.findByText("Reconcile receipts")).closest(
     '[data-slot="item"]',
@@ -550,8 +554,8 @@ test("a schedule's page pauses it, runs it, shows its runs and deletes it", asyn
   );
   await waitFor(() =>
     expect(writes).toContainEqual({
-      request: "PUT /api/routines/r1/enabled",
-      body: { enabled: false },
+      request: `POST ${ROUTINES_PATH}/r1/pause`,
+      body: null,
     }),
   );
 
@@ -562,7 +566,7 @@ test("a schedule's page pauses it, runs it, shows its runs and deletes it", asyn
   );
   await waitFor(() =>
     expect(writes.map((write) => write.request)).toContain(
-      "POST /api/routines/r1/run",
+      `POST ${ROUTINES_PATH}/r1/run`,
     ),
   );
   // Its runs are on the page, so the one Run now started appears there.
@@ -575,15 +579,15 @@ test("a schedule's page pauses it, runs it, shows its runs and deletes it", asyn
   );
   // Delete still asks first.
   const confirm = await within(document.body).findByRole("dialog", {
-    name: 'Delete "Weekdays at 09:00"?',
+    name: "Delete “Post the standup summary.”?",
   });
   expect(writes.map((write) => write.request)).not.toContain(
-    "DELETE /api/routines/r1",
+    `DELETE ${ROUTINES_PATH}/r1`,
   );
   fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   await waitFor(() =>
     expect(writes.map((write) => write.request)).toContain(
-      "DELETE /api/routines/r1",
+      `DELETE ${ROUTINES_PATH}/r1`,
     ),
   );
   // Deleted, it goes back to the Bot's list it came from.
@@ -615,7 +619,7 @@ test("a refused delete is said in its confirmation, and Delete can be pressed ag
   );
   const confirm = within(
     await within(document.body).findByRole("dialog", {
-      name: 'Delete "Weekdays at 09:00"?',
+      name: "Delete “Post the standup summary.”?",
     }),
   );
   fireEvent.click(confirm.getByRole("button", { name: "Delete" }));
@@ -627,7 +631,7 @@ test("a refused delete is said in its confirmation, and Delete can be pressed ag
   fireEvent.click(confirm.getByRole("button", { name: "Delete" }));
   await waitFor(() =>
     expect(writes.map((write) => write.request)).toContain(
-      "DELETE /api/routines/r1",
+      `DELETE ${ROUTINES_PATH}/r1`,
     ),
   );
 });

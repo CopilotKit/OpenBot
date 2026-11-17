@@ -33,10 +33,17 @@
 ; for each one it stopped (30 seconds at most) before the installer goes on to replace the file.
 ; The folder reaches PowerShell as data, in OPENBOT_CLI_BUNDLE, never inside the script: a profile folder like
 ; C:\Users\O'Brien would end a quoted string there, and [ and ] are wildcards to -like.
+; Only when this installation has a cli-bundle folder: nothing can run from a folder that isn't there, and Windows
+; keeps a running program's file, so its folder, until it exits. On a fresh computer the folder isn't there yet, and
+; starting PowerShell and WMI there to find nothing held the Installing page still on "Output folder" for about two
+; minutes. An update or a reinstall over a bundled CLI has the folder, and stops it as before.
+; IfFileExists with \*.* is how NSIS asks whether a folder exists (https://nsis.sourceforge.io/Docs/Chapter4.html).
 !macro OPENBOT_STOP_BUNDLED_CLI
-  System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")'
-  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue } | Stop-Process -Force -PassThru -ErrorAction SilentlyContinue | ForEach-Object { $$null = $$_.WaitForExit(30000) }"`
-  Pop $0
+  ${If} ${FileExists} "$INSTDIR\cli-bundle\*.*"
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")'
+    nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bundle = $$env:OPENBOT_CLI_BUNDLE.TrimEnd('\') + '\'; Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$bundle, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue } | Stop-Process -Force -PassThru -ErrorAction SilentlyContinue | ForEach-Object { $$null = $$_.WaitForExit(30000) }"`
+    Pop $0
+  ${EndIf}
 !macroend
 
 ; Installing over an installed OpenBot with "Uninstall before installing" uninstalls the old version

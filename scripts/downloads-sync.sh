@@ -13,6 +13,9 @@
 #   releases/<tag>/<versioned name>  each installer under the name Tauri gave it, container-images.json,
 #                                    desktop-images.json and the Mac updater archives; never changes,
 #                                    so cached for a year
+#   rollout/<tag>/<fixed name>       in a rollout only: what latest/ would hold if <tag> were Latest,
+#                                    for the edge function (scripts/downloads-rollout.js) to hand to
+#                                    a share of the viewers of latest/; cached for five minutes
 #
 # Env:
 #   GITHUB_REPOSITORY and GH_TOKEN  for `gh`
@@ -22,15 +25,19 @@
 #                                   included (cached for five minutes, as its signing may replace
 #                                   an installer), and leave latest/ alone (default: the Latest
 #                                   release, both)
-#   DOWNLOADS_PREFIX                put every key under this prefix, such as `smoketest/`, to try
+#   DOWNLOADS_ROLLOUT               `true` to also fill rollout/<tag>/ for the stable release
+#                                   DOWNLOADS_TAG names, with the same checks latest/ gets; latest/
+#                                   is still left alone
+#   DOWNLOADS_PREFIX               put every key under this prefix, such as `smoketest/`, to try
 #                                   the sync against the real bucket without changing what it serves
 #   DOWNLOADS_URL                   the address the mirrored latest.json names its downloads at
 #                                   (default https://downloads.copilotkit.ai)
 #   DOWNLOADS_VERIFY_DELAY          seconds between checks of a download the feed names (default 10)
 #   and AWS credentials that may read and write the bucket and invalidate the distribution.
 #
-# latest/latest.json is the release's feed with each platform's download moved here, where this run
-# put it (releases/<tag>/<file>); see the comment where it is written.
+# latest/latest.json (or rollout/<tag>/latest.json) is the release's feed with each platform's
+# download moved here, where this run put it (releases/<tag>/<file>); see the comment where it is
+# written.
 #
 # Running it again changes nothing. Each object's SHA-256, as S3 computed it on upload, is compared
 # with the digest GitHub reports for the asset, and only an object that is missing, differs, or has
@@ -66,7 +73,13 @@ if [ -n "$prefix" ] && [[ ! "$prefix" =~ ^[a-z0-9][a-z0-9-]*/$ ]]; then
   exit 1
 fi
 
-if [ -z "$tag" ]; then
+if [ "${DOWNLOADS_ROLLOUT:-false}" = true ]; then
+  if [ -z "$tag" ]; then
+    echo "::error::A rollout names its release: set DOWNLOADS_TAG to the stable release to roll out. Nothing was mirrored."
+    exit 1
+  fi
+  mode=rollout
+elif [ -z "$tag" ]; then
   mode=latest
   # GitHub's Latest is never a prerelease or a draft. Assigned first: a failure inside a command's
   # argument would not stop the script.
@@ -89,6 +102,10 @@ elif [ "$(jq -r '.isPrerelease' <<<"$release")" = true ] &&
   # five minutes rather than a year.
   if [ "$mode" = latest ]; then
     echo "::error::The Latest release $tag is a prerelease. Nothing was mirrored."
+    exit 1
+  fi
+  if [ "$mode" = rollout ]; then
+    echo "::error::$tag is a candidate or a beta. A rollout serves a stable release. Nothing was mirrored."
     exit 1
   fi
   release_cache="$latest_cache"
@@ -184,9 +201,16 @@ for asset in container-images.json desktop-images.json OpenBot-darwin-aarch64.ap
   fi
 done
 feed_urls=()
-if [ "$mode" = latest ]; then
+# The folder that serves the fixed names and the feed: latest/ for the Latest release, and
+# rollout/<tag>/ for a release being rolled out, which the edge hands out in latest/'s place.
+served=""
+case "$mode" in
+  latest) served=latest/ ;;
+  rollout) served="rollout/$tag/" ;;
+esac
+if [ -n "$served" ]; then
   for fixed in "${fixed_names[@]}"; do
-    add "latest/$fixed" "$fixed" "$latest_cache"
+    add "$served$fixed" "$fixed" "$latest_cache"
   done
   # The feed the app updates from, with each platform's download moved to this address: a URL that
   # is exactly this release's GitHub download of a file this run puts under releases/<tag>/ becomes
@@ -233,7 +257,7 @@ if [ "$mode" = latest ]; then
     echo "::error::Rewriting latest.json on $tag would change more than its URLs. Nothing was mirrored."
     exit 1
   fi
-  add latest/latest.json latest.json "$latest_cache" \
+  add "${served}latest.json" latest.json "$latest_cache" \
     "$(openssl dgst -sha256 -binary "$feed" | od -An -v -tx1 | tr -d ' \n')"
 fi
 
@@ -295,10 +319,10 @@ check_feed() {
   done
 }
 
-changed_latest=false
+changed_served=false
 for key in "${uploads[@]}"; do
   IFS=$'\t' read -r _ asset _ cache type < <(awk -F '\t' -v key="$key" '$1 == key' "$plan")
-  if [ "$key" = "${prefix}latest/latest.json" ]; then
+  if [ -n "$served" ] && [ "$key" = "${prefix}${served}latest.json" ]; then
     check_feed
   fi
   # S3 refuses the upload unless the bytes it received hash to this checksum.
@@ -307,20 +331,24 @@ for key in "${uploads[@]}"; do
     --checksum-sha256 "$(openssl dgst -sha256 -binary "$work/assets/$asset" | openssl base64 -A)" \
     --output json > /dev/null
   echo "Uploaded $asset to s3://$bucket/$key."
-  if [[ "$key" == "${prefix}latest/"* ]]; then
-    changed_latest=true
+  if [ -n "$served" ] && [[ "$key" == "${prefix}${served}"* ]]; then
+    changed_served=true
   fi
 done
 
-if [ "$changed_latest" = true ]; then
+if [ "$changed_served" = true ]; then
   invalidation="$(aws cloudfront create-invalidation --distribution-id "$DOWNLOADS_DISTRIBUTION_ID" \
-    --paths "/${prefix}latest/*" --output json)"
-  echo "Invalidated /${prefix}latest/* ($(jq -r .Invalidation.Id <<<"$invalidation"))."
+    --paths "/${prefix}${served}*" --output json)"
+  echo "Invalidated /${prefix}${served}* ($(jq -r .Invalidation.Id <<<"$invalidation"))."
 fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
-    echo "### downloads.copilotkit.ai now serves $tag"
+    if [ "$mode" = rollout ]; then
+      echo "### downloads.copilotkit.ai holds $tag under rollout/$tag/"
+    else
+      echo "### downloads.copilotkit.ai now serves $tag"
+    fi
     echo ""
     for key in "${uploads[@]}"; do
       echo "- uploaded \`$key\`"

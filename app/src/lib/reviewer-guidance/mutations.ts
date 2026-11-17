@@ -1,5 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  deleteReviewerGuidance,
+  replaceReviewerGuidance,
+} from "@/lib/api/generated/reviewer-guidance/reviewer-guidance";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { reviewerGuidanceKeys } from "./queries";
 
 const FALLBACK = "The guidance for auto-review couldn't be saved.";
@@ -14,11 +18,12 @@ const invalidateGuidance = (queryClient: QueryClient) =>
 export const saveReviewerGuidanceMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: (text: string) =>
-      client("/api/approvals/team/guidance", {
-        method: "PUT",
-        body: { text },
-        fallback: FALLBACK,
-      }),
+      replaceReviewerGuidance(
+        organizationId(),
+        { text },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      ),
     onSuccess: () => invalidateGuidance(queryClient),
   });
 
@@ -28,9 +33,10 @@ export const removeReviewerGuidanceMutationOptions = (
 ) =>
   mutationOptions({
     mutationFn: () =>
-      client("/api/approvals/team/guidance", {
-        method: "DELETE",
-        fallback: "The guidance for auto-review couldn't be removed.",
-      }),
+      deleteReviewerGuidance(
+        organizationId(),
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "The guidance for auto-review couldn't be removed." },
+      ),
     onSuccess: () => invalidateGuidance(queryClient),
   });

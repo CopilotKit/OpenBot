@@ -1,8 +1,8 @@
 """LangGraph as a Bot, through the AG-UI integration rather than by hand.
 
-OpenBot already ships `agent-langgraph`, which speaks AG-UI itself because it predates the rule
-against writing adapters. This is the same framework served through `ag-ui-langgraph`, which is the
-package the AG-UI project maintains, so the protocol stops being ours to keep working.
+The framework is served through `ag-ui-langgraph`, which is the package the AG-UI project
+maintains, so the protocol is not ours to keep working. It is also the managed Bot: the team
+edition's Risk Analyst runs on it.
 """
 
 import hmac
@@ -129,16 +129,26 @@ def _provider_kwargs(provider: str, model: str, effort: str):
     An effort is sent only when the run carries one, under the field that provider reads, so a run
     without one gets the model's own default.
 
-    - OpenAI itself (no `OPENAI_BASE_URL`): the Responses API for a model that takes tools only
-      there, with `reasoning.effort`; Chat Completions otherwise, with `reasoning_effort`.
-    - Any other OpenAI-compatible endpoint: `reasoning_effort`, on whichever API the integration
-      picks. Most serve only Chat Completions (Gemini's and xAI's compatible endpoints), and the
-      integration moves `reasoning_effort` to `reasoning.effort` itself when it picks Responses.
+    - OpenAI, wherever it is reached: the Responses API for a model that takes tools only there,
+      with `reasoning.effort`; Chat Completions otherwise, with `reasoning_effort`.
+    - Any other model at an OpenAI-compatible endpoint: `reasoning_effort`, on whichever API the
+      integration picks. Most serve only Chat Completions (Gemini's and xAI's compatible
+      endpoints), and the integration moves `reasoning_effort` to `reasoning.effort` itself when
+      it picks Responses.
+
+    THE MODEL DECIDES, NOT THE ADDRESS. A gateway or a proxy in front of OpenAI (LiteLLM, Portkey,
+    a company's own, a test's recorder) is an `OPENAI_BASE_URL`, and the address cannot say which
+    API a model takes. Decided by the address, `gpt-5.6-terra` behind one was sent to Chat
+    Completions and refused every run that offered a tool: "Function tools with reasoning_effort
+    are not supported for gpt-5.6-terra in /v1/chat/completions." The built-in Bots decide the
+    same way (`chooseOpenAIApi` on the server). An operator who set `COPILOTKIT_OPENAI_API=chat`
+    has decided, as there.
     - Anthropic: `output_config.effort`, through langchain-anthropic's `effort`.
     - Google: `thinkingConfig.thinkingLevel`, through langchain-google-genai's `thinking_level`.
     """
     if provider == "openai":
-        if not os.environ.get("OPENAI_BASE_URL") and requires_responses_api(model):
+        chat_only = (os.environ.get("COPILOTKIT_OPENAI_API") or "").strip() == "chat"
+        if requires_responses_api(model) and not chat_only:
             return {
                 "use_responses_api": True,
                 **({"reasoning": {"effort": effort}} if effort else {}),
@@ -164,6 +174,18 @@ def _chatgpt_auth_file(store: str) -> Path:
     with path.open("rb"):
         pass
     return path
+
+
+def _retries(run) -> dict:
+    """The model client's own retries, switched off for a run the server retries itself.
+
+    Each provider's integration retries a failed call on its own (`max_retries`, two by default for
+    OpenAI and Anthropic). A delegated task's turn is retried by the server, which sorts the failure
+    first and waits as long as the provider asked. Left on under that, one rate limit is asked
+    again several times over, without the wait. So a run that carries `openbotSendOnce` asks once
+    and hands the failure back. Every other run keeps the integration's own retries.
+    """
+    return {"max_retries": 0} if getattr(run, "send_once", False) is True else {}
 
 
 def _model(plan_models=None):
@@ -217,6 +239,7 @@ def _model(plan_models=None):
             # The Codex backend is the Responses API, so `reasoning.effort`; `_ChatOpenAICodex`
             # inherits `ChatOpenAI.reasoning` and sends it as it is.
             **({"reasoning": {"effort": run.effort}} if run.effort else {}),
+            **_retries(run),
         )
 
     _normalize_openai_base_url()
@@ -235,12 +258,14 @@ def _model(plan_models=None):
             model,
             **_google_genai_kwargs(prefix),
             **_provider_kwargs(prefix, named, run.effort),
+            **_retries(run),
         )
     return init_chat_model(
         model,
         model_provider=provider,
         **_google_genai_kwargs(provider),
         **_provider_kwargs(provider, model, run.effort),
+        **_retries(run),
     )
 
 

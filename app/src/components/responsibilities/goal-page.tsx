@@ -13,7 +13,6 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";
-import { Streamdown } from "streamdown";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import {
   PageCard,
@@ -57,16 +56,14 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { markdownComponents } from "@/lib/markdown";
+import { BotMarkdown, markdownComponents } from "@/lib/markdown";
 import {
   deleteResponsibilityMutationKey,
   deleteResponsibilityMutationOptions,
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
   responsibilityActionMutationOptions,
-  responsibilityRunsQueryOptions,
   type TriggerRecord,
-  triggersQueryOptions,
   updateResponsibilityMutationOptions,
 } from "@/lib/responsibilities";
 import { describeEvent, eventIdentifier } from "@/lib/routines/events";
@@ -77,6 +74,7 @@ import {
 } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { KIND_LABEL, Triggers } from "./triggers";
+import { useGoalRuns, useGoalTriggers } from "./use-goal-reads";
 
 type Status = ResponsibilityRecord["status"];
 
@@ -215,7 +213,7 @@ export function GoalPage({
   const [instruction, setInstruction] = useState(goal.instruction);
   const [successCriteria, setSuccessCriteria] = useState(goal.successCriteria);
   const [criteriaMissing, setCriteriaMissing] = useState(false);
-  const triggers = useQuery(triggersQueryOptions(goal.id));
+  const triggers = useGoalTriggers(goal.id);
   const action = useMutation(responsibilityActionMutationOptions(queryClient));
   const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
   const remove = useMutation(deleteResponsibilityMutationOptions(queryClient));
@@ -347,7 +345,7 @@ export function GoalPage({
           <Item
             render={
               <Link
-                params={{ channelId: goal.channelId }}
+                params={{ channelId: goal.conversationId }}
                 to="/channel/$channelId"
               />
             }
@@ -536,7 +534,7 @@ export function GoalPage({
       ) : null}
 
       <Triggers goal={goal} />
-      <Runs channelId={goal.channelId} goalId={goal.id} />
+      <Runs channelId={goal.conversationId} goalId={goal.id} />
 
       <Dialog onOpenChange={setConfirmingDelete} open={confirmingDelete}>
         <DialogContent>
@@ -605,7 +603,7 @@ function runStatusClass(status: string) {
  * moves through its states without a reload.
  */
 function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
-  const runs = useQuery(responsibilityRunsQueryOptions(goalId));
+  const runs = useGoalRuns(goalId);
   return (
     <PageSection title="Runs">
       {runs.isPending ? (
@@ -687,12 +685,12 @@ function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
  */
 function RunMarkdown({ children }: { children: string }) {
   return (
-    <Streamdown
+    <BotMarkdown
       className="min-w-0 text-sm [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_li]:my-0 [&_ol]:my-1 [&_p]:my-1 [&_ul]:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       components={markdownComponents}
       mode="static"
     >
       {children}
-    </Streamdown>
+    </BotMarkdown>
   );
 }

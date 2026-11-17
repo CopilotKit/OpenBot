@@ -1,15 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { addCuratedServerMutationOptions } from "@/lib/apps/mutations";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import {
-  addCuratedServerMutationOptions,
   connectAccountMutationOptions,
   invalidatePlugins,
 } from "@/lib/plugins/mutations";
-import {
-  connectionsQueryOptions,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { connectionsQueryOptions } from "@/lib/plugins/queries";
 
 /**
  * One press of a tile on the personal edition's Connections: add the app if it isn't added yet,
@@ -30,10 +28,10 @@ export function useConnectApp() {
   const freshServer = async (key: string) =>
     (
       await queryClient.fetchQuery({
-        ...pluginsPageQueryOptions(),
+        ...appsQueryOptions(),
         staleTime: 0,
       })
-    ).servers.find((item) => item.id === key);
+    ).find((item) => item.id === key);
 
   async function run(key: string, action: "connect" | "add") {
     setError(null);

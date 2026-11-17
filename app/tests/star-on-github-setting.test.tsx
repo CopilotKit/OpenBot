@@ -48,10 +48,9 @@ beforeEach(() => {
       const body =
         typeof init?.body === "string" ? JSON.parse(init.body) : init?.body;
       requests.push({ path, method, body });
-      if (path.endsWith("/api/settings/preferences")) {
-        return Response.json({
-          preferences: { ...preferences, ...(body as object) },
-        });
+      if (path.endsWith("/people/me/preferences")) {
+        // The API answers with the preferences themselves, not wrapped.
+        return Response.json({ ...preferences, ...(body as object) });
       }
       return new Response(null, { status: 204 });
     },
@@ -72,6 +71,7 @@ afterAll(async () => {
 const preferences: UserPreferences = {
   messageListEmphasis: "thread",
   selfHostBannerDismissed: true,
+  starPromptAnswered: false,
   narration: null,
   skin: "openbot",
   proactive: "on",
@@ -132,9 +132,8 @@ test("pressing it counts a Settings click and answers the card", async () => {
 
   await waitFor(() =>
     expect(
-      requests.find((request) =>
-        request.path.endsWith("/api/telemetry/product-events"),
-      )?.body,
+      requests.find((request) => request.path.endsWith("/star-prompt-events"))
+        ?.body,
     ).toEqual({
       kind: "star_prompt_clicked",
       trigger: "settings",
@@ -145,7 +144,7 @@ test("pressing it counts a Settings click and answers the card", async () => {
     expect(
       requests.find(
         (request) =>
-          request.path.endsWith("/api/settings/preferences") &&
+          request.path.endsWith("/people/me/preferences") &&
           request.method === "PATCH",
       )?.body,
     ).toEqual({ starPromptAnswered: true }),

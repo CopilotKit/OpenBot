@@ -18,6 +18,7 @@ import {
 } from "@/components/channels/chat-transcript";
 import type { QueuedMessage } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { attachmentPath } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -174,7 +175,9 @@ test("an image attachment renders as an img carrying the attachment url", () => 
   ]);
 
   const img = getByRole("img", { name: /attachment/i });
-  expect(img.getAttribute("src")).toBe(url);
+  expect(img.getAttribute("src")).toBe(attachmentPath("att-image"));
+  // The message still names the file in its stored form; only where it is loaded from is the API's.
+  expect(url).toBe("/api/attachments/att-image");
 });
 
 test("a broken image is replaced by a stated absence, not a broken-image glyph", () => {
@@ -436,7 +439,7 @@ test("the probe asks for the head of the attachment url, not its bytes", async (
   renderTranscript([userMessage([documentPart(url, "report.pdf")])]);
 
   await waitFor(() => expect(probes).toHaveLength(1));
-  expect(probes[0].url).toBe(url);
+  expect(probes[0].url).toBe(attachmentPath("att-document"));
   expect(probes[0].method).toBe("HEAD");
 });
 
@@ -471,7 +474,9 @@ test("an off-site document is never probed", async () => {
 
   await waitFor(() => expect(probes).toHaveLength(1));
   // One probe, and it is the servable file's. Nothing was sent to example.com.
-  expect(probes.map((probe) => probe.url)).toEqual([kept]);
+  expect(probes.map((probe) => probe.url)).toEqual([
+    attachmentPath("att-document"),
+  ]);
 });
 
 /*
@@ -490,7 +495,9 @@ test("an image is not probed, its own load already answers", async () => {
   ]);
 
   await waitFor(() => expect(probes).toHaveLength(1));
-  expect(probes.map((probe) => probe.url)).toEqual([kept]);
+  expect(probes.map((probe) => probe.url)).toEqual([
+    attachmentPath("att-document"),
+  ]);
 });
 
 /*
@@ -694,7 +701,7 @@ test("a file parked with a message is still on screen", () => {
   });
 
   const image = container.querySelector("img");
-  expect(image?.getAttribute("src")).toBe(attachmentUrl("att-image"));
+  expect(image?.getAttribute("src")).toBe(attachmentPath("att-image"));
   // Still parked, and still takeable back: the row is drawn with the message, not instead of it.
   expect(getByText("this one instead")).toBeTruthy();
   expect(getByText("Queued")).toBeTruthy();
@@ -712,7 +719,7 @@ test("a parked message that is only a file draws the file, not an empty bubble",
   });
 
   expect(container.querySelector("img")?.getAttribute("src")).toBe(
-    attachmentUrl("att-image"),
+    attachmentPath("att-image"),
   );
   expect(container.querySelector('[data-slot="bubble"]')).toBeNull();
 });
@@ -852,7 +859,7 @@ test("a parked picture the browser mislabelled is drawn as a picture", () => {
   });
 
   expect(container.querySelector("img")?.getAttribute("src")).toBe(
-    attachmentUrl("att-shot"),
+    attachmentPath("att-shot"),
   );
   // Not the file card: that caption is the fixed word every document tile carries.
   expect(queryByText("Attachment")).toBeNull();
@@ -905,7 +912,7 @@ test("a parked file with no server type falls back to the declared one", () => {
   });
 
   expect(container.querySelector("img")?.getAttribute("src")).toBe(
-    attachmentUrl("att-shot"),
+    attachmentPath("att-shot"),
   );
 });
 
@@ -928,7 +935,6 @@ test("a parked file with no server type falls back to the declared one", () => {
  * by which a probe for the picture, mounted in the same commit, would have had to appear.
  */
 test("a parked picture drawn from its bytes is not probed either", async () => {
-  const kept = attachmentUrl("att-clock");
   renderTranscript([], {
     queued: [
       parked("", [
@@ -940,7 +946,9 @@ test("a parked picture drawn from its bytes is not probed either", async () => {
 
   await waitFor(() => expect(probes).toHaveLength(1));
   // One probe, and it is the real document's. Nothing was asked about the screenshot.
-  expect(probes.map((probe) => probe.url)).toEqual([kept]);
+  expect(probes.map((probe) => probe.url)).toEqual([
+    attachmentPath("att-clock"),
+  ]);
 });
 
 /*

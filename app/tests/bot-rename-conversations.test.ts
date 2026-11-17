@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { updateAgentMutationOptions } from "../src/lib/agents/mutations";
 import { channelKeys } from "../src/lib/channels/queries";
+import { botPath } from "./bots-api";
 
 /**
  * Renaming a Bot on its Setup page, and the conversations named after it.
@@ -20,10 +21,13 @@ afterEach(() => {
 });
 
 test("renaming a Bot refetches the conversations, so the sidebar and header show its new name", async () => {
-  globalThis.fetch = (async () =>
-    Response.json({
-      agent: { id: "picked-harness", name: "Personal Assistant F5" },
-    })) as unknown as typeof fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === botPath("picked-harness") && init?.method === "PATCH")
+      return Response.json({
+        bot: { id: "picked-harness", name: "Personal Assistant F5" },
+      });
+    return Response.json({ error: "not served" }, { status: 404 });
+  }) as unknown as typeof fetch;
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   });

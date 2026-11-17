@@ -13,13 +13,32 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
 4. Review the pull request it opens. It updates `package.json`, promotes the changelog's
-   `## Unreleased` heading to `## X.Y.Z`, and moves the Helm chart's `appVersion` and the desktop
-   Cargo package/lockfile to the same version. Tauri reads its version directly from the root
-   `package.json`.
-5. Merge it. That is the publish.
+   `## Unreleased` heading to `## X.Y.Z`, moves the desktop Cargo package/lockfile to the same
+   version, and pins `backend-images.env` to `vX.Y.Z`, so a checkout of the release runs the
+   OpenBot server, computer and supervisor images of that release. Those images must be published
+   at `vX.Y.Z` before it merges, with their release files (`ghcr.io/copilotkit/openbot:charts-vX.Y.Z`),
+   which carry the two Helm charts and the name of the last migration. Tauri reads its version directly from the root `package.json`.
+5. Merge it. That is the publish. After a stable release, the publish workflow opens a PR that puts
+   `main` back in `backend-images.env`, so main runs the images built from main again; merge it
+   once its checks pass.
 
 Merging is the trigger, so a release is always a reviewed commit: on `main` for a stable release,
 and on `release/X.Y` for a candidate, beta or final.
+
+Kept for one release, so that the 1.0.2 and 1.0.3 apps can read and start a newer installation,
+and all dropped together in the release after:
+
+- `container-images.json` names `agent-bot` and `agent-langgraph` (both the OpenBot image, which
+  runs the server, written in `.github/workflows/images.yml`).
+- `docker-compose.yml` defines two services of those names that nothing starts, behind the
+  `for-older-apps` profile (`tests/older-apps.test.ts`).
+- `docker-compose.yml` defines a `worker` and a `migrate` service that nothing starts, behind the
+  `openbot` profile. Those apps read a Compose file as current only when it defines `worker`, and
+  ask for `migrate`'s image by name. The server applies its own migrations and does the scheduled
+  work itself, which the file says on its `x-openbot-scheduled-work: server` line.
+- The two commands those services run in the OpenBot image, `/app/bin/openbot worker` and
+  `/app/bin/openbot migrate`, which do nothing there now.
+- The `routine_sweeps` table, which nothing writes now.
 
 Do not push a `v*` tag by hand to release. A tag pushed by a person builds nothing and publishes
 nothing. It only starts [Desktop macOS signing](#signed-mac-builds-and-the-updater) for that tag,
@@ -258,6 +277,9 @@ Making a release Latest also starts **Downloads sync**, so
 [downloads.copilotkit.ai](#downloadscopilotkitai) serves the same signed installers. Both attach jobs
 have `actions: write` for that.
 
+A release listed in the repository variable `RELEASE_HOLD_LATEST` is never made Latest by a
+signing run; see [Staged rollout](#staged-rollout).
+
 If either signing run is never approved, or fails, the release stays not Latest. Sign it again from
 its tag with `make-latest` set, or mark it Latest by hand on its release page.
 
@@ -406,16 +428,20 @@ default branch, the same run starts from a terminal:
 
 ```sh
 gh workflow run internal-build.yml --ref my-branch
+gh workflow run internal-build.yml --ref my-branch -f backend_tag=v1.0.3
 ```
 
-The run builds the images for that commit, then a Mac (Apple Silicon) installer and a Windows (x64)
-installer. The images are pushed tagged `sha-<commit>` and never `latest`, so the release images
-stay where they are.
+The run builds the Bot images for that commit, then a Mac (Apple Silicon) installer and a Windows
+(x64) installer. The Bot images are pushed tagged `sha-<commit>` and never `latest`, so the release
+images stay where they are. The OpenBot images (`ghcr.io/copilotkit/openbot`, which runs the server
+and every Bot's computer, and `openbot-supervisor`) are the published ones at `backend_tag`: `main`
+unless you choose another, such as a version (`v1.0.3`) or a `test-<date>-<run>` tag.
 
 Each installer is pinned to what the run built:
 
 - its deployment version is `internal-<sha12>`, the first twelve characters of the commit
-- its images are the `sha-<commit>` images of that commit, by digest
+- its Bot images are the `sha-<commit>` images of that commit, and its OpenBot images those at
+  `backend_tag`, all by digest
 
 A pinned installer never asks for `releases/latest`. Opening it installs that exact build, and it
 replaces whatever deployment is installed on the machine, keeping its data. OpenBot's database does
@@ -468,8 +494,9 @@ carries main's tree at a chosen commit, so the candidate is what main's CI teste
 [Finishing a candidate](#finishing-a-candidate)).
 
 Each candidate or beta is published as a GitHub prerelease. It is never Latest, so customers who
-check for the latest release do not see it. Its images are tagged with the version and
-`sha-<commit>`, and never `latest`. A Mac (Apple Silicon) and a Windows (x64) installer are attached
+check for the latest release do not see it. Its Bot images are tagged with the version and
+`sha-<commit>`, and never `latest`, and its OpenBot images are the ones published at that version.
+A Mac (Apple Silicon) and a Windows (x64) installer are attached
 to it, pinned to that version and to those images, the same as an internal build is. They are built
 beside the release rather than before it, so the signing runs start as soon as the release and its
 `container-images.json` exist, and they are attached when they are built, unless a signed one is
@@ -509,14 +536,15 @@ anything, and fails if anything else changed. The allowed difference is:
 
 - the `version` in `package.json`
 - `CHANGELOG.md`
-- `appVersion` in `charts/openbot/Chart.yaml`
+- the `version` in `release-policy.json`
+- the `OPENBOT_BACKEND_TAG` line in `backend-images.env`
 - the `openbot-desktop` version in `desktop/src-tauri/Cargo.toml` and `Cargo.lock`
 
 A final also cannot change `desktop/intelligence-cli.json`, so it bundles the CLI the candidate
 pinned.
 
-The final is a normal release: its installers are attached, and it becomes Latest, with its images
-tagged `latest`, only when no newer release already is, and only once its signed Mac and Windows
+The final is a normal release: its installers are attached, and it becomes Latest, with its Bot
+images tagged `latest`, only when no newer release already is, and only once its signed Mac and Windows
 installers are attached (see [Which release is Latest](#which-release-is-latest)). A patch from `main` can be
 released while a newer final is out, and that does not move Latest back.
 
@@ -618,7 +646,9 @@ by hand. Each run:
 - checks it carries `latest.json` and every installer under its fixed download name, and that each
   versioned installer is the same file as its fixed-name copy, so both are the signed build;
 - compares each file's SHA-256 with what the bucket holds, uploads only what differs, and
-  invalidates `/latest/*` only when something under `latest/` changed.
+  invalidates `/latest/*` only when something under `latest/` changed;
+- removes the installers of every release older than the Latest one from `releases/<tag>/`, and
+  invalidates each removed path ([Older installers](#older-installers)).
 
 It also copies everything else the Desktop app downloads for that release, so the app can fetch it
 all from this address and go to GitHub only when it does not answer
@@ -636,7 +666,7 @@ all from this address and go to GitHub only when it does not answer
 | `v2/<repo>/referrers/sha256:<hex>` | an empty OCI image index (`application/vnd.oci.image.index.v1+json`) for each of those manifests | five minutes |
 
 The `v2/` tree is a read-only copy of the OCI Distribution API, at ghcr.io's own paths: `<repo>` is
-the ghcr.io path unchanged, such as `copilotkit/openbot-server`, so Docker and containerd pull
+the ghcr.io path unchanged, such as `copilotkit/openbot-supervisor`, so Docker and containerd pull
 `downloads.copilotkit.ai/<repo>@<digest>` (or use it as a mirror for `ghcr.io`) exactly as they
 pull from ghcr.io. Indexes are copied byte for byte, so every digest stays the same, and whole:
 Docker 29's containerd image store fetches every manifest an index names, attestations included,
@@ -703,7 +733,8 @@ When the Latest release lacks some of those files, the run fails and changes not
 addresses keep serving the previous signed installers. A Latest release with none of them was
 published before signing attached any, as v0.2.0 was: that is not drift, so the run succeeds with
 "no signed installers yet; nothing to sync" and does not touch AWS. A release asked for by tag must
-have them all. Nothing is ever deleted.
+have them all. Apart from the installers of releases older than the Latest one
+([Older installers](#older-installers)), nothing is ever deleted.
 
 To run it by hand, from `main`:
 
@@ -731,8 +762,150 @@ Origin Shield in us-east-1, and uses the managed CachingOptimized policy, which 
 Cache-Control and leaves query strings out of the cache key. All of it is managed by hand in the
 console, not by infrastructure as code. The workflow signs in as the role `openbot-release-downloads`
 with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
-`main`, and may only read and write the bucket's objects and invalidate that distribution. The role
+`main`, and may only read and write the bucket's objects, delete those under `releases/` (the
+installers of older releases, [Older installers](#older-installers)), and invalidate that
+distribution. The role
 ARN, bucket and distribution are written in the workflow; none is a secret.
+
+### Older installers
+
+When a stable release becomes Latest, the installers of every older release are removed, from the
+GitHub releases and from `releases/<tag>/` in the bucket. A fresh install lays out the Latest
+release's server stack whatever installer started it, and an older app may not set that stack up
+as it needs: an installer from 1.0.3 or before writes no install token, which the 1.1 server
+requires, so it crash-loops. One rule decides what goes, for both places
+([`scripts/release-older-installers.sh`](../scripts/release-older-installers.sh)).
+
+- **Older** means a tag that is a version (`vX.Y.Z` or `vX.Y.Z-<pre>`) below the Latest one by
+  semver: a lower `X.Y.Z`, or a candidate or beta of the Latest version itself.
+- **Removed**, from each older release: every installer, under its versioned name and its fixed
+  name (`.dmg`, `.exe` and `-setup.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`), and each one's `.sig`.
+- **Kept**: everything else, on every release. `latest.json`, the updater archives
+  (`.app.tar.gz`) and their `.sig`, `container-images.json`, `desktop-images.json`, the source
+  archives, `release-manifest.json` and the provenance. Installed apps fetch
+  `container-images.json` and the source at run time to repair, and update from the Latest
+  release's feed. The Latest release, anything newer (such as the next candidate), and any tag that
+  is not a version keep everything.
+
+Both sides read the Latest release from GitHub, never from an argument, so a mistyped tag cannot
+remove the installers the website links to. Running either again changes nothing.
+
+When it runs:
+
+- **GitHub, signing path:** `scripts/release-make-latest.sh` runs
+  `scripts/release-older-installers.sh github` right after it makes the release Latest and starts
+  Downloads sync, with the attach job's `contents: write`. If a removal fails, the feed is still
+  checked and the job then fails, naming the command to run again.
+- **GitHub, finish at 100%:** by hand, as a step of [Ramp, finish and roll back](#ramp-finish-and-roll-back).
+- **Bucket, both paths:** the last step of Downloads sync, `scripts/release-older-installers.sh bucket`,
+  on every run for the Latest release (the one the signing run starts, the one step 3 of finish at
+  100% starts, and the scheduled ones), never on a run for one tag. It removes the selected objects
+  and invalidates each removed path on the distribution, as they were cached for a year. The role
+  `openbot-release-downloads` may delete only under `releases/` (`s3:DeleteObject` on
+  `arn:aws:s3:::copilotkit-openbot-downloads/releases/*`).
+
+Downloads sync has only `contents: read` on the repository, so it never touches the GitHub
+releases; the finish-at-100% path removes those by hand. To see what would go, and then remove it,
+from a checkout of `main` with `gh` signed in:
+
+```sh
+GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github --dry-run
+GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github
+```
+
+The bucket side lists the same way with admin credentials for the account:
+`GITHUB_REPOSITORY=CopilotKit/OpenBot DOWNLOADS_BUCKET=copilotkit-openbot-downloads DOWNLOADS_DISTRIBUTION_ID=EQ4EH8L79LPGX scripts/release-older-installers.sh bucket --dry-run`.
+
+**Restoring one.** The bucket is versioned, so a removal only adds a delete marker and the
+installer's earlier version is still there. Removing the marker brings it back, then invalidate its
+path. This needs admin credentials for the account, as deleting a version is not something the
+sync's role may do:
+
+```sh
+key=releases/v1.0.3/OpenBot_1.0.3_aarch64.dmg
+aws s3api list-object-versions --bucket copilotkit-openbot-downloads --prefix "$key" \
+  --query 'DeleteMarkers[?IsLatest].VersionId' --output text
+aws s3api delete-object --bucket copilotkit-openbot-downloads --key "$key" --version-id <that id>
+aws cloudfront create-invalidation --distribution-id EQ4EH8L79LPGX --paths "/$key"
+```
+
+On GitHub a removed asset is gone. To put one back, download it from the bucket (restored as above
+if needed) and attach it again: `gh release upload v1.0.3 OpenBot_1.0.3_aarch64.dmg -R CopilotKit/OpenBot`.
+The fixed-name copies and installer `.sig` files are not in the bucket, so they cannot be put back
+this way; the fixed names are the same files as the versioned ones, and can be uploaded again under
+their fixed names from those.
+
+## Staged rollout
+
+A stable release can go to a share of people first: a share of new downloads from
+`downloads.copilotkit.ai/latest/`, and the same share of installed apps' update checks. Everyone
+else keeps getting the Latest release until the share is widened.
+
+It has three parts:
+
+- **Hold Latest.** The repository variable `RELEASE_HOLD_LATEST` lists release tags, separated by
+  spaces or commas, such as `v1.1.0`. A listed release is published and signed as usual, but the
+  signing run that would make it Latest leaves it not Latest
+  ([`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)). So `releases/latest`,
+  `downloads.copilotkit.ai/latest/` and both update feeds keep serving the release before it. Its
+  images are still tagged `latest`. Set the variable before the release PR merges.
+- **Rollout files.** Instead of making it Latest, that signing run starts Downloads sync with
+  `rollout` set. The sync copies the release's images and `releases/<tag>/` files as for any tag,
+  and puts under `rollout/<tag>/` what `latest/` would hold if it were Latest: each signed installer
+  under its fixed name and the rewritten `latest.json`, with the same checks. To run it by hand:
+  `gh workflow run downloads-sync.yml --ref main -f tag=v1.1.0 -f rollout=true`.
+- **Edge split.** The CloudFront Function `openbot-downloads-rollout`
+  ([`scripts/downloads-rollout.js`](../scripts/downloads-rollout.js), cloudfront-js-2.0) runs on
+  the viewer request of the distribution's default behavior. For the four files under `latest/`
+  (the three fixed names and `latest.json`) it hashes the release tag and the viewer's address, its
+  /64 for IPv6, to a number from 0 to 99. Below the percent, it rewrites the request to
+  `rollout/<tag>/<same file>`; otherwise the request stays on `latest/`. Every other path, `v2/`,
+  `releases/` and `tools/` included, passes through. The function runs before the cache, so each
+  folder is cached under its own key. A viewer gets the same answer for the feed and the installer
+  on every request, a wider percent keeps everyone the narrower one had, and each release draws a
+  new cohort. The tag and the percent are the keys `rollout-tag` and `rollout-percent` in the
+  CloudFront KeyValueStore `openbot-downloads-rollout`; a missing or malformed value sends every
+  request to `latest/`.
+
+An app that installed the newer release and later lands outside the share reads the older feed,
+and is offered nothing, because the updater only offers a newer version.
+
+### Ramp, finish and roll back
+
+Each change to the key value store reaches every edge location within seconds, with no change to
+the function or the distribution. From a shell with admin credentials for the account:
+
+```sh
+kvs="$(aws cloudfront describe-key-value-store --name openbot-downloads-rollout \
+  --query KeyValueStore.ARN --output text)"
+etag() { aws cloudfront-keyvaluestore describe-key-value-store --kvs-arn "$kvs" --query ETag --output text; }
+aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key rollout-tag --value v1.1.0
+aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key rollout-percent --value 5
+```
+
+- **Ramp:** put `rollout-percent` again, for example `25`.
+- **Roll back:** put `rollout-percent` to `0`. Every request is on `latest/` again. Apps that
+  already installed the newer release keep it.
+- **Finish at 100%:**
+  1. Remove the tag from `RELEASE_HOLD_LATEST`.
+  2. Mark the release Latest on its release page, or `gh release edit v1.1.0 --latest`.
+  3. Run Downloads sync for the Latest release, `gh workflow run downloads-sync.yml --ref main`, and
+     wait for it to finish, so `latest/` serves the release.
+  4. Remove the installers of every older release from GitHub, which the signing run would have
+     done had it made the release Latest ([Older installers](#older-installers)):
+     `GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-older-installers.sh github`. The sync in
+     step 3 has already removed them from the bucket.
+  5. Remove the function's association from the default behavior (console: the distribution,
+     Behaviors, the default behavior, Function associations, Viewer request: No association), then
+     put `rollout-percent` to `0`.
+
+Between steps 3 and 5, `latest/` and `rollout/<tag>/` hold the same release, so nobody in the share
+is sent back to the older one.
+
+The test path `/rollout-test/latest/<file>` routes the same way, to `latest/` or `rollout/<tag>/`.
+It exists so the function can be attached to a test cache behavior (`/rollout-test/*`) and shown
+answering both ways through the real distribution before it touches `latest/`. With no such
+behavior it is never reached, and on the default behavior it serves what `latest/` would.
 
 ## What merging does
 
@@ -755,19 +928,20 @@ Then, in order:
 - the commit is checked, as described under [What has to be green](#what-has-to-be-green): the full
   CI suite, or, when the release PR changed only the release files on a commit main's CI passed,
   that run and the checks that read the release files
-- one image is built and pushed to `ghcr.io/copilotkit/openbot`, tagged with the version, the
-  commit as `sha-<commit>` and `latest` only when the release becomes Latest (a stable release with
-  no newer release already out). A candidate or beta is never tagged `latest`
-- the services `docker-compose.yml` can build are published too, one image each, at
-  `ghcr.io/copilotkit/openbot-<service>`. Those are `linux/amd64` and `linux/arm64`, built on native
+- the OpenBot images, `ghcr.io/copilotkit/openbot` (the server and every Bot's computer) and
+  `openbot-supervisor`, are taken at the tag `backend-images.env` names, the release's version,
+  and pinned by digest in `container-images.json`, where `openbot`, `server` and `agent-computer`
+  all name the one image. The run stops if one is missing or lacks an architecture it needs
+- the Bots and harnesses in this tree are built from the commit and published, one image each, at
+  `ghcr.io/copilotkit/openbot-<name>`. Those are `linux/amd64` and `linux/arm64`, built on native
   runners of each architecture and joined into one manifest list, because the machines pulling them
   are laptops as well as servers. `.github/published-images.json` is the list, and CI fails if it
   stops matching the Dockerfiles in the tree
 - a build provenance attestation is signed with the workflow's OIDC identity and pushed alongside
-  every one of them
+  every one of those
 - the commit is tagged and a GitHub Release is created, carrying the changelog section as its notes
   (for a candidate or beta, what is under `## Unreleased`), `container-images.json`, the source
-  archive, the chart and the release manifest as assets. A candidate or beta is marked as a
+  archive, the `openbot` and `openbot-bundle` chart packages and the release manifest as assets. A candidate or beta is marked as a
   prerelease and never Latest. A stable release is published not Latest, with no installers yet
 - [Desktop macOS signing](#signed-mac-builds-and-the-updater) is dispatched on the tag straight
   away. It waits for a `macos-signing` reviewer, then builds both Macs and attaches the signed `.dmg`
@@ -813,31 +987,34 @@ is a service, so the references can be read straight out of it:
 ```sh
 export COMPUTER_IMAGE="$(jq -r '.images["agent-computer"].reference' container-images.json)"
 export SUPERVISOR_IMAGE="$(jq -r .images.supervisor.reference container-images.json)"
-export BOT_IMAGE="$(jq -r '.images["agent-bot"].reference' container-images.json)"
-export LANGGRAPH_IMAGE="$(jq -r '.images["agent-langgraph"].reference' container-images.json)"
+export LANGGRAPH_IMAGE="$(jq -r '.images["agent-langgraph-agui"].reference' container-images.json)"
 export SERVER_IMAGE="$(jq -r .images.server.reference container-images.json)"
 export IMAGE_PULL_POLICY=missing
 docker compose up -d
 ```
 
-`IMAGE_PULL_POLICY=missing` is what turns those names into pulls; without it every one of those
-services builds from source, because a service with a `build` section builds by default whatever
-its image is called. A pull that fails still falls back to building, so a machine with no toolchain
-wants the `build` sections overridden away rather than this variable alone.
+The OpenBot images are only ever pulled. `IMAGE_PULL_POLICY=missing` is what makes the Bot a pull
+too; without it `agent-langgraph-agui` builds from source, because a service with a `build` section
+builds by default whatever its image is called. A pull that fails still falls back to building, so a
+machine with no toolchain wants the `build` section overridden away rather than this variable alone.
 
 A tag can be moved to point at a different image; a digest cannot. The same digest that CI smoke
 tested is the one that runs, and rolling back is the same command with an earlier version.
 
-On Kubernetes the chart takes the same digest as `image.digest`; see
-[charts/openbot/README.md](../charts/openbot/README.md#pin-the-image-by-digest).
+On Kubernetes the chart takes the same digest as `image.digest`; see "Pin the image by digest" in
+the Helm guide that comes with the chart.
 
-Before deploying, you can check an image is the one this repository built. Every published image
+Before deploying, you can check an image is OpenBot's. The OpenBot images are signed with OpenBot's
+own key, whose public half is [cosign.pub](cosign.pub), and every Bot image this repository built
 carries its own attestation:
 
 ```sh
-gh attestation verify oci://ghcr.io/copilotkit/openbot:v0.1.0 -R CopilotKit/OpenBot
-gh attestation verify oci://ghcr.io/copilotkit/openbot-supervisor:v0.1.0 -R CopilotKit/OpenBot
+cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot:main
+cosign verify --key docs/cosign.pub --insecure-ignore-tlog=true ghcr.io/copilotkit/openbot-supervisor:main
+gh attestation verify oci://ghcr.io/copilotkit/openbot-agent-langgraph-agui:v1.0.3 -R CopilotKit/OpenBot
 ```
+
+The OpenBot images of releases up to 1.0.3 carry an attestation, checked the way the Bot image is.
 
 ## What has to be green
 
@@ -846,23 +1023,18 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 
 | check | what it would catch |
 | --- | --- |
-| `format, lint, types` | the ordinary things, across every workspace including `agent-computer` and the supervisor |
-| `types (agent-computer)`, `types (supervisor)` | a type error in either deployable package, each checked on its own install |
+| `format, lint, types` | the ordinary things, across every workspace, and a desktop version that has left the release version |
+| `API spec` | a bundled spec that is not what its sources bundle to, a broken API convention, a generated client that is not the committed one, or, on a pull request, a breaking change to the API or the live channels |
 | `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
-| `computer (real browser)` | the agent-computer behavior only a real Chromium shows, such as a password reaching the snapshot a model reads, a session cookie lost on restart, or WebRTC leaving around the egress filter |
+| `app (real browser)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark |
 | `tests` | a decision made wrongly, in isolation |
-| `chart` | a Helm values file that renders a server which cannot start, across the self-hosted, EKS, EKS sandbox, GKE and AKS targets |
-| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses |
+| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses, or a Compose file an older Compose cannot read |
 | `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
-| `migrations` | a schema change with no migration, or a snapshot that has drifted |
-| `image` | an image that builds but does not boot, or a supervised service that respawns |
 | `component dockerfiles` | a Dockerfile a release would publish that no longer builds, or one the publish list has stopped covering |
 
-`image` matters more than its position suggests. Everything above it can pass on a tree whose image
-never starts, because nothing else here runs the thing it ships. It builds the container, boots it
-with embedded PostgreSQL, waits for `/api/capabilities`, and fails if a supervised service is
-respawning.
+None of these runs the OpenBot server. It comes as published images, which a release pins by digest
+and refuses to publish without (see [What merging does](#what-merging-does)).
 
 These checks gate the publish rather than the proposal, which is why the release PR arriving
 without its own checks does not matter: a pull request opened by a workflow does not trigger them.
@@ -873,13 +1045,13 @@ release commit:
 - When the release commit changes nothing but the release files from the commit it merged onto
   (its first parent), and main's CI passed on that commit, they do not. That commit's tree has been
   through all of them already. The release files are `CHANGELOG.md` and `release-policy.json`, which
-  may change freely, and the `version` in `package.json`, the `openbot-desktop` version line in
-  `desktop/src-tauri/Cargo.toml` and `Cargo.lock` and `appVersion` in `charts/openbot/Chart.yaml`,
-  which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
+  may change freely, and the `version` in `package.json`, the `OPENBOT_BACKEND_TAG` line in
+  `backend-images.env` and the `openbot-desktop` version line in
+  `desktop/src-tauri/Cargo.toml` and `Cargo.lock`, which may change nothing else. Only a run of `ci.yml` for a push to this repository's `main`, at
   exactly that commit, counts; a pull request's run tests a merge of the PR, not the commit, and
-  skips `image` unless it was labelled. A run still in progress is waited for, up to 40 minutes. In
+  skips `component dockerfiles` unless it was labelled `full-ci`. A run still in progress is waited for, up to 40 minutes. In
   their place the job re-runs the checks that read the files the release did change: formatting and
-  lint, the desktop and chart versions against `package.json`, and every test that names
+  lint, the desktop version against `package.json`, and every test that names
   `CHANGELOG.md` or `release-policy.json`.
 - Otherwise they all run again, as before: when any other path is added, removed, renamed or
   changed, when a version file changes more than its version, or when main's CI on that commit
@@ -905,9 +1077,8 @@ the server reaches the supervisor, the supervisor builds a computer, the gateway
 browser acts, and the trail records it. It cannot run in CI, and this is not a gap to be closed
 later.
 
-OpenBot only runs in Intelligence mode, and `loadConfig` refuses to start without the project's
-Intelligence values, which a hosted runner has no business holding. The `image` check gets around
-this with placeholder values, because nothing is contacted at start-up, but the journey asserts
+OpenBot only runs in Intelligence mode, and the server refuses to start without the project's
+Intelligence values, which a hosted runner has no business holding. The journey also asserts
 `licenseStatus` is `valid`, and no placeholder can make that true.
 
 So it is a step a person takes, on a machine with real Intelligence credentials, before merging
@@ -918,6 +1089,8 @@ bash scripts/start.sh
 export OPENBOT_SMOKE_COOKIE='better-auth.session_token=...'   # from a signed-in browser
 bun run test:smoke
 ```
+
+A deployment with sign-in needs `OPENBOT_SMOKE_COOKIE` from an administrator's session.
 
 The session is the second half of "a machine with real credentials": the routes the journey proves
 are behind `requireUser`, so a run without one answers 401 three times and says nothing about the

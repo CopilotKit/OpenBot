@@ -1030,6 +1030,184 @@ pub fn pull_completed<R: tauri::Runtime>(
     );
 }
 
+/**
+OpenBot updating itself (`install_app_update_now`): `update_started` as the download of the new
+version begins, and `update_failed` when this version sees the update fail. The emitter keeps the
+start across the restart, and the first launch after it says `update_completed`, or `update_failed`
+when it is still this version (`telemetry::PendingUpdate`). A check that finds nothing, or fails
+before any download, is not an update and says nothing.
+*/
+#[derive(Default)]
+pub struct AppUpdate {
+    started: Mutex<
+        Option<(
+            telemetry::AppVersion,
+            telemetry::AppVersion,
+            std::time::Instant,
+        )>,
+    >,
+}
+
+impl AppUpdate {
+    /// The download of `to`, as the feed names it, is beginning. Said once, however many downloads
+    /// the update tries (`download_app_update`'s second feed).
+    pub fn begin<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, to: &str) {
+        let Some(from) = app
+            .try_state::<DesktopTelemetry>()
+            .and_then(|state| state.emitter.app_version())
+        else {
+            return;
+        };
+        let Some(to) = telemetry::AppVersion::from_package(to) else {
+            log::warn!("[telemetry] the update's version is not one usage data can say");
+            return;
+        };
+        {
+            let Ok(mut started) = self.started.lock() else {
+                return;
+            };
+            if started.is_some() {
+                return;
+            }
+            *started = Some((from.clone(), to.clone(), std::time::Instant::now()));
+        }
+        record(
+            app,
+            telemetry::EventData::UpdateStarted {
+                from_version: from,
+                to_version: to,
+            },
+        );
+    }
+
+    /// The update stopped, for `class`. Nothing when it never began.
+    pub fn failed<R: tauri::Runtime>(
+        &self,
+        app: &tauri::AppHandle<R>,
+        class: telemetry::UpdateFailureClass,
+    ) {
+        let Some((from, to, began)) = self.started.lock().ok().and_then(|mut held| held.take())
+        else {
+            return;
+        };
+        record(
+            app,
+            telemetry::EventData::UpdateFailed {
+                from_version: from,
+                to_version: to,
+                duration_ms: millis(began.elapsed()),
+                failure_class: class,
+            },
+        );
+    }
+}
+
+fn millis(took: std::time::Duration) -> u64 {
+    u64::try_from(took.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Why the updater failed, from its own error: a closed class, never its words. Its download
+/// verifies the signature, so a signature that does not match fails there.
+pub fn update_failure(error: &tauri_plugin_updater::Error) -> telemetry::UpdateFailureClass {
+    use tauri_plugin_updater::Error as E;
+    use telemetry::UpdateFailureClass as C;
+    match error {
+        E::Reqwest(error) if error.is_connect() || error.is_timeout() => C::NetworkUnavailable,
+        E::Reqwest(_)
+        | E::Network(_)
+        | E::ReleaseNotFound
+        | E::TargetNotFound(_)
+        | E::TargetsNotFound(_) => C::DownloadFailed,
+        E::Minisign(_)
+        | E::Base64(_)
+        | E::SignatureUtf8(_)
+        | E::SignedVersionMismatch { .. }
+        | E::MissingSignedVersion => C::SignatureInvalid,
+        E::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => C::PermissionDenied,
+        E::AuthenticationFailed => C::PermissionDenied,
+        // The updater moves the running app aside to install, and could not move it back.
+        E::PreviousAppNotRestored(_) => C::RestoreFailed,
+        E::Io(_)
+        | E::TempDirNotOnSameMountPoint
+        | E::TempDirNotFound
+        | E::FailedToDetermineExtractPath
+        | E::BinaryNotFoundInArchive
+        | E::InvalidUpdaterFormat
+        | E::DebInstallFailed
+        | E::PackageInstallFailed => C::InstallFailed,
+        _ => C::Unknown,
+    }
+}
+
+/// A release tag (`v1.0.4`, `v1.1.0-rc.2`) as an app version, or None for a name that is not one,
+/// such as an internal build's commit.
+fn release_version(tag: &str) -> Option<telemetry::AppVersion> {
+    telemetry::AppVersion::from_package(tag.strip_prefix('v').unwrap_or(tag))
+}
+
+/// This launch's version against the one that last ran (`Telemetry::observe_launch`), with the
+/// release of the installation on this computer, when there is one (`deployment::installed`).
+pub fn observe_launch<R: tauri::Runtime>(app: &tauri::AppHandle<R>, installed: Option<&str>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        state
+            .emitter
+            .observe_launch(installed.and_then(release_version));
+    }
+}
+
+/// The installation is on this app's release, moved there or already there
+/// (`Telemetry::installation_settled`).
+pub fn installation_settled<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        state.emitter.installation_settled();
+    }
+}
+
+/// A Start's move from release `from` to `to` failed, and `from` is back, its database included
+/// (`upgrade::Ran::Kept` and `Back`, and an upgrade the app stopped part way put back).
+pub fn update_restored<R: tauri::Runtime>(app: &tauri::AppHandle<R>, from: &str, to: &str) {
+    if let (Some(from_version), Some(to_version)) = (release_version(from), release_version(to)) {
+        record(
+            app,
+            telemetry::EventData::UpdateRestored {
+                from_version,
+                to_version,
+            },
+        );
+    }
+}
+
+/// A Start's move from release `from` to `to` failed after `took`, and `from` could not be put back
+/// (`upgrade::Ran::Stuck`).
+pub fn update_not_restored<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    from: &str,
+    to: &str,
+    took: std::time::Duration,
+) {
+    if let (Some(from_version), Some(to_version)) = (release_version(from), release_version(to)) {
+        record(
+            app,
+            telemetry::EventData::UpdateFailed {
+                from_version,
+                to_version,
+                duration_ms: millis(took),
+                failure_class: telemetry::UpdateFailureClass::RestoreFailed,
+            },
+        );
+    }
+}
+
+/// Windows is restarting for the fix setup asked for (`Telemetry::restart_required`). Saved at
+/// once: Windows ends the app without a Quit, and the launch after the restart sends what is left.
+pub fn restart_required<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        if state.emitter.restart_required().is_err() {
+            log::warn!("[telemetry] setup event could not be saved");
+        }
+    }
+}
+
 pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<DesktopTelemetry>() {
         if state.emitter.shutdown().is_err() {
@@ -1062,10 +1240,17 @@ fn main() {
     if dir.join("slow").exists() {
         std::thread::sleep(std::time::Duration::from_secs(30));
     }
-    if let Ok(answer) = std::fs::read_to_string(dir.join("answer")) {
-        print!("{answer}");
-        let code = std::fs::read_to_string(dir.join("exit")).unwrap_or_default();
-        std::process::exit(code.trim().parse().unwrap_or(0));
+    // An answer for this command (`local update` reads `answer-update`), else for every call.
+    let command = args.get(1).cloned().unwrap_or_default();
+    for (answer, exit) in [
+        (format!("answer-{command}"), format!("exit-{command}")),
+        ("answer".to_owned(), "exit".to_owned()),
+    ] {
+        if let Ok(answer) = std::fs::read_to_string(dir.join(answer)) {
+            print!("{answer}");
+            let code = std::fs::read_to_string(dir.join(exit)).unwrap_or_default();
+            std::process::exit(code.trim().parse().unwrap_or(0));
+        }
     }
     println!("{{\"type\":\"skipped\"}}");
 }
@@ -1105,6 +1290,12 @@ fn main() {
         pub(crate) fn answer(&self, stdout: &str, exit: i32) {
             std::fs::write(self.dir.join("answer"), stdout).unwrap();
             std::fs::write(self.dir.join("exit"), exit.to_string()).unwrap();
+        }
+
+        /// Answer later `local <command>` calls with `stdout` and `exit`, ahead of `answer`.
+        pub(crate) fn answer_to(&self, command: &str, stdout: &str, exit: i32) {
+            std::fs::write(self.dir.join(format!("answer-{command}")), stdout).unwrap();
+            std::fs::write(self.dir.join(format!("exit-{command}")), exit.to_string()).unwrap();
         }
 
         /// Every call so far, one line each, arguments space-separated.
@@ -1930,6 +2121,52 @@ mod tests {
         let _ = finish_account_check(off.handle(), small());
         let _ = finish_account_check(off.handle(), required());
         assert!(off.state::<DesktopTelemetry>().emitter.snapshot().is_err());
+    }
+
+    /// A Start whose move to the app's release failed and put the previous release back is
+    /// `update_restored`, with the release it is back on and the one it was moving to, read from
+    /// their tags (`v1.0.4`). One that could not put it back is `update_failed` (`restore_failed`).
+    /// A release name that is not a version says nothing, rather than something open.
+    #[test]
+    fn a_release_put_back_is_restored_with_both_versions() {
+        let app = tauri::test::mock_builder()
+            .manage(DesktopTelemetry::for_tests(
+                temp_root("update-restored"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        update_restored(app.handle(), "v1.0.4", "v1.1.0-rc.2");
+        update_restored(app.handle(), "internal-1263-gabc1234", "v1.1.0");
+        update_not_restored(
+            app.handle(),
+            "v1.0.4",
+            "v1.1.0",
+            std::time::Duration::from_millis(4200),
+        );
+        let queued: Vec<_> = app
+            .state::<DesktopTelemetry>()
+            .queued()
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .collect();
+        assert_eq!(
+            queued,
+            [
+                serde_json::json!({
+                    "kind": "update_restored",
+                    "from_version": "1.0.4",
+                    "to_version": "1.1.0-rc.2"
+                }),
+                serde_json::json!({
+                    "kind": "update_failed",
+                    "from_version": "1.0.4",
+                    "to_version": "1.1.0",
+                    "duration_ms": 4200,
+                    "failure_class": "restore_failed"
+                }),
+            ]
+        );
     }
 
     pub(super) fn context() -> telemetry::Context {

@@ -10,10 +10,9 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import type { ComposioApp } from "@/lib/plugins/queries";
 import { Route as ComposioRoute } from "@/routes/_authed/admin/plugins/composio";
-import { displayName } from "../../server/src/plugins/app-names";
-import captured from "../../server/tests/fixtures/composio-key-apps.json";
+import { answerAppsApi, type TodayDirectoryApp } from "./apps-api";
+import captured from "./fixtures/composio-key-apps.json";
 
 /**
  * THE DIRECTORY SAYS WHICH APPS TAKE A KEY, BEFORE ANYBODY PRESSES ADD OR CONNECT.
@@ -24,9 +23,8 @@ import captured from "../../server/tests/fixtures/composio-key-apps.json";
  * to are listed first.
  *
  * The rows are Composio's own catalogue answer, captured read-only on 2026-11-08. Each one's
- * `connection` is the server's verdict for that exact row, which `server/tests/key-only-apps.test.ts`
- * pins against `connectionOf`: HubSpot and Gmail sign in, 1Password, PostHog, Fireflies and
- * Pipedrive take a key.
+ * `connection` is the server's verdict for that exact row: HubSpot and Gmail sign in, 1Password,
+ * PostHog, Fireflies and Pipedrive take a key.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -38,7 +36,20 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
+/**
+ * The name the server gives each captured row, read off its own naming when this fixture was
+ * recorded: 1Password arrives as its brand spells it and not as Composio's "1password".
+ */
+const NAME: Record<string, string> = {
+  hubspot: "HubSpot",
+  gmail: "Gmail",
+  _1password: "1Password",
+  posthog: "PostHog",
+  fireflies: "Fireflies",
+  pipedrive: "Pipedrive",
+};
+
+const VERDICT: Record<string, TodayDirectoryApp["connection"]["kind"]> = {
   hubspot: "consent",
   gmail: "consent",
   _1password: "fields",
@@ -47,12 +58,11 @@ const VERDICT: Record<string, ComposioApp["connection"]["kind"]> = {
   pipedrive: "fields",
 };
 
-/** The captured rows, as the directory route answers them: the server's own projection. */
-function directory(): ComposioApp[] {
+/** The captured rows, as the server projected them for the directory. */
+function directory(): TodayDirectoryApp[] {
   return captured.catalogue.map((row) => ({
     slug: row.slug,
-    // The server's own naming, so 1Password arrives as its brand spells it and not "1password".
-    name: displayName(row.slug, row.name),
+    name: NAME[row.slug] ?? row.name,
     description: row.meta.description,
     logo: null,
     categories: [],
@@ -116,27 +126,19 @@ function renderDirectory() {
   );
 }
 
-function stubFetch(apps: ComposioApp[]) {
-  global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input).split("?")[0] ?? "";
-    const json = (body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    if (path === "/api/plugins/composio/apps") return json({ apps });
-    if (path === "/api/plugins") {
-      return json({
-        catalogue: [],
-        servers: [],
-        skills: [],
-        botsMayCallBack: false,
-        redirectUri: null,
-        composioConfigured: true,
-        provider: "composio",
-      });
-    }
-    return json({ connections: [] });
+function stubFetch(apps: TodayDirectoryApp[], pageSize?: number) {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const answered = answerAppsApi(input, init, {
+      directory: apps,
+      composioConfigured: true,
+      provider: "composio",
+      pageSize,
+    });
+    if (answered) return answered;
+    return new Response(JSON.stringify({ connections: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }) as unknown as typeof fetch;
 }
 
@@ -163,10 +165,18 @@ test("a key-only app says it needs a key before Add, and a sign-in app does not"
   expect(view.container.textContent ?? "").not.toMatch(/composio/i);
 });
 
-test("apps you sign in to are listed ahead of apps that need a key", async () => {
-  stubFetch(directory());
-  const view = renderDirectory();
+/*
+ * The directory is read a page at a time. Two to a page puts the captured rows on three pages, so a
+ * reader that stopped at the first page would list two of the six.
+ */
+for (const pageSize of [undefined, 2]) {
+  test(`apps you sign in to are listed ahead of apps that need a key (${pageSize ? `${pageSize} to a page` : "one page"})`, async () => {
+    stubFetch(directory(), pageSize);
+    await expectSignInAppsFirst(renderDirectory());
+  });
+}
 
+async function expectSignInAppsFirst(view: ReturnType<typeof renderDirectory>) {
   await view.findByTestId("directory-_1password");
   await waitFor(() => {
     const order = Array.from(
@@ -181,4 +191,4 @@ test("apps you sign in to are listed ahead of apps that need a key", async () =>
       "directory-posthog",
     ]);
   });
-});
+}

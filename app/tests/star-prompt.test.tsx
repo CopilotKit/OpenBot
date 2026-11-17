@@ -82,13 +82,12 @@ beforeEach(() => {
       const body =
         typeof init?.body === "string" ? JSON.parse(init.body) : init?.body;
       requests.push({ path, method, body });
-      if (path.endsWith("/api/telemetry/product-events")) {
+      if (path.endsWith("/star-prompt-events")) {
         return new Response(null, { status: telemetryStatus });
       }
-      if (path.endsWith("/api/settings/preferences") && method === "PATCH") {
-        return Response.json({
-          preferences: { ...preferences(), ...(body as object) },
-        });
+      if (path.endsWith("/people/me/preferences") && method === "PATCH") {
+        // The API answers with the preferences themselves, not wrapped.
+        return Response.json({ ...preferences(), ...(body as object) });
       }
       return Response.json({ error: "not served" }, { status: 500 });
     },
@@ -126,7 +125,7 @@ function preferences(answered?: boolean): UserPreferences {
     narration: null,
     skin: "openbot",
     proactive: "on",
-    ...(answered === undefined ? {} : { starPromptAnswered: answered }),
+    starPromptAnswered: answered ?? false,
   };
 }
 
@@ -162,7 +161,7 @@ function sendPrompts(count: number) {
 const posted = (kind: string) =>
   requests.filter(
     (request) =>
-      request.path.endsWith("/api/telemetry/product-events") &&
+      request.path.endsWith("/star-prompt-events") &&
       (request.body as { kind?: string }).kind === kind,
   );
 
@@ -198,7 +197,7 @@ test("is never asked before the person's preferences load, when they fail, or on
   await waitFor(() =>
     expect(
       requests.some((request) =>
-        request.path.endsWith("/api/settings/preferences"),
+        request.path.endsWith("/people/me/preferences"),
       ),
     ).toBe(true),
   );
@@ -257,7 +256,7 @@ for (const [button, kind] of [
     });
     const saved = requests.find(
       (request) =>
-        request.path.endsWith("/api/settings/preferences") &&
+        request.path.endsWith("/people/me/preferences") &&
         request.method === "PATCH",
     );
     expect(saved?.body).toEqual({ starPromptAnswered: true });
@@ -276,7 +275,7 @@ test("a count the server refuses still hides it and still saves the answer", asy
     expect(
       requests.some(
         (request) =>
-          request.path.endsWith("/api/settings/preferences") &&
+          request.path.endsWith("/people/me/preferences") &&
           request.method === "PATCH",
       ),
     ).toBe(true),

@@ -6,7 +6,9 @@ import { FuseEmpty, FuseScreen } from "../ui";
 
 /**
  * Activity: what the centre Bot is waiting on you for, then what it is doing, has scheduled and has
- * finished. Both are OpenBot's own sections from the Bot's page, under OpenFuse's title.
+ * finished. Both are OpenBot's own sections from the Bot's page, under OpenFuse's title. The board
+ * lists the Bot's tasks and what it asked, so the sections below leave those out; a task the board
+ * leaves out, one it delegated that has finished or one marked done, is listed below under Done.
  */
 export function ActivityScreen() {
   const { bot } = useFuse();
@@ -15,7 +17,7 @@ export function ActivityScreen() {
       {bot ? (
         <div className="[&>section:first-child]:mt-0">
           <BotNeedsYou agentId={bot.id} />
-          <BotActivitySections agentId={bot.id} />
+          <BotActivitySections agentId={bot.id} boardAbove />
         </div>
       ) : (
         <NoBot />

@@ -20,8 +20,19 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
 import type { GrantState } from "@/lib/plugins/grants";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { ME_PATH, meBody } from "./accounts-api";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
+import {
+  authorizationStartResponse,
+  authorizationsResponse,
+  confirmationResponse,
+  connectionPage,
+  connectionsProblem,
+  disconnectPreviewResponse,
+  MY_CONNECTIONS_PATH,
+  startResponse,
+} from "./connections-api";
 
 /**
  * THE GRANT LIST on an app's own page, drawn by `GrantState`, grouped by permission, with the consent
@@ -48,6 +59,7 @@ afterAll(async () => {
 });
 
 const APP = "gmail";
+const CONSENT_URL = "https://vendor.invalid/consent";
 
 function captureRouteState(route: object): Record<string, unknown> {
   return { ...route, options: { ...(route as { options: object }).options } };
@@ -77,7 +89,7 @@ type Provider = "composio" | "arcade";
 function server(
   provider: Provider,
   accountMode: "shared" | null = null,
-): PluginServer {
+): TodayServer {
   return {
     authScheme: "OAUTH2",
     id: APP,
@@ -129,10 +141,9 @@ const siblingReads: string[] = [];
 
 function install(setup: Setup) {
   siblingReads.length = 0;
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server(setup.provider, setup.accountMode ?? null)],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: setup.configured ?? true,
@@ -148,26 +159,31 @@ function install(setup: Setup) {
   authorizeCalls.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0] ?? "";
-    if (path.endsWith("/grants")) return json({ actions: setup.grants ?? [] });
+    if (path.endsWith("/authorizations"))
+      return authorizationsResponse(setup.grants ?? []);
     if (path.endsWith("/connect") && setup.connectRefusal) {
-      return json({ error: setup.connectRefusal }, 503);
+      return connectionsProblem(503, setup.connectRefusal);
     }
+    if (path.endsWith("/connect") && init?.method === "POST")
+      return startResponse({ authorizationUrl: CONSENT_URL });
     if (path.endsWith("/authorize")) {
       authorizeCalls.push(String(init?.body));
-      return json({ authorizationUrl: "https://vendor.invalid/consent" });
+      return authorizationStartResponse(CONSENT_URL);
     }
-    if (path === "/api/me")
-      return json({
-        user: { id: "u", role: setup.role ?? "user", email: "u@x.io" },
-      });
-    if (path === "/api/plugins") return json(page);
-    if (path.startsWith("/api/plugins/connections")) {
-      return json({
-        connections: setup.connected
+    if (path === ME_PATH)
+      return json(
+        meBody({
+          user: { id: "u", role: setup.role ?? "user", email: "u@x.io" },
+        }),
+      );
+    const apps = answerAppsApi(input, init, page);
+    if (apps) return apps;
+    if (path === MY_CONNECTIONS_PATH) {
+      return connectionPage(
+        setup.connected
           ? [
               {
                 serverId: APP,
-                scope: "",
                 connectedAt: "2026-09-10T00:00:00.000Z",
                 verified: true,
                 verifiedAt: null,
@@ -175,16 +191,17 @@ function install(setup: Setup) {
               },
             ]
           : [],
-        redirectUri: null,
-      });
+      );
     }
-    if (path.endsWith("/connection/siblings")) {
+    if (path.endsWith("/disconnect-preview")) {
       siblingReads.push(path);
-      if (setup.siblingsFail) return json({ error: "no" }, 500);
-      return json(setup.siblings ?? { siblings: [], unanswered: 0 });
+      if (setup.siblingsFail) return connectionsProblem(500, "no");
+      return disconnectPreviewResponse(
+        setup.siblings ?? { siblings: [], unanswered: 0 },
+      );
     }
-    if (path.endsWith("/connection/confirm"))
-      return json({ connected: setup.connected });
+    if (path.endsWith("/confirm"))
+      return confirmationResponse(setup.connected === true);
     return json({ error: "unexpected" }, 404);
   }) as typeof fetch;
 }
@@ -255,7 +272,7 @@ const GMAIL: GrantState[] = [
   { action: "Gmail.SendEmail", state: "needs-consent", scopes: ["gmail.send"] },
   {
     action: "Gmail.Setup",
-    state: "needs-operator",
+    state: "needs-admin",
     missing: ["GOOGLE_CLIENT_SECRET"],
   },
   { action: "Gmail.Flaky", state: "unknown", reason: "Try again in a moment." },
@@ -298,14 +315,14 @@ test("Authorize appears for needs-consent and for nothing else", async () => {
   expect(buttons("Gmail.Flaky")).not.toContain("Authorize");
 });
 
-test("needs-operator names the missing secret, says an admin has to set it, and offers no Authorize", async () => {
+test("needs-admin names the missing secret, says an admin has to set it, and offers no Authorize", async () => {
   install({
     provider: "arcade",
     connected: true,
     grants: [
       {
         action: "Gmail.Setup",
-        state: "needs-operator",
+        state: "needs-admin",
         missing: ["GOOGLE_CLIENT_SECRET"],
       },
     ],
@@ -512,7 +529,7 @@ test("with mixed unauthorized states past ten, the ten drawn are in state order:
       { length: 3 },
       (_, index): GrantState => ({
         action: `Gmail.B${index}`,
-        state: "needs-operator",
+        state: "needs-admin",
         missing: ["GOOGLE_CLIENT_SECRET"],
       }),
     ),
@@ -603,7 +620,7 @@ test("a Shared app landing from a consent names the action and marks its row", a
   expect(row(view, "Gmail.ListEmails").hasAttribute("data-landed")).toBe(true);
   expect(row(view, "Gmail.SendEmail").hasAttribute("data-landed")).toBe(false);
   // The Shared branch is the one drawing this, not the personal-account branch.
-  expect(view.container.textContent).toContain("Team account");
+  expect(view.container.textContent).toContain("Shared account");
 });
 
 test("a Shared app reached without an action says nothing about authorizing", async () => {
@@ -644,7 +661,7 @@ test("pressing Authorize renders consentCopy's sentence and redirects nowhere ye
   fireEvent.click(view.getByText("Continue to consent"));
   await waitFor(() =>
     expect(authorizeCalls).toEqual([
-      JSON.stringify({ action: "Gmail.SendEmail" }),
+      JSON.stringify({ action: "Gmail.SendEmail", returnTo: "connections" }),
     ]),
   );
 });
@@ -752,7 +769,7 @@ test("a Composio deployment draws no grant list and never reads the grants", asy
  *
  * The case where the two DISAGREE, which is the whole reason the screen stopped comparing names: a
  * deployment whose provider is named arcade but whose broker declares no per-action authorization
- * flow. `/servers/:id/authorize` refuses such a deployment with 503, so a list drawn here would be
+ * flow. authorizeConnectionAction refuses such a deployment with 503, so a list drawn here would be
  * a screenful of buttons that cannot work. The name says draw it; the capability says do not; the
  * capability is what the route behind the buttons reads.
  */
@@ -807,5 +824,121 @@ test("a refused Connect that names an address shows it whole and lets it wrap", 
     expect(notice.className.split(/\s+/)).toContain("break-words");
   } finally {
     window.open = realOpen;
+  }
+});
+
+/*
+ * ---- OpenBot Desktop: the window finishes the consent its person's browser came back from ----
+ *
+ * The window sends the consent to the person's default browser, and the personal edition admits only
+ * requests carrying its install's token, which that browser does not have. So the server holds the
+ * browser's return and hands it back to the window, and the window, back in front, opens the
+ * verifier itself to finish it. Once per consent, and only in the Desktop window.
+ */
+
+const VERIFIER = "/api/plugins/arcade/verify";
+
+/** Every page address the screen sends this window to, in order, instead of going there. */
+function watchNavigation() {
+  const navigations: string[] = [];
+  Object.defineProperty(window.location, "href", {
+    configurable: true,
+    get: () => "about:blank",
+    set: (value: string) => {
+      navigations.push(String(value));
+    },
+  });
+  return {
+    navigations,
+    restore: () => {
+      delete (window.location as unknown as Record<string, unknown>).href;
+    },
+  };
+}
+
+function inDesktopWindow() {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  return () => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  };
+}
+
+async function authorizeSendEmail(view: ReturnType<typeof render>) {
+  await waitFor(() => row(view, "Gmail.SendEmail"));
+  fireEvent.click(view.getByText("Authorize"));
+  fireEvent.click(await view.findByText("Continue to consent"));
+}
+
+test("in OpenBot Desktop, an authorized action is finished at the verifier once the window is back in front", async () => {
+  install({ provider: "arcade", connected: true, grants: GMAIL });
+  const leave = inDesktopWindow();
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    await authorizeSendEmail(view);
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL, VERIFIER]);
+    // Once per consent: a later focus goes nowhere.
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL, VERIFIER]);
+  } finally {
+    watched.restore();
+    leave();
+  }
+});
+
+test("in OpenBot Desktop, connecting an app on Arcade is finished at the verifier the same way", async () => {
+  install({ provider: "arcade", connected: false, grants: GMAIL });
+  const leave = inDesktopWindow();
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL, VERIFIER]);
+  } finally {
+    watched.restore();
+    leave();
+  }
+});
+
+test("in a browser the consent comes back to the verifier by itself, so focus opens nothing", async () => {
+  install({ provider: "arcade", connected: true, grants: GMAIL });
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    await authorizeSendEmail(view);
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL]);
+  } finally {
+    watched.restore();
+  }
+});
+
+test("in OpenBot Desktop, a Composio consent is confirmed on return and never opens the verifier", async () => {
+  install({ provider: "composio", connected: false });
+  const leave = inDesktopWindow();
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+    // Through Composio, OpenBot's step comes first, in the window as anywhere else.
+    fireEvent.click(await view.findByRole("button", { name: "Continue now" }));
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL]);
+  } finally {
+    watched.restore();
+    leave();
   }
 });

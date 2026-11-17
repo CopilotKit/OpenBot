@@ -1,3 +1,16 @@
 # Auto detect text files and perform LF normalization, and check them out with LF on every OS.
 # Biome formats to LF and the s6 files are copied into a Linux image, so a CRLF checkout breaks both.
 * text=auto eol=lf
+
+# Builders add API operations in parallel. Both sides of a merge only ever append to these lists (the
+# spec's tags, OAuth scopes and paths in common.yaml, one line each; the generated client's
+# re-exports), so git's union driver keeps both sides' new lines instead of raising a conflict. Union
+# cannot be scoped to part of a file, so it covers the whole of common.yaml. api/openapi.yaml is the
+# bundle of the sources, so a merge never stops on it either: it is rebuilt, not merged. After a
+# rebase, run `bun run api:bundle` and `bun run api:generate` and commit: CI's drift checks catch
+# anything the union got wrong.
+api/openapi/common.yaml merge=union
+api/openapi.yaml merge=union
+app/src/lib/api/generated/index.ts merge=union
+app/src/lib/api/generated/index.zod.ts merge=union
+app/src/lib/api/generated/model/index.ts merge=union

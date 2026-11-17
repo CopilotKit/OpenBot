@@ -45,7 +45,6 @@ pub struct Ports {
     pub server: u16,
     pub postgres: u16,
     pub computer: u16,
-    pub bot: u16,
     pub langgraph: u16,
     pub supervisor: u16,
     pub harness: Option<u16>,
@@ -58,7 +57,6 @@ impl Default for Ports {
             server: 3001,
             postgres: 5432,
             computer: 4100,
-            bot: 4200,
             langgraph: 4201,
             supervisor: 4500,
             harness: None,
@@ -67,12 +65,11 @@ impl Default for Ports {
 }
 
 /// The `.env` keys a deployment's host ports are kept under.
-const PORT_KEYS: [&str; 8] = [
+const PORT_KEYS: [&str; 7] = [
     "APP_PORT",
     "SERVER_PORT",
     "POSTGRES_PORT",
     "COMPUTER_PORT",
-    "BOT_PORT",
     "LANGGRAPH_PORT",
     "SUPERVISOR_PORT",
     "PICKED_HARNESS_HOST_PORT",
@@ -151,7 +148,6 @@ impl Ports {
             ("SERVER_PORT", &mut ports.server),
             ("POSTGRES_PORT", &mut ports.postgres),
             ("COMPUTER_PORT", &mut ports.computer),
-            ("BOT_PORT", &mut ports.bot),
             ("LANGGRAPH_PORT", &mut ports.langgraph),
             ("SUPERVISOR_PORT", &mut ports.supervisor),
         ] {
@@ -172,7 +168,6 @@ impl Ports {
             ("SERVER_PORT", self.server),
             ("POSTGRES_PORT", self.postgres),
             ("COMPUTER_PORT", self.computer),
-            ("BOT_PORT", self.bot),
             ("LANGGRAPH_PORT", self.langgraph),
             ("SUPERVISOR_PORT", self.supervisor),
         ]
@@ -241,7 +236,6 @@ impl Ports {
             server: choose(self.server)?,
             postgres: choose(self.postgres)?,
             computer: choose(self.computer)?,
-            bot: choose(self.bot)?,
             langgraph: choose(self.langgraph)?,
             supervisor: choose(self.supervisor)?,
             harness: harness
@@ -430,7 +424,6 @@ mod port_tests {
                 server: port,
                 postgres: port,
                 computer: port,
-                bot: port,
                 langgraph: port,
                 supervisor: port,
                 harness: None,
@@ -453,7 +446,6 @@ mod port_tests {
             server: port,
             postgres: port,
             computer: port,
-            bot: port,
             langgraph: port,
             supervisor: port,
             harness: Some(port),
@@ -464,7 +456,7 @@ mod port_tests {
             .values()
             .map(|value| value.parse().unwrap())
             .collect();
-        assert_eq!(values.len(), 8);
+        assert_eq!(values.len(), 7);
         assert!(!values.contains(&port));
         // Checked on the binds that chose them, still open. Given back and bound again here, a
         // port can still be taken: a process another test is starting holds a copy of every open
@@ -712,6 +704,17 @@ fn secret() -> String {
     BASE64.encode(bytes)
 }
 
+/// A new value for `key`. The install's token travels in an address and a cookie, so it is 32
+/// random bytes in the URL-safe alphabet with no padding, which both carry as they are.
+fn minted(key: &str) -> String {
+    if key == crate::install_token::NAME {
+        let mut bytes = [0u8; 32];
+        rand::rng().fill_bytes(&mut bytes);
+        return base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    }
+    secret()
+}
+
 /// The settings the shell owns, in the order a person reading the file would want them.
 ///
 /// Addresses use `127.0.0.1` rather than `localhost` deliberately. Compose publishes on both
@@ -860,7 +863,6 @@ pub fn compose(
             );
             env.insert("BOT_PROVIDER".into(), "openai".into());
             env.insert("BOT_MODEL".into(), model.clone());
-            env.insert("AGENT_BOT_MODEL".into(), model.clone());
         }
         ModelCredential::Compatible {
             base_url,
@@ -891,18 +893,6 @@ pub fn compose(
                 insert_if_given(&mut env, "OPENAI_CONTAINER_BASE_URL", container_base_url);
             }
             insert_if_given(&mut env, "BOT_MODEL", name);
-            /*
-             * The bundled Bot's own model variable, set to the same name.
-             *
-             * It has one because it hand-writes `/v1/chat/completions`, where `gpt-5.6-*` rejects
-             * function tools, so `docker-compose.yml` pins it to `gpt-5.5` rather than letting the
-             * framework Bot's choice take its tools away. That reasoning is about OpenAI's own
-             * models and does not survive a custom endpoint: `gpt-5.5` is not in the catalogue of
-             * an Ollama or a vLLM, so the pin asked somebody's own server for a model it has never
-             * heard of. The person named exactly one model on that screen and meant it for
-             * whichever Bot answers.
-             */
-            insert_if_given(&mut env, "AGENT_BOT_MODEL", name);
         }
     }
 
@@ -922,9 +912,9 @@ pub fn compose(
     // reports that it cannot answer without ever naming the space.
     //
     // And at `127.0.0.1` where they say `localhost`, as the local Intelligence CLI reports its
-    // stack. The server and the person's browser both dial these (`docker-compose.yml` hands the
-    // gateway to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`), the stack publishes on
-    // `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway at no other name.
+    // stack. The stack publishes on `127.0.0.1` alone, and whatever on this machine reads these
+    // from `.env` dials them there. The person's browser and the Recorder dial neither: they are
+    // given OpenBot's own address for the gateway (below).
     env.insert(
         "INTELLIGENCE_API_URL".into(),
         numeric_loopback(&intelligence.api_url),
@@ -937,10 +927,14 @@ pub fn compose(
      * The same two addresses as the server's container reaches them.
      *
      * Local Intelligence answers on this machine's loopback, which inside a container is the
-     * container. `host.docker.internal` is the machine. Only the server is moved: the browser opens
-     * the gateway too, from the address in `/info`, and the browser is on the host, so
-     * `docker-compose.yml` hands it the address above unchanged. Empty for an Intelligence somewhere
-     * else, which the container reaches at the address it was given.
+     * container. `host.docker.internal` is the machine. Empty for an Intelligence somewhere else,
+     * which the container reaches at the address it was given.
+     *
+     * A gateway address here is also what turns the server's own carrying of the gateway socket on
+     * (`INTELLIGENCE_GATEWAY_PROXY` in `docker-compose.yml`): the browser opens that socket too,
+     * and with Intelligence on this machine it is given OpenBot's address for it, the app's own
+     * port, and never the gateway's. An Intelligence somewhere else has a host of its own, which
+     * the browser reaches itself.
      */
     env.insert(
         "INTELLIGENCE_CONTAINER_API_URL".into(),
@@ -1003,7 +997,7 @@ pub fn compose(
             // present, is published, and must still be replaced. It also holds
             // `KEY_ENCRYPTION_KEY` to the 32 bytes it has to decode to.
             .filter(|value| usable(key, value))
-            .unwrap_or_else(secret);
+            .unwrap_or_else(|| minted(key));
         env.insert(key.into(), value);
     }
 
@@ -1060,8 +1054,8 @@ pub fn compose(
      * The picked harness, if there is one.
      *
      * Addressed on loopback rather than by a compose service name, because the server is a host
-     * process here and not a container: it reaches `agent-bot` and `agent-langgraph` the same way,
-     * over the port those services publish.
+     * process here and not a container: it reaches a Bot's container the same way, over the port
+     * that service publishes.
      *
      * One address and one kind. The package's single row drops itself while the address is blank,
      * so a deployment that picked nothing registers nothing.
@@ -1166,9 +1160,10 @@ pub fn compose(
         loopback_relays(ports, &intelligence.gateway_ws_url),
     );
 
-    // The worker refuses to start without this, by design: it is a fact about where this process
-    // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
-    // from a developer's machine does not carry it either.
+    // For an installation whose Compose file is a release's up to 1.0.3, which runs the routines
+    // sweep as a `worker` service: that worker refuses to start without this, by design. It is a
+    // fact about where the process runs, and it would rather stop than guess. Later releases' server
+    // does the sweep itself and reads neither this nor the worker's secret.
     env.insert(
         "SERVER_INTERNAL_URL".into(),
         format!("http://127.0.0.1:{}", ports.server),
@@ -1368,7 +1363,7 @@ pub const NO_KEY_NEEDED: &str = "no-key-needed";
 const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
 
 /// The secrets this deployment mints for itself, once.
-pub const MINTED: [&str; 7] = [
+pub const MINTED: [&str; 8] = [
     "AGENT_TOOL_TOKEN",
     "COMPUTER_TOKEN",
     "KEY_ENCRYPTION_KEY",
@@ -1376,6 +1371,9 @@ pub const MINTED: [&str; 7] = [
     // the person's plan. See `learning_model`.
     crate::learning_model::TOKEN,
     "MANAGED_AGENT_TOKEN",
+    // The install's own token, which the personal edition only admits requests carrying. Kept, not
+    // minted again, so a window that already has its cookie stays let in. See `install_token`.
+    crate::install_token::NAME,
     "SUPERVISOR_TOKEN",
     "WORKER_SHARED_SECRET",
 ];
@@ -1385,10 +1383,16 @@ pub const MINTED: [&str; 7] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 9] = [
+pub const REMOVED_WHEN_UNSET: [&str; 12] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
+    // What earlier Desktops wrote for the two Bots that shipped in their own containers, agent-bot
+    // and agent-langgraph: a host port and an image for the first, an image for the second. Neither
+    // Bot exists now, and nothing reads these.
+    "BOT_PORT",
+    "BOT_IMAGE",
+    "LANGGRAPH_IMAGE",
     // What earlier Desktops wrote for the host-side Chrome they ran beside the server: its port, its
     // address (the host's and the server container's), and why there was none. Desktop runs no such
     // browser now, and a server still pointed at one shows the person a separate window, or a port
@@ -2024,6 +2028,54 @@ HTTPS_PROXY=http://proxy:8080
         }
     }
 
+    /**
+    The install's token, which the personal edition only admits requests carrying: minted by the
+    first Start, and kept by every Start after it, a restart, an upgrade, and a put-back to an older
+    app and forward again alike, because each reads it back from the credential store (`MINTED`).
+    Never written to `.env`, and minted in a shape a URL and a cookie carry as it is.
+    */
+    #[test]
+    fn the_install_token_is_minted_once_kept_and_never_written_to_the_file() {
+        let name = crate::install_token::NAME;
+        assert!(MINTED.contains(&name), "Start reads only MINTED back");
+        let first = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let minted = first.get(name).cloned().expect("the first Start mints it");
+        assert!(minted.len() >= 43, "32 random bytes: {}", minted.len());
+        assert!(
+            minted
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "a URL and a cookie carry it as it is"
+        );
+
+        // What the credential store is given, and what the next Start reads back from it.
+        let (settings, secrets) = crate::vault::split(first);
+        assert!(!settings.contains_key(name), "never in .env");
+        assert_eq!(secrets.get(name), Some(&minted));
+        let kept: BTreeMap<String, String> = secrets
+            .into_iter()
+            .filter(|(key, _)| MINTED.contains(&key.as_str()))
+            .collect();
+        let again = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &kept,
+        );
+        assert_eq!(again.get(name), Some(&minted), "minted again");
+    }
+
     /// A blank one is not a value to keep. An empty line is what clearing looks like, not a secret.
     #[test]
     fn a_blank_kept_secret_is_minted_rather_than_carried() {
@@ -2287,6 +2339,51 @@ HTTPS_PROXY=http://proxy:8080
         write(&path, &settings, &purge).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("OPENBOT_ORGANIZATION_AUTH_URL"), "{text}");
+        assert!(text.contains("MY_OWN=kept"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// An installation updated from a release that shipped agent-bot and agent-langgraph still has
+    /// their settings in `.env`: a port and an image for the first, an image for the second. A Start
+    /// takes them out, keeps the ports it still chooses and leaves a person's own lines alone.
+    #[test]
+    fn a_start_takes_out_the_settings_of_the_two_retired_bots() {
+        let dir = temp_root("env-retired-bots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        std::fs::write(
+            &path,
+            "BOT_PORT=4200\n\
+             LANGGRAPH_PORT=4201\n\
+             BOT_IMAGE=ghcr.io/copilotkit/openbot-agent-bot@sha256:00\n\
+             LANGGRAPH_IMAGE=ghcr.io/copilotkit/openbot-agent-langgraph@sha256:00\n\
+             MY_OWN=kept\n",
+        )
+        .unwrap();
+        let ports = Ports::read(&dir).unwrap();
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &ports,
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+            .iter()
+            .filter(|key| !settings.contains_key(**key))
+            .map(|key| (key.to_string(), String::new()))
+            .collect();
+        write(&path, &settings, &purge).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        for gone in ["BOT_PORT=", "BOT_IMAGE=", "LANGGRAPH_IMAGE="] {
+            assert!(
+                !text.lines().any(|line| line.starts_with(gone)),
+                "{gone} survived: {text}"
+            );
+        }
+        assert!(text.contains("LANGGRAPH_PORT=4201"), "{text}");
         assert!(text.contains("MY_OWN=kept"), "{text}");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -2911,10 +3008,11 @@ HTTPS_PROXY=http://proxy:8080
         );
     }
 
-    /// The local Intelligence CLI reports its stack at `localhost`, and `docker-compose.yml` hands
-    /// the gateway address to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`. The stack
-    /// publishes on `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at
-    /// `127.0.0.1` or `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved.
+    /// The local Intelligence CLI reports its stack at `localhost`. The stack publishes on
+    /// `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at `127.0.0.1` or
+    /// `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved when the
+    /// browser was handed that address. It is handed OpenBot's own now, and nothing written here
+    /// dials the name either.
     #[test]
     fn a_local_intelligence_is_written_at_127_0_0_1_and_nothing_written_dials_localhost() {
         let env = compose(
@@ -3437,18 +3535,9 @@ mod model_tests {
             compatible.get("BOT_MODEL"),
             Some(&"local-model".to_string())
         );
-        /*
-         * And the bundled Bot's own variable, which is the one that was missed.
-         *
-         * `docker-compose.yml` reads `AGENT_BOT_MODEL` for `agent-bot` rather than `BOT_MODEL`, so
-         * that a model chosen for the framework Bot cannot take its tools away. On a custom
-         * endpoint that pin asked somebody's own server for `gpt-5.5`, which an Ollama or a vLLM
-         * has never heard of.
-         */
-        assert_eq!(
-            compatible.get("AGENT_BOT_MODEL"),
-            Some(&"local-model".to_string())
-        );
+        // AGENT_BOT_MODEL was the retired agent-bot's own model setting: nothing reads it now, so
+        // nothing writes it, and an earlier .env's line is taken out (REMOVED_WHEN_UNSET).
+        assert!(!compatible.contains_key("AGENT_BOT_MODEL"));
 
         let with_a_key = compose(
             &intelligence(),

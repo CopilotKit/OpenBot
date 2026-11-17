@@ -50,7 +50,7 @@ export function ConnectedBrowsers({
     <PageSection title="Connected browsers">
       {connections.isPending ? null : connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your connected browsers. Reload the page.
+          Couldn't load your connected browsers. Try again in a moment.
         </p>
       ) : connections.data.connections.length === 0 ? (
         <PageEmpty>No browsers connected yet.</PageEmpty>

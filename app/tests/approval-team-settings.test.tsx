@@ -18,6 +18,8 @@ import {
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamApprovalSettings } from "@/components/approvals/team-settings";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Admin → Approvals: the team-wide controls and team rules, in one place for administrators. */
@@ -98,13 +100,16 @@ beforeEach(() => {
           method: init.method,
           body: init.body ? JSON.parse(String(init.body)) : undefined,
         });
-        return Response.json({ ok: true });
+        return approvalWriteResponse(path, init) ?? Response.json({ ok: true });
       }
-      if (url === "/api/approvals") return Response.json(inbox);
-      if (url === "/api/approvals/shared-use")
-        return Response.json({ requests: [] });
-      if (url === "/api/me")
-        return Response.json({
+      {
+        const approvals = approvalInboxResponse(url, inbox);
+        if (approvals) return approvals;
+      }
+      if (url === "/api/v2/organizations/default/shared-use-requests?limit=100")
+        return Response.json({ sharedUseRequests: [], nextCursor: null });
+      if (url === ME_PATH)
+        return meResponse({
           user: { id: "me", email: "me@example.test", role: "admin" },
         });
       return new Response(null, { status: 404 });
@@ -139,9 +144,9 @@ function draw() {
   );
 }
 
-test("an administrator sets the team-wide controls", async () => {
+test("an administrator sets the organization-wide controls", async () => {
   const view = draw();
-  await view.findByText("Team settings");
+  await view.findByText("Organization settings");
   const user = userEvent.setup({ document });
   await user.click(
     view.getByRole("combobox", {
@@ -151,20 +156,22 @@ test("an administrator sets the team-wide controls", async () => {
   await user.click(await view.findByRole("option", { name: "Never" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/team",
+      path: "/api/v2/organizations/default/approval-settings",
       method: "PATCH",
       body: { hostCommandsCap: "never" },
     }),
   );
-  // Team rules only: a member's own rules are theirs, in Settings.
+  // Organization rules only: a member's own rules are theirs, in Settings.
   expect(view.getAllByRole("button", { name: "Remove" }).length).toBe(1);
 });
 
-test("an administrator adds a team rule for every Bot", async () => {
+test("an administrator adds an organization rule for every Bot", async () => {
   const view = draw();
-  await view.findByText("Add a team rule");
+  await view.findByText("Add an organization rule");
   const user = userEvent.setup({ document });
-  await user.click(view.getByRole("button", { name: /Add a team rule/ }));
+  await user.click(
+    view.getByRole("button", { name: /Add an organization rule/ }),
+  );
   await user.type(
     await view.findByRole("textbox", { name: "Tool or app" }),
     "mcp/slack/*",
@@ -172,7 +179,7 @@ test("an administrator adds a team rule for every Bot", async () => {
   await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
-      path: "/api/approvals/team/rules",
+      path: "/api/v2/organizations/default/approval-rules",
       method: "POST",
       body: {
         botId: "*",

@@ -74,7 +74,10 @@ export type ComputerActivity = {
   output: string;
   /** Present for a command. Non-zero is drawn as a failure. */
   exitCode?: number;
-  /** A browser step the computer could not carry out: the page would not load, the element was gone. */
+  /**
+   * A step the computer did not carry out: a page that would not load, an element that was gone, a
+   * file that was not saved (its computer was held for a person, say).
+   */
   failed?: boolean;
   /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
@@ -849,6 +852,12 @@ export function detailsOf(
           : typeof result.bytes === "number"
             ? `${result.bytes} bytes${args.append === true ? ", appended" : ""}`
             : "",
+      // Not saved: the line must not say "Saved" about a file the computer never wrote.
+      ...(result.ok === false &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
       ...notTheBot,
     };
   return {

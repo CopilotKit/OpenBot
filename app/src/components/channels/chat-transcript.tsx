@@ -11,6 +11,7 @@ import {
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
 import { answeredBy } from "@openbot/shared/handoff-markers";
+import { readBrief, readTaskReport } from "@openbot/shared/orchestration";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   answersTheModel,
@@ -27,10 +28,11 @@ import {
   IconFile,
   IconX,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {
   createContext,
+  Fragment,
   memo,
   useCallback,
   useContext,
@@ -40,12 +42,28 @@ import {
   useRef,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
 import { InlineApproval } from "@/components/approvals/inline-approval";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
+import { reportsUnderTheirCards } from "@/components/tasks/report-under-card";
+import { SteerLanded } from "@/components/tasks/task-steer";
+import {
+  MessageReactions,
+  SentFromBot,
+  TaskReport,
+} from "@/components/tasks/task-thread";
+import {
+  publishThreadWork,
+  threadWorkOf,
+} from "@/components/tasks/thread-work";
+import { foldTurnWork, NO_TURN_WORK } from "@/components/tasks/turn-work";
+import {
+  isTaskThread,
+  useWaitingToolCalls,
+  WorkedFor,
+} from "@/components/tasks/worked-for";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   Dialog,
@@ -70,7 +88,7 @@ import {
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { attachmentUrl } from "@/lib/channels/attachments";
+import { attachmentAddress, attachmentUrl } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
 import type { CardPlace } from "@/lib/copilot/carry-on";
@@ -86,9 +104,10 @@ import {
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
 import {
+  BotMarkdown,
   markdownComponents,
   markdownPlugins,
-  replyRemarkPlugins,
+  replyRemarkPluginsFor,
 } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
@@ -98,6 +117,8 @@ import {
 } from "@/lib/plugins/research-results";
 import {
   asText,
+  CUT_OFF_SENTENCE,
+  cutOffStep,
   forDisplay,
   refusalOf,
   toolResultFailed,
@@ -105,6 +126,11 @@ import {
   unofferedTool,
 } from "@/lib/plugins/tool-result";
 import { useResultVisibility } from "@/lib/product-telemetry";
+import {
+  NO_SLACK_NAMES,
+  type SlackNames,
+  slackNamesIn,
+} from "@/lib/slack/mentions";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
@@ -784,14 +810,20 @@ function ResponsibilityFiring({
 const TranscriptMessage = memo(function TranscriptMessage({
   commandLabels = "",
   role,
+  slackNames = NO_SLACK_NAMES,
   streaming = false,
   settled = true,
   text,
   threadId,
   messageId,
+  underItsCard = false,
 }: {
   commandLabels?: string;
   role: "user" | "assistant";
+  /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
+  underItsCard?: boolean;
+  /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
+  slackNames?: SlackNames;
   threadId?: string;
   messageId: string;
   /* This is the Bot's reply still being written: the last row of a turn in flight. */
@@ -817,6 +849,22 @@ const TranscriptMessage = memo(function TranscriptMessage({
     !isUser && settled && revealed.trim().length > 0,
   );
   const firing = isUser ? readFiring(text) : null;
+  /*
+   * A task thread's first message is the Bot's brief, not something the person typed: drawn as sent
+   * from the Bot, without the words that frame it for the model. See `frameBrief`.
+   */
+  const brief = isUser ? readBrief(text) : null;
+  if (brief !== null) {
+    return (
+      <MessageRow align="end">
+        <MessageContent>
+          <Arriving>
+            <SentFromBot brief={brief} threadId={threadId} />
+          </Arriving>
+        </MessageContent>
+      </MessageRow>
+    );
+  }
   if (firing !== null) {
     return (
       <MessageRow align="start">
@@ -839,6 +887,12 @@ const TranscriptMessage = memo(function TranscriptMessage({
    * Bot saying something new. The id is what says whose it is; see `answerMessageId`.
    */
   const answerer = isUser ? null : answeredBy(messageId);
+  const report = isUser ? null : readTaskReport(messageId);
+  /*
+   * What the person told a task in its own thread, written here so the Bot knows of it. The person
+   * reads it on the line under the task's card, once, so the transcript draws no message for it.
+   */
+  if (report?.kind === "steer") return <SteerLanded taskId={report.taskId} />;
 
   return (
     <MessageRow
@@ -905,18 +959,43 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closes them for the duration.
                  */
                 <div ref={resultRef}>
-                  <Streamdown
-                    components={markdownComponents}
-                    mode={mode}
-                    plugins={markdownPlugins}
-                    remarkPlugins={replyRemarkPlugins}
-                  >
-                    {revealed}
-                  </Streamdown>
+                  {report ? (
+                    /*
+                     * A task the Bot handed out, saying how it went: its words, framed with the
+                     * task they are about and the way into its thread. See `taskReportMessageId`.
+                     */
+                    <TaskReport
+                      kind={report.kind}
+                      taskId={report.taskId}
+                      underCard={underItsCard}
+                      words={text}
+                    >
+                      <BotMarkdown
+                        components={markdownComponents}
+                        mode={mode}
+                        plugins={markdownPlugins}
+                        remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                      >
+                        {revealed}
+                      </BotMarkdown>
+                    </TaskReport>
+                  ) : (
+                    <BotMarkdown
+                      components={markdownComponents}
+                      mode={mode}
+                      plugins={markdownPlugins}
+                      remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                    >
+                      {revealed}
+                    </BotMarkdown>
+                  )}
                 </div>
               )}
             </BubbleContent>
           </Bubble>
+          {isUser && threadId ? (
+            <MessageReactions messageId={messageId} threadId={threadId} />
+          ) : null}
         </Arriving>
       </MessageContent>
     </MessageRow>
@@ -1209,13 +1288,15 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
    * transcript drew, announcing to whoever owns it that this person opened this channel.
    */
   const servable = url.startsWith(ATTACHMENT_URL_PREFIX);
+  // Where the bytes are read from: the API's address for the attachment the message names.
+  const address = servable ? attachmentAddress(url) : url;
   /*
    * ONLY OURS IS EVER ASKED ABOUT, and that is the same rule as the line above rather than a second
    * one: a probe is a request like any other, so asking a third party whether a file is still there
    * announces the reader exactly as fetching it would. An off-site url is already unavailable
    * without anybody being asked.
    */
-  const gone = useDocumentIsGone(url, servable && modality === "document");
+  const gone = useDocumentIsGone(address, servable && modality === "document");
   const unavailable = failedToLoad || gone || !servable;
 
   /*
@@ -1265,12 +1346,12 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
   }
 
   return (
-    <AttachmentLightbox filename={filename} url={url}>
+    <AttachmentLightbox filename={filename} url={address}>
       <img
         alt={filename ? `Attachment: ${filename}` : "Attachment"}
         className="size-32 rounded-xl object-cover"
         onError={() => setFailedToLoad(true)}
-        src={url}
+        src={address}
       />
     </AttachmentLightbox>
   );
@@ -1701,8 +1782,9 @@ export function ServerToolLine({
   place?: CardPlace;
 }) {
   const running = result === undefined;
-  const named = readToolName(name, running);
-  const { label } = named;
+  // Cut off with its outcome unknown: named as it is while under way, since nobody knows it was done.
+  const interrupted = cutOffStep(result);
+  const named = readToolName(name, running || interrupted);
   const folders = useContext(FolderNamesContext);
   // The file a file step read or saved, as a computer's own file steps name it; a step on a folder
   // on the person's computer names the folder too ("todo.txt in share").
@@ -1723,7 +1805,18 @@ export function ServerToolLine({
   const refused = reason !== undefined;
   // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
   const unoffered = unofferedTool(result);
-  const failed = !refused && (unoffered || toolResultFailed(result));
+  const failed =
+    !refused && !interrupted && (unoffered || toolResultFailed(result));
+  const role = researchRoleOfCall(name);
+  /*
+   * A search with its results in reads as done. A research step is named for what it does ("Search
+   * the web"), which on a line of its own, finished, read as a search still going on; folded with
+   * other steps it has always read "Searched the web".
+   */
+  const label =
+    role === "search" && !running && !interrupted && !refused && !failed
+      ? "Searched the web"
+      : named.label;
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1764,24 +1857,28 @@ export function ServerToolLine({
   const shown =
     name === SHOW_APP_ACCESS_TOOL || folderRefusal !== undefined
       ? undefined
-      : unoffered
-        ? UNOFFERED_TOOL_SENTENCE
-        : refused && body
-          ? outcomeForPerson(body)
-          : answersTheModel(name)
-            ? // Written for the model. A tool search opens to the tools it found, in words.
-              name === SEARCH_TOOLS
-              ? foundToolsInWords(answer)
-              : undefined
-            : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
-              folderStepBody(name, body);
+      : interrupted
+        ? // What the Bot was told is for the Bot. The person is told what happened.
+          CUT_OFF_SENTENCE
+        : unoffered
+          ? UNOFFERED_TOOL_SENTENCE
+          : refused && body
+            ? outcomeForPerson(body)
+            : answersTheModel(name)
+              ? // Written for the model. A tool search opens to the tools it found, in words.
+                name === SEARCH_TOOLS
+                ? foundToolsInWords(answer)
+                : undefined
+              : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
+                folderStepBody(name, body);
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
    */
-  const role = researchRoleOfCall(name);
   const sources =
-    role && shown && !refused && !failed ? readResearchSources(shown) : null;
+    role && shown && !refused && !failed && !interrupted
+      ? readResearchSources(shown)
+      : null;
   if (role && sources)
     return (
       <ToolLine
@@ -1806,12 +1903,13 @@ export function ServerToolLine({
       label={label}
       refused={refused}
       failed={failed}
+      interrupted={interrupted}
       running={running}
     >
       {shown ? (
-        <Streamdown components={markdownComponents} plugins={markdownPlugins}>
+        <BotMarkdown components={markdownComponents} plugins={markdownPlugins}>
           {forDisplay(shown)}
-        </Streamdown>
+        </BotMarkdown>
       ) : null}
     </ToolLine>
   );
@@ -2069,6 +2167,24 @@ export function ChatTranscript({
   );
   const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
   /*
+   * In a task's thread, each turn's steps and the lines said on the way fold into one "Worked for"
+   * row (`foldTurnWork`). Worked out on every render, as `items` is.
+   */
+  const queryClient = useContext(QueryClientContext);
+  const taskThread = isTaskThread(threadId, items, queryClient);
+  // What waits on the person's approval stays out of the fold, its card with it.
+  const waiting = useWaitingToolCalls(queryClient);
+  const folds = taskThread ? foldTurnWork(items, busy, waiting) : NO_TURN_WORK;
+  // What the task read and made, for its Details pane beside the thread (`thread-work.ts`).
+  useEffect(() => {
+    if (taskThread && threadId)
+      publishThreadWork(threadId, threadWorkOf(visible));
+  });
+  const taskWork = {
+    folds,
+    lastAskId: [...folds.at.values()].at(-1)?.askId,
+  };
+  /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.
    * The same map while the names are the same: a new one on every render is a new context value,
    * and every finished tool row under it drew again while a reply streamed.
@@ -2087,6 +2203,26 @@ export function ChatTranscript({
   if (namedKey !== foldersRef.current.key)
     foldersRef.current = { key: namedKey, names: named };
   const folders = foldersRef.current.names;
+
+  /*
+   * The people and channels this conversation's Slack steps named, so a reply that quotes Slack's
+   * `<@U…>` shows "@Alex Clarke". Kept the same map while the names are the same, as the folders are,
+   * so a finished message is not drawn again.
+   */
+  const slackRef = useRef<{ key: string; names: SlackNames }>({
+    key: "",
+    names: NO_SLACK_NAMES,
+  });
+  const slackNamed = slackNamesIn(
+    visible.filter(
+      (item): item is Extract<typeof item, { kind: "tool" }> =>
+        item.kind === "tool",
+    ),
+  );
+  const slackKey = JSON.stringify([...slackNamed]);
+  if (slackKey !== slackRef.current.key)
+    slackRef.current = { key: slackKey, names: slackNamed };
+  const slackNames = slackRef.current.names;
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -2166,6 +2302,8 @@ export function ChatTranscript({
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
+  /* The tasks' results drawn directly under their own card, which says which task each is about. */
+  const underTheirCards = reportsUnderTheirCards(items);
 
   /*
    * Decided once, from the rows present when the scroller mounts, and forgotten while restoring so
@@ -2396,64 +2534,89 @@ export function ChatTranscript({
    * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
    * drawn, so "the last row" and "latest" mean the same with or without older pages above.
    */
-  const renderRow = (item: TranscriptItem, index: number) =>
+  /*
+   * What one row draws, without the scroller's wrapper: drawn on its own below, and inside a task
+   * turn's "Worked for" row when it folds there (`foldTurnWork`).
+   */
+  const rowContent = (item: TranscriptItem, index: number) =>
     item.kind === "tools" || item.kind === "tool" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <ToolRow
-          active={busy && index === items.length - 1}
-          id={item.id}
-          inFlight={busy && index >= turnStart}
-          latest={index >= latestIndex}
-          spokeAfter={lastBotWords > index}
-          steps={item.kind === "tools" ? item.steps : [item]}
-        />
-      </MessageScrollerItem>
+      <ToolRow
+        active={busy && index === items.length - 1}
+        id={item.id}
+        inFlight={busy && index >= turnStart}
+        latest={index >= latestIndex}
+        spokeAfter={lastBotWords > index}
+        steps={item.kind === "tools" ? item.steps : [item]}
+      />
     ) : item.kind === "activity" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <TranscriptActivity message={item.message} />
-      </MessageScrollerItem>
+      <TranscriptActivity message={item.message} />
     ) : item.kind === "text" ? (
-      <MessageScrollerItem
-        key={item.id}
+      <TranscriptMessage
+        threadId={threadId}
         messageId={item.id}
-        scrollAnchor={anchorRows.has(item.id)}
-        {...openingProps(item.id)}
-      >
-        <TranscriptMessage
-          threadId={threadId}
-          messageId={item.id}
-          settled={!busy || index < turnStart}
-          commandLabels={commandLabels}
-          role={item.role}
-          streaming={
-            busy && item.role === "assistant" && index === items.length - 1
-          }
-          text={item.text}
-        />
-      </MessageScrollerItem>
+        settled={!busy || index < turnStart}
+        commandLabels={commandLabels}
+        role={item.role}
+        slackNames={slackNames}
+        underItsCard={underTheirCards.has(item.id)}
+        streaming={
+          busy && item.role === "assistant" && index === items.length - 1
+        }
+        text={item.text}
+      />
     ) : item.kind === "attachments" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        scrollAnchor={anchorRows.has(item.id)}
-        {...openingProps(item.id)}
-      >
-        <TranscriptAttachments attachments={item.attachments} />
-      </MessageScrollerItem>
+      <TranscriptAttachments attachments={item.attachments} />
     ) : (
       // Every member of the union is handled above. `assertNever` types `item` as
       // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
       // this call instead of silently falling into this branch and rendering nothing.
       assertNever(item)
     );
+
+  /*
+   * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
+   * drawn, so "the last row" and "latest" mean the same with or without older pages above. In a
+   * task's thread a turn's work is one row, drawn where its first step is; the rest of it is drawn
+   * inside that row.
+   */
+  const renderRow = (item: TranscriptItem, index: number) => {
+    const work = taskWork.folds.at.get(item.id);
+    if (work)
+      return (
+        <MessageScrollerItem
+          key={work.id}
+          messageId={work.id}
+          {...openingProps(item.id)}
+        >
+          <WorkedFor
+            last={work.askId === taskWork.lastAskId}
+            threadId={threadId}
+            work={work}
+          >
+            {work.rows.map((row) => (
+              <Fragment key={row.item.id}>
+                {rowContent(row.item, row.index)}
+              </Fragment>
+            ))}
+          </WorkedFor>
+        </MessageScrollerItem>
+      );
+    if (taskWork.folds.inside.has(item.id)) return null;
+    return (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        scrollAnchor={
+          item.kind === "text" || item.kind === "attachments"
+            ? anchorRows.has(item.id)
+            : undefined
+        }
+        {...openingProps(item.id)}
+      >
+        {rowContent(item, index)}
+      </MessageScrollerItem>
+    );
+  };
 
   return (
     <ArrivalsLive>

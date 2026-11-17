@@ -1,4 +1,5 @@
 import { useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
+import { ANSWERED_DIRECTLY } from "@openbot/shared/subagent";
 import { humanise, readToolName } from "@openbot/shared/tool-name";
 import { useQuery } from "@tanstack/react-query";
 import { useContext, useState } from "react";
@@ -98,6 +99,7 @@ export function SubtaskStep({
               </span>
             ) : null}
             <SubtaskStatus
+              answered={result !== null && "answer" in result}
               count={count}
               handedBack={handedBack !== null}
               running={running}
@@ -126,16 +128,22 @@ export function SubtaskStep({
   );
 }
 
-/** How the subtask ended, beside its line. A finished one says only how many steps it took. */
+/**
+ * How the subtask ended, beside its line. A finished one says only how many steps it took, and one
+ * that answered without calling a tool says so: it did the work, so it never reads as no steps.
+ */
 function SubtaskStatus({
   step,
   running,
   handedBack,
+  answered,
   count,
 }: {
   step: StepDetails;
   running: boolean;
   handedBack: boolean;
+  /** It finished with an answer. */
+  answered: boolean;
   count: number;
 }) {
   const steps = count > 0 ? `${count} ${count === 1 ? "step" : "steps"}` : "";
@@ -159,8 +167,9 @@ function SubtaskStatus({
         Didn't finish
       </span>
     );
-  return steps ? (
-    <span className="shrink-0 text-muted-foreground">{steps}</span>
+  const said = steps || (answered ? ANSWERED_DIRECTLY : "");
+  return said ? (
+    <span className="shrink-0 text-muted-foreground">{said}</span>
   ) : null;
 }
 

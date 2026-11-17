@@ -16,6 +16,7 @@ import {
   saveUserPreferencesMutationOptions,
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
 
 const originalFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
@@ -25,7 +26,7 @@ beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 beforeEach(() => {
   requests = [];
   response = async () =>
-    Response.json({ preferences: { messageListEmphasis: "agent" } });
+    preferencesResponse({ preferences: { messageListEmphasis: "agent" } });
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
@@ -73,7 +74,7 @@ test("loads preferences from the account and renders the saved emphasis", async 
   const agent = await view.findByText("General Assistant");
   expect(agent.className).toContain("text-sm");
   expect(requests).toEqual([
-    { path: "/api/settings/preferences", method: "GET", body: undefined },
+    { path: PREFERENCES_PATH, method: "GET", body: undefined },
   ]);
 });
 
@@ -99,6 +100,7 @@ test("successful writes update only the current account cache; failures preserve
   client.setQueryData(bobKey, {
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    starPromptAnswered: false,
     narration: null,
     skin: "opendots",
     proactive: "on",
@@ -107,10 +109,11 @@ test("successful writes update only the current account cache; failures preserve
     .getMutationCache()
     .build(client, saveUserPreferencesMutationOptions(client, "alice"));
   response = async () =>
-    Response.json({
+    preferencesResponse({
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
+        starPromptAnswered: false,
         narration: null,
         skin: "openbot",
         proactive: "on",
@@ -121,13 +124,14 @@ test("successful writes update only the current account cache; failures preserve
     expect(view.getByText("Plan next week").className).toContain("text-sm"),
   );
   expect(requests.at(-1)).toEqual({
-    path: "/api/settings/preferences",
+    path: PREFERENCES_PATH,
     method: "PATCH",
     body: JSON.stringify({ messageListEmphasis: "thread" }),
   });
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
+    starPromptAnswered: false,
     narration: null,
     skin: "opendots",
     proactive: "on",
@@ -144,6 +148,7 @@ test("successful writes update only the current account cache; failures preserve
   ).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
+    starPromptAnswered: false,
     narration: null,
     skin: "openbot",
     proactive: "on",

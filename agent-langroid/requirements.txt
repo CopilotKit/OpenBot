@@ -9,4 +9,9 @@ uvicorn[standard]
 # 'mcp.types'` where an older mcp is pinned by another dependency, and `No module named 'mcp'`
 # where there is none at all. 1.105.1 does not reach for it. Lift this when litellm stops
 # requiring mcp, or declares it.
-litellm<1.106.0
+#
+# 1.105.7 is the release this harness is checked on for OpenAI's newer models: its model map knows
+# which fields each one refuses (`temperature` on gpt-5.5, `parallel_tool_calls` on o3), and its
+# `responses/` route carries a chat with tools to /v1/responses for gpt-5.6 and later and the -pro
+# models. src/main.py relies on both.
+litellm>=1.105.7,<1.106.0

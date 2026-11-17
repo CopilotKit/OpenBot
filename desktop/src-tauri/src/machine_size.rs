@@ -20,6 +20,8 @@
 //! are started again with it, as after a Podman update (`acquire::start_machine_named`). A size
 //! Podman refuses still ends with the machine started again, as it was.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -147,7 +149,8 @@ pub fn plan(machine: &str, size: Size, host: Size, short: &Short, mac: bool) -> 
 
 /**
 Make `machine` `to` in size: stop it, set its CPUs and memory, start it again with the containers
-that were running in it. Only what is larger than now is set.
+that were running in it, and wait for it to be ready for setup (`ready_with`). Only what is larger
+than now is set.
 
 `run` is `podman`. `start_own` starts OpenBot's own machine, which `acquire::start_machine` brings up
 with its networking; anybody else's is started here.
@@ -157,8 +160,10 @@ pub fn resize_with(
     to: Size,
     run: &mut impl FnMut(&[&str]) -> Result<String, String>,
     start_own: impl FnOnce(&Containers) -> Result<(), String>,
-) -> Result<(), String> {
-    let (size, running) = inspected(&run(&["machine", "inspect", machine])?, machine)?;
+) -> Result<(), Stopped> {
+    let (size, running) = run(&["machine", "inspect", machine])
+        .and_then(|listing| inspected(&listing, machine))
+        .map_err(Stopped::Refused)?;
     let cpus = (to.cpus > size.cpus).then(|| to.cpus.to_string());
     let memory = (to.memory_mib > size.memory_mib).then(|| to.memory_mib.to_string());
     if cpus.is_none() && memory.is_none() {
@@ -170,7 +175,7 @@ pub fn resize_with(
         Vec::new()
     };
     if running {
-        run(&["machine", "stop", machine])?;
+        run(&["machine", "stop", machine]).map_err(Stopped::Refused)?;
     }
     let mut args = vec!["machine", "set"];
     if let Some(cpus) = &cpus {
@@ -187,9 +192,115 @@ pub fn resize_with(
     } else {
         start_with(run, machine, &containers)
     };
-    set?;
-    started
+    set.map_err(Stopped::Refused)?;
+    started.map_err(Stopped::Refused)?;
+    let origin = std::time::Instant::now();
+    ready_with(machine, run, || origin.elapsed(), std::thread::sleep)
 }
+
+/// Why a resize did not end with a machine setup can use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Stopped {
+    /// Podman refused a step, in its own words. The machine is started again as it was.
+    Refused(String),
+    /// The machine is bigger and started, but did not answer, or could not reach a registry, within
+    /// `READY_WITHIN`. Why, in the last check's words.
+    NotReady(String),
+}
+
+impl std::fmt::Display for Stopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stopped::Refused(why) | Stopped::NotReady(why) => f.write_str(why),
+        }
+    }
+}
+
+/// Said when the machine came back bigger but was not ready in time.
+pub const NOT_READY: &str = "Your Podman machine has more room now, but it can't download yet. Check your internet connection, then click Retry.";
+
+/// How long a resized machine has, once started again, to answer and to reach a registry.
+pub const READY_WITHIN: Duration = Duration::from_secs(180);
+/// Between checks while it gets there.
+const READY_EVERY: Duration = Duration::from_secs(2);
+
+/**
+Wait for `machine`, just started again, to be one setup can run on, for up to `READY_WITHIN`.
+
+`podman machine start` returns once the machine boots, not once everything in it answers. On the
+EC2 Mac pass (Podman 6.1.1, libkrun), the setup that ran straight after a resize had every image
+pull fail at 60.5 s: containerd tries the mirror and then the registry, 30 s each to connect
+(containerd 1.7 `remotes/docker/config/hosts.go`), and neither connected. A Retry a minute later
+pulled every image in seconds. So the restarted machine is asked, as Start asks an engine
+(`engine_versions::answers`), until it answers both what Compose and the CLI use, its engine's API,
+and what the image download uses, a registry over HTTPS (`REGISTRY_CHECK`). Setup then runs on a
+machine that is ready, and the first attempt succeeds without a Retry.
+*/
+pub fn ready_with(
+    machine: &str,
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    now: impl Fn() -> Duration,
+    mut pause: impl FnMut(Duration),
+) -> Result<(), Stopped> {
+    let began = now();
+    let mut checks = 0u32;
+    loop {
+        checks += 1;
+        let why = match ready_now(machine, run) {
+            Ok(()) => {
+                log::info!(
+                    "[machine-size] {machine} answers and reaches a registry, after {checks} check(s)"
+                );
+                return Ok(());
+            }
+            Err(why) => why,
+        };
+        if now().saturating_sub(began) >= READY_WITHIN {
+            log::warn!(
+                "[machine-size] {machine} was not ready {}s after it started again: {why}",
+                READY_WITHIN.as_secs()
+            );
+            return Err(Stopped::NotReady(why));
+        }
+        if checks == 1 || checks.is_multiple_of(10) {
+            log::info!("[machine-size] {machine} not ready yet ({checks}): {why}");
+        }
+        pause(READY_EVERY);
+    }
+}
+
+/// The engine's API, as the health gate asks it (`acquire::health_gate`), then a registry.
+fn ready_now(
+    machine: &str,
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+) -> Result<(), String> {
+    let connection = acquire::connection_for(machine, true);
+    let api = run(&[
+        "--connection",
+        &connection,
+        "version",
+        "--format",
+        "{{.Server.APIVersion}}",
+    ])?;
+    if api.trim().is_empty() {
+        return Err(format!("{connection} gave no engine API version"));
+    }
+    let answered = run(&["machine", "ssh", machine, REGISTRY_CHECK])?;
+    let status = answered.trim();
+    if status.len() == 3 && status.bytes().all(|b| b.is_ascii_digit()) && status != "000" {
+        Ok(())
+    } else {
+        Err(format!(
+            "{REGISTRY} did not answer from {machine}: {status}"
+        ))
+    }
+}
+
+/// The registry the back end's images come from first (`local_images::Mirror::standard`).
+const REGISTRY: &str = "https://downloads.copilotkit.ai/v2/";
+/// Any HTTP answer from `REGISTRY`, asked from inside the machine: the status, or `000` when it
+/// could not connect. Bounded, so one check never holds the wait.
+const REGISTRY_CHECK: &str = "timeout 10 curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 https://downloads.copilotkit.ai/v2/ || true";
 
 fn start_with(
     run: &mut impl FnMut(&[&str]) -> Result<String, String>,
@@ -254,13 +365,15 @@ pub fn plan_here(short: &Short) -> Option<Plan> {
     plan
 }
 
-/// The person said yes: make the machine the CLI runs on `to` in size. The machine is the one the
-/// CLI runs on, never one the window names.
-pub fn resize_here(to: Size) -> Result<(), String> {
+/// The person said yes: make the machine the CLI runs on `to` in size, and ready for setup. The
+/// machine is the one the CLI runs on, never one the window names.
+pub fn resize_here(to: Size) -> Result<(), Stopped> {
     let machine = crate::local_eval::engine_machine()
-        .ok_or_else(|| "OpenBot isn't running on a Podman machine".to_string())?;
+        .ok_or_else(|| Stopped::Refused("OpenBot isn't running on a Podman machine".to_string()))?;
     if !cfg!(target_os = "macos") {
-        return Err("Podman can change a machine's size only on a Mac".to_string());
+        return Err(Stopped::Refused(
+            "Podman can change a machine's size only on a Mac".to_string(),
+        ));
     }
     log::info!(
         "[machine-size] resizing {machine} to {} CPUs and {} MiB",
@@ -271,7 +384,10 @@ pub fn resize_here(to: Size) -> Result<(), String> {
         acquire::start_machine_named(MACHINE, containers)
     });
     match &resized {
-        Ok(()) => log::info!("[machine-size] {machine} resized and started again"),
+        Ok(()) => log::info!("[machine-size] {machine} resized, started again and ready"),
+        Err(Stopped::NotReady(_)) => {
+            log::warn!("[machine-size] {machine} resized and started again, but is not ready")
+        }
         Err(error) => log::warn!("[machine-size] could not resize {machine}: {error}"),
     }
     resized
@@ -440,6 +556,9 @@ mod tests {
         rootless: Vec<String>,
         rootful: Vec<String>,
         ran: Vec<String>,
+        /// Checks of a started machine that fail before one passes: its engine first, then its
+        /// network, as a machine just started answers.
+        unready: u32,
     }
 
     impl FakePodman {
@@ -451,6 +570,7 @@ mod tests {
                 rootless: vec![],
                 rootful: vec!["3f1c2b9a7d4e".to_string(), "9b8e4c1d2a3f".to_string()],
                 ran: vec![],
+                unready: 0,
             }
         }
 
@@ -502,6 +622,26 @@ mod tests {
                     Ok(format!("Starting machine \"{name}\"\n\nThis machine is currently configured in rootful mode.\n\nMachine \"{name}\" started successfully"))
                 }
                 ["--connection", _, "start", ids @ ..] => Ok(ids.join("\n")),
+                ["--connection", connection, "version", "--format", "{{.Server.APIVersion}}"] => {
+                    if !self.running {
+                        return Err(format!("podman --connection {connection} version exited with exit status: 125; stderr: Cannot connect to Podman."));
+                    }
+                    if self.unready >= 2 {
+                        self.unready -= 1;
+                        return Err(format!("podman --connection {connection} version exited with exit status: 125; stderr: Error: unable to connect to Podman socket: ssh: handshake failed: EOF"));
+                    }
+                    Ok("6.1.1\n".to_string())
+                }
+                ["machine", "ssh", machine, check]
+                    if *machine == name && *check == REGISTRY_CHECK =>
+                {
+                    if self.unready >= 1 {
+                        self.unready -= 1;
+                        // curl's status when it could not connect, as `-w '%{http_code}'` says it.
+                        return Ok("000".to_string());
+                    }
+                    Ok("200".to_string())
+                }
                 other => panic!("unexpected podman {other:?}"),
             }
         }
@@ -541,8 +681,76 @@ mod tests {
                 "machine set --cpus 6 podman-machine-default",
                 "machine start podman-machine-default",
                 "--connection podman-machine-default-root start 3f1c2b9a7d4e 9b8e4c1d2a3f",
+                // Ready: its engine answers, and it reaches the registry.
+                "--connection podman-machine-default-root version --format {{.Server.APIVersion}}",
+                &format!("machine ssh podman-machine-default {REGISTRY_CHECK}"),
             ]
         );
+    }
+
+    /**
+    THE EC2 MAC PASS, FINDING B: setup started on a machine just resized, before it could download.
+
+    After "Resize my Podman" (6 GB to 9 GB, Podman 6.1.1 on libkrun), the setup the window runs
+    straight after failed its image download at 60.5 s, 2 times out of 2, and one Retry passed. The
+    resize answered as soon as `podman machine start` returned. Here the machine, once started, has
+    its engine not answering and then no way to the registry, as it had. The resize answers only once
+    both work, so the setup that follows it never starts on a machine that can't download.
+    */
+    #[test]
+    fn a_resize_answers_only_once_the_machine_answers_and_reaches_a_registry() {
+        let mut podman = FakePodman::new("mine", 4, 6144);
+        podman.unready = 2;
+        let ready = std::cell::Cell::new(false);
+        resize_with(
+            "mine",
+            Size {
+                cpus: 4,
+                memory_mib: 9216,
+            },
+            &mut |args: &[&str]| {
+                let answer = podman.run(args);
+                if args.first() == Some(&"machine") && args.get(1) == Some(&"ssh") {
+                    ready.set(answer.as_deref() == Ok("200"));
+                }
+                answer
+            },
+            |_| panic!("not OpenBot's own machine"),
+        )
+        .expect("resized and ready");
+        assert!(
+            ready.get(),
+            "the resize answered before the machine reached a registry: {:#?}",
+            podman.ran
+        );
+        let checks = podman
+            .ran
+            .iter()
+            .filter(|ran| ran.contains("version --format"))
+            .count();
+        assert_eq!(checks, 3, "{:#?}", podman.ran);
+    }
+
+    /// A machine that never gets ready is waited on for `READY_WITHIN` and no longer, and the
+    /// answer says it is bigger but not ready, with the last check's words for the log.
+    #[test]
+    fn a_machine_that_never_gets_ready_is_given_up_on_in_time() {
+        let mut podman = FakePodman::new("mine", 6, 9216);
+        podman.unready = u32::MAX;
+        let waited = std::cell::Cell::new(Duration::ZERO);
+        let stopped = ready_with(
+            "mine",
+            &mut |args: &[&str]| podman.run(args),
+            || waited.get(),
+            |pause| waited.set(waited.get() + pause),
+        )
+        .expect_err("never ready");
+        assert!(
+            matches!(&stopped, Stopped::NotReady(why) if why.contains("handshake failed")),
+            "{stopped:?}"
+        );
+        assert!(waited.get() >= READY_WITHIN && waited.get() < READY_WITHIN + READY_EVERY * 2);
+        assert!(!NOT_READY.contains("Podman's") && NOT_READY.ends_with("click Retry."));
     }
 
     /// Podman refused the size: the machine is started again as it was, with its containers, and
@@ -561,7 +769,9 @@ mod tests {
         )
         .expect_err("more CPUs than the Mac has");
         assert!(
-            refused.contains("greater than number of host CPUs"),
+            refused
+                .to_string()
+                .contains("greater than number of host CPUs"),
             "{refused}"
         );
         assert_eq!(
@@ -584,16 +794,22 @@ mod tests {
     #[test]
     fn openbots_own_machine_starts_its_own_way_and_a_big_one_is_left_alone() {
         let mut podman = FakePodman::new(MACHINE, 4, 6144);
-        let mut started = None;
+        let started = std::cell::RefCell::new(None);
         resize_with(
             MACHINE,
             Size {
                 cpus: 6,
                 memory_mib: 8192,
             },
-            &mut |args: &[&str]| podman.run(args),
+            &mut |args: &[&str]| {
+                // Started its own way: running from then on.
+                if started.borrow().is_some() {
+                    podman.running = true;
+                }
+                podman.run(args)
+            },
             |containers| {
-                started = Some(containers.clone());
+                *started.borrow_mut() = Some(containers.clone());
                 Ok(())
             },
         )
@@ -606,7 +822,7 @@ mod tests {
             }
         );
         assert_eq!(
-            started.unwrap(),
+            started.into_inner().unwrap(),
             vec![(
                 "openbot-root".to_string(),
                 vec!["3f1c2b9a7d4e".to_string(), "9b8e4c1d2a3f".to_string()]
@@ -659,7 +875,10 @@ mod tests {
             |_| panic!("not OpenBot's own machine"),
         )
         .expect_err("set on a running machine");
-        assert!(refused.contains("unless vm is stopped"), "{refused}");
+        assert!(
+            refused.to_string().contains("unless vm is stopped"),
+            "{refused}"
+        );
         assert_eq!(
             podman.size,
             Size {
@@ -817,7 +1036,9 @@ mod live {
         .expect_err("more CPUs than this Mac has");
         println!("[live] refused: {refused}");
         assert!(
-            refused.contains("greater than number of host CPUs"),
+            refused
+                .to_string()
+                .contains("greater than number of host CPUs"),
             "{refused}"
         );
         assert_eq!(inspected_whole(&name), after, "a refusal changes nothing");
@@ -838,7 +1059,10 @@ mod live {
         )
         .expect_err("set on a running machine");
         println!("[live] refused while running: {refused}");
-        assert!(refused.contains("unless vm is stopped"), "{refused}");
+        assert!(
+            refused.to_string().contains("unless vm is stopped"),
+            "{refused}"
+        );
         assert_eq!(inspected_whole(&name), after, "a refusal changes nothing");
         assert_eq!(sorted(acquire::running_containers(&name)), containers);
 

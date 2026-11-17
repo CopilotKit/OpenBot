@@ -1,0 +1,1941 @@
+# Connections: a person's connections to apps, the accounts they connected at each, and the consent
+# for one action; and an app's one shared account, which an administrator connects for the organization.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/people/{personId}/connections:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Connections]
+      operationId: listConnections
+      summary: List a person's connections
+      description: >-
+        Return one page of the apps a person connected their own accounts to,
+        so their Bots can act there for them, oldest first. An app's one
+        shared account is not listed here: read it with getSharedConnection.
+        A connection whose access was withdrawn stays listed, revoked, until
+        the person connects again. Only the person themselves may list them;
+        there is no administrator view. A missing cursor starts at the first
+        page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of connections.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ConnectionPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Connections]
+      operationId: getConnection
+      summary: Read a person's connection to an app
+      description: >-
+        Return a person's connection to one app. Not found when they haven't
+        connected it, or when the app uses one shared account, which
+        getSharedConnection reads. Only the person themselves may read it.
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The connection.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+              examples:
+                checked:
+                  $ref: '#/components/examples/ConnectionExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/ConnectionNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/connect:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: connectApp
+      summary: Start connecting a person's account at an app
+      description: >-
+        Start connecting a person's own account at an app, and say what
+        happens next. consent answers the address of the app's own sign-in
+        page: the client opens it, and the app sends the person back to the
+        page returnTo names. form answers the boxes an app that takes a key
+        asks for; sending them back as values connects it. connected means
+        the account is connected already. Coming back from a sign-in page
+        proves nothing by itself, so call confirmConnection when the person
+        lands. Connecting over a standing connection asks for more permissions
+        on the same account, unless anotherAccount asks for a second account
+        beside it. Only the person themselves may connect their accounts, and
+        an app with one shared account is connected by an administrator with
+        connectSharedApp. The address and the values are never logged.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectAppRequest'
+            examples:
+              signIn:
+                value:
+                  returnTo: connections
+              anotherAccount:
+                value:
+                  returnTo: connections
+                  anotherAccount: true
+              key:
+                value:
+                  values:
+                    api_key: lin_api_example
+      responses:
+        '200':
+          description: What the person does next.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionStart'
+              examples:
+                consent:
+                  $ref: '#/components/examples/ConnectionStartConsent'
+                form:
+                  $ref: '#/components/examples/ConnectionStartForm'
+                connected:
+                  $ref: '#/components/examples/ConnectionStartConnected'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ConnectionForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/confirm:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: confirmConnection
+      summary: Check with the app that a person's account is connected
+      description: >-
+        Ask the app whether the person's account is really connected, and
+        record its answer: kept when it says yes, forgotten here when it says
+        no. Call it when the person comes back from the app's sign-in page,
+        and whenever a page shows the connection, because a connection can be
+        ended at the app itself. Asking again records nothing new. When the
+        app can't be asked, the last answer stands. An app whose sign-in
+        OpenBot keeps itself has nothing to confirm. Only the person
+        themselves may confirm their connections.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What the app answered.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionConfirmation'
+              examples:
+                connected:
+                  $ref: '#/components/examples/ConnectionConfirmed'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/recheck:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: recheckConnection
+      summary: Check that a person's key still works
+      description: >-
+        Try the key a person connected an app with, by one safe, read-only
+        call in their account, and record whether it worked and when. For
+        apps that take a key. The call counts against the person's own limits
+        at the app, so make it when the person asks, never on page load. A key
+        the app refuses is answered 400 with the app's reason, and the record
+        keeps that the check failed. checkedAction null means the app offers
+        nothing safe to try. Only the person themselves may check their
+        connections.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What the check found.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionCheck'
+              examples:
+                verified:
+                  $ref: '#/components/examples/ConnectionCheckExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/disconnect:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: disconnectApp
+      summary: Disconnect a person's account from an app
+      description: >-
+        End a person's connection to an app, with every account they
+        connected there. The app is asked to end the access first, then
+        OpenBot forgets the connection. Other apps that share the same sign-in
+        at the app end with it, as getConnectionDisconnectPreview names them.
+        Safe to repeat. revocationRequested is false where the app had nothing
+        to end. Only the person themselves may disconnect their apps.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The connection, ended.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Disconnection'
+              examples:
+                ended:
+                  $ref: '#/components/examples/DisconnectionExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/disconnect-preview:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Connections]
+      operationId: getConnectionDisconnectPreview
+      summary: Read what disconnecting an app would also end
+      description: >-
+        Name the other apps a disconnect would also end, because they share
+        this connection's sign-in at the app, and count the ones that
+        couldn't be checked. Changes nothing. Only the person themselves may
+        read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: What a disconnect would also end.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisconnectPreview'
+              examples:
+                shared:
+                  $ref: '#/components/examples/DisconnectPreviewExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/authorizations:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Connections]
+      operationId: getConnectionAuthorizations
+      summary: Read what a person's account at an app allows
+      description: >-
+        Return what a person's account at an app allows, action by action:
+        authorized, waiting for the person's consent (authorizeConnectionAction),
+        waiting for an administrator to set something up, or unknown. Every
+        action at once, in one answer. readable is false when the app couldn't
+        be asked; actions is then empty and reason says why. Only the person
+        themselves may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: What the account allows.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionAuthorizations'
+              examples:
+                read:
+                  $ref: '#/components/examples/ActionAuthorizationsExample'
+                unreadable:
+                  $ref: '#/components/examples/ActionAuthorizationsUnreadable'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/authorize:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: authorizeConnectionAction
+      summary: Start a person's consent for one action
+      description: >-
+        Start a person's consent for one action of an app that grants access
+        action by action, and answer the address of the app's consent page.
+        The client opens it; the app sends the person back to the page
+        returnTo names, where getConnectionAuthorizations shows the result. A
+        person has one consent in progress at a time, and one left unfinished
+        expires after fifteen minutes. The address is never logged. Only the
+        person themselves may authorize for their accounts.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeActionRequest'
+            examples:
+              action:
+                value:
+                  action: Github.CreateIssue
+                  returnTo: connections
+      responses:
+        '200':
+          description: The address of the app's consent page.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationStart'
+              examples:
+                consent:
+                  $ref: '#/components/examples/AuthorizationStartExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Connections]
+      operationId: listConnectedAccounts
+      summary: List a person's accounts at an app
+      description: >-
+        Return one page of the accounts a person connected at one app, such
+        as a work and a personal mailbox, in the order they connected them.
+        The app is asked each time, so an account connected or ended
+        elsewhere is listed as it stands. isDefault marks the one their Bots
+        use when they name none. Only the person themselves may list them. A
+        missing cursor starts at the first page and nextCursor null ends the
+        list.
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of accounts.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectedAccountPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/ConnectedAccountPageLast'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts/{accountId}/make-default:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+      - $ref: '#/components/parameters/ConnectedAccountId'
+    post:
+      tags: [Connections]
+      operationId: makeConnectedAccountDefault
+      summary: Choose the account a person's Bots use at an app
+      description: >-
+        Make one of a person's accounts at an app the one their Bots use
+        when they name none. Only the person themselves may choose.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The account is the default.
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/ConnectedAccountNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/connections/{appId}/accounts/{accountId}/disconnect:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+      - $ref: '#/components/parameters/ConnectedAccountId'
+    post:
+      tags: [Connections]
+      operationId: disconnectConnectedAccount
+      summary: Disconnect one of a person's accounts at an app
+      description: >-
+        End one of a person's accounts at an app and keep the others. The app
+        is asked to end that account's access first. Ending the last account
+        ends the connection, as disconnectApp does, and connectionEnded says
+        so. Only the person themselves may disconnect their accounts.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The account, ended.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDisconnection'
+              examples:
+                oneOfTwo:
+                  $ref: '#/components/examples/AccountDisconnectionExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/ConnectedAccountNotFound'
+        '409':
+          $ref: '#/components/responses/ConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Connections]
+      operationId: getSharedConnection
+      summary: Read an app's shared account
+      description: >-
+        Return the one account an app in Shared mode acts as for everybody in
+        the organization: whether it is connected, who connected it, and the
+        app's own name for the account. Each organization connects its own,
+        and one organization's shared account is never used in another. Any
+        member of the organization may read it. Not found when the
+        app is connected by each person instead, as getConnection reads.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The app's shared account.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedConnection'
+              examples:
+                connected:
+                  $ref: '#/components/examples/SharedConnectionExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/SharedConnectionNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/connect:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: connectSharedApp
+      summary: Start connecting an app's shared account
+      description: >-
+        Start connecting the one account an app in Shared mode acts as for
+        everybody in the organization, and say what happens next, as
+        connectApp does: consent
+        answers the address of the app's sign-in page, form answers the boxes
+        to fill in, connected means it is connected already. The person comes
+        back to the app's page, where confirmSharedConnection checks the
+        result. Where an app connects once, a shared account already connected
+        is a conflict: disconnect it first. Only an administrator of the
+        organization may connect it. The address and the values are never
+        logged.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectSharedAppRequest'
+            examples:
+              signIn:
+                value:
+                  returnTo: apps
+      responses:
+        '200':
+          description: What the administrator does next.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionStart'
+              examples:
+                consent:
+                  $ref: '#/components/examples/ConnectionStartConsent'
+                connected:
+                  $ref: '#/components/examples/ConnectionStartConnected'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/SharedConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/confirm:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: confirmSharedConnection
+      summary: Check with the app that its shared account is connected
+      description: >-
+        Ask the app whether its shared account is really connected, and
+        record its answer, as confirmConnection does for a person's own. Call
+        it when the administrator comes back from the app's sign-in page.
+        Asking again records nothing new. Only an administrator may confirm
+        it.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What the app answered.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionConfirmation'
+              examples:
+                connected:
+                  $ref: '#/components/examples/ConnectionConfirmed'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/SharedConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/recheck:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: recheckSharedConnection
+      summary: Check that an app's shared key still works
+      description: >-
+        Try the key an app's shared account was connected with, by one safe,
+        read-only call, and record whether it worked and when, as
+        recheckConnection does for a person's own. Make it when an
+        administrator asks, never on page load. Only an administrator may
+        check it.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What the check found.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionCheck'
+              examples:
+                verified:
+                  $ref: '#/components/examples/ConnectionCheckExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/SharedConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/disconnect:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: disconnectSharedApp
+      summary: Disconnect an app's shared account
+      description: >-
+        End an app's shared account: the app is asked to end the access
+        first, then OpenBot forgets it. Every Bot using the app loses it until
+        an administrator connects an account again. Other apps that share the
+        same sign-in at the app end with it. Safe to repeat. Only an
+        administrator may disconnect it.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The shared account, ended.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Disconnection'
+              examples:
+                ended:
+                  $ref: '#/components/examples/DisconnectionExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/SharedConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/authorizations:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    get:
+      tags: [Connections]
+      operationId: getSharedConnectionAuthorizations
+      summary: Read what an app's shared account allows
+      description: >-
+        Return what an app's shared account allows, action by action, as
+        getConnectionAuthorizations does for a person's own. Anybody signed in
+        may read it, since every Bot using the app acts as this account.
+        Every action at once, in one answer.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [connections:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: What the shared account allows.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionAuthorizations'
+              examples:
+                read:
+                  $ref: '#/components/examples/ActionAuthorizationsExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/SharedConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/apps/{appId}/shared-connection/authorize:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/AppId'
+    post:
+      tags: [Connections]
+      operationId: authorizeSharedConnectionAction
+      summary: Start consent for one action on an app's shared account
+      description: >-
+        Start consent for one action of an app's shared account, where the app
+        grants access action by action, and answer the address of the app's
+        consent page, as authorizeConnectionAction does for a person's own.
+        Only an administrator may authorize for the shared account. The
+        address is never logged.
+      security:
+        - webSession: []
+        - appOAuth: [connections:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeActionRequest'
+            examples:
+              action:
+                value:
+                  action: Github.CreateIssue
+                  returnTo: apps
+      responses:
+        '200':
+          description: The address of the app's consent page.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationStart'
+              examples:
+                consent:
+                  $ref: '#/components/examples/AuthorizationStartExample'
+        '400':
+          $ref: '#/components/responses/ConnectionRefused'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/AppNotFound'
+        '409':
+          $ref: '#/components/responses/SharedConnectionConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: './common.yaml#/components/responses/AppServiceFailed'
+        '503':
+          $ref: '#/components/responses/ConnectionsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    ConnectedAccountId:
+      name: accountId
+      in: path
+      required: true
+      description: >-
+        One of the person's accounts at the app, as listConnectedAccounts
+        answers it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+      example: 5f0c2b7e-3a1d-4e8f-9b6c-2d4a7e1f0c93
+  schemas:
+    Connection:
+      type: object
+      description: >-
+        A person's connection to an app: their own account there, which their
+        Bots act as. Never the credential behind it.
+      required: [appId, connectedAt, revoked, scope, check, canAddAccount]
+      properties:
+        appId:
+          type: string
+          description: The app, as listApps answers it.
+        connectedAt:
+          type: string
+          format: date-time
+          description: When the person first connected it.
+        revoked:
+          type: boolean
+          description: >-
+            Whether the access behind it was withdrawn. A revoked connection
+            can't be used until the person connects again.
+        scope:
+          type: [string, 'null']
+          description: >-
+            What the app granted, in its own words, where OpenBot keeps the
+            sign-in itself. Null where the app keeps it.
+        check:
+          description: >-
+            The last check of the connection with the app. Null where OpenBot
+            keeps the sign-in itself, which leaves nothing to check.
+          oneOf:
+            - $ref: '#/components/schemas/ConnectionCheckState'
+            - type: 'null'
+        canAddAccount:
+          type: boolean
+          description: >-
+            Whether the person can connect a second account at this app beside
+            this one, with connectApp's anotherAccount.
+    ConnectionCheckState:
+      type: object
+      description: What the last check of a connection found, and whether it can be checked now.
+      required: [verified, verifiedAt, checkedAction, checkable]
+      properties:
+        verified:
+          type: boolean
+          description: Whether the last check made a real call with the connection, and it worked.
+        verifiedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When verified was last earned. Null when it never was.
+        checkedAction:
+          type: [string, 'null']
+          description: >-
+            The action the last check called. Null when nothing was tried,
+            because the app offered nothing safe to call.
+        checkable:
+          type: boolean
+          description: >-
+            Whether the app offers a safe action to check the connection with
+            now, as recheckConnection does.
+    ConnectionCheck:
+      type: object
+      description: What one check of a connection found.
+      required: [verified, verifiedAt, checkedAction]
+      properties:
+        verified:
+          type: boolean
+          description: Whether the call was made and worked.
+        verifiedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When verified was last earned. Null when it never was.
+        checkedAction:
+          type: [string, 'null']
+          description: >-
+            The action the check called. Null when the app offers nothing safe
+            to call, so nothing was tried.
+    ConnectionPage:
+      type: object
+      required: [connections, nextCursor]
+      properties:
+        connections:
+          type: array
+          description: The oldest connection first, then by app id.
+          items:
+            $ref: '#/components/schemas/Connection'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    ConnectionReturnTo:
+      type: string
+      enum: [connections, apps, desktop]
+      default: connections
+      description: >-
+        Which of OpenBot's own pages the app sends the person back to:
+        connections, the person's own page for the app; apps, the app's page
+        for administrators; desktop, back to OpenBot Desktop. Never an
+        address.
+    SharedConnectionReturnTo:
+      type: string
+      enum: [apps, desktop]
+      default: apps
+      description: >-
+        Which of OpenBot's own pages the app sends the administrator back to:
+        apps, the app's page for administrators; desktop, back to OpenBot
+        Desktop. Never an address.
+    ConnectionValues:
+      type: object
+      description: >-
+        What the person typed into the boxes a form answer asked for, by each
+        box's name. Sent once to the app and never logged or kept here.
+      maxProperties: 50
+      additionalProperties:
+        type: string
+        maxLength: 16384
+    ConnectAppRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        returnTo:
+          $ref: '#/components/schemas/ConnectionReturnTo'
+        anotherAccount:
+          type: boolean
+          default: false
+          description: >-
+            Connect a second account at the app beside the one connected
+            already, such as a work mailbox beside a personal one. Without it,
+            connecting again asks for more permissions on the same account.
+        values:
+          $ref: '#/components/schemas/ConnectionValues'
+    ConnectSharedAppRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        returnTo:
+          $ref: '#/components/schemas/SharedConnectionReturnTo'
+        values:
+          $ref: '#/components/schemas/ConnectionValues'
+    ConnectionField:
+      type: object
+      description: One box an app that takes a key asks for, as the app describes it.
+      required: [name, label, help, required, secret, default]
+      properties:
+        name:
+          type: string
+          description: The name to send it back under, in values. Not shown to the person.
+        label:
+          type: string
+          description: The box's label.
+        help:
+          type: string
+          description: What to put in it, written for the person filling it in.
+        required:
+          type: boolean
+        secret:
+          type: boolean
+          description: Whether to hide what is typed, as for a password.
+        default:
+          type: [string, 'null']
+          description: What the box starts with. Null for nothing.
+    ConnectionKeyGuide:
+      type: object
+      description: Where the person gets the key an app asks for.
+      required: [steps, url]
+      properties:
+        steps:
+          type: string
+          description: What to do at the app, in a sentence or two.
+        url:
+          type: [string, 'null']
+          format: uri
+          description: The app's own page for making the key. Null where there is none.
+    ConnectionConsent:
+      type: object
+      description: The app's own sign-in page, which sends the person back to OpenBot once they agree.
+      required: [next, authorizationUrl]
+      properties:
+        next:
+          type: string
+          const: consent
+        authorizationUrl:
+          type: string
+          format: uri
+          description: The address to open. Works once, for this person only.
+    ConnectionForm:
+      type: object
+      description: >-
+        The boxes an app that takes a key asks for. Send what the person types
+        back to the same operation as values.
+      required: [next, fields, guide]
+      properties:
+        next:
+          type: string
+          const: form
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectionField'
+        guide:
+          description: Where the person gets the key. Null where OpenBot has no guide for this app.
+          oneOf:
+            - $ref: '#/components/schemas/ConnectionKeyGuide'
+            - type: 'null'
+    ConnectionMade:
+      type: object
+      description: The account is connected, with nothing more for the person to do.
+      required: [next, verified, checkedAction]
+      properties:
+        next:
+          type: string
+          const: connected
+        verified:
+          type: [boolean, 'null']
+          description: >-
+            For a key, whether a real call with it worked. Null where the
+            account was already connected at the app and nothing was checked.
+        checkedAction:
+          type: [string, 'null']
+          description: >-
+            The action the check called. Null when nothing was tried.
+    ConnectionStart:
+      description: What happens next, after starting to connect an app.
+      oneOf:
+        - $ref: '#/components/schemas/ConnectionConsent'
+        - $ref: '#/components/schemas/ConnectionForm'
+        - $ref: '#/components/schemas/ConnectionMade'
+      discriminator:
+        propertyName: next
+        mapping:
+          consent: '#/components/schemas/ConnectionConsent'
+          form: '#/components/schemas/ConnectionForm'
+          connected: '#/components/schemas/ConnectionMade'
+    ConnectionConfirmation:
+      type: object
+      required: [connected]
+      properties:
+        connected:
+          type: boolean
+          description: Whether the app says the account is connected.
+    Disconnection:
+      type: object
+      required: [revocationRequested]
+      properties:
+        revocationRequested:
+          type: boolean
+          description: >-
+            Whether the app was asked to end the access. False where the app
+            had nothing to end, such as a connection already gone or a key the
+            app never kept a sign-in for.
+    DisconnectPreview:
+      type: object
+      required: [alsoEnds, uncheckedCount]
+      properties:
+        alsoEnds:
+          type: array
+          description: The other apps a disconnect would also end, by name, sorted.
+          items:
+            type: string
+        uncheckedCount:
+          type: integer
+          minimum: 0
+          description: How many other apps on the same sign-in couldn't be checked, and may end too.
+    ActionAuthorized:
+      type: object
+      description: The account may use the action.
+      required: [action, state, scopes, authorization]
+      properties:
+        action:
+          type: string
+        state:
+          type: string
+          const: authorized
+        scopes:
+          type: array
+          items:
+            type: string
+          description: What the app granted for it, in its own words.
+        authorization:
+          type: string
+          enum: [held, not-required]
+          description: >-
+            held when somebody consented to it; not-required when the app asks
+            nobody to consent to it.
+    ActionNeedsConsent:
+      type: object
+      description: The account may use the action once its holder consents to it.
+      required: [action, state, scopes]
+      properties:
+        action:
+          type: string
+        state:
+          type: string
+          const: needs-consent
+        scopes:
+          type: array
+          items:
+            type: string
+          description: What consenting would grant, in the app's own words.
+    ActionNeedsAdmin:
+      type: object
+      description: >-
+        The action needs something an administrator sets up once for
+        everybody. No consent changes it.
+      required: [action, state, missing]
+      properties:
+        action:
+          type: string
+        state:
+          type: string
+          const: needs-admin
+        missing:
+          type: array
+          items:
+            type: string
+          description: What is missing, by name.
+    ActionStateUnknown:
+      type: object
+      description: The app didn't say whether the account may use the action.
+      required: [action, state, reason]
+      properties:
+        action:
+          type: string
+        state:
+          type: string
+          const: unknown
+        reason:
+          type: string
+          description: Why, as a person reads it.
+    ActionAuthorization:
+      description: What an account may do with one action of an app.
+      oneOf:
+        - $ref: '#/components/schemas/ActionAuthorized'
+        - $ref: '#/components/schemas/ActionNeedsConsent'
+        - $ref: '#/components/schemas/ActionNeedsAdmin'
+        - $ref: '#/components/schemas/ActionStateUnknown'
+      discriminator:
+        propertyName: state
+        mapping:
+          authorized: '#/components/schemas/ActionAuthorized'
+          needs-consent: '#/components/schemas/ActionNeedsConsent'
+          needs-admin: '#/components/schemas/ActionNeedsAdmin'
+          unknown: '#/components/schemas/ActionStateUnknown'
+    ActionAuthorizations:
+      type: object
+      required: [readable, reason, actions]
+      properties:
+        readable:
+          type: boolean
+          description: Whether the app could be asked. False leaves actions empty.
+        reason:
+          type: [string, 'null']
+          description: Why the app couldn't be asked, as a person reads it. Null when it could.
+        actions:
+          type: array
+          description: Every action of the app, by name.
+          items:
+            $ref: '#/components/schemas/ActionAuthorization'
+    AuthorizeActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The action's name, exactly as getConnectionAuthorizations lists it.
+        returnTo:
+          $ref: '#/components/schemas/ConnectionReturnTo'
+    AuthorizationStart:
+      type: object
+      description: The app's consent page, which sends the person back to OpenBot once they agree.
+      required: [authorizationUrl]
+      properties:
+        authorizationUrl:
+          type: string
+          format: uri
+          description: The address to open. Works once, for this person only.
+    ConnectedAccount:
+      type: object
+      description: One of a person's accounts at an app.
+      required: [id, identity, label, isDefault, connectedAt]
+      properties:
+        id:
+          type: string
+          description: The account's id here.
+        identity:
+          type: [string, 'null']
+          description: Who the account is at the app, such as an email address. Null where the app didn't say.
+        label:
+          type: string
+          description: What the person and their Bots call it, the identity or "account 2" where there is none.
+        isDefault:
+          type: boolean
+          description: Whether this is the account their Bots use when they name none.
+        connectedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When it was connected. Null where the app didn't say.
+    ConnectedAccountPage:
+      type: object
+      required: [accounts, nextCursor]
+      properties:
+        accounts:
+          type: array
+          description: In the order the person connected them, then by id.
+          items:
+            $ref: '#/components/schemas/ConnectedAccount'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    AccountDisconnection:
+      type: object
+      required: [remaining, connectionEnded, revocationRequested]
+      properties:
+        remaining:
+          type: integer
+          minimum: 0
+          description: How many of the person's accounts at the app are left.
+        connectionEnded:
+          type: boolean
+          description: Whether that was the last account, which ends the connection.
+        revocationRequested:
+          type: boolean
+          description: Whether the app was asked to end the access. False where it had nothing to end.
+    SharedConnection:
+      type: object
+      description: >-
+        The one account an app in Shared mode acts as for everybody. Never
+        the credential behind it.
+      required: [appId, connected, connectedAt, connectedBy, accountName, check]
+      properties:
+        appId:
+          type: string
+          description: The app, as listApps answers it.
+        connected:
+          type: boolean
+          description: Whether an account is connected. False until an administrator connects one.
+        connectedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When it was connected. Null when it isn't.
+        connectedBy:
+          type: [string, 'null']
+          description: The email address of the administrator who connected it, where known.
+        accountName:
+          type: [string, 'null']
+          description: The app's own name for the account, such as a workspace. Null where it didn't say.
+        check:
+          description: The last check of the account with the app. Null when it isn't connected.
+          oneOf:
+            - $ref: '#/components/schemas/ConnectionCheckState'
+            - type: 'null'
+  responses:
+    ConnectionRefused:
+      description: >-
+        A parameter or the body is malformed, or the app can't be connected
+        this way: it needs no account, OpenBot keeps its sign-in itself so
+        there is nothing to confirm or check, the values don't match the form
+        it asks for, the app refused the key, or it has no action by that
+        name.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notThisWay:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That app doesn't connect this way.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noAccount:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Weather needs no account, so there's nothing to connect. Bots that can use it already work.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            required:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Linear needs api_key, so nothing was sent. Fill in every required box and press Connect again.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noAction:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: GitHub has no action by that name.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionForbidden:
+      description: >-
+        The caller asked to connect somebody else's account, which only that
+        person may do, or the app connects only as one shared account.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see or change their connections.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            sharedOnly:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Shopify connects only as one shared account, so no account was made. Ask an admin to make it shared on its page under Apps and connect it there.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionNotFound:
+      description: >-
+        No app has that id here, the person hasn't connected it, the app uses
+        one shared account, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notConnected:
+              value:
+                type: https://open.bot/errors/connection-not-found
+                title: Connection not found.
+                status: 404
+                detail: You haven't connected Linear.
+                code: CONNECTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            shared:
+              value:
+                type: https://open.bot/errors/connection-not-found
+                title: Connection not found.
+                status: 404
+                detail: Linear uses one shared account. An admin connects it on its page under Apps.
+                code: CONNECTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noApp:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: That app hasn't been added.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SharedConnectionNotFound:
+      description: >-
+        No app has that id here, the app is connected by each person and has
+        no shared account, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            personal:
+              value:
+                type: https://open.bot/errors/connection-not-found
+                title: Connection not found.
+                status: 404
+                detail: Linear is connected by each person, so it has no shared account.
+                code: CONNECTION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noApp:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: That app hasn't been added.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectedAccountNotFound:
+      description: >-
+        The person has no account by that id at the app, no app has that id
+        here, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notConnected:
+              value:
+                type: https://open.bot/errors/connected-account-not-found
+                title: Account not found.
+                status: 404
+                detail: That account isn't connected. Reload the page.
+                code: CONNECTED_ACCOUNT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            noApp:
+              value:
+                type: https://open.bot/errors/app-not-found
+                title: App not found.
+                status: 404
+                detail: That app hasn't been added.
+                code: APP_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionConflict:
+      description: >-
+        The app uses one shared account, which an administrator connects on
+        its own page. Or, on a write, a connection or consent is already in
+        progress or settled another way, or the Idempotency-Key was used for a
+        different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            shared:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Linear uses one shared account. An admin connects it on its page under Apps.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            inProgress:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: You're already connecting an app. Finish it, or wait for it to expire, before starting another.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    SharedConnectionConflict:
+      description: >-
+        The app is connected by each person and has no shared account. Or, on
+        a write, a shared account is connected already where the app connects
+        once, a consent is already in progress, or the Idempotency-Key was
+        used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            personal:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Linear is connected by each person, so it has no shared account.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            connected:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Linear already has a shared account connected. Disconnect it first if you want to connect a different one.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ConnectionsUnavailable:
+      description: >-
+        This OpenBot can't connect apps this way: connecting apps isn't set
+        up here, it has no address to bring the person back to, or the app
+        can't be used here. Trying again won't help until an administrator
+        changes something.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notSetUp:
+              value:
+                type: https://open.bot/errors/connections-unavailable
+                title: Connecting apps isn't available here.
+                status: 503
+                detail: Connecting apps isn't set up yet, so nothing was asked. Ask an admin to set it up.
+                code: CONNECTIONS_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    ConnectionPageLast:
+      summary: A Google Drive sign-in OpenBot keeps, and a Linear key, on one page.
+      value:
+        connections:
+          - appId: google-drive
+            connectedAt: '2026-11-02T09:14:00.000Z'
+            revoked: false
+            scope: https://www.googleapis.com/auth/drive.readonly
+            check: null
+            canAddAccount: false
+          - appId: linear
+            connectedAt: '2026-11-09T16:40:12.000Z'
+            revoked: false
+            scope: null
+            check:
+              verified: true
+              verifiedAt: '2026-11-13T08:02:51.000Z'
+              checkedAction: LINEAR_LIST_LINEAR_TEAMS
+              checkable: true
+            canAddAccount: true
+        nextCursor: null
+    ConnectionExample:
+      summary: A Linear key, checked yesterday.
+      value:
+        appId: linear
+        connectedAt: '2026-11-09T16:40:12.000Z'
+        revoked: false
+        scope: null
+        check:
+          verified: true
+          verifiedAt: '2026-11-13T08:02:51.000Z'
+          checkedAction: LINEAR_LIST_LINEAR_TEAMS
+          checkable: true
+        canAddAccount: true
+    ConnectionStartConsent:
+      summary: The app's sign-in page, to open.
+      value:
+        next: consent
+        authorizationUrl: https://accounts.google.com/o/oauth2/v2/auth?client_id=example.apps.googleusercontent.com&response_type=code&state=sealed
+    ConnectionStartForm:
+      summary: The one box Linear asks for.
+      value:
+        next: form
+        fields:
+          - name: api_key
+            label: API key
+            help: Your Linear API key, from Settings, then Security & access.
+            required: true
+            secret: true
+            default: null
+        guide:
+          steps: In Linear, open Settings, then Security & access, and create a personal API key.
+          url: https://linear.app/settings/account/security
+    ConnectionStartConnected:
+      summary: Connected, with the key checked.
+      value:
+        next: connected
+        verified: true
+        checkedAction: LINEAR_LIST_LINEAR_TEAMS
+    ConnectionConfirmed:
+      summary: The app says the account is connected.
+      value:
+        connected: true
+    ConnectionCheckExample:
+      summary: The key worked.
+      value:
+        verified: true
+        verifiedAt: '2026-11-14T10:05:33.000Z'
+        checkedAction: LINEAR_LIST_LINEAR_TEAMS
+    DisconnectionExample:
+      summary: The app was asked to end the access.
+      value:
+        revocationRequested: true
+    DisconnectPreviewExample:
+      summary: Google Calendar shares Gmail's sign-in.
+      value:
+        alsoEnds: [Google Calendar]
+        uncheckedCount: 0
+    ActionAuthorizationsExample:
+      summary: One action authorized, one waiting for consent.
+      value:
+        readable: true
+        reason: null
+        actions:
+          - action: Github.ListIssues
+            state: authorized
+            scopes: [repo]
+            authorization: held
+          - action: Github.CreateIssue
+            state: needs-consent
+            scopes: [repo]
+    ActionAuthorizationsUnreadable:
+      summary: The app couldn't be asked.
+      value:
+        readable: false
+        reason: Couldn't read what this account allows right now. Try again in a moment.
+        actions: []
+    AuthorizationStartExample:
+      summary: The app's consent page, to open.
+      value:
+        authorizationUrl: https://cloud.example.com/oauth/authorize?flow=example
+    ConnectedAccountPageLast:
+      summary: A work and a personal mailbox.
+      value:
+        accounts:
+          - id: 5f0c2b7e-3a1d-4e8f-9b6c-2d4a7e1f0c93
+            identity: sam@acme.com
+            label: sam@acme.com
+            isDefault: true
+            connectedAt: '2026-11-03T12:00:00.000Z'
+          - id: 8a4d6e1f-0b2c-4d3e-a5f6-7b8c9d0e1f24
+            identity: sam.ortiz@example.com
+            label: sam.ortiz@example.com
+            isDefault: false
+            connectedAt: '2026-11-10T18:21:45.000Z'
+        nextCursor: null
+    AccountDisconnectionExample:
+      summary: One of two accounts ended.
+      value:
+        remaining: 1
+        connectionEnded: false
+        revocationRequested: true
+    SharedConnectionExample:
+      summary: Slack's shared account, connected by an administrator.
+      value:
+        appId: slack
+        connected: true
+        connectedAt: '2026-11-05T15:30:00.000Z'
+        connectedBy: admin@acme.com
+        accountName: Acme Workspace
+        check:
+          verified: true
+          verifiedAt: '2026-11-05T15:30:00.000Z'
+          checkedAction: null
+          checkable: false

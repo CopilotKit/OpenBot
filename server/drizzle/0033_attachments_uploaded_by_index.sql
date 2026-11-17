@@ -1,1 +1,0 @@
-CREATE INDEX "attachments_uploaded_by_idx" ON "attachments" USING btree ("uploaded_by");

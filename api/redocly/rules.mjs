@@ -13,6 +13,19 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
 const ORGANIZATION_PREFIX = "/api/v2/organizations/{organizationId}/";
+/**
+ * The addresses outside an organization. The organizations the caller is a member of, and
+ * creating one: a person has to be able to ask which organizations they are in before they can
+ * name one. And the invitations sent to the caller: they answer one before they are a member of
+ * the organization it is for, so neither can sit under an organization's address.
+ */
+const OUTSIDE_AN_ORGANIZATION = [
+  "/api/v2/people/me/organizations",
+  "/api/v2/people/me/invitations",
+  "/api/v2/people/me/invitations/{invitationId}",
+  "/api/v2/people/me/invitations/{invitationId}/accept",
+  "/api/v2/people/me/invitations/{invitationId}/decline",
+];
 const WRITE_METHODS = ["post", "put", "patch", "delete"];
 const METHODS = ["get", "head", "options", "trace", ...WRITE_METHODS];
 const PROBLEM_JSON = "application/problem+json";
@@ -64,7 +77,10 @@ function OrganizationScoped() {
       enter(paths, ctx) {
         for (const path of Object.keys(paths)) {
           const location = ctx.location.child([path]).key();
-          if (!path.startsWith(ORGANIZATION_PREFIX)) {
+          if (
+            !path.startsWith(ORGANIZATION_PREFIX) &&
+            !OUTSIDE_AN_ORGANIZATION.includes(path)
+          ) {
             ctx.report({
               message: `${path} is not under ${ORGANIZATION_PREFIX}. Every OpenBot resource belongs to an organization, as every Intelligence v2 resource does.`,
               location,
@@ -100,6 +116,17 @@ function operationsOf(pathItem) {
   ]);
 }
 
+/**
+ * The shared Problem schema, or an area's own that is the shared one and more: `allOf` whose first
+ * entry is the shared Problem, so an area can name what its problems carry beside the shared members
+ * without editing the shared schema.
+ */
+function isProblemSchema(ctx, schema) {
+  if (schema?.$ref === PROBLEM_SCHEMA) return true;
+  const own = resolved(ctx, schema);
+  return Array.isArray(own?.allOf) && own.allOf[0]?.$ref === PROBLEM_SCHEMA;
+}
+
 /** Every error response is application/problem+json, and nothing else, with the shared Problem schema. */
 function ProblemDetailsErrors() {
   return {
@@ -117,10 +144,10 @@ function ProblemDetailsErrors() {
             if (
               types.length !== 1 ||
               types[0] !== PROBLEM_JSON ||
-              schema?.$ref !== PROBLEM_SCHEMA
+              !isProblemSchema(ctx, schema)
             ) {
               ctx.report({
-                message: `${method.toUpperCase()} ${status} must be ${PROBLEM_JSON} only, with the schema ${PROBLEM_SCHEMA} (RFC 9457, as Intelligence's v2 API).`,
+                message: `${method.toUpperCase()} ${status} must be ${PROBLEM_JSON} only, with the schema ${PROBLEM_SCHEMA}, or one that is allOf it and more (RFC 9457, as Intelligence's v2 API).`,
                 location: ctx.location.child([method, "responses", status]),
               });
             }

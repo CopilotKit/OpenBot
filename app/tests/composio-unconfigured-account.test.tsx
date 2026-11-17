@@ -18,13 +18,14 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import { serversListedFor } from "@/lib/plugins/listed";
-import {
-  type PluginConnections,
-  type PluginServer,
-  type PluginsPage,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+import { type PluginConnections, pluginKeys } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import {
+  type AppsFixture,
+  appBody,
+  seedAppReads,
+  type TodayServer,
+} from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -62,7 +63,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-function server(overrides: Partial<PluginServer> & { id: string }) {
+function server(overrides: Partial<TodayServer> & { id: string }) {
   return {
     title: "App",
     summary: "",
@@ -72,31 +73,34 @@ function server(overrides: Partial<PluginServer> & { id: string }) {
     authScheme: "OAUTH2",
     tools: [],
     ...overrides,
-  } as PluginServer;
+  } satisfies TodayServer;
 }
 
 const gmail = server({ id: "composio-gmail", title: "Gmail" });
 const drive = server({
   id: "google-drive",
   title: "Google Drive",
-  provenance: "catalogue",
+  provenance: "first-party",
+  url: "https://drivemcp.googleapis.com/mcp/v1",
   vendor: "Google",
-} as Partial<PluginServer> & { id: string });
+});
 
-test("lists no Composio app when the deployment has no Composio key", () => {
+test("lists no app from the directory when the directory isn't set up", () => {
   expect(
     serversListedFor({
-      servers: [gmail, drive],
-      composioConfigured: false,
+      servers: [gmail, drive].map(appBody),
+      directoryAvailable: false,
+      directoryProvider: "composio",
     }).map((row) => row.id),
   ).toEqual(["google-drive"]);
 });
 
-test("lists Composio apps as before once the key is set", () => {
+test("lists apps from the directory as before once it is set up", () => {
   expect(
     serversListedFor({
-      servers: [gmail, drive],
-      composioConfigured: true,
+      servers: [gmail, drive].map(appBody),
+      directoryAvailable: true,
+      directoryProvider: "composio",
     }).map((row) => row.id),
   ).toEqual(["composio-gmail", "google-drive"]);
 });
@@ -121,18 +125,17 @@ function renderAccount(composioConfigured: boolean) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [gmail],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
     // Composio's answer: its auth config fixes one state for a whole toolkit.
     authorizesPerAction: false,
   };
-  const connections: PluginConnections = { connections: [], redirectUri: null };
-  client.setQueryData(pluginKeys.page(), page);
+  const connections: PluginConnections = { connections: [] };
+  seedAppReads(client, page);
   client.setQueryData(pluginKeys.connections(), connections);
 
   const rootRoute = createRootRoute({ component: Outlet });

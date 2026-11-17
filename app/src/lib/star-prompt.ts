@@ -1,5 +1,8 @@
-import { tryClient } from "@/lib/client";
+import { recordStarPromptEvent } from "@/lib/api/generated/product-events/product-events";
+import { idempotencyKey } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
+import { organizationId } from "@/lib/organizations/current";
 
 /**
  * THE ASK TO STAR OPENBOT ON GITHUB, AND THE MOMENT THAT EARNS IT.
@@ -29,7 +32,7 @@ export type StarPromptTrigger = "prompts" | "bot_created";
 /** Where an answer came from: the card, under the trigger that showed it, or Settings' link. */
 export type StarPromptSource = StarPromptTrigger | "settings";
 
-/** What is counted. The server accepts exactly these (server/src/telemetry/product.ts). */
+/** What is counted: `StarPromptEvent.kind` in api/openapi/conversations.yaml. */
 export type StarPromptEvent =
   | "star_prompt_shown"
   | "star_prompt_clicked"
@@ -123,17 +126,20 @@ export async function recordStarPrompt(
   trigger: StarPromptSource,
 ): Promise<void> {
   try {
-    const response = await tryClient("/api/telemetry/product-events", {
-      method: "POST",
-      body: {
+    // With keepalive, like the answer events: Star on GitHub leaves the page as it is pressed.
+    await recordStarPromptEvent(
+      organizationId(),
+      {
         kind,
         trigger,
         surface: desktopShell() === null ? "web" : "desktop",
       },
-    });
-    if (!response.ok)
-      console.warn("Star prompt telemetry was not accepted.", response.status);
-  } catch {
-    console.warn("Star prompt telemetry could not be delivered.");
+      { "Idempotency-Key": idempotencyKey() },
+      { keepalive: true },
+    );
+  } catch (error) {
+    if (error instanceof ClientError)
+      console.warn("Star prompt telemetry was not accepted.", error.status);
+    else console.warn("Star prompt telemetry could not be delivered.");
   }
 }

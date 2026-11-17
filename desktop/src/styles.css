@@ -731,6 +731,427 @@ button.text-link.change-provider {
   box-shadow: 0 0 0 3px var(--lilac-30);
 }
 
+/*
+ * The ways to run OpenBot, on the first screen. OpenBot (Self-Contained) is the one this app sets
+ * up. OpenBot for Business is one card holding its two ways to run, each a smaller row inside it,
+ * and either books a call.
+ */
+fieldset.picker.hosting {
+  max-height: none;
+  overflow-y: visible;
+  margin: 4px 0 12px;
+}
+
+/* A shade tighter than the provider list, so the whole first screen fits the window's default size. */
+fieldset.picker.hosting .tile {
+  padding-block: 9px;
+}
+
+fieldset.picker.hosting .tile.chosen {
+  cursor: default;
+}
+
+/*
+ * OpenBot for Business: drawn as a row, mark and name and summary where every row has them, with
+ * its two choices stacked under the summary. Not itself a choice, so no hover of its own; while one
+ * of its choices is picked its edge is the chosen row's ring.
+ */
+.tile-group {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  grid-template-areas:
+    "mark name"
+    "mark summary"
+    ". options";
+  align-items: center;
+  column-gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  line-height: 1.5;
+}
+
+.tile-group.chosen {
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
+}
+
+.tile-options {
+  grid-area: options;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* One of Business's ways to run: the row's shape, smaller, its words on one line. */
+.tile-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  cursor: pointer;
+  transition:
+    border-color 100ms ease,
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.tile-option:hover {
+  background: color-mix(in srgb, var(--muted) 60%, var(--card));
+}
+
+.tile-option:active {
+  background: var(--muted);
+}
+
+.tile-option.chosen,
+.tile-option.chosen:hover {
+  cursor: default;
+  background: color-mix(in srgb, var(--ring) 6%, var(--card));
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
+}
+
+.tile-option.held,
+.tile-option.held:hover,
+.tile-option.held:active {
+  cursor: default;
+  background: var(--card);
+}
+
+.tile-option:has(.tile-input:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--lilac-30);
+}
+
+.tile-option-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.tile-option-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.tile-option-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tile-option-summary {
+  color: var(--text-secondary);
+}
+
+/* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
+.cloud-marks {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.cloud-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--mark-ground);
+}
+
+.cloud-mark img {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * Under the rows: the way to connect this app to an OpenBot a company already runs, in the row
+ * summary's size and colour, starting where the rows' text does. Close under them, so the first
+ * screen still fits the window's default size.
+ */
+fieldset.picker.hosting .tile-aside {
+  margin: -6px 0 0;
+  padding-left: 65px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+/* A link in a sentence: the sentence's own line, none of a button's height or gap. */
+button.text-link.inline-link {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
+/*
+ * OpenBot for Business, under the rows: the app's OpenBot for Business view stacked for the card.
+ * Where it runs in big letters, what it adds in three short lists, then the calendar to book a
+ * call on a card of its own. Sizes are the app dialog's: 28px icon tiles, 10px between rows.
+ */
+.business-booker {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.business-deploy {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.business-group h3 {
+  margin: 0 0 10px;
+  font-size: var(--text-xs);
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.business-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.business-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-primary);
+}
+
+.business-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.business-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.business-more {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+/* Book a demo: the dialog's muted side, as a band across the card under the list. */
+.book-a-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.book-a-demo h2 {
+  margin: 0;
+}
+
+.book-a-demo-line {
+  margin: 0 0 12px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* A real control, so a card: the card's fill and border, the calendar drawn in its colours. */
+.booking-calendar {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sheet);
+  background: var(--card);
+}
+
+.booking-calendar iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.booking-calendar[data-ready] iframe {
+  opacity: 1;
+}
+
+.booking-calendar-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .booking-calendar iframe {
+    transition: none;
+  }
+}
+
+.book-a-demo-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.book-a-demo-fallback p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+/* The way on when the calendar can't load: the app's primary button, full width, as a link. */
+a.button-link.primary {
+  width: 100%;
+  gap: 6px;
+  border-color: transparent;
+  background: var(--action);
+  color: var(--action-ink);
+}
+
+a.button-link.primary:hover {
+  background: var(--action-hover);
+}
+
+a.button-link.primary svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Not choosable for now, while an address is checked or the browser is waited on: Cancel is. */
+fieldset.picker.hosting .tile.held,
+fieldset.picker.hosting .tile.held:hover,
+fieldset.picker.hosting .tile.held:active {
+  cursor: default;
+  background: var(--card);
+}
+
+/*
+ * OpenBot for Business, under the choices: the address of the OpenBot to connect to, what happens
+ * next under the field, then Connect. What went wrong with the address is said under the field,
+ * in the destructive colour; anything else is said in a card between the field and the button.
+ */
+.connect-to-openbot .field {
+  margin: 8px 0 0;
+}
+
+/* Held while it is checked or signed in to: still readable, on the ground of a field at rest. */
+.connect-to-openbot .field input:read-only {
+  background: var(--muted);
+}
+
+.address-problem {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.connect-to-openbot .footnote {
+  margin-top: 8px;
+}
+
+/*
+ * A connection that didn't work, or a sign-in that stopped or ended: the card that waits on the
+ * person, with the shell's sentence in ink. Not the failure card: nothing on this computer failed.
+ */
+.connect-to-openbot .local-alert {
+  margin: 16px 0 0;
+}
+
+.connect-to-openbot .local-alert p {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A link that is the way on, drawn as the app's `outline` button. */
+a.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 150ms ease-out;
+}
+
+a.button-link:hover {
+  background: var(--muted);
+}
+
+/* What Self-hosted asks of this computer: the reason, then the four needs, two to a line. */
+.needs .lede {
+  margin-bottom: 6px;
+}
+
+/* The setup-time line under the needs: Install's own gap is all there is between them. */
+.needs + .lede {
+  margin-bottom: 0;
+}
+
+.needs-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 2px 16px;
+  margin: 0 0 4px;
+  padding-left: 20px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 22px;
+}
+
 /* A disclosure: options almost nobody should open. */
 details {
   border-top: 1px solid var(--border);
@@ -1248,6 +1669,62 @@ a:hover {
 }
 
 /*
+ * Why updating OpenBot has a screen, under its progress (`SelfContainedNote`): the window's icon
+ * tile, then the reason and OpenBot for Business, on the muted ground the app gives an aside, in
+ * the rows' smaller type so the progress above stays what the eye reads first.
+ */
+.self-contained {
+  margin-top: 16px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  /* Its own areas: `.mark-tile` names its area `mark`, as the hosting tiles lay it out. */
+  grid-template-areas: "mark words";
+  column-gap: 14px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--muted) 55%, var(--card));
+}
+
+.self-contained-words {
+  grid-area: words;
+}
+
+.self-contained h2 {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.self-contained p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.self-contained p + p {
+  margin-top: 6px;
+}
+
+.self-contained a {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/*
+ * While Docker Desktop's three-line hand-off shows, the journey is 44px taller, and the card
+ * scrolled at the window's default size. The note keeps its heading, which says why, and the pitch
+ * with its link, and leaves out the sentence between until the hand-off goes.
+ */
+main > .sheet:has(.journey.handing-off) .self-contained-why {
+  display: none;
+}
+
+/*
  * The background install's row, last in the step (`BehindSlot`). ONE height, its tallest form's
  * (its name, one line, and a download bar with its bytes under them), whatever it says: a plain
  * line, a download, unpacking, waiting for you, installed. Each line is one line, cut short with
@@ -1310,6 +1787,10 @@ a:hover {
 }
 .step .mark.bad {
   color: var(--bad);
+}
+/* A step that ended without doing what it set out to, and stops nothing: quiet, not red. */
+.step .mark.note {
+  color: var(--text-secondary);
 }
 
 .step .detail {
@@ -1815,13 +2296,15 @@ a:hover {
 
   /* The app's dark `outline` button: `dark:bg-input/30`, a shade above the card. */
   button.quiet,
-  button.another-question {
+  button.another-question,
+  a.button-link {
     background: color-mix(in srgb, var(--input) 30%, transparent);
     border-color: var(--input);
   }
 
   button.quiet:hover:not(:disabled),
-  button.another-question:hover:not(:disabled) {
+  button.another-question:hover:not(:disabled),
+  a.button-link:hover {
     background: color-mix(in srgb, var(--input) 50%, transparent);
   }
 
@@ -1953,15 +2436,16 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
 }
 
 /*
- * Usage data, at the foot of the last screen of setup: a small checkbox and a line or two beside
- * it, in the footnote's size and colour. No card: it is a choice, not a step.
+ * Usage data, on the last screen of setup: a small checkbox and a line or two beside it, in the
+ * footnote's size and colour. No card: it is a choice, not a step. Under the step's words and above
+ * its rows, the lede's own gap on either side, so nothing that comes and goes below can move it.
  */
 .usage-choice {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 8px;
   align-items: start;
-  margin-top: 20px;
+  margin: 0 0 20px;
   font-size: var(--text-xs);
   line-height: 16px;
   color: var(--text-secondary);

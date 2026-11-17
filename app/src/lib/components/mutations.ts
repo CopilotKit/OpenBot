@@ -1,10 +1,20 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
-import { componentKeys } from "./queries";
+import {
+  allowBotComponent,
+  deleteComponent,
+  grantComponentFunction,
+  publishComponent,
+  replaceComponentDraft,
+  revokeComponentFunction,
+  unpublishComponent,
+  withholdBotComponent,
+} from "@/lib/api/generated/components/components";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { type ComponentRecord, componentKeys } from "./queries";
 
 /**
- * Writes against a component's governance: publication, per-Bot grants, per-function grants, and the
- * draft description.
+ * Writes against a component's governance: publication, per-Bot grants, per-function grants, the
+ * draft, and a Playground component's source.
  *
  * Every one of these is a decision the server records and may refuse, so none of them patch the
  * cache — the list is invalidated and the screen re-reads whatever was actually decided.
@@ -18,16 +28,12 @@ function invalidateComponents(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: componentKeys.all });
 }
 
-/** The path segment for one component, which is a tool name rather than an opaque id. */
-function componentPath(name: string): string {
-  return `/api/components/${encodeURIComponent(name)}`;
-}
+const key = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /**
  * Whether one Bot may answer with a component.
  *
- * Granting posts to the collection; withholding deletes from it. The absence of a grant is what
- * withholds it, so there is no third state to send.
+ * Allowing it and holding it back are the two answers; there is no third state to send.
  */
 export function setComponentGrantMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
@@ -36,16 +42,13 @@ export function setComponentGrantMutationOptions(queryClient: QueryClient) {
       agentId: string;
       granted: boolean;
     }) => {
-      await (variables.granted
-        ? client(`${componentPath(variables.name)}/grants`, {
-            method: "POST",
-            body: { agentId: variables.agentId },
-            fallback: FALLBACK,
-          })
-        : client(
-            `${componentPath(variables.name)}/grants/${encodeURIComponent(variables.agentId)}`,
-            { method: "DELETE", fallback: FALLBACK },
-          ));
+      await (variables.granted ? allowBotComponent : withholdBotComponent)(
+        organizationId(),
+        variables.agentId,
+        variables.name,
+        key(),
+        { fallback: FALLBACK },
+      );
     },
     onSuccess: () => invalidateComponents(queryClient),
   });
@@ -60,15 +63,14 @@ export function setComponentFunctionMutationOptions(queryClient: QueryClient) {
       granted: boolean;
     }) => {
       await (variables.granted
-        ? client(`${componentPath(variables.name)}/functions`, {
-            method: "POST",
-            body: { function: variables.functionName },
-            fallback: FALLBACK,
-          })
-        : client(
-            `${componentPath(variables.name)}/functions/${encodeURIComponent(variables.functionName)}`,
-            { method: "DELETE", fallback: FALLBACK },
-          ));
+        ? grantComponentFunction
+        : revokeComponentFunction)(
+        organizationId(),
+        variables.name,
+        variables.functionName,
+        key(),
+        { fallback: FALLBACK },
+      );
     },
     onSuccess: () => invalidateComponents(queryClient),
   });
@@ -78,11 +80,12 @@ export function setComponentFunctionMutationOptions(queryClient: QueryClient) {
 export function setComponentPublishedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { name: string; published: boolean }) => {
-      await client(`${componentPath(variables.name)}/publication`, {
-        method: "POST",
-        body: { published: variables.published },
-        fallback: FALLBACK,
-      });
+      await (variables.published ? publishComponent : unpublishComponent)(
+        organizationId(),
+        variables.name,
+        key(),
+        { fallback: FALLBACK },
+      );
     },
     onSuccess: () => invalidateComponents(queryClient),
   });
@@ -91,14 +94,117 @@ export function setComponentPublishedMutationOptions(queryClient: QueryClient) {
 /**
  * The description the model will read once it is published. Saving it changes nothing a Bot can see
  * until publication, which is why it is a separate write.
+ *
+ * A Playground component's draft is its title, description and source together, so its title and
+ * source go with the new description, as they stand.
  */
 export function saveComponentDraftMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (variables: { name: string; description: string }) => {
-      await client(`${componentPath(variables.name)}/draft`, {
-        method: "PUT",
-        body: { description: variables.description },
-        fallback: FALLBACK,
+    mutationFn: async (variables: {
+      component: Pick<ComponentRecord, "name" | "title" | "draftSource">;
+      description: string;
+    }) => {
+      const { component, description } = variables;
+      await replaceComponentDraft(
+        organizationId(),
+        component.name,
+        component.draftSource
+          ? {
+              title: component.title,
+              description,
+              source: component.draftSource,
+            }
+          : { description },
+        key(),
+        { fallback: FALLBACK },
+      );
+    },
+    onSuccess: () => invalidateComponents(queryClient),
+  });
+}
+
+/**
+ * A component written in Playground, as the playground sends it.
+ *
+ * `argumentSchema` and `sampleArguments` arrive parsed. The playground holds them as text while
+ * somebody is typing, and text that does not parse is not a draft the server should be asked to
+ * store — so parsing is the editor's job and this is what survives it.
+ */
+export type PlaygroundDraftInput = {
+  slug: string;
+  title: string;
+  description: string;
+  html: string;
+  css: string;
+  jsFunctions: string;
+  argumentSchema: Record<string, unknown>;
+  sampleArguments: Record<string, unknown>;
+};
+
+const PLAYGROUND_FALLBACK = "That did not work.";
+
+/** The name the server knows a Playground component by. */
+export function playgroundName(slug: string): string {
+  return `custom_${slug}`;
+}
+
+/** Save the draft on screen, which makes the component the first time it is saved. */
+async function savePlaygroundDraft(input: PlaygroundDraftInput) {
+  await replaceComponentDraft(
+    organizationId(),
+    playgroundName(input.slug),
+    {
+      title: input.title,
+      description: input.description,
+      source: {
+        html: input.html,
+        css: input.css,
+        jsFunctions: input.jsFunctions,
+        argumentSchema: input.argumentSchema,
+        sampleArguments: input.sampleArguments,
+      },
+    },
+    key(),
+    { fallback: PLAYGROUND_FALLBACK },
+  );
+}
+
+export function savePlaygroundDraftMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: savePlaygroundDraft,
+    onSuccess: () => invalidateComponents(queryClient),
+  });
+}
+
+/**
+ * Publish what is on screen.
+ *
+ * Saves first, in the same mutation, because publishing acts on the stored draft rather than on the
+ * editors. Two calls rather than one, so a save that fails stops the publish — publishing a draft
+ * the server never received would put something on screen that nobody wrote.
+ */
+export function publishPlaygroundMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (input: PlaygroundDraftInput) => {
+      await savePlaygroundDraft(input);
+      await publishComponent(
+        organizationId(),
+        playgroundName(input.slug),
+        key(),
+        { fallback: PLAYGROUND_FALLBACK },
+      );
+    },
+    onSuccess: () => invalidateComponents(queryClient),
+  });
+}
+
+export function deletePlaygroundComponentMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (name: string) => {
+      await deleteComponent(organizationId(), name, key(), {
+        fallback: PLAYGROUND_FALLBACK,
       });
     },
     onSuccess: () => invalidateComponents(queryClient),

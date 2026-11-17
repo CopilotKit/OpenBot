@@ -1,3 +1,4 @@
+import { humanise } from "@openbot/shared/tool-name";
 import {
   WHAT_IF_INITIATOR_WORDS,
   WHAT_IF_INITIATORS,
@@ -7,8 +8,10 @@ import {
   type WhatIfInitiator,
   type WhatIfIntent,
   type WhatIfVocabulary,
+  whatIfGroupName,
+  whatIfTeamGroup,
+  whatIfTeamOf,
 } from "@openbot/shared/what-if";
-import { humanise } from "@openbot/shared/tool-name";
 import { IconChevronDown } from "@tabler/icons-react";
 import { type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -34,8 +37,12 @@ import { cn } from "@/lib/utils";
  * One action as chips: who, what started it, and what it does. A question read by the model arrives
  * here, and every chip can be changed, so the action that is checked is the one the admin confirmed.
  *
- * Each chip holds only what this OpenBot has: its Bots, people, groups, apps and tools. The same chip
+ * Each chip holds only what this OpenBot has: its Bots, people, teams, apps and tools. The same chip
  * shape as the Audit page's filters, wrapping onto as many lines as the column needs.
+ *
+ * "Runs as" is a person, or anyone in one of the organization's teams. A team is chosen and shown by
+ * its name and kept as `team:<id>`. Directory groups are from before there were teams: one an action
+ * already names is still shown, and the ones this OpenBot lists stay under a heading of their own.
  */
 export function ActionChips({
   action,
@@ -52,6 +59,17 @@ export function ActionChips({
   const person = vocabulary?.people.find((entry) => entry.id === action.person);
   const app = vocabulary?.apps.find((entry) => entry.id === action.app);
   const tool = app?.tools.find((entry) => entry.name === action.tool);
+  /*
+   * Until the vocabulary arrives a team has no name to show, and saying it no longer exists would be
+   * a claim nothing supports yet.
+   */
+  const anyoneIn = !action.group
+    ? null
+    : vocabulary
+      ? whatIfGroupName(action.group, vocabulary)
+      : whatIfTeamOf(action.group) === null
+        ? action.group
+        : "a team";
   const intent = action.intent as WhatIfIntent | "";
   const detail =
     intent === "run_command"
@@ -101,8 +119,8 @@ export function ActionChips({
         empty={!person && !action.group}
         title="Runs as"
         value={
-          action.group
-            ? `Anyone in ${action.group}`
+          anyoneIn
+            ? `Anyone in ${anyoneIn}`
             : (person?.name ?? person?.email ?? "Choose")
         }
       >
@@ -124,11 +142,29 @@ export function ActionChips({
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuGroup>
+          {vocabulary?.teams?.length ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Anyone in a team</DropdownMenuLabel>
+                {vocabulary.teams.map((team) => (
+                  <DropdownMenuRadioItem
+                    key={team.id}
+                    value={`group:${whatIfTeamGroup(team.id)}`}
+                  >
+                    <span className="truncate">{team.name}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuGroup>
+            </>
+          ) : null}
           {vocabulary?.groups.length ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuLabel>Anyone in a group</DropdownMenuLabel>
+                <DropdownMenuLabel>
+                  Anyone in a directory group
+                </DropdownMenuLabel>
                 {vocabulary.groups.map((group) => (
                   <DropdownMenuRadioItem key={group} value={`group:${group}`}>
                     <span className="truncate">{group}</span>

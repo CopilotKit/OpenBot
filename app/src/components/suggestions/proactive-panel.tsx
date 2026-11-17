@@ -80,7 +80,7 @@ export function SuggestionsInbox({
 } = {}) {
   const suggestions = useQuery(proactiveSuggestionsQueryOptions());
   const shown = (suggestions.data ?? []).filter(
-    (suggestion) => agentId === undefined || suggestion.agentId === agentId,
+    (suggestion) => agentId === undefined || suggestion.botId === agentId,
   );
   const bots = useQuery(agentListQueryOptions());
   const [expanded, setExpanded] = useState(false);
@@ -106,7 +106,7 @@ export function SuggestionsInbox({
             <Fragment key={suggestion.id}>
               {index > 0 ? <Separator /> : null}
               <SuggestionRow
-                botName={botName(suggestion.agentId)}
+                botName={botName(suggestion.botId)}
                 suggestion={suggestion}
               />
             </Fragment>
@@ -176,7 +176,7 @@ export function ProactiveResearchSettings({
   const blocked = useCheckInsBlocked();
   const [adding, setAdding] = useState(false);
   const shown = (settings.data ?? []).filter(
-    (setting) => fixedBot === undefined || setting.agentId === fixedBot,
+    (setting) => fixedBot === undefined || setting.botId === fixedBot,
   );
   const canAdd =
     settings.isSuccess && (fixedBot === undefined || shown.length === 0);
@@ -232,8 +232,8 @@ export function ProactiveResearchSettings({
                 blocked={blocked}
                 setting={setting}
                 botName={
-                  bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
-                  setting.agentId
+                  bots.data?.find((bot) => bot.id === setting.botId)?.name ??
+                  setting.botId
                 }
               />
             </Fragment>
@@ -266,7 +266,7 @@ export function TurnOnResearchDialog({
   const allBots = useQuery(agentListQueryOptions());
   const bots = {
     data: allBots.data?.filter(
-      (bot) => !settings.data?.some((setting) => setting.agentId === bot.id),
+      (bot) => !settings.data?.some((setting) => setting.botId === bot.id),
     ),
   };
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -300,7 +300,12 @@ export function TurnOnResearchDialog({
             onSubmit={(event) => {
               event.preventDefault();
               add.mutate(
-                { agentId, channelId, focus, intervalMinutes },
+                {
+                  botId: agentId,
+                  conversationId: channelId,
+                  focus,
+                  intervalMinutes,
+                },
                 { onSuccess: onClose },
               );
             }}

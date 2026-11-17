@@ -7,10 +7,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import {
-  type BrowserApiState,
-  browserApiPaths,
-} from "@openbot/shared/openbot-browser";
+import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import {
   environmentManager,
@@ -93,8 +90,9 @@ beforeEach(() => {
   state = idleState();
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) =>
+      // The person's own browser at the API's address: a read of `/api/browser` reaches nothing here.
       new URL(String(input), "http://localhost/").pathname ===
-      browserApiPaths.state
+      "/api/v2/organizations/default/people/me/browser"
         ? Response.json(state)
         : Response.json({ error: "not served" }, { status: 404 }),
     { preconnect: originalFetch.preconnect },
@@ -140,6 +138,7 @@ function renderSidebar() {
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    starPromptAnswered: false,
     narration: null,
     skin: "openbot",
     proactive: "on",

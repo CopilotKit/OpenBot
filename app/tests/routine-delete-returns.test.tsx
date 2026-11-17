@@ -13,6 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerBotsList } from "./bots-api";
+import { pathOf, ROUTINES_PATH, routineRunsPath } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -39,12 +41,12 @@ afterEach(() => {
 
 const ROUTINE: RoutineRecord = {
   id: "routine-1",
-  agentId: "lead-desk",
+  botId: "lead-desk",
   schedule: "Weekdays at 09:00",
   timezone: "Europe/Madrid",
   instruction: "Send me a summary of yesterday's new leads",
   title: "Morning leads",
-  channel: {
+  conversation: {
     id: "conversation-1",
     name: "Lead Desk",
     title: "Leads",
@@ -53,35 +55,48 @@ const ROUTINE: RoutineRecord = {
   enabled: true,
   nextRunAt: "2099-01-01T08:00:00.000Z",
   lastRun: null,
+  goalId: null,
+  createdAt: "2026-11-01T09:00:00.000Z",
 };
 
-/** The server: the routine until it is deleted, and a 404 for its runs after, as the real one. */
+/**
+ * The server: the routine until it is deleted, and a 404 for its runs after, as the real one. It
+ * counts how often the runs of the deleted routine were asked for.
+ */
 function serving() {
   let deleted = false;
+  const asked = { runsAfterDelete: 0 };
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
+    const path = pathOf(input);
     const method = init?.method ?? "GET";
-    if (path === `/api/routines/${ROUTINE.id}` && method === "DELETE") {
+    if (path === `${ROUTINES_PATH}/${ROUTINE.id}` && method === "DELETE") {
       deleted = true;
-      return Response.json({ ok: true });
+      return new Response(null, { status: 204 });
     }
-    if (path === `/api/routines/${ROUTINE.id}/runs`)
+    if (path === routineRunsPath(ROUTINE.id)) {
+      if (deleted) asked.runsAfterDelete += 1;
       return deleted
-        ? Response.json({ error: "Routine not found." }, { status: 404 })
-        : Response.json({ runs: [] });
-    if (path === "/api/routines")
+        ? Response.json({ detail: "Routine not found." }, { status: 404 })
+        : Response.json({ runs: [], nextCursor: null });
+    }
+    if (path === ROUTINES_PATH) {
+      // A real list takes a moment to come back, and the page is still up until it does.
+      if (deleted) await new Promise((resolve) => setTimeout(resolve, 150));
       return Response.json({
         routines: deleted ? [] : [ROUTINE],
-        sweep: { lastSweptAt: new Date().toISOString(), working: true },
+        nextCursor: null,
       });
-    if (path.startsWith("/api/agents"))
-      return Response.json({
-        agents: path.includes("hidden=true")
-          ? []
-          : [{ id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" }],
-      });
+    }
+    const bots = answerBotsList(path, init, {
+      visible: [
+        { id: "lead-desk", name: "Lead Desk", avatarSeed: "lead-desk" },
+      ],
+      hidden: [],
+    });
+    if (bots) return bots;
     return Response.json({});
   }) as unknown as typeof fetch;
+  return asked;
 }
 
 function drawAt(path: string) {
@@ -118,8 +133,9 @@ test("Delete on a routine's page goes back to Routines", async () => {
       name: "Delete the routine scheduled Weekdays at 09:00",
     }),
   );
+  // Asked about by its name, as its heading says, never by its schedule.
   const dialog = await view.findByRole("dialog", {
-    name: 'Delete "Weekdays at 09:00"?',
+    name: "Delete “Morning leads”?",
   });
   await user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
@@ -129,4 +145,28 @@ test("Delete on a routine's page goes back to Routines", async () => {
   );
   expect(view.getByRole("heading", { name: "Routines" })).toBeTruthy();
   expect(view.queryByText("This routine isn't here")).toBeNull();
+});
+
+test("a deleted routine's runs are never asked for again", async () => {
+  const asked = serving();
+  const { view, router } = drawAt(`/routines/schedules/${ROUTINE.id}`);
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", {
+      name: "Delete the routine scheduled Weekdays at 09:00",
+    }),
+  );
+  const dialog = await view.findByRole("dialog", {
+    name: "Delete “Morning leads”?",
+  });
+  await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(
+    () => expect(router.state.location.pathname).toBe("/routines"),
+    { timeout: 3_000 },
+  );
+  // Long enough for a read started by the delete to have gone out.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  // The routine is gone, so asking for its runs could only answer that it is not found.
+  expect(asked.runsAfterDelete).toBe(0);
 });

@@ -47,7 +47,7 @@ const WORDS = {
       "Browse the components your Bots can show in conversations. Every Bot can use all of them.",
     emptyTitle: "No components yet",
     empty:
-      "Components show up here once OpenBot has loaded them. Reload the page if this stays empty.",
+      "Components show up here once OpenBot has loaded them. Check back in a moment if this stays empty.",
   },
 } as const;
 
@@ -63,7 +63,7 @@ function RouteComponent() {
     <PageShell description={words.intro} title="Components gallery">
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load components. Reload the page.
+          Couldn't load components. Try again in a moment.
         </p>
       ) : published?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">

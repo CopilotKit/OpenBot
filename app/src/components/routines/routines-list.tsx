@@ -14,6 +14,7 @@ import {
 } from "@/components/layout/page-shell";
 import { STATUS } from "@/components/responsibilities/goal-page";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
+import { useGoalTriggers } from "@/components/responsibilities/use-goal-reads";
 import {
   SettingRow,
   useCheckInsBlocked,
@@ -28,13 +29,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
-import { relativeTime } from "@/lib/relative-time";
 import {
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
-  triggersQueryOptions,
 } from "@/lib/responsibilities";
 import { describeEvent } from "@/lib/routines/events";
 import {
@@ -44,10 +42,8 @@ import {
   routineDoes,
 } from "@/lib/routines/merged";
 import {
-  nothingIsFiring,
   type RoutineRecord,
   routinesQueryOptions,
-  stoppedRoutinesGuidance,
 } from "@/lib/routines/queries";
 import { NewRoutineButton } from "./new-routine-button";
 import { lastRunLabel, scheduleWords } from "./routine-page";
@@ -114,7 +110,7 @@ function RoutineItem({
             {lastRun.text}
           </ItemDescription>
         ) : null}
-        {routine.channel.gone ? (
+        {routine.conversation.gone ? (
           <ItemDescription className="text-destructive">
             Its conversation was deleted
           </ItemDescription>
@@ -162,10 +158,7 @@ function GoalItem({
     (Boolean(goal.successCriteria) &&
       goalCanEnd(goal, routines, undefined) &&
       !goal.endsWhenMet);
-  const triggers = useQuery({
-    ...triggersQueryOptions(goal.id),
-    enabled: triggersDecide,
-  });
+  const triggers = useGoalTriggers(goal.id, { enabled: triggersDecide });
   const Icon = STATUS[goal.status].icon;
   const starts =
     goal.status === "active"
@@ -274,14 +267,6 @@ export function RoutinesList({
     agentId,
   });
   const showBot = agentId === undefined;
-  const sweep = routines.data?.sweep;
-  // Every routine, including the ones folded into a goal's row: a goal on a schedule is a
-  // schedule the sweep must fire too.
-  const scheduled = (routines.data?.routines ?? []).filter(
-    (routine) => agentId === undefined || routine.agentId === agentId,
-  ).length;
-  const noWorker = nothingIsFiring(sweep, scheduled);
-  const edition = useQuery(deploymentCapabilitiesQueryOptions()).data?.edition;
   const pending = routines.isPending || goals.isPending || checkIns.isPending;
   const failed = [
     routines.error ? "routines" : null,
@@ -291,23 +276,10 @@ export function RoutinesList({
 
   return (
     <PageSection className={embedded ? "mt-0" : undefined}>
-      {/* A fact about OpenBot rather than a row to act on, so said as a sentence. */}
-      {noWorker ? (
-        <p className="mt-4 text-muted-foreground text-sm" role="alert">
-          <span className="font-medium text-amber-600 dark:text-amber-500">
-            Routines aren't running.
-          </span>{" "}
-          {stoppedRoutinesGuidance(
-            sweep?.lastSweptAt ? relativeTime(sweep.lastSweptAt) : null,
-            edition,
-          )}
-        </p>
-      ) : null}
-
       {/* One read failing leaves the other two listed, and says which part is missing. */}
       {failed.length > 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your {failed.join(" and ")}. Reload the page.
+          Couldn't load your {failed.join(" and ")}. Try again in a moment.
         </p>
       ) : null}
 

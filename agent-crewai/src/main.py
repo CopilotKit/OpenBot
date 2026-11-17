@@ -2,8 +2,7 @@
 
 The third harness in the box, and the first built the way every one after it will be: the AG-UI
 integration that CrewAI's own ecosystem publishes, mounted on FastAPI, with nothing of the protocol
-written here. `agent-bot` and `agent-langgraph` speak AG-UI by hand because they predate the rule
-that we do not write adapters. This one imports `ag_ui_crewai` and stops.
+written here: we do not write adapters. This one imports `ag_ui_crewai` and stops.
 
 The contract with the rest of OpenBot is the same one the other Bots meet, and it is small:
 serve AG-UI on a port, answer `/health`, and refuse anybody who does not carry the server's token.

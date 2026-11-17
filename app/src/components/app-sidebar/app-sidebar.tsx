@@ -1,15 +1,21 @@
 import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import {
+  Link,
+  type LinkOptions,
+  useParams,
+  useRouterState,
+} from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BrandName } from "@/components/edition/brand-name";
+import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
+import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
+import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import {
-  DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   InputGroup,
@@ -28,7 +34,6 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { untitledLine } from "@/lib/channels/label";
 import {
@@ -47,6 +52,10 @@ import {
   type NavigationLink,
   useNavigationItems,
 } from "@/lib/navigation";
+import {
+  useOrganizationChoices,
+  useWaitingInvitationCount,
+} from "@/lib/organizations/queries";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
   type MessageListEmphasis,
@@ -59,33 +68,18 @@ import {
   useLiveRecording,
 } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
-import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import {
+  AccountMenu,
+  accountMenuClassName,
+  accountMenuItemClassName as userMenuItemClassName,
+} from "./account-label";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 import { useSignOut } from "./use-sign-out";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
-
-const userMenuItemClassName = "gap-2 px-2 py-1.5";
-
-function UserAvatar() {
-  const { data: currentUser } = useQuery(currentUserQueryOptions());
-  const initials =
-    currentUser?.name
-      ?.trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") ?? currentUser?.email.slice(0, 2).toUpperCase();
-
-  return (
-    <div className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden">
-      {initials}
-    </div>
-  );
-}
 
 /**
  * Cap layout animation because `layout` measures every animated row on each reorder.
@@ -342,6 +336,40 @@ function SearchResults({
   );
 }
 
+/**
+ * Whether the pointer has stayed where it was since the page last changed.
+ *
+ * The account menu opens upwards, over the rows above it, and Invitations sits right over Bots. Chosen
+ * from there, the menu goes and leaves the pointer resting on Bots, which took its hover fill: the
+ * same fill the open page's row has, so on /invitations Bots read as the page that was open. Until
+ * the pointer moves, a row it happens to be over is not filled. A browser can tell the page what is
+ * under a pointer that did not move, with no distance moved; only a real move counts.
+ */
+function usePointerRestingSinceNavigation(): boolean {
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const [movedOn, setMovedOn] = useState<string | null>(null);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const moved = (event: PointerEvent) => {
+      // By the distance the event reports, or, where a browser reports none, by where it lands.
+      const before = last.current;
+      last.current = { x: event.clientX, y: event.clientY };
+      if (
+        event.movementX !== 0 ||
+        event.movementY !== 0 ||
+        (before !== null &&
+          (before.x !== event.clientX || before.y !== event.clientY))
+      )
+        setMovedOn(pathname);
+    };
+    window.addEventListener("pointermove", moved);
+    return () => window.removeEventListener("pointermove", moved);
+  }, [pathname]);
+  return movedOn !== pathname;
+}
+
 /** One of the main menu's own destinations, in the sidebar's footer, with what goes at the end of its row. */
 function PrimaryNavItem({
   item,
@@ -355,7 +383,9 @@ function PrimaryNavItem({
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        className="hover:bg-foreground/5 h-10"
+        // No hover fill under a pointer that has not moved since the page changed (see
+        // usePointerRestingSinceNavigation); the open page's row keeps its own.
+        className="hover:bg-foreground/5 h-10 group-data-[pointer-resting]/footer-menu:hover:bg-transparent group-data-[pointer-resting]/footer-menu:data-[status=active]:hover:bg-foreground/5"
         render={(props) => (
           <Link
             {...props}
@@ -393,9 +423,13 @@ function SkillsNavItem({ item }: { item: NavigationLink }) {
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const emphasis = useMessageListEmphasis();
-  const { data: currentUser } = useQuery(currentUserQueryOptions());
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
+  // Where OpenBot lists no organizations, the menu has none at all.
+  const organizationChoices = useOrganizationChoices();
+  const invitationsWaiting = useWaitingInvitationCount();
+  const switchOrganization = useSwitchOrganization();
+  const pointerResting = usePointerRestingSinceNavigation();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -551,7 +585,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarContent>
       <SidebarFooter>
-        <SidebarMenu className="gap-px">
+        <SidebarMenu
+          className="group/footer-menu gap-px"
+          data-pointer-resting={pointerResting || undefined}
+        >
           {navigation
             .filter(isNavigationLink)
             .filter((item) => item.section === "primary")
@@ -567,27 +604,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               ),
             )}
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
-                }
-              >
-                <UserAvatar />
-                {/* The name and the release the server runs, side by side: 80/20 of the row. */}
-                <span className="grid min-w-0 flex-1 grid-cols-[4fr_1fr] items-center gap-2">
-                  <span className="truncate text-sm trackint-tight">
-                    {currentUser?.name || currentUser?.email}
-                  </span>
-                  <OpenBotVersion className="text-right text-[10px] leading-3 text-muted-foreground" />
-                </span>
-              </DropdownMenuTrigger>
+            <AccountMenu>
               <DropdownMenuContent
                 align="start"
-                className="p-1.5"
+                className={accountMenuClassName}
                 side="top"
                 sideOffset={8}
               >
+                {organizationChoices ? (
+                  <OrganizationMenuItems
+                    choices={organizationChoices}
+                    invitationsWaiting={invitationsWaiting}
+                    itemClassName={userMenuItemClassName}
+                    onNew={() => {
+                      // A narrow window's sheet would wait behind the dialog.
+                      setOpenMobile(false);
+                      openNewOrganization();
+                    }}
+                    switching={switchOrganization}
+                  />
+                ) : null}
                 {navigation
                   .filter((item) => item.section === "account")
                   .map((item) => (
@@ -620,7 +656,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </DropdownMenuItem>
                 ) : null}
               </DropdownMenuContent>
-            </DropdownMenu>
+            </AccountMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

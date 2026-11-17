@@ -12,6 +12,7 @@ import { scheduleWords } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -41,12 +42,12 @@ const PAGE: RoutinesPage = {
   routines: [
     {
       id: "routine-named",
-      agentId: "general-assistant",
+      botId: "general-assistant",
       schedule: "Every day at 08:00",
       timezone: "Europe/Madrid",
       instruction: "Summarise my unread mail and today's meetings.",
       title: "Morning briefing",
-      channel: {
+      conversation: {
         id: "conversation-briefing",
         name: "General Assistant",
         title: "Briefings",
@@ -55,15 +56,17 @@ const PAGE: RoutinesPage = {
       enabled: true,
       nextRunAt: "2026-11-08T07:00:00.000Z",
       lastRun: null,
+      goalId: null,
+      createdAt: "2026-11-01T09:00:00.000Z",
     },
     {
       id: "routine-unnamed",
-      agentId: "general-assistant",
+      botId: "general-assistant",
       schedule: "Weekdays at 18:00",
       timezone: "UTC",
       instruction: "Post the day's open pull requests.",
       title: null,
-      channel: {
+      conversation: {
         id: "conversation-prs",
         name: "General Assistant",
         title: "Pull requests",
@@ -72,20 +75,15 @@ const PAGE: RoutinesPage = {
       enabled: true,
       nextRunAt: "2026-11-09T18:00:00.000Z",
       lastRun: null,
+      goalId: null,
+      createdAt: "2026-11-01T09:00:00.000Z",
     },
   ],
-  sweep: { lastSweptAt: "2026-11-07T07:30:00.000Z", working: true },
 };
 
 function draw() {
   global.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path.startsWith("/api/routines")) return Response.json(PAGE);
-    if (path === "/api/responsibilities")
-      return Response.json({ responsibilities: [] });
-    if (path === "/api/proactive/settings")
-      return Response.json({ settings: [], allowed: true });
-    return Response.json({});
+    return answerScheduleLists(input, undefined, PAGE) ?? Response.json({});
   }) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),

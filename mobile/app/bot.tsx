@@ -1,14 +1,20 @@
 import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
 import { Button, Pressable, Switch, Text, View } from "react-native";
+import { everyPage, ORGANIZATION_ID, type Routine } from "../src/api";
 import {
-  api,
-  type Bot,
-  type BotLifecycle,
-  type CheckInItem,
-  type Conversation,
-  type Routine,
-} from "../src/api";
+  getBot,
+  getBotLifecycle,
+  pauseBot,
+  resumeBot,
+} from "../src/api/generated/bots/bots";
+import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
+import { listConversations } from "../src/api/generated/conversations/conversations";
+import {
+  listRoutines,
+  pauseRoutine,
+  resumeRoutine,
+} from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
 import { hideItem, ItemCard, startItem } from "../src/check-ins";
 import {
@@ -37,64 +43,57 @@ export default function BotScreen() {
   const { botId = "" } = useLocalSearchParams<{ botId: string }>();
   const { data: session, isPending } = authClient.useSession();
   const action = useAction();
-  const loadBot = useCallback(
-    () => api<{ agent: Bot }>(`/api/agents/${encodeURIComponent(botId)}`),
-    [botId],
-  );
+  const loadBot = useCallback(() => getBot(ORGANIZATION_ID, botId), [botId]);
   const bot = useLoad(loadBot, Boolean(session && botId));
   const loadLifecycle = useCallback(
-    () =>
-      api<{ lifecycle: BotLifecycle }>(
-        `/api/bots/${encodeURIComponent(botId)}/lifecycle`,
-      ),
+    () => getBotLifecycle(ORGANIZATION_ID, botId),
     [botId],
   );
   const lifecycle = useLoad(loadLifecycle, Boolean(session && botId));
   const loadRoutines = useCallback(
-    () => api<{ routines: Routine[] }>("/api/routines"),
+    () =>
+      everyPage(
+        (page) => listRoutines(ORGANIZATION_ID, page),
+        (page) => page.routines,
+      ),
     [],
   );
   const routines = useLoad(loadRoutines, Boolean(session));
   const loadItems = useCallback(
-    () => api<{ suggestions: CheckInItem[] }>("/api/proactive/suggestions"),
+    () =>
+      everyPage(
+        (page) => listCheckInItems(ORGANIZATION_ID, page),
+        (page) => page.checkInItems,
+      ),
     [],
   );
   const items = useLoad(loadItems, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
-  const mine = routines.data?.routines.filter(
-    (routine) => routine.agentId === botId,
-  );
-  const found = items.data?.suggestions.filter(
-    (item) => item.agentId === botId,
-  );
-  const paused = lifecycle.data?.lifecycle.paused;
-  const name = bot.data?.agent.name ?? "This Bot";
+  const mine = routines.data?.filter((routine) => routine.botId === botId);
+  const found = items.data?.filter((item) => item.botId === botId);
+  const paused = lifecycle.data?.paused;
+  const name = bot.data?.bot.name ?? "This Bot";
 
   async function setPaused(next: boolean) {
     await action.run("pause", async () => {
-      await api(
-        `/api/bots/${encodeURIComponent(botId)}/${next ? "pause" : "resume"}`,
-        { method: "POST" },
-      );
+      await (next ? pauseBot : resumeBot)(ORGANIZATION_ID, botId);
       await lifecycle.refresh();
     });
   }
   async function setActive(routine: Routine, enabled: boolean) {
     await action.run(routine.id, async () => {
-      await api(`/api/routines/${encodeURIComponent(routine.id)}/enabled`, {
-        method: "PUT",
-        body: { enabled },
-      });
+      await (enabled ? resumeRoutine : pauseRoutine)(
+        ORGANIZATION_ID,
+        routine.id,
+      );
       await routines.refresh();
     });
   }
   async function addRoutine() {
     await action.run("add", async () => {
-      const page = await api<{ conversations: Conversation[] }>(
-        "/api/delivery/conversations",
-      );
+      const page = await listConversations(ORGANIZATION_ID, { limit: 100 });
       const conversation = page.conversations.find(
-        (item) => item.active && item.agentIds.includes(botId),
+        (item) => item.active && item.botIds.includes(botId),
       );
       if (!conversation)
         throw new Error(
@@ -124,8 +123,8 @@ export default function BotScreen() {
       }}
     >
       <Text style={heading}>{name}</Text>
-      {bot.data?.agent.title ? (
-        <Text style={muted}>{bot.data.agent.title}</Text>
+      {bot.data?.bot.title ? (
+        <Text style={muted}>{bot.data.bot.title}</Text>
       ) : null}
       <Problem
         message={

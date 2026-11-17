@@ -1,4 +1,11 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
@@ -7,6 +14,7 @@ import { NameOrb, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 import { authKeys } from "@/lib/auth/queries";
+import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -16,6 +24,12 @@ import { settleReactWork } from "./settle-react-work";
  */
 
 beforeAll(() => GlobalRegistrator.register());
+/*
+ * Saving the name refreshes the signed-in person in the app's own query client, which every test file
+ * in this process shares. One left there by an earlier file was refetched through this file's held
+ * fetch, and the save waited on it. Each test starts with that client empty.
+ */
+beforeEach(() => queryClient.clear());
 const originalFetch = globalThis.fetch;
 afterEach(() => {
   cleanup();

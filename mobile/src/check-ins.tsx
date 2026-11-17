@@ -1,12 +1,15 @@
 import { router } from "expo-router";
 import { Linking, Pressable, Text, View } from "react-native";
 import {
-  api,
-  type BotTask,
   type CheckInItem,
-  type StartedItem,
+  ORGANIZATION_ID,
+  type Task,
   type TaskStatus,
 } from "./api";
+import {
+  dismissCheckInItem,
+  startCheckInItem,
+} from "./api/generated/check-ins/check-ins";
 import { card, colors, muted } from "./ui";
 
 /*
@@ -17,24 +20,16 @@ import { card, colors, muted } from "./ui";
 
 /** Start an item and open the conversation its task runs in. */
 export async function startItem(item: CheckInItem) {
-  const started = await api<StartedItem>(
-    `/api/proactive/suggestions/${encodeURIComponent(item.id)}/start`,
-    { method: "POST" },
-  );
+  const started = await startCheckInItem(ORGANIZATION_ID, item.id);
   router.push({
     pathname: "/conversation",
-    params: { channelId: started.task.channelId, agentId: item.agentId },
+    params: { channelId: started.task.conversationId, agentId: item.botId },
   });
 }
 
 /** Hide an item: off every list, and remembered for 30 days. */
 export async function hideItem(item: CheckInItem) {
-  await api(
-    `/api/proactive/suggestions/${encodeURIComponent(item.id)}/dismiss`,
-    {
-      method: "POST",
-    },
-  );
+  await dismissCheckInItem(ORGANIZATION_ID, item.id);
 }
 
 /** A link the phone may open: the web page the Bot read, never another app's scheme. */
@@ -162,7 +157,7 @@ const WAITS_ON_YOU: readonly TaskStatus[] = [
 ];
 
 /** The tasks that wait on the person, in the order they are listed, newest first within each. */
-export function waitingTasks(tasks: readonly BotTask[]): BotTask[] {
+export function waitingTasks(tasks: readonly Task[]): Task[] {
   return tasks
     .filter((task) => WAITS_ON_YOU.includes(task.status))
     .sort(
@@ -177,13 +172,7 @@ export function waitingTasks(tasks: readonly BotTask[]): BotTask[] {
  * reply, the way a row on the Bots list opens its Bot: its title in the link colour, nothing else to
  * press.
  */
-export function TaskCard({
-  task,
-  botName,
-}: {
-  task: BotTask;
-  botName: string;
-}) {
+export function TaskCard({ task, botName }: { task: Task; botName: string }) {
   const next =
     task.status === "failed"
       ? task.failure
@@ -197,7 +186,7 @@ export function TaskCard({
       onPress={() =>
         router.push({
           pathname: "/conversation",
-          params: { channelId: task.channelId, agentId: task.agentId },
+          params: { channelId: task.conversationId, agentId: task.botId },
         })
       }
       style={card}

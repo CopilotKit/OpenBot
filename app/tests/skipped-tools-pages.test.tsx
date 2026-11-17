@@ -17,9 +17,10 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
 import { Route as BotAppRoute } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -75,7 +76,7 @@ afterEach(() => {
 });
 
 /** An app whose last refresh stored one action and skipped one, as the server reports it. */
-function server(): PluginServer {
+function server(): TodayServer {
   return {
     id: APP,
     title: "Notion",
@@ -112,27 +113,27 @@ function server(): PluginServer {
 }
 
 function install() {
-  const page: PluginsPage = {
+  const page: AppsFixture = {
     catalogue: [],
     servers: [server()],
-    skills: [],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured: false,
     authorizesPerAction: false,
   };
   global.fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0]) => {
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
-      if (path === "/api/plugins") return Response.json(page);
+      const apps = answerAppsApi(input, init, page);
+      if (apps) return apps;
       if (path.startsWith("/api/plugins/connections"))
         return Response.json({ connections: [], redirectUri: null });
-      if (path.startsWith("/api/agents"))
-        return Response.json({
-          agents: [
-            { id: BOT, name: "Helper", hidden: false, hasCallbackToken: false },
-          ],
-        });
+      const bots = answerBotsList(path, init, {
+        visible: [
+          { id: BOT, name: "Helper", hidden: false, hasCallbackToken: false },
+        ],
+      });
+      if (bots) return bots;
       return Response.json({ error: "unexpected" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },

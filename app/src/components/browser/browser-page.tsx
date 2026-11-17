@@ -84,7 +84,7 @@ export function BrowserPage() {
     return (
       <PageShell title={TITLE}>
         <p className="mt-6 text-destructive text-sm" role="alert">
-          Couldn't load your browser. Reload the page.
+          Couldn't load your browser. Try again in a moment.
         </p>
         <YourRecordings action={<LearnedLink />} />
       </PageShell>

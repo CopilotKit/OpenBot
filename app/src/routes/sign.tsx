@@ -18,7 +18,7 @@ import { searchTextEntry } from "@/lib/search-text";
 import {
   type AuthProviderId,
   authProvidersQueryOptions,
-  currentUserQueryOptions,
+  signedInUser,
 } from "../lib/auth/queries";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -44,9 +44,7 @@ export const Route = createFileRoute("/sign")({
   validateSearch: (search: Record<string, unknown>): { flow_id?: string } =>
     searchTextEntry("flow_id", search.flow_id),
   beforeLoad: async ({ context, search }) => {
-    const user = await context.queryClient.ensureQueryData(
-      currentUserQueryOptions(),
-    );
+    const user = await signedInUser(context.queryClient);
     if (user) {
       /*
        * Signed in already, so the handle has nowhere to be lost between here and the verifier.

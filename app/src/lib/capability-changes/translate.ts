@@ -1,10 +1,15 @@
-import { client } from "@/lib/client";
+import { translateCapabilityChanges as translate } from "@/lib/api/generated/capabilities/capabilities";
+import type { CapabilityChangeScopeKind } from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 
-/** One switch to set: the organization's, a role's or a group's, for one permission. */
+/** One switch to set: the organization's, a role's, a team's or a directory group's, for one permission. */
 export type CapabilityChange = {
-  scopeKind: "organization" | "role" | "group";
-  /** Empty for the organization; "admin" or "user" for a role; the group's name for a group. */
+  scopeKind: CapabilityChangeScopeKind;
+  /**
+   * Empty for the organization; "admin" or "member" for a role; a team's id for a team; a directory
+   * group's name for a group.
+   */
   scopeId: string;
   capability: CapabilityKey;
   /** On, off, or null to remove the switch so the level beneath it decides. */
@@ -19,8 +24,8 @@ export type CapabilityChangeProblem = {
 };
 
 /**
- * Whether changes name real permissions, roles and groups and set nothing the rule ignores, such as
- * a group's off switch, and what is wrong with each when they don't.
+ * Whether changes name real permissions, roles and teams and set nothing the rule ignores, such as
+ * a team's off switch, and what is wrong with each when they don't.
  */
 export type CapabilityChangesCheck =
   | { ok: true }
@@ -48,14 +53,18 @@ export type CapabilityTranslation = {
 export async function translateCapabilityChanges(
   text: string,
 ): Promise<CapabilityTranslation> {
-  const response = await client(
-    "/api/admin/enterprise/capabilities/translate",
+  const translation = await translate(
+    organizationId(),
+    { text },
+    { "Idempotency-Key": idempotencyKey() },
     {
-      method: "POST",
-      body: { text },
       fallback:
         "Couldn't write the changes. Try again, or set the switches by hand.",
     },
   );
-  return (await response.json()) as CapabilityTranslation;
+  /*
+   * Changes that don't check come back as the model wrote them, a permission that isn't one
+   * included, for the admin to edit; `check` says what is wrong, and the preview checks them again.
+   */
+  return translation as CapabilityTranslation;
 }

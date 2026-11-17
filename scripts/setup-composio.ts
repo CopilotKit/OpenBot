@@ -8,7 +8,7 @@ import {
   object,
   type RunCli,
   runCli,
-} from "../server/src/learning/ensure-container";
+} from "./copilotkit-cli";
 
 const IDENTITY = "OPENBOT_INSTALLATION_ID";
 const UUID =
