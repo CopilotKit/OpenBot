@@ -24079,6 +24079,27 @@ components:
         personId:
           type: string
           description: The person who is now in the conversation.
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
     ConversationMessage:
       type: object
       description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
@@ -24151,6 +24172,12 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:
@@ -24217,27 +24244,6 @@ components:
           type: string
           description: Names the message being written, so the files of two windows are counted apart.
           maxLength: 200
-    Attachment:
-      type: object
-      description: A file held for a message, or sent with one.
-      required:
-        - id
-        - name
-        - mimeType
-        - sizeBytes
-      properties:
-        id:
-          type: string
-          description: The attachment's id.
-        name:
-          type: string
-          description: The file's name.
-        mimeType:
-          type: string
-          description: The type OpenBot recognised it as.
-        sizeBytes:
-          type: integer
-          minimum: 0
     VoiceCallRequest:
       type: object
       additionalProperties: false

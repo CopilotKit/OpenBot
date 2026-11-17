@@ -204,6 +204,7 @@ export function messagesOf(group: Pick<GroupFixture, "messages">) {
         ? {}
         : { answeredBy: message.answeredBy }),
       ...(message.consent === undefined ? {} : { consent: message.consent }),
+      ...(message.files === undefined ? {} : { files: message.files }),
     }))
     .reverse();
 }
