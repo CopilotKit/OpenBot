@@ -172,8 +172,9 @@ type State = {
    */
   updateFailed: string | null;
   /**
-   * The update that failed left the back end not working (`leftNotWorking`): the one case its row
-   * says Failed. Otherwise it is a note on the row, under a Start that carries on.
+   * The update that failed left the back end not working (`leftNotWorking`): the one case it has a
+   * row, which says Failed. Otherwise the Start carries on with no row for it, and the page's update
+   * panel says the outcome.
    */
   updateBroke: boolean;
   /** The phase this run began at, and when: the whole journey on screen counts from here. */
@@ -1055,20 +1056,12 @@ export function useLocalSequence({
               : stopped
                 ? { step: label, ok: false, detail: state.blocked?.said ?? "" }
                 : { step: label, ok: true, detail: "" };
-      if (phase !== "wait" || !state.updateFailed) return [row];
-      // Failed only when it left the services not working, which stops the Start. Otherwise a
-      // note: the services run the version they had, and the Start carries on over them.
-      return [
-        row,
-        state.updateBroke
-          ? { step: UPDATING, ok: false, detail: state.updateFailed }
-          : {
-              step: UPDATING,
-              ok: true,
-              note: "Not updated",
-              detail: state.updateFailed,
-            },
-      ];
+      // Said only when it left the services not working, which stops the Start. When they run
+      // the version they had, OpenBot opens on it and the page's update panel says the outcome:
+      // a row here said "Not updated" under a Start that went on.
+      if (phase !== "wait" || !state.updateFailed || !state.updateBroke)
+        return [row];
+      return [row, { step: UPDATING, ok: false, detail: state.updateFailed }];
     },
   );
 
@@ -1099,9 +1092,16 @@ export function LocalIntelligence({
   open = [],
   releaseDue = false,
   waitingOn = null,
+  updatingScreen = false,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /**
+   * This Start updates OpenBot: while it runs, the card is the journey's one bar alone. Rows,
+   * "Complete", "Step 4 of 4", a second spinner and Cancel all contradicted it. A stop still shows
+   * its rows, its failure and Retry.
+   */
+  updatingScreen?: boolean;
   /**
    * What the person has to choose before the sequence can go on, when it stopped for that: its
    * row waits on them, with no Failed and no Retry (leftover data, `StartFresh`).
@@ -1156,7 +1156,9 @@ export function LocalIntelligence({
           releaseDue={releaseDue}
         />
       )}
-      <SetupProgress steps={rows} showElapsed={!journeying} />
+      {!(updatingScreen && journeying) && (
+        <SetupProgress steps={rows} showElapsed={!journeying} />
+      )}
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
       {stopped && problem && !waitingOn && <Failure problem={problem} />}
@@ -1169,7 +1171,8 @@ export function LocalIntelligence({
         />
       )}
       {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
-      {!(plan && tooSmall) && (
+      {/* The update screen offers no Cancel, so it needs no word on why it can't. */}
+      {!(plan && tooSmall) && !(updatingScreen && journeying) && (
         <div className="row">
           {running && at !== "start" && (
             <button type="button" className="quiet" onClick={sequence.cancel}>

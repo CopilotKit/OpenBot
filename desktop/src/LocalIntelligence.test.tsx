@@ -136,6 +136,8 @@ type Props = {
   onForgotten?: () => void;
   pollDelays?: number[];
   roomEveryMs?: number;
+  /** A Start that updates: the card is the journey's one bar alone (`updatingScreen`). */
+  updatingScreen?: boolean;
 };
 
 /** The window's part: it holds the sequence, and a screen shows it. */
@@ -157,7 +159,11 @@ function Holder(props: Props) {
   return (
     <>
       {(props.prepare || props.status) && <LocalStatus sequence={sequence} />}
-      <LocalIntelligence sequence={sequence} offerStart />
+      <LocalIntelligence
+        sequence={sequence}
+        offerStart
+        updatingScreen={props.updatingScreen}
+      />
     </>
   );
 }
@@ -452,7 +458,7 @@ test("a backend already on this app's release is not updated", async () => {
   expect(commands()).toEqual(["run_local_eval:status"]);
 });
 
-test("an update that fails says so and starts OpenBot on the release the backend still has", async () => {
+test("an update that fails starts OpenBot on the release the backend still has, with no row for it", async () => {
   for (const failed of [
     report({
       outcome: "failed",
@@ -489,9 +495,10 @@ test("an update that fails says so and starts OpenBot on the release the backend
       "run_local_eval:update",
       "run_local_eval:status",
     ]);
-    expect(row(screen, "Updating OpenBot's services").textContent).toContain(
-      "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.",
-    );
+    // OpenBot runs what it had: the page's update panel says the outcome, not a row here.
+    expect(
+      screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
+    ).toBeNull();
     expect(calls).toBe(2);
     cleanup();
     invokeCalls = [];
@@ -502,10 +509,10 @@ test("an update that fails says so and starts OpenBot on the release the backend
  * Found on Windows K, updating Desktop over a local install: the CLI refused the services' update
  * (`release_unavailable`: it could not get the release this app installs) and a red "Updating
  * OpenBot · Failed" row came up while OpenBot's own update was still running at step 4. The services
- * kept the version they had and OpenBot started on it. The row names the part, and says it as a
- * note while the Start runs and after it: nothing failed that stops OpenBot.
+ * kept the version they had and OpenBot started on it. Nothing failed that stops OpenBot, so the
+ * card adds no row while the Start runs or after it: the page's update panel says the outcome.
  */
-test("a services update the CLI refuses is a note on their own row while the Start runs, never Failed", async () => {
+test("a services update the CLI refuses adds no row while the Start runs, never Failed", async () => {
   invokeHandler = async (command, args) => {
     if (command === "cancel_local_eval") return null;
     if (command === "local_eval_download") return null;
@@ -524,21 +531,17 @@ test("a services update the CLI refuses is a note on their own row while the Sta
     connected: true,
     onStart: () => opening.promise,
   });
-  const services = await screen.findByRole("listitem", {
-    name: "Updating OpenBot's services",
-  });
   // OpenBot's own start, its update included, is still running.
-  expect(row(screen, START).querySelector(".step-spinner")).not.toBeNull();
-  const said =
-    "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.";
-  const isNote = () => {
-    const now = row(screen, "Updating OpenBot's services");
-    expect(now.querySelector(".step-status")?.textContent).toBe("Not updated");
-    expect(now.querySelector(".mark.bad, .step-status.bad")).toBeNull();
-    expect(now.querySelector(".detail")?.textContent).toBe(said);
+  await waitFor(() =>
+    expect(row(screen, START).querySelector(".step-spinner")).not.toBeNull(),
+  );
+  const noRow = () => {
+    expect(
+      screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
+    ).toBeNull();
+    expect(screen.container.textContent).not.toContain("Not updated");
   };
-  isNote();
-  expect(services.textContent).not.toContain("Failed");
+  noRow();
   expect(
     screen.queryByRole("listitem", { name: "Updating OpenBot" }),
   ).toBeNull();
@@ -548,7 +551,7 @@ test("a services update the CLI refuses is a note on their own row while the Sta
   await waitFor(() =>
     expect(row(screen, START).textContent).toContain("Complete"),
   );
-  isNote();
+  noRow();
   expect(screen.container.textContent).not.toContain("Failed");
 });
 
@@ -1134,7 +1137,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
   });
 });
 
-test("an update whose download stopped says so, and that the next start continues it", async () => {
+test("an update whose download stopped starts OpenBot on what it had, with no row for it", async () => {
   let calls = 0;
   invokeHandler = async (command, args) => {
     if (command === "cancel_local_eval") return null;
@@ -1154,10 +1157,159 @@ test("an update whose download stopped says so, and that the next start continue
     },
   });
   await waitFor(() => expect(started).toEqual([startableUrls]));
-  expect(row(screen, "Updating OpenBot's services").textContent).toContain(
-    "The update of OpenBot's services stopped downloading, so they run the version they had. OpenBot picks up the download the next time it starts.",
-  );
+  // The page's update panel says the outcome, not a row here.
+  expect(
+    screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
+  ).toBeNull();
   expect(calls).toBe(2);
+});
+
+/**
+ * A Start that updates is one screen: one title, one line and one bar. The rows under it said
+ * "Complete", "Step 4 of 4" and a second spinner, and Cancel or "You can't cancel" over an update
+ * that could not be stopped. None of that contradicts the bar now.
+ */
+test("a Start with a back end update due shows one update screen", async () => {
+  const updating = deferred<LocalReport>();
+  const opening = deferred<StartOutcome>();
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updating.promise;
+    return commands().includes("run_local_eval:update")
+      ? onRelease("0.16.0-rc.9", null)
+      : onRelease("0.16.0-rc.8", "0.16.0-rc.9");
+  };
+  let asked = false;
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    updatingScreen: true,
+    onStart: () => {
+      asked = true;
+      return opening.promise;
+    },
+  });
+  const alone = () => {
+    expect(journeyOf(screen)).toBeTruthy();
+    expect(screen.queryAllByRole("listitem").length).toBe(0);
+    // The journey's own spinner is the only one.
+    expect(screen.container.querySelectorAll(".step-spinner").length).toBe(1);
+    expect(journeyOf(screen).querySelector(".step-spinner")).not.toBeNull();
+    expect(screen.container.querySelector(".cannot-cancel")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    const text = screen.container.textContent ?? "";
+    for (const contradiction of [
+      "Complete",
+      "Step ",
+      "can't cancel",
+      "OpenBot's services",
+      "Not updated",
+      "Failed",
+    ])
+      expect(text).not.toContain(contradiction);
+  };
+  // While the back end updates.
+  await waitFor(() => expect(commands()).toContain("run_local_eval:update"));
+  await waitFor(() => expect(journeyOf(screen)).toBeTruthy());
+  alone();
+  // And while OpenBot itself starts, the step that can't be stopped partway.
+  updating.resolve(onRelease("0.16.0-rc.9", null));
+  await waitFor(() => expect(asked).toBe(true));
+  alone();
+  opening.resolve("started");
+});
+
+/**
+ * A back end update that fails while OpenBot still runs the version it had is not the Start's to
+ * say: OpenBot opens on it, and the page's update panel reports the outcome. The card adds no row.
+ */
+test("a back end update that fails while OpenBot still runs adds no Failed row", async () => {
+  for (const updatingScreen of [false, true]) {
+    invokeHandler = async (command, args) => {
+      if (command === "cancel_local_eval") return null;
+      if (command === "local_eval_download") return null;
+      const action = (args as { action: string }).action;
+      if (action === "update")
+        return report({
+          outcome: "failed",
+          stack: null,
+          reason: "local-command-failed",
+        });
+      return onRelease("0.16.0-rc.8", "0.16.0-rc.9");
+    };
+    const started: Startable[] = [];
+    const screen = view({
+      stack: "local-abc123",
+      connected: true,
+      updatingScreen,
+      onStart: async (startable) => {
+        started.push(startable);
+        return "started";
+      },
+    });
+    await waitFor(() => expect(started).toEqual([startableUrls]));
+    await waitFor(() =>
+      expect(row(screen, START).textContent).toContain("Complete"),
+    );
+    expect(
+      screen.queryByRole("listitem", { name: "Updating OpenBot's services" }),
+    ).toBeNull();
+    expect(screen.container.textContent).not.toContain("Failed");
+    expect(screen.container.textContent).not.toContain("Not updated");
+    expect(screen.container.textContent).not.toContain("OpenBot's services");
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
+/** An update that leaves OpenBot unable to run stops the Start: its failure and Retry show. */
+test("a failed update that stops OpenBot shows Failure and Retry", async () => {
+  // The update left the back end not working: its row says Failed, with Retry.
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updateStopped;
+    if (action !== "status") throw new Error(`unexpected ${action}`);
+    return leftByUpdate;
+  };
+  let screen = view({
+    stack: "local-abc123",
+    connected: true,
+    updatingScreen: true,
+  });
+  await screen.findByRole("button", { name: "Retry" });
+  const services = row(screen, "Updating OpenBot's services");
+  expect(services.textContent).toContain("Failed");
+  expect(services.textContent).toContain(
+    "OpenBot's services couldn't finish updating.",
+  );
+  expect(row(screen, WAIT).textContent).toContain(
+    "OpenBot is running but not working properly.",
+  );
+  cleanup();
+  invokeCalls = [];
+  // An answer it can't read after the update stops it too: the failure card, with Retry.
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return onRelease("0.16.0-rc.9", null);
+    if (commands().includes("run_local_eval:update")) throw "synthetic";
+    return onRelease("0.16.0-rc.8", "0.16.0-rc.9");
+  };
+  screen = view({
+    stack: "local-abc123",
+    connected: true,
+    updatingScreen: true,
+  });
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "That didn’t finish",
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
 test("a setup whose download stopped offers Retry, which continues where it left off", async () => {
