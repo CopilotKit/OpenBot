@@ -6,12 +6,17 @@ import { BotOrb } from "@/components/agents/bot-orb";
 import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { ActivityRow, upcomingOf } from "@/components/bot-profile/activity";
 import { useWaitingOnYou } from "@/components/bot-profile/attention";
+import { ChannelAvatar } from "@/components/channels/avatar";
 import { Button } from "@/components/ui/button";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { botActivityQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import { conversationTitle } from "@/lib/channels/label";
+import {
+  type ChannelSummary,
+  channelListQueryOptions,
+} from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { cn } from "@/lib/utils";
 import {
@@ -64,6 +69,7 @@ function BotsPlace() {
               <BotItem
                 agent={agent}
                 key={agent.id}
+                recent={recentWith(channels.data ?? [], agent.id)}
                 waiting={waiting(agent.id)}
                 working={working.has(agent.id)}
               />
@@ -75,12 +81,33 @@ function BotsPlace() {
   );
 }
 
+/** How many of a Bot's conversations its opened row lists. */
+export const RECENT_CONVERSATIONS = 5;
+
+/**
+ * A Bot's latest conversations that anything was said in, newest first, from the conversations read
+ * so far: the list arrives in recency order, so its first page holds the newest of every Bot's.
+ */
+export function recentWith(
+  channels: ChannelSummary[],
+  agentId: string,
+): ChannelSummary[] {
+  return channels
+    .filter(
+      (channel) =>
+        channel.agentIds.includes(agentId) && channel.lastMessageAt !== null,
+    )
+    .slice(0, RECENT_CONVERSATIONS);
+}
+
 function BotItem({
   agent,
+  recent,
   waiting,
   working,
 }: {
   agent: AgentProfile;
+  recent: ChannelSummary[];
   waiting: number;
   working: boolean;
 }) {
@@ -114,7 +141,7 @@ function BotItem({
         />
         <Button
           aria-expanded={open}
-          aria-label={`What ${agent.name} is doing`}
+          aria-label={`${agent.name}'s latest conversations`}
           onClick={() => setOpen(!open)}
           size="icon-sm"
           variant="ghost"
@@ -124,33 +151,52 @@ function BotItem({
           />
         </Button>
       </div>
-      {open ? <BotUpcoming agentId={agent.id} /> : null}
+      {open ? (
+        <div className="flex flex-col pl-4">
+          <BotUpcoming agentId={agent.id} />
+          {recent.map((channel) => (
+            <PlaceRow
+              key={channel.id}
+              media={
+                <ChannelAvatar participantIds={channel.agentIds} size={20} />
+              }
+              title={conversationTitle(channel) || "New conversation"}
+              to={{
+                to:
+                  channel.agentIds.length > 1
+                    ? "/group/$channelId"
+                    : "/channel/$channelId",
+                params: { channelId: channel.id },
+              }}
+            />
+          ))}
+          {recent.length === 0 ? (
+            <PlaceEmpty>No conversations with {agent.name} yet.</PlaceEmpty>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Read only for an open row, so a long list of Bots does not read every Bot's activity. */
+/**
+ * What the Bot is running and has lined up, above its conversations, and nothing when there is
+ * none. Read only for an open row, so a long list of Bots does not read every Bot's activity.
+ */
 function BotUpcoming({ agentId }: { agentId: string }) {
   const activity = useQuery(botActivityQueryOptions(agentId));
   const upcoming = upcomingOf(activity.data);
   if (activity.isPending) return null;
   if (activity.error) {
     return (
-      <p className="px-2 py-3 text-muted-foreground text-xs" role="alert">
+      <p className="px-2 py-1 text-muted-foreground text-xs" role="alert">
         Couldn't load what it is doing. Try again in a moment.
       </p>
     );
   }
-  if (upcoming.length === 0) {
-    return <PlaceEmpty>Nothing is running or lined up.</PlaceEmpty>;
-  }
-  return (
-    <div className="flex flex-col pl-4">
-      {upcoming.map(({ item, live }) => (
-        <ActivityRow agentId={agentId} item={item} key={item.id} live={live} />
-      ))}
-    </div>
-  );
+  return upcoming.map(({ item, live }) => (
+    <ActivityRow agentId={agentId} item={item} key={item.id} live={live} />
+  ));
 }
 
 function NewBotAction() {

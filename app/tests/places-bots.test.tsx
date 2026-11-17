@@ -9,13 +9,13 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { upcomingOf } from "@/components/bot-profile/activity";
-import { botsPlace } from "@/components/places/bots-place";
+import { botsPlace, recentWith } from "@/components/places/bots-place";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import {
   type ActivityItem,
   botLifecycleKeys,
 } from "@/lib/bot-lifecycle/queries";
-import { channelKeys } from "@/lib/channels/queries";
+import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { activityOf, activityResponse, botOperationPath } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
@@ -109,11 +109,37 @@ function attentionFor(botId: string, questions: number) {
   };
 }
 
+/** A conversation with `agentIds`, last spoken in at `lastMessageAt` (null: never used). */
+function conversation(
+  id: string,
+  agentIds: string[],
+  lastMessageAt: string | null,
+  summary: string | null = id,
+): ChannelSummary {
+  return {
+    id,
+    name: agentIds[0] ?? "Bot",
+    agentIds,
+    threadId: `thread-${id}`,
+    active: true,
+    summary,
+    lastMessage: null,
+    lastMessageAt,
+    lastMessageAgentId: null,
+    createdAt: "2026-11-17T09:00:00.000Z",
+    pinned: false,
+    lastReadAt: null,
+  };
+}
+
 function renderPlace({
   roster,
   waiting = {},
   rosterFails = false,
+  channels = [],
 }: {
+  /** The conversations read so far, newest first, as the list arrives. */
+  channels?: ChannelSummary[];
   roster: AgentProfile[];
   /** The roster read fails instead of answering. */
   rosterFails?: boolean;
@@ -143,7 +169,7 @@ function renderPlace({
     lastPingId: null,
   });
   queryClient.setQueryData(channelKeys.list(), {
-    pages: [{ channels: [], nextCursor: null }],
+    pages: [{ channels, nextCursor: null }],
     pageParams: [""],
   });
   queryClient.setQueryData(deploymentKeys.capabilities(), {
@@ -209,9 +235,69 @@ test("a Bot's activity is read only when its row is opened", async () => {
   await view.findByText("Mine");
   expect(reads).toBe(0);
 
-  fireEvent.click(view.getByRole("button", { name: "What Mine is doing" }));
-  await view.findByText("Nothing is running or lined up.");
+  fireEvent.click(
+    view.getByRole("button", { name: "Mine's latest conversations" }),
+  );
+  await view.findByText("No conversations with Mine yet.");
+  await settleReactWork();
   expect(reads).toBe(1);
+});
+
+test("an opened Bot lists its five latest conversations, newest first, each opening it", async () => {
+  globalThis.fetch = Object.assign(async () => activityResponse(), {
+    preconnect: originalFetch.preconnect,
+  });
+  const channels = [
+    conversation("one", ["mine"], "2026-11-17T12:00:00Z"),
+    conversation("someone else's", ["theirs"], "2026-11-17T11:30:00Z"),
+    conversation("two", ["mine", "theirs"], "2026-11-17T11:00:00Z"),
+    conversation("never used", ["mine"], null),
+    conversation("three", ["mine"], "2026-11-17T10:00:00Z", null),
+    conversation("four", ["mine"], "2026-11-17T09:00:00Z"),
+    conversation("five", ["mine"], "2026-11-17T08:00:00Z"),
+    conversation("six", ["mine"], "2026-11-17T07:00:00Z"),
+  ];
+  const { view } = renderPlace({ roster: four, channels });
+  await view.findByText("Mine");
+  expect(view.queryByText("one")).toBeNull();
+
+  fireEvent.click(
+    view.getByRole("button", { name: "Mine's latest conversations" }),
+  );
+  const first = await view.findByText("one");
+  const links = [
+    ...(first.closest("div.flex-col")?.querySelectorAll("a") ?? []),
+  ];
+  expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    "/channel/one",
+    "/group/two",
+    "/channel/three",
+    "/channel/four",
+    "/channel/five",
+  ]);
+  expect(view.getByText("New conversation")).toBeTruthy();
+  expect(view.queryByText("six")).toBeNull();
+  expect(view.queryByText("someone else's")).toBeNull();
+  expect(view.queryByText("No conversations with Mine yet.")).toBeNull();
+});
+
+test("recentWith keeps one Bot's used conversations, five at most", () => {
+  const channels = [
+    conversation("a", ["x"], "2026-11-17T12:00:00Z"),
+    conversation("b", ["y"], "2026-11-17T11:00:00Z"),
+    conversation("c", ["x"], null),
+    ...["d", "e", "f", "g", "h"].map((id) =>
+      conversation(id, ["x", "y"], "2026-11-17T10:00:00Z"),
+    ),
+  ];
+  expect(recentWith(channels, "x").map((found) => found.id)).toEqual([
+    "a",
+    "d",
+    "e",
+    "f",
+    "g",
+  ]);
+  expect(recentWith(channels, "z")).toEqual([]);
 });
 
 test("a Bot's activity that can't be read says so, not that nothing is under way", async () => {
@@ -221,11 +307,12 @@ test("a Bot's activity that can't be read says so, not that nothing is under way
   );
   const { view } = renderPlace({ roster: four });
   await view.findByText("Mine");
-  fireEvent.click(view.getByRole("button", { name: "What Mine is doing" }));
+  fireEvent.click(
+    view.getByRole("button", { name: "Mine's latest conversations" }),
+  );
   await view.findByText(
     "Couldn't load what it is doing. Try again in a moment.",
   );
-  expect(view.queryByText("Nothing is running or lined up.")).toBeNull();
 });
 
 test("a roster that can't be read says so", async () => {
