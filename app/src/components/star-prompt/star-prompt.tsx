@@ -44,13 +44,22 @@ export function StarPrompt({
 }: {
   trigger?: StarPromptTrigger;
 }) {
+  /*
+   * READ FROM WHAT THE APP ALREADY LOADED, NEVER FETCHED FROM HERE. The self-host banner, mounted in
+   * every page of the app, loads the person, the deployment and their preferences; this card only
+   * watches those answers (`enabled: false` keeps an observer on the cache and sends nothing). Drawn
+   * inside a conversation, it must not add requests of its own to every conversation that renders.
+   */
   const { data: capabilities } = useQuery(
-    deploymentCapabilitiesQueryOptions(),
+    { ...deploymentCapabilitiesQueryOptions(), enabled: false },
     queryClient,
   );
-  const userId = useQuery(currentUserQueryOptions(), queryClient).data?.id;
+  const userId = useQuery(
+    { ...currentUserQueryOptions(), enabled: false },
+    queryClient,
+  ).data?.id;
   const { data: preferences } = useQuery(
-    userPreferencesQueryOptions(userId),
+    { ...userPreferencesQueryOptions(userId), enabled: false },
     queryClient,
   );
   const answer = useMutation(

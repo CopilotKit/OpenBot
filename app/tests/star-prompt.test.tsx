@@ -188,25 +188,27 @@ test("is never asked where the deployment turned it off, or by a server too old 
   expect(render(<StarPrompt />).queryByText(ASK)).toBeNull();
 });
 
-test("is never asked before the person's preferences load, when they fail, or once answered", async () => {
+test("is never asked before the app has loaded the person's preferences, or once answered", () => {
   sendPrompts(STAR_PROMPT_AFTER_PROMPTS);
   seed({ loaded: false });
-  const loading = render(<StarPrompt />);
-  expect(loading.queryByText(ASK)).toBeNull();
-  // The preferences request is answered 500 by the stub; the card still never appears.
-  await waitFor(() =>
-    expect(
-      requests.some((request) =>
-        request.path.endsWith("/people/me/preferences"),
-      ),
-    ).toBe(true),
-  );
-  expect(loading.queryByText(ASK)).toBeNull();
+  expect(render(<StarPrompt />).queryByText(ASK)).toBeNull();
   cleanup();
   queryClient.clear();
 
   seed({ answered: true });
   expect(render(<StarPrompt />).queryByText(ASK)).toBeNull();
+});
+
+/*
+ * The card reads what the app shell already loaded (the self-host banner, always mounted, loads the
+ * same three) and asks the server for nothing itself. A conversation drawn on its own, as many tests
+ * draw one, must not grow requests it never made before.
+ */
+test("asks the server for nothing itself, whatever the app has loaded", async () => {
+  sendPrompts(STAR_PROMPT_AFTER_PROMPTS);
+  render(<StarPrompt />);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(requests).toEqual([]);
 });
 
 test("Star on GitHub is a link to the repository, opened in a new tab", () => {
