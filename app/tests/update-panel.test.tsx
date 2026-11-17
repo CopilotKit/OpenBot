@@ -19,7 +19,7 @@ import {
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { environmentManager, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { UpdatePanel } from "@/components/layout/update-panel";
 import { type DesktopAppUpdate, desktopKeys } from "@/lib/desktop/queries";
@@ -36,6 +36,8 @@ let calls: Call[];
 let fetches: string[];
 let refuseOffer: string | null;
 let installFailure: string | null;
+let restoreFailure: string | null;
+let installStarts: boolean;
 let installRelease: (() => void) | null;
 const originalFetch = globalThis.fetch;
 
@@ -53,6 +55,7 @@ async function shellInvoke(command: string, args?: Record<string, unknown>) {
     return null;
   }
   if (command === "plugin:openbot-desktop|restore_update") {
+    if (restoreFailure) throw restoreFailure;
     offer = { ...offer, version: offer.minimized ?? null, minimized: null };
     return null;
   }
@@ -64,6 +67,12 @@ async function shellInvoke(command: string, args?: Record<string, unknown>) {
   if (command === "plugin:openbot-desktop|open_logs") return null;
   if (command === "plugin:openbot-desktop|install_update") {
     if (installFailure) throw installFailure;
+    // The shell records the install only after the click, and the page polls for it.
+    if (installStarts)
+      offer = {
+        ...offer,
+        installing: { downloaded: 0, total: 100, restarting: false },
+      };
     // On success the app restarts and the call never answers.
     await new Promise<void>((resolve) => {
       installRelease = resolve;
@@ -80,12 +89,19 @@ function inDesktop() {
   };
 }
 
-beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
+beforeAll(() => {
+  GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" });
+  // TanStack Query read `window` before it was registered above and took this for a server, where
+  // it never polls. The page polls the shell, so say it is a browser.
+  environmentManager.setIsServer(() => false);
+});
 beforeEach(() => {
   calls = [];
   fetches = [];
   refuseOffer = null;
   installFailure = null;
+  restoreFailure = null;
+  installStarts = false;
   installRelease = null;
   offer = { version: "0.3.2", current: "0.3.1", installing: null };
   globalThis.fetch = Object.assign(
@@ -363,6 +379,37 @@ test("an install that fails says why and offers it again", async () => {
     "Couldn't install the update: signature verification failed",
   );
   expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+});
+
+test("after a click on Update and restart, the panel moves to Restarting without a manual refetch", async () => {
+  inDesktop();
+  installStarts = true;
+  const view = show();
+  fireEvent.click(
+    await view.findByRole("button", { name: "Update and restart" }),
+  );
+  await waitFor(() => expect(view.getByText("Downloading… 0%")).toBeTruthy(), {
+    timeout: 3000,
+  });
+  expect(view.getByText("Restarting")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Update and restart" })).toBeNull();
+});
+
+test("a pill that can't open the update says why", async () => {
+  inDesktop();
+  restoreFailure = "the update is gone";
+  offer = {
+    version: null,
+    minimized: "1.0.4",
+    current: "1.0.3",
+    installing: null,
+  };
+  const view = show();
+  fireEvent.click(await view.findByRole("button", { name: "Update 1.0.4" }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Couldn't show the update: the update is gone",
+  );
+  expect(view.getByRole("button", { name: "Update 1.0.4" })).toBeTruthy();
 });
 
 test("an older Desktop app without the command draws nothing, and is asked once", async () => {

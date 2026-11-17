@@ -33,11 +33,20 @@ import { queryClient } from "@/query-client";
  * pill and the desktop app keeps that, until a newer version comes out.
  */
 export function UpdatePanel() {
-  const offer = useQuery(desktopAppUpdateQueryOptions());
+  const install = useMutation(installAppUpdateMutationOptions(queryClient));
+  // The shell records the install only after the click, so ask it every half second from the click.
+  const offer = useQuery({
+    ...desktopAppUpdateQueryOptions(),
+    refetchInterval: (query) =>
+      install.isPending || query.state.data?.installing
+        ? 500
+        : query.state.data?.ready?.state === "preparing"
+          ? 5_000
+          : 60_000,
+  });
   const minimize = useMutation(dismissAppUpdateMutationOptions(queryClient));
   const restore = useMutation(restoreAppUpdateMutationOptions(queryClient));
   const clear = useMutation(clearUpdateOutcomeMutationOptions(queryClient));
-  const install = useMutation(installAppUpdateMutationOptions(queryClient));
   const restart = useMutation(restartOpenBotMutationOptions(queryClient));
   const openLog = useMutation(openLogFolderMutationOptions());
 
@@ -53,8 +62,13 @@ export function UpdatePanel() {
     return (
       <aside
         aria-label="OpenBot update"
-        className="fixed right-4 bottom-4 z-50"
+        className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-2"
       >
+        {restore.error ? (
+          <p className="text-destructive text-sm" role="alert">
+            Couldn't show the update: {reason(restore.error)}
+          </p>
+        ) : null}
         <Button
           disabled={restore.isPending}
           onClick={() => restore.mutate()}
