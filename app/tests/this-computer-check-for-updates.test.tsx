@@ -48,7 +48,6 @@ const STATUS: DesktopStatus = {
 let found: DesktopAppUpdateCheck | string;
 let offer: DesktopAppUpdate;
 let commands: string[];
-let installRelease: (() => void) | null;
 
 async function shellInvoke(command: string) {
   commands.push(command);
@@ -61,14 +60,7 @@ async function shellInvoke(command: string) {
       // The shell refuses with its own sentence, as a plain string.
       if (typeof found === "string") throw found;
       return found;
-    case "plugin:openbot-desktop|install_update":
-      offer = {
-        ...offer,
-        installing: { downloaded: 50, total: 200, restarting: false },
-      };
-      await new Promise<void>((resolve) => {
-        installRelease = resolve;
-      });
+    case "plugin:openbot-desktop|restore_update":
       return null;
   }
   throw `command ${command} not found`;
@@ -77,7 +69,6 @@ async function shellInvoke(command: string) {
 beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
 beforeEach(() => {
   commands = [];
-  installRelease = null;
   // A release build, as the shell answers now.
   offer = {
     version: null,
@@ -92,7 +83,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  installRelease?.();
   queryClient.clear();
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
@@ -127,24 +117,43 @@ test("on the newest release it says this version is up to date", async () => {
   expect(commands).toContain("plugin:openbot-desktop|check_update");
 });
 
-test("a newer version is offered with Update and restart, which installs it", async () => {
+test("a newer version is offered with Show update, which opens the panel", async () => {
   found = { found: "available", version: "0.3.3", current: "0.3.2" };
   const view = await checkForUpdates();
   expect((await view.findByRole("status")).textContent).toBe(
     "OpenBot 0.3.3 is available.",
   );
-  fireEvent.click(view.getByRole("button", { name: "Update and restart" }));
+  expect(view.queryByRole("button", { name: "Update and restart" })).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Show update" }));
   await waitFor(() =>
-    expect(commands).toContain("plugin:openbot-desktop|install_update"),
+    expect(commands).toContain("plugin:openbot-desktop|restore_update"),
   );
-  // The page asks twice a second while it installs. Query timers do not run under happy-dom
-  // (TanStack reads the module as server-side), so this is the next of those asks.
-  await queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate });
+  // This section never installs: the panel does.
+  expect(commands).not.toContain("plugin:openbot-desktop|install_update");
+});
+
+test("a minimized version is said and offered again with Show update", async () => {
+  offer = { ...offer, version: null, minimized: "0.3.3" };
+  const view = renderPage();
+  await view.findByText("OpenBot 0.3.3 is available.");
+  fireEvent.click(await view.findByRole("button", { name: "Show update" }));
   await waitFor(() =>
-    expect(view.getByRole("button", { name: /Downloading/ }).textContent).toBe(
-      "Downloading… 25%",
-    ),
+    expect(commands).toContain("plugin:openbot-desktop|restore_update"),
   );
+});
+
+test("while an update installs the row shows its progress", async () => {
+  offer = {
+    ...offer,
+    version: "0.3.3",
+    installing: { downloaded: 50, total: 200, restarting: false },
+  };
+  const view = renderPage();
+  expect(
+    (await view.findByRole("button", { name: /Downloading/ })).textContent,
+  ).toBe("Downloading… 25%");
+  expect(view.queryByRole("button", { name: "Show update" })).toBeNull();
+  expect(commands).not.toContain("plugin:openbot-desktop|install_update");
 });
 
 test("a check that fails says what to do", async () => {
@@ -171,7 +180,7 @@ test("a build that doesn't update itself says so up front, with no button", asyn
   await view.findByText("Version 0.3.2");
   // Nothing to click: the setup window, the tray and the menus offer no check on this build either.
   expect(view.queryByRole("button", { name: "Check for updates" })).toBeNull();
-  expect(view.queryByRole("button", { name: "Update and restart" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Show update" })).toBeNull();
   expect(commands).not.toContain("plugin:openbot-desktop|check_update");
 });
 
@@ -195,7 +204,6 @@ test("an older desktop app that doesn't say up front still answers the check in 
 });
 
 test("a newer version says it is downloading in the background, then that it is ready to install", async () => {
-  found = { found: "available", version: "0.3.3", current: "0.3.2" };
   offer = {
     version: "0.3.3",
     current: "0.3.2",
@@ -203,14 +211,14 @@ test("a newer version says it is downloading in the background, then that it is 
     updatesItself: true,
     ready: { state: "preparing", done: 300, total: 1000 },
   };
-  const view = await checkForUpdates();
+  const view = renderPage();
   await waitFor(async () =>
     expect((await view.findByRole("status")).textContent).toBe(
       "OpenBot 0.3.3 is downloading in the background (30%).",
     ),
   );
-  // Nothing waits for it: Update and restart works now.
-  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  // Nothing waits for it: Show update works now.
+  expect(view.getByRole("button", { name: "Show update" })).toBeTruthy();
   // The app finishes, and the next ask of its offer says so.
   offer = { ...offer, ready: { state: "ready" } };
   await queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate });

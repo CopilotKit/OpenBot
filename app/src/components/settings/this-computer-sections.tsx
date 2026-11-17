@@ -1,5 +1,6 @@
 import {
   DOESNT_UPDATE_ITSELF,
+  installProgressSaid,
   type UpdateReadiness,
   updateOffered,
 } from "@openbot/shared/desktop-updates";
@@ -17,7 +18,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import * as React from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
-import { describe } from "@/components/layout/update-banner";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -29,10 +29,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   checkAppUpdateMutationOptions,
-  installAppUpdateMutationOptions,
   intelligenceMutationOptions,
   openLogFolderMutationOptions,
   restartOpenBotMutationOptions,
+  restoreAppUpdateMutationOptions,
   stopOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
 import { type PartGroup, partLabel } from "@/lib/desktop/part-names";
@@ -402,27 +402,31 @@ export function LogsRow({ folder }: { folder: string }) {
  * A build that never updates itself (internal, candidate, or without the updater) says so up front
  * in the setup window's words, with no button: the tray and the menus don't offer the check either.
  *
- * A newer version found says how ready it is, as the banner does: downloading in the background
- * while this version keeps running, then ready to install in a few minutes.
+ * A newer version found says how ready it is: downloading in the background while this version
+ * keeps running, then ready to install in a few minutes. Show update opens the update panel, which
+ * installs it. This row never installs.
  */
 export function VersionRow({ status }: { status: DesktopStatus }) {
   const check = useMutation(checkAppUpdateMutationOptions(queryClient));
-  const install = useMutation(installAppUpdateMutationOptions(queryClient));
-  // The download's progress, asked twice a second from the click on, as the banner asks once it
-  // sees an install under way; and every five seconds while the new version downloads in the
-  // background, so its share moves.
+  const restore = useMutation(restoreAppUpdateMutationOptions(queryClient));
+  // The download's progress, asked twice a second while an install is under way, and every five
+  // seconds while the new version downloads in the background, so its share moves.
   const offer = useQuery({
     ...desktopAppUpdateQueryOptions(),
     refetchInterval: (query) =>
-      install.isPending
+      query.state.data?.installing
         ? 500
         : query.state.data?.ready?.state === "preparing"
           ? 5_000
           : false,
   });
   const progress = offer.data?.installing ?? null;
-  const installing = install.isPending || progress !== null;
+  const installing = progress !== null;
   const found = check.data;
+  // A newer version the app knows, offered or minimized, or one the check just found.
+  const known = offer.data?.version ?? offer.data?.minimized ?? null;
+  const newer =
+    known ?? (found?.found === "available" ? found.version : null);
   // An older desktop app doesn't say, and its check answers for itself. No button until the first
   // answer, so a build that doesn't update itself never shows one for a moment.
   const updatesItself = offer.data?.updatesItself !== false;
@@ -439,13 +443,22 @@ export function VersionRow({ status }: { status: DesktopStatus }) {
             {DOESNT_UPDATE_ITSELF}
           </ItemDescription>
         )}
-        {found && !check.isPending && (
+        {found && !check.isPending ? (
           <ItemDescription
             className="line-clamp-none text-foreground"
             role="status"
           >
             {checked(found, offer.data?.ready)}
           </ItemDescription>
+        ) : (
+          known && (
+            <ItemDescription
+              className="line-clamp-none text-foreground"
+              role="status"
+            >
+              {updateOffered(known, offer.data?.ready)}
+            </ItemDescription>
+          )
         )}
         {check.error && (
           <ItemDescription
@@ -455,24 +468,28 @@ export function VersionRow({ status }: { status: DesktopStatus }) {
             {reason(check.error)}
           </ItemDescription>
         )}
-        {install.error && !installing && (
+        {restore.error && (
           <ItemDescription
             className="line-clamp-none text-destructive"
             role="alert"
           >
-            Couldn't install the update: {reason(install.error)}
+            Couldn't show the update: {reason(restore.error)}
           </ItemDescription>
         )}
       </ItemContent>
       {updatesItself && !offer.isLoading && (
         <ItemActions>
-          {found?.found === "available" ? (
+          {installing ? (
+            <Button disabled size="sm">
+              {installProgressSaid(progress)}
+            </Button>
+          ) : newer ? (
             <Button
-              disabled={installing}
-              onClick={() => install.mutate()}
+              disabled={restore.isPending}
+              onClick={() => restore.mutate()}
               size="sm"
             >
-              {installing ? describe(progress) : "Update and restart"}
+              Show update
             </Button>
           ) : (
             <Button
