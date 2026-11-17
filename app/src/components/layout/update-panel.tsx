@@ -65,7 +65,10 @@ export function UpdatePanel() {
         className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-2"
       >
         {restore.error ? (
-          <p className="text-destructive text-sm" role="alert">
+          <p
+            className="rounded-lg border border-border bg-popover p-3 text-destructive text-sm shadow-lg"
+            role="alert"
+          >
             Couldn't show the update: {reason(restore.error)}
           </p>
         ) : null}

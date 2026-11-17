@@ -89,8 +89,10 @@ function inDesktop() {
   };
 }
 
+let wasServer = true;
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" });
+  wasServer = environmentManager.isServer();
   // TanStack Query read `window` before it was registered above and took this for a server, where
   // it never polls. The page polls the shell, so say it is a browser.
   environmentManager.setIsServer(() => false);
@@ -121,6 +123,7 @@ afterEach(() => {
 });
 afterAll(async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
+  environmentManager.setIsServer(() => wasServer);
   await GlobalRegistrator.unregister();
 });
 
