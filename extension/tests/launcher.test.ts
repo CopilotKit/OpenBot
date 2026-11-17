@@ -698,9 +698,7 @@ test("an OpenBot browser shows no setup tab and no Connect page: none on a later
   fake.restartServiceWorker();
   startWorker();
   const before = fake.opened.length;
-  fake.fireInstalled("install");
-  await settle();
-  await settle();
+  await fake.fireInstalled("install");
   expect(fake.opened.length).toBe(before);
   // Desktop was not even asked for a code it would mint for nothing.
   expect(

@@ -153,7 +153,9 @@ export type ChromeFake = {
    */
   restartServiceWorker(): void;
   fireStartup(): void;
-  fireInstalled(reason: string): void;
+  /** Resolves once every onInstalled listener has finished, as their own promises say, so a test waits on the work
+   * itself rather than on a guess at how long it takes. Chrome itself waits on none of them. */
+  fireInstalled(reason: string): Promise<void>;
 };
 
 const DEFAULT_EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop";
@@ -530,8 +532,8 @@ export function installChromeFake(
     fireStartup() {
       runtimeEvents.onStartup.dispatch();
     },
-    fireInstalled(reason) {
-      runtimeEvents.onInstalled.dispatch({ reason });
+    async fireInstalled(reason) {
+      await Promise.all(runtimeEvents.onInstalled.dispatch({ reason }));
     },
   };
 

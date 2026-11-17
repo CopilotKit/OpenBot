@@ -5456,7 +5456,11 @@ fn intelligence_limits(kind: Shutdown) -> local_eval::Limits {
 /// The Intelligence step both production paths run, chosen here so they cannot drift apart.
 fn intelligence_step(kind: Shutdown) -> impl FnOnce(&Path) -> Result<(), String> {
     let limits = intelligence_limits(kind);
-    move |root: &Path| stop_local_eval(root, limits)
+    let by = match kind {
+        Shutdown::Stop => local_eval::ShutdownBy::Stop,
+        Shutdown::Quit => local_eval::ShutdownBy::Quit,
+    };
+    move |root: &Path| stop_local_eval(root, by, limits)
 }
 
 fn root_for_stop(shell: &Shell, fallback_root: &Path) -> PathBuf {
@@ -5557,12 +5561,20 @@ where
 }
 
 /// The production Intelligence step for Stop and Quit, within `limits`.
-fn stop_local_eval(root: &Path, limits: local_eval::Limits) -> Result<(), String> {
+fn stop_local_eval(
+    root: &Path,
+    by: local_eval::ShutdownBy,
+    limits: local_eval::Limits,
+) -> Result<(), String> {
     #[cfg(test)]
     INTELLIGENCE_TIMEOUT.with(|used| used.set(Some(limits.timeout)));
     let attempt = format!("openbot-shutdown-{:016x}", rand::random::<u64>());
-    stop_local_eval_with(root, local_eval::cancel_all, |stack| {
-        local_eval::stop_for_shutdown(&attempt, stack, limits)
+    let cancel_all: fn() = match by {
+        local_eval::ShutdownBy::Stop => local_eval::cancel_all,
+        local_eval::ShutdownBy::Quit => local_eval::cancel_for_quit,
+    };
+    stop_local_eval_with(root, by, cancel_all, |stack| {
+        local_eval::stop_for_shutdown(&attempt, stack, by, limits)
     })
 }
 
@@ -5588,12 +5600,23 @@ stack's containers are never touched here; only the CLI stops what the CLI start
 
 Calls already in flight are cancelled first, whoever owns the stack: cancelling ends only this
 app's own CLI processes, never the stack, and a `start` left running could otherwise hold the stop
-behind it, finish after it and leave the stack running, or outlive the app as an orphan.
+behind it, finish after it and leave the stack running, or outlive the app as an orphan. Another
+Stop's stop of the stack is left to finish, and this one waits its turn behind it. Quit also
+cancels a Stop's (`local_eval::Kind`).
+
+So a Stop's own stop is cancelled only by Quit, and Quit then stops the stack itself, after the
+cancelled CLI has gone: that is not a stop that failed, and the Stop does not say it was. Nothing
+cancels Quit's.
 
 Every way this can fail is said in fixed words. There is no CLI output to repeat, and none would
 be repeated if there were.
 */
-fn stop_local_eval_with<A, S>(root: &Path, cancel_all: A, stop: S) -> Result<(), String>
+fn stop_local_eval_with<A, S>(
+    root: &Path,
+    by: local_eval::ShutdownBy,
+    cancel_all: A,
+    stop: S,
+) -> Result<(), String>
 where
     A: FnOnce(),
     S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
@@ -5616,6 +5639,7 @@ where
         Err(local_eval::Failure::Unavailable) => {
             Err("this build has no command-line tool to stop the backend OpenBot created".into())
         }
+        Err(local_eval::Failure::Cancelled) if by == local_eval::ShutdownBy::Stop => Ok(()),
         Err(failure) => Err(not_stopped(wire_name(failure))),
     }
 }
@@ -5721,7 +5745,11 @@ impl uninstall::Computer for ThisComputerAtUninstall {
 
     fn stop_backend(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
         local_eval::use_engine(engine);
-        stop_local_eval(root, local_eval::Limits::for_quit())
+        stop_local_eval(
+            root,
+            local_eval::ShutdownBy::Quit,
+            local_eval::Limits::for_quit(),
+        )
     }
 
     /// The CLI's `local delete` for the stack OpenBot created, found as the stop finds it. A stack
@@ -19014,6 +19042,7 @@ mod tests {
 
             let result = stop_local_eval_with(
                 &root,
+                local_eval::ShutdownBy::Stop,
                 || phases.borrow_mut().push("cancel-all".to_string()),
                 |stack| {
                     phases.borrow_mut().push(format!("stop:{}", stack.as_str()));
@@ -19026,7 +19055,11 @@ mod tests {
             assert_eq!(phases.into_inner(), ["cancel-all"], "{ownership:?}");
             // The production adapter too: had it tried, this build's missing CLI would have failed.
             assert_eq!(
-                stop_local_eval(&root, local_eval::Limits::for_quit()),
+                stop_local_eval(
+                    &root,
+                    local_eval::ShutdownBy::Quit,
+                    local_eval::Limits::for_quit()
+                ),
                 Ok(()),
                 "{ownership:?}"
             );
@@ -19044,6 +19077,7 @@ mod tests {
 
         let result = stop_local_eval_with(
             &root,
+            local_eval::ShutdownBy::Stop,
             || phases.borrow_mut().push("cancel-all".to_string()),
             |stack| {
                 phases.borrow_mut().push(format!("stop:{}", stack.as_str()));
@@ -19063,7 +19097,7 @@ mod tests {
             Some(local_eval_state::Ownership::Created),
         );
         let failed = |result: Result<local_eval::Report, local_eval::Failure>| {
-            stop_local_eval_with(&root, || {}, move |_| result)
+            stop_local_eval_with(&root, local_eval::ShutdownBy::Stop, || {}, move |_| result)
                 .expect_err("a stop that did not complete is reported")
         };
 
@@ -19086,6 +19120,25 @@ mod tests {
             failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
             "the backend's command-line tool did not stop the backend (failed)"
         );
+        // Only Quit cancels a Stop's own stop, and Quit then stops the stack itself.
+        assert_eq!(
+            stop_local_eval_with(
+                &root,
+                local_eval::ShutdownBy::Stop,
+                || {},
+                |_| { Err(local_eval::Failure::Cancelled) }
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            stop_local_eval_with(
+                &root,
+                local_eval::ShutdownBy::Quit,
+                || {},
+                |_| { Err(local_eval::Failure::Cancelled) }
+            ),
+            Err("the backend's command-line tool did not stop the backend (cancelled)".into())
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -19103,7 +19156,13 @@ mod tests {
             &root,
             |_| Ok(0),
             |_| Err("compose down refused".to_string()),
-            |root| stop_local_eval(root, local_eval::Limits::for_quit()),
+            |root| {
+                stop_local_eval(
+                    root,
+                    local_eval::ShutdownBy::Quit,
+                    local_eval::Limits::for_quit(),
+                )
+            },
         );
 
         assert_eq!(
@@ -19546,6 +19605,13 @@ fn main() {
 
     #[test]
     fn stop_and_quit_choose_their_own_limits_for_the_real_adapter() {
+        // Another test's Quit closes local evaluation for the rest of its process, and a Stop's own
+        // stop is then left to Quit rather than run.
+        if test_support::isolated_process(
+            "tests::stop_and_quit_choose_their_own_limits_for_the_real_adapter",
+        ) {
+            return;
+        }
         assert_eq!(
             intelligence_limits(Shutdown::Stop).timeout,
             local_eval::Limits::for_action(local_eval::Action::Stop).timeout
@@ -20315,6 +20381,7 @@ fn main() {
             app: tauri::App<tauri::test::MockRuntime>,
             window: tauri::WebviewWindow<tauri::test::MockRuntime>,
             previous_runtime: Option<std::ffi::OsString>,
+            previous_config: Option<std::ffi::OsString>,
         }
 
         impl Fixture {
@@ -20328,6 +20395,11 @@ fn main() {
                 std::fs::create_dir_all(&runtime).unwrap();
                 let previous_runtime = std::env::var_os("XDG_RUNTIME_DIR");
                 std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+                // Podman's configuration home too, where a local Podman Start writes OpenBot's
+                // drop-in. Otherwise every fixture, each in its own process at once, writes the
+                // runner's real ~/.config/containers, and one replaces the file under another.
+                let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+                std::env::set_var("XDG_CONFIG_HOME", base.join("config"));
                 let a = base.join("a");
                 let b = base.join("b");
                 write_installed_deployment(&a);
@@ -20470,6 +20542,7 @@ fn main() {
                     app,
                     window,
                     previous_runtime,
+                    previous_config,
                 }
             }
 
@@ -20592,6 +20665,10 @@ fn main() {
                 match &self.previous_runtime {
                     Some(runtime) => std::env::set_var("XDG_RUNTIME_DIR", runtime),
                     None => std::env::remove_var("XDG_RUNTIME_DIR"),
+                }
+                match &self.previous_config {
+                    Some(config) => std::env::set_var("XDG_CONFIG_HOME", config),
+                    None => std::env::remove_var("XDG_CONFIG_HOME"),
                 }
                 println!(
                     "CONTAINER_CLEANUP={}",
