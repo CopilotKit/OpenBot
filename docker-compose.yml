@@ -173,6 +173,10 @@ services:
       # The desktop's host-access broker proves itself with this. Minted per start and given to the
       # server alone, so it is named here and nowhere else in this file.
       OPENBOT_DESKTOP_HOST_TOKEN: ${OPENBOT_DESKTOP_HOST_TOKEN:-}
+      # The install's own token: the personal edition only admits requests carrying it. OpenBot
+      # Desktop mints it once per installation, keeps it out of `.env` and hands it to Compose in
+      # its environment; `scripts/start.sh` mints it into `.env`. Given to the server alone.
+      OPENBOT_INSTALL_TOKEN: ${OPENBOT_INSTALL_TOKEN:-}
       # The app broker's settings. A Composio key the desktop provisioned at CopilotKit sign-in lives
       # in its protected store, never in `.env`, so it reaches this container only by being named
       # here. A key the person put in `.env` wins and arrives the same way.

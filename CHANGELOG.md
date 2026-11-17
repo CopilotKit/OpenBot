@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- **Confirming a character with a Chinese, Japanese or Korean input method no longer sends the
+  message.** Pressing Enter to confirm the character sent the half-finished message instead. The
+  chat composer now holds the key while a character is still being composed, so the confirming
+  Enter commits the character and only an Enter outside a composition sends.
+
+## 1.1.0
+
 **Before upgrading.** Read these first: several of them change what a script, a proxy, a Compose
 override or a Helm values file has to say.
 
@@ -35,7 +42,15 @@ override or a Helm values file has to say.
   A script, integration or socket client that calls one has to move to the `/api/v2` address
   `api/openapi.yaml` or `api/asyncapi.yaml` lists. A reverse proxy or firewall that allows
   OpenBot's paths one by one has to allow `/api/v2/`, with WebSocket upgrades, and keep allowing
-  the addresses listed under What stays outside `/api/v2` (below).
+  the addresses listed under What stays outside `/api/v2` (below). The API now refuses, with a 400,
+  a query parameter sent more than once where the spec takes one value, and a body that isn't valid
+  JSON on the operations whose body is optional, as the spec says. Check-in usage refuses an empty
+  `days=`, which it used to read as 7.
+- **The personal edition admits only requests that carry its install token.** A script or tool
+  that reached a personal OpenBot with no credentials is refused: give it an API key from
+  Settings > API keys, or send the token in `X-OpenBot-Install-Token`. A single-user OpenBot in a
+  container doesn't start without `OPENBOT_INSTALL_TOKEN`. OpenBot Desktop, `scripts/start.sh` and
+  both charts' single-user mode make one (below).
 - **The OpenBot images are checked with OpenBot's own key.** They are signed with the key in
   `docs/cosign.pub` (`docs/deployment.md`), and no longer carry a GitHub build attestation or a
   `sha-<commit>` tag. Deploy a version tag, or its digest from `container-images.json`.
@@ -168,17 +183,20 @@ override or a Helm values file has to say.
   API keys or sessions: that takes a signed-in session. An app's token needs `computers:write` to
   type or click on a Bot's screen or terminal, and with `computers:read` it only watches. With one
   organization, removing somebody deletes their keys and their apps' sign-ins. OpenBot on one
-  computer for one person has neither keys nor OAuth.
+  computer for one person has no OAuth, and has API keys of its own (Personal edition, below).
 - **The API holds requests to the spec.** A request body with a property the spec doesn't name is
   refused with 400, at any depth, and so is text the database can't store, such as a NUL
   character, where several addresses answered 500. Roles are `owner`, `admin` and `member`. Every
   answer carries `Cache-Control: private, no-store` and `X-Request-Id`. An `Idempotency-Key`
   replays its first answer for 24 hours, except one that held a password, a code, a token or what
-  was on a Bot's computer, which is answered `ANSWER_NOT_KEPT`.
+  was on a Bot's computer, which is answered `ANSWER_NOT_KEPT`. A query parameter sent more than
+  once where the spec takes one value is refused with 400, where the first value was kept, and so
+  is a body that isn't valid JSON on the operations whose body is optional (approving an app access
+  request, replacing a Bot's grant, replacing a goal trigger's secret), where it was read as no body.
 - **Settings has an API keys page.** Under You, a signed-in person lists their keys, creates one
   by name and revokes one. A new key is shown once, with Copy. OpenBot on one computer for one
-  person has no sign-in and says it has no keys, and OpenBot Desktop connected to an OpenBot
-  elsewhere opens the page in your browser.
+  person has the page too, for its one person (Personal edition, below), and OpenBot Desktop
+  connected to an OpenBot elsewhere opens the page in your browser.
 
 ### A Bot hands work to tasks and agents
 
@@ -243,9 +261,31 @@ override or a Helm values file has to say.
   belongs to the conversation that asked.
 - **Work carried on after an approval continues at once after a restart or deploy**, where a task
   could read Working for up to 15 minutes.
+- **A Bot finishes a long list with subagents instead of stopping partway.** One answer could start
+  five subagents in all, so a Bot given twelve accounts or documents to work through ran out after
+  five and did the rest itself, one by one, or left them. Now up to 10 run at once and any more
+  wait their turn, up to 100 in one answer, and a Bot past that is told to do the rest itself. Both
+  numbers are settings, `BOT_SUBAGENTS_AT_ONCE` and `BOT_SUBAGENTS_PER_ANSWER`, and in the Helm
+  chart `config.subagents.atOnce` and `config.subagents.perAnswer`.
+- **A task shows once in the conversation that asked.** A result posted right under its own task's
+  card no longer repeats the task's title and link, which the card already has. A result that
+  lands after something else keeps them, so it still says which task it is. A stopped task's
+  result reads stopped, where it showed a green check.
+- **A subtask that called no tool says "Answered directly"**, where its line in the task thread
+  said nothing and the Bot reported it took 0 steps. Task details says how long the task worked.
+- **A long run that finished keeps its answer.** On Bots on the Claude Agent SDK harness, about one
+  multi-step run in 20 ended with "The Bot stopped before it finished answering" though the work
+  was done, and a task tried again after that kept the first try's failure line. A failure a task
+  will try again is now said only if the last try fails too.
 
 ### Conversations
 
+- **Bots talk about their work in plain words.** They are told never to name a tool, a function or
+  an app action's code name, never to say how their tools are found or loaded, and never to quote
+  an error the way a tool gave it, so a reply says "the Teams post didn't go through", not "No such
+  tool available".
+- **A conversation keeps its name** when it and a subagent's conversation are named at the same
+  moment, where the sidebar could go back to calling it by its first message until a reload.
 - **Maths draws as formulas.** LaTeX a Bot writes (`\( \)`, `\[ \]`, `$$`) is drawn as formulas in
   replies, task threads, cards, group conversations, tool results and skills, where it showed as
   source. A single `$` stays a dollar sign and code stays as written. A wide formula scrolls in its
@@ -397,10 +437,20 @@ override or a Helm values file has to say.
   starts when they show, and choosing a folder a Bot already has reuses its grant. An approval left
   unanswered no longer ends the folder's grant, so later commands there still ask, where each came
   back "Host grant was revoked.".
-- **Confirming a character with a Chinese, Japanese or Korean input method no longer sends the
-  message.** Pressing Enter to confirm the character sent the half-finished message instead. The
-  chat composer now holds the key while a character is still being composed, so the confirming
-  Enter commits the character and only an Enter outside a composition sends.
+- **Connecting an app through Composio says who Composio is first.** Before the sign-in for Gmail,
+  Google Calendar, Slack or another app from the directory, OpenBot shows a step that names the
+  app, says Composio is the service that holds OpenBot's app connections, and says the next page
+  will ask you to allow Composio, which is expected (for Slack, so is "App not approved by Slack").
+  It moves on after 5 seconds, or at once with Continue now, and Cancel stops it. On OpenBot
+  Desktop, the page your browser comes back to says "Gmail is connected" (or that it couldn't
+  connect) and counts down 5 seconds before handing you back to the window, where it went at once.
+  Arcade, apps that take a key and the apps OpenBot signs in to itself are unchanged.
+- **An app call with a parameter the action doesn't take is refused before you're asked.** The Bot
+  is told the parameters the action does take, so you approve the corrected call once, where a
+  Slack post sent with the wrong field could ask you twice.
+- **Arrow keys in a dropdown on a Bot's computer count from the top.** The computer's screen
+  pointer sat in the middle of the screen, and a list that opened under it could move the choice,
+  so two presses of the down arrow could pick the wrong option.
 
 ### Pages and routines
 
@@ -479,6 +529,18 @@ override or a Helm values file has to say.
 
 ### Personal edition
 
+- **Only requests that carry the install's token are let in.** OpenBot Desktop makes the token
+  once per install and keeps it in the system's credential store, never in `.env`, and it stays the
+  same across restarts, upgrades and a put-back to an earlier version. Compose hands it to the
+  server alone. The window enters once through an address that leaves it a cookie, and a program of
+  yours sends `X-OpenBot-Install-Token`. A request without it, a Bot's own computer included, is
+  refused, and a browser refused this way shows "Open OpenBot from its app". `scripts/start.sh`
+  makes the token, writes it to `.env` and prints the entry address as its Ready line, and both
+  charts' single-user mode make one and keep it across upgrades. An app sign-in that ends in your
+  browser hands back to the window, which finishes it. The team edition is unchanged.
+- **API keys work in the personal edition.** Settings > API keys lists, creates and deletes your
+  keys, where it said "Couldn't load your API keys". A key works on `/api/v2` only, is shown once,
+  can't make a key, and needs no install token.
 - **Admin is in the personal edition too**, under your name. Its pages open where they used to
   send you to Settings. Providers, model usage and check-in history show your own Bots. Pages and
   controls that only apply to a team say "This applies when OpenBot runs for a team." with a way to
@@ -497,6 +559,15 @@ override or a Helm values file has to say.
 
 ### OpenBot Desktop
 
+- **A first install no longer stops at "Connecting OpenBot" when your home folder is a git
+  repository.** On a Mac whose home folder is a repository that ignores everything, a common way to
+  keep dotfiles, setup stopped with "Setup stopped partway through with an error", and Retry failed
+  the same way every time: git looked up from OpenBot's folder into the home repository, whose
+  rules hid OpenBot's own files. Setup now keeps git to OpenBot's folder. A repository you keep in
+  OpenBot's folder itself is still read.
+- **A setup step that stops offers its troubleshooting logs.** When Finishing setup or Starting
+  OpenBot stops with an error, Copy logs and Save to a file are under Retry, where the card said to
+  copy the logs below and showed none, and the logs now say why the connect step stopped.
 - **OpenBot Desktop can connect to an OpenBot that runs somewhere else.** At set-up choose
   **OpenBot for Business**, or later Settings > Computer > **Connect to an OpenBot**, which stops
   OpenBot on this computer first. Type the https address of your company's OpenBot. Nothing is
@@ -637,6 +708,13 @@ override or a Helm values file has to say.
   their images are no longer published. `scripts/start.sh` starts the harness on port 4201 and
   points `MANAGED_AGENT_AG_UI_URL` at it, whichever provider `BOT_PROVIDER` names. OpenBot Desktop
   takes the retired Bots' settings out of an updated installation's `.env`.
+- **Usage data says which release it came from, and carries error reports.** With usage data on,
+  every event names the OpenBot version and edition. The app's error screen, errors a page didn't
+  handle, and the server's uncaught errors and 5xx answers are sent as error reports, through the
+  server, with secrets, emails, addresses, paths and long numbers taken out and their size and
+  number capped. OpenBot Desktop reports when an update starts and how it ends, and the first
+  launch of a new version reports the update that brought it, once. With usage data off none of it
+  is sent. `docs/TELEMETRY.md` lists every field.
 
 ### Kubernetes
 

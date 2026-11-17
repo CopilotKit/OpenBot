@@ -23,6 +23,7 @@ import {
   type Shortfall,
   setUpLocalEval,
   signInToCopilotKit,
+  type UpdateState,
   updateStepSaid,
   wakeEngine,
 } from "./localEvalCli";
@@ -264,6 +265,29 @@ function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
 /** An update of the back end that stopped downloading: they run the version they had. */
 const UPDATE_STALLED_SAID =
   "The update of OpenBot's services stopped downloading, so they run the version they had. OpenBot picks up the download the next time it starts.";
+
+/**
+ * An update that failed after it began updating the data (`UpdateState`), said in place of "so they
+ * run the version they had", which is no longer true. `migrated`: the data is on the new release,
+ * and only the new services' start did not finish. `migrating`: it stopped part-way through the
+ * data. Either way `local update` resumes from the record, and the next Start runs it.
+ *
+ * Found on a Mac, rc.11 to rc.13: the CLI was stopped at `migrated` and the repair after it failed.
+ * The row said the services ran the version they had; the next launch finished the update.
+ */
+const UPDATE_PAST_DATA_SAID: Partial<Record<UpdateState, string>> = {
+  migrated:
+    "The update of OpenBot's services didn't finish starting. Your data is kept, and OpenBot finishes the update the next time it starts.",
+  migrating:
+    "The update of OpenBot's services stopped while updating your data. Your data is kept, and OpenBot picks up the update the next time it starts.",
+};
+
+/** The note on the update's row: nothing was updated, or the update began and did not finish. */
+function updateNote(said: string): string {
+  return Object.values(UPDATE_PAST_DATA_SAID).includes(said)
+    ? "Not finished"
+    : "Not updated";
+}
 
 export type LocalSequence = State & {
   /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
@@ -715,7 +739,14 @@ export function useLocalSequence({
         !woken &&
         found.readiness === "degraded" &&
         found.checksPassed !== true;
-      if (failedTo && (failedStep || leftNotWorking)) {
+      // An update that got as far as the data does not leave the version they had.
+      const pastData =
+        !leftNotWorking && unfinished?.state
+          ? UPDATE_PAST_DATA_SAID[unfinished.state]
+          : undefined;
+      if (failedTo && pastData) {
+        update({ updateFailed: pastData, updateBroke: false });
+      } else if (failedTo && (failedStep || leftNotWorking)) {
         update({
           updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
           updateBroke: leftNotWorking,
@@ -1057,7 +1088,7 @@ export function useLocalSequence({
                 : { step: label, ok: true, detail: "" };
       if (phase !== "wait" || !state.updateFailed) return [row];
       // Failed only when it left the services not working, which stops the Start. Otherwise a
-      // note: the services run the version they had, and the Start carries on over them.
+      // note: the services run the version they had, or the next Start finishes the update.
       return [
         row,
         state.updateBroke
@@ -1065,7 +1096,7 @@ export function useLocalSequence({
           : {
               step: UPDATING,
               ok: true,
-              note: "Not updated",
+              note: updateNote(state.updateFailed),
               detail: state.updateFailed,
             },
       ];
@@ -1199,6 +1230,19 @@ export function LocalIntelligence({
           )}
         </div>
       )}
+      {/* A stop said on its row ("Retry. If it stops again, copy the logs below.") has its logs
+          here, under Retry, as the status card on the other screens has (`LocalStatus`). A failure
+          with a problem has them in its own card (`Failure`), a stop the person clears (signing
+          in, the agreement, Start fresh) has its own action instead, and their own Cancel is no
+          failure to troubleshoot. */}
+      {stopped &&
+        !problem &&
+        !waitingOn &&
+        !needsPerson(sequence) &&
+        sequence.blocked &&
+        sequence.blocked.said !== said("cancelled") && (
+          <TroubleshootingLogs problem={{ said: sequence.blocked.said }} />
+        )}
     </section>
   );
 }

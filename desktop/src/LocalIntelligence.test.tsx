@@ -599,6 +599,119 @@ test("an update that fails says the step it stopped at and that the data is kept
 });
 
 /**
+ * After an update fails, the back end with the CLI's record of it, its checks passing. `state` is
+ * how far the record says the update got.
+ */
+function afterFailedUpdate(
+  state: "prepared" | "migrating" | "migrated",
+  failedStep?: string,
+): LocalReport {
+  const base = report({
+    readiness: "degraded",
+    licence: "valid",
+    checksPassed: true,
+    updateTo: "0.16.0-rc.13",
+  });
+  return {
+    ...base,
+    stack: base.stack && {
+      ...base.stack,
+      installedRelease: "0.16.0-rc.11",
+      step: "bootstrapped",
+      updateInProgress: true,
+      unfinishedUpdate: {
+        to: "0.16.0-rc.13",
+        prepared: state === "prepared",
+        state,
+        stoppedDownloading: false,
+        ...(failedStep ? { failedStep } : {}),
+      },
+    },
+  };
+}
+
+/** Runs a Start whose update fails, over `after`, and returns the services' update row. */
+async function servicesRowAfterFailedUpdate(after: LocalReport) {
+  let calls = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "cancel_local_eval") return null;
+    if (command === "local_eval_download") return null;
+    const action = (args as { action: string }).action;
+    if (action === "update") return updateStopped;
+    calls += 1;
+    return calls === 1 ? onRelease("0.16.0-rc.11", "0.16.0-rc.13") : after;
+  };
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async () => "started",
+  });
+  // Stopped at Retry, or opened on the release the back end still has: either way, settled.
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Retry" }) !== null ||
+        row(screen, START).textContent?.includes("Complete"),
+    ).toBe(true),
+  );
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "run_local_eval:update",
+    "run_local_eval:status",
+  ]);
+  return row(screen, "Updating OpenBot's services");
+}
+
+/**
+ * Found on a Mac, rc.11 to rc.13: the CLI was stopped at `migrated`, while the new services were
+ * starting, and the repair after it failed. The database was already on rc.13, yet the row said
+ * the services ran the version they had. The next start finished the update.
+ */
+test("an update that stops after its data is updated says it didn't finish starting, not that the services run the version they had", async () => {
+  for (const failedStep of [undefined, "services-wait"]) {
+    const services = await servicesRowAfterFailedUpdate(
+      afterFailedUpdate("migrated", failedStep),
+    );
+    expect(services.querySelector(".detail")?.textContent).toBe(
+      "The update of OpenBot's services didn't finish starting. Your data is kept, and OpenBot finishes the update the next time it starts.",
+    );
+    expect(services.querySelector(".step-status")?.textContent).toBe(
+      "Not finished",
+    );
+    expect(services.querySelector(".mark.bad, .step-status.bad")).toBeNull();
+    expect(services.textContent).not.toContain("the version they had");
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
+/** Stopped part-way through updating the data: neither the version they had nor the new one. */
+test("an update that stops while updating the data says it stopped part-way, not that the services run the version they had", async () => {
+  const services = await servicesRowAfterFailedUpdate(
+    afterFailedUpdate("migrating"),
+  );
+  expect(services.querySelector(".detail")?.textContent).toBe(
+    "The update of OpenBot's services stopped while updating your data. Your data is kept, and OpenBot picks up the update the next time it starts.",
+  );
+  expect(services.querySelector(".step-status")?.textContent).toBe(
+    "Not finished",
+  );
+  expect(services.textContent).not.toContain("the version they had");
+});
+
+/** Before any data was updated, the services do still run the version they had. */
+test("an update that fails before updating the data still says the services run the version they had", async () => {
+  const services = await servicesRowAfterFailedUpdate(
+    afterFailedUpdate("prepared", "chart-render"),
+  );
+  expect(services.querySelector(".step-status")?.textContent).toBe(
+    "Not updated",
+  );
+  expect(services.querySelector(".detail")?.textContent).toBe(
+    "OpenBot's services couldn't finish updating, so they run the version they had. The update stopped while preparing the update. Your data is kept, and OpenBot tries again the next time it starts.",
+  );
+});
+
+/**
  * Found on OpenBot Desktop: an update sat on "Updating the back end" for minutes with nothing
  * else on the row, while the CLI waited on its databases and Jobs (up to ten minutes each) and
  * logged nothing until each ended. The journey now says which step it is in, from the steps the
@@ -1259,6 +1372,39 @@ test("a lost backend is said on the status card too, with Start fresh", async ()
     within(card).getByRole("button", { name: "Start fresh" }),
   ).toBeTruthy();
   expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
+/**
+ * A first install on a Mac: on Finishing setup, "Connecting OpenBot" stopped with "Setup stopped
+ * partway through with an error. Retry. If it stops again, copy the logs below.", and nothing was
+ * below it but Retry. The card now offers the logs it names, with what failed in them.
+ */
+test("a step that stops offers the logs its sentence names", async () => {
+  const partway =
+    "Setup stopped partway through with an error. Retry. If it stops again, copy the logs below.";
+  invokeHandler = answers({
+    set_up_local_eval: [report()],
+    connect_local_eval: [
+      connection({
+        outcome: "failed",
+        stack: null,
+        reason: "local-command-failed",
+      }),
+    ],
+    save_troubleshooting_logs: [null],
+  });
+  const screen = view();
+  await waitFor(() =>
+    expect(row(screen, CONNECT).textContent).toContain(partway),
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Copy logs" })).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Save to a file" }));
+  await screen.findByText("Saved in the log folder.");
+  expect(
+    invokeCalls.find((call) => call.command === "save_troubleshooting_logs")
+      ?.args,
+  ).toEqual({ failure: partway });
 });
 
 const blockedOnSignIn = report({

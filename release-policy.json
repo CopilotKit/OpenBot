@@ -1,6 +1,6 @@
 {
   "$schema": "./shared/release-policy.schema.json",
-  "version": "v1.0.3",
+  "version": "v1.1.0",
   "compatibility": {
     "launcherApi": 1,
     "configSchema": 1,
@@ -13,13 +13,14 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0088_approval_reviewer_guidance",
+      "to": "0132_bot_task_runs",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
   },
   "upgrade": {
     "fromVersions": [
+      "v1.0.3",
       "v1.0.2",
       "v1.0.1",
       "v1.0.0",

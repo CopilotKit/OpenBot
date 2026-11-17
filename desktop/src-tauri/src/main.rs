@@ -86,6 +86,10 @@ struct Shell {
     root: Mutex<Option<PathBuf>>,
     /// Containers may outlive a failed Start before any host root is published.
     containers: Mutex<Option<ContainerDeployment>>,
+    /// The install's token the `server` of the deployment at this root was given, None for a server
+    /// from a release before it (`install_token`). Read from its container, which is exactly what the
+    /// server checks, and kept nowhere but here.
+    install_token: Mutex<Option<(PathBuf, Option<String>)>>,
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
@@ -1697,9 +1701,23 @@ async fn windows_restart_pending(app: tauri::AppHandle) -> Result<bool, Problem>
 }
 
 /// Restart Windows to finish a fix, with OpenBot set to open again afterwards.
+///
+/// Setup goes on after the restart, so the exit it brings is not an abandonment: that is saved
+/// first, before Windows ends the app.
 #[tauri::command]
-fn windows_restart() -> Result<(), Problem> {
+fn windows_restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
+    desktop_telemetry::restart_required(&app);
     win::restart()
+}
+
+/// A fix's Windows restart is still owed (`win::record_restart_needed`). Only whether the record is
+/// there: Windows is ending the session, too late to ask which boot this is.
+fn windows_restart_owed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    cfg!(target_os = "windows")
+        && app
+            .path()
+            .app_local_data_dir()
+            .is_ok_and(|data| win::restart_path(&data).exists())
 }
 
 /// Bring the engine up: create the machine if it is missing, start it, then prove it answers.
@@ -2017,9 +2035,13 @@ async fn upgrade_and_start_now(
                     "release",
                     "Putting back the version OpenBot was updating from.",
                 );
+                let previous = upgrade::previous_version(&target);
                 upgrade::recover(&target, &mut steps).map_err(|problem| {
                     Problem::with(UPGRADE_INTERRUPTED, upgrade::detail(&problem))
                 })?;
+                if let Some(previous) = previous {
+                    desktop_telemetry::update_restored(&handle, &previous, &upgrade::own().version);
+                }
             }
             let Some(planned) = upgrade::due(&target, &upgrade::own()) else {
                 // Put back, and nothing to move: an ordinary Start, with no step of putting back
@@ -2030,18 +2052,20 @@ async fn upgrade_and_start_now(
                 return Ok::<_, Problem>(None);
             };
             report_running_line(&handle, "release", upgrade::moving_said(&planned), None);
+            let began = std::time::Instant::now();
             let ran = upgrade::run(&target, &mut steps);
-            Ok(Some((planned, ran)))
+            Ok(Some((planned, ran, began.elapsed())))
         })
         .await
         .map_err(|e| Problem::from(e.to_string()))??
     };
-    let Some((planned, ran)) = ran else {
+    let Some((planned, ran, took)) = ran else {
         // Nothing to move (put back, decided meanwhile, or newer): an ordinary Start.
         let kept = deployment::installed(&selected)
             .map(|found| found.version)
             .unwrap_or_default();
-        start_stack(app, root, api_url, gateway_ws_url, model, harness).await?;
+        start_stack(app.clone(), root, api_url, gateway_ws_url, model, harness).await?;
+        desktop_telemetry::installation_settled(&app);
         return Ok(upgrade::Outcome::unchanged(kept));
     };
     refresh_menus(&app);
@@ -2061,6 +2085,7 @@ async fn upgrade_and_start_now(
                     .logged(format!("OpenBot is on {}.", planned.to)),
             );
             remove_superseded_images(&app, &selected);
+            desktop_telemetry::installation_settled(&app);
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::moved(&planned))
         }
@@ -2072,18 +2097,23 @@ async fn upgrade_and_start_now(
                 engine::StepLine::here(upgrade::kept_said(&planned))
                     .logged(upgrade::moved_log(&planned)),
             );
+            desktop_telemetry::update_restored(&app, &planned.from, &planned.to);
             desktop_telemetry::record(&app, telemetry::EventData::Activated);
             Ok(upgrade::Outcome::kept(&planned, &failed))
         }
-        upgrade::Ran::Back { failed, .. } if cancelled => Err(Problem::with(
-            "OpenBot stopped before it finished updating, and the version it had is back in place.",
-            format!(
-                "{}: {}",
-                upgrade::moved_log(&planned),
-                upgrade::detail(&failed)
-            ),
-        )),
+        upgrade::Ran::Back { failed, .. } if cancelled => {
+            desktop_telemetry::update_restored(&app, &planned.from, &planned.to);
+            Err(Problem::with(
+                "OpenBot stopped before it finished updating, and the version it had is back in place.",
+                format!(
+                    "{}: {}",
+                    upgrade::moved_log(&planned),
+                    upgrade::detail(&failed)
+                ),
+            ))
+        }
         upgrade::Ran::Back { failed, start } => {
+            desktop_telemetry::update_restored(&app, &planned.from, &planned.to);
             let said = upgrade::back_said(&planned, &start);
             report_line(
                 &app,
@@ -2102,6 +2132,7 @@ async fn upgrade_and_start_now(
             })
         }
         upgrade::Ran::Stuck { failed, undo } => {
+            desktop_telemetry::update_not_restored(&app, &planned.from, &planned.to, took);
             let said = upgrade::stuck_said(&planned);
             report_line(
                 &app,
@@ -2141,8 +2172,12 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
             harness: None,
             start: None,
         };
+        let previous = upgrade::previous_version(&target);
         upgrade::recover(&target, &mut steps)
             .map(|_| {
+                if let Some(previous) = &previous {
+                    desktop_telemetry::update_restored(&handle, previous, &upgrade::own().version);
+                }
                 // Install goes on from the version that is back, with no step of putting back
                 // still said as its own.
                 report_line(&handle, "release", true, upgrade::put_back_said(&target));
@@ -2753,43 +2788,49 @@ async fn install_app_update_steps<R: tauri::Runtime>(
     let _update = RuntimeUpdateGuard::begin(&app)?;
     let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let feeds = app_update::endpoints(app.config().plugins.0.get("updater")).unwrap_or_default();
+    // Usage data: started as the download begins, failed here when this version sees it fail. A
+    // successful install is completed by the version it restarts into.
+    let attempt = desktop_telemetry::AppUpdate::default();
     let installed = async {
-        let (update, bytes) = download_app_update(
-            &feeds,
-            |feed| {
-                let handle = app.clone();
-                let stopped_by_installer = stopped.clone();
-                let mut builder = app
-                    .updater_builder()
-                    // Runs on Windows only, in place of the updater's own cleanup, which this
-                    // ends with.
-                    .on_before_exit(move || {
-                        stopped_by_installer.store(true, std::sync::atomic::Ordering::SeqCst);
-                        stop_before_installer(&handle);
-                    });
-                if let Some(feed) = feed {
-                    builder = builder.endpoints(vec![feed])?;
-                }
-                builder.build()
-            },
-            || app.state::<Shell>().app_update.begin_install(),
-            |chunk, total| app.state::<Shell>().app_update.downloaded(chunk, total),
-        )
+        let (update, bytes) = download_app_update_recorded(&app, &attempt, &feeds, |feed| {
+            let handle = app.clone();
+            let stopped_by_installer = stopped.clone();
+            let mut builder = app
+                .updater_builder()
+                // Runs on Windows only, in place of the updater's own cleanup, which this
+                // ends with.
+                .on_before_exit(move || {
+                    stopped_by_installer.store(true, std::sync::atomic::Ordering::SeqCst);
+                    stop_before_installer(&handle);
+                });
+            if let Some(feed) = feed {
+                builder = builder.endpoints(vec![feed])?;
+            }
+            builder.build()
+        })
         .await?;
         if app
             .state::<Shell>()
             .update_cancelled
             .load(std::sync::atomic::Ordering::SeqCst)
         {
+            attempt.failed(&app, telemetry::UpdateFailureClass::Cancelled);
             return Err(Problem::plain(
                 "OpenBot was stopped before the update was installed.",
             ));
         }
         app.state::<Shell>().app_update.restarting();
-        tauri::async_runtime::spawn_blocking(move || update.install(bytes))
-            .await
-            .map_err(|e| Problem::from(e.to_string()))?
-            .map_err(|e| Problem::from(e.to_string()))
+        match tauri::async_runtime::spawn_blocking(move || update.install(bytes)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                attempt.failed(&app, desktop_telemetry::update_failure(&error));
+                Err(Problem::from(error.to_string()))
+            }
+            Err(error) => {
+                attempt.failed(&app, telemetry::UpdateFailureClass::Unknown);
+                Err(Problem::from(error.to_string()))
+            }
+        }
     }
     .await;
     if let Err(problem) = installed {
@@ -2833,18 +2874,21 @@ first feed is downloads.copilotkit.ai's, which names its own copy of the archive
 mirror that served the feed but not the archive left the update failing until the mirror was fixed,
 though GitHub's feed names the same signed archive. Any other failure is returned as it is.
 
-`begin` is called before each download, and `on_chunk` with what each one receives, so the window's
-progress starts again for the second.
+`begin` is called with the update before each download, and `on_chunk` with what each one receives,
+so the window's progress starts again for the second.
 */
 async fn download_app_update(
     feeds: &[reqwest::Url],
     updater: impl Fn(
         Option<reqwest::Url>,
     ) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater>,
-    begin: impl Fn(),
+    begin: impl Fn(&tauri_plugin_updater::Update),
     on_chunk: impl Fn(usize, Option<u64>),
-) -> Result<(tauri_plugin_updater::Update, Vec<u8>), Problem> {
-    let failed = |e: tauri_plugin_updater::Error| Problem::from(e.to_string());
+) -> Result<(tauri_plugin_updater::Update, Vec<u8>), DownloadFailed> {
+    let failed = |e: tauri_plugin_updater::Error| DownloadFailed {
+        class: desktop_telemetry::update_failure(&e),
+        problem: Problem::from(e.to_string()),
+    };
     let check = |feed: Option<reqwest::Url>| {
         let built = updater(feed);
         async move {
@@ -2853,7 +2897,10 @@ async fn download_app_update(
                 .check()
                 .await
                 .map_err(failed)?
-                .ok_or_else(|| Problem::plain("OpenBot is already up to date."))
+                .ok_or_else(|| DownloadFailed {
+                    problem: Problem::plain("OpenBot is already up to date."),
+                    class: telemetry::UpdateFailureClass::Unknown,
+                })
         }
     };
     let downloaded = |update: &tauri_plugin_updater::Update| {
@@ -2869,7 +2916,7 @@ async fn download_app_update(
         update.version,
         update.download_url
     );
-    begin();
+    begin(&update);
     let error = match update.download(&on_chunk, || {}).await {
         Ok(bytes) => {
             downloaded(&update);
@@ -2890,10 +2937,43 @@ async fn download_app_update(
         update.version,
         update.download_url
     );
-    begin();
+    begin(&update);
     let bytes = update.download(&on_chunk, || {}).await.map_err(failed)?;
     downloaded(&update);
     Ok((update, bytes))
+}
+
+/// A check or download that failed: what the person is told, and its class for usage data.
+#[derive(Debug)]
+struct DownloadFailed {
+    problem: Problem,
+    class: telemetry::UpdateFailureClass,
+}
+
+/// `download_app_update` as the shell runs it: the window's progress, and the update in usage data
+/// (`desktop_telemetry::AppUpdate`), started as the first download begins and failed with its class.
+async fn download_app_update_recorded<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    attempt: &desktop_telemetry::AppUpdate,
+    feeds: &[reqwest::Url],
+    updater: impl Fn(
+        Option<reqwest::Url>,
+    ) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater>,
+) -> Result<(tauri_plugin_updater::Update, Vec<u8>), Problem> {
+    download_app_update(
+        feeds,
+        updater,
+        |update| {
+            attempt.begin(app, &update.version);
+            app.state::<Shell>().app_update.begin_install();
+        },
+        |chunk, total| app.state::<Shell>().app_update.downloaded(chunk, total),
+    )
+    .await
+    .map_err(|failed| {
+        attempt.failed(app, failed.class);
+        failed.problem
+    })
 }
 
 /**
@@ -4774,6 +4854,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 "the local container runtime is unavailable",
             )
         })?;
+    // What the server this Start raised was given, read back from it: none for an installation
+    // whose Compose file is an earlier release's, which runs that release's server.
+    learn_install_token(&shell, &root, &address);
     let broker = start_host_access(&app, &root, ports.server, address, host_token.clone())?;
     *shell.host_access.lock().unwrap() = Some(broker);
     preparation::record_launch(&root, requested_harness.as_ref())?;
@@ -6573,7 +6656,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let (url, address) = owned_app(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
-    hold_shown_deployment(&app, &shell, &root, address, ports.server);
+    hold_shown_deployment(&app, &shell, &root, address.clone(), ports.server);
     refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
@@ -6592,12 +6675,13 @@ fn show_openbot_on<R: tauri::Runtime>(
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there to show it in")?;
+    let destination: tauri::Url = destination
+        .parse()
+        .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?;
+    // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
+    let destination = owned_app_entry(&shell, &root, &address, &destination);
     let outcome = window
-        .navigate(
-            destination
-                .parse()
-                .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?,
-        )
+        .navigate(destination)
         .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
     log::info!("[show] navigate returned {outcome:?}");
     // Setup is over and OpenBot is what the person uses now: in front, wherever they had gone
@@ -8260,10 +8344,11 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     {
         return false;
     }
-    let Some(mut url) = ports_for_shell(app)
+    let shell = app.state::<Shell>();
+    let Some((mut url, address)) = ports_for_shell(app)
         .ok()
-        .and_then(|ports| owned_app_url(&app.state::<Shell>(), &root, &ports))
-        .and_then(|url| url.parse::<tauri::Url>().ok())
+        .and_then(|ports| owned_app(&shell, &root, &ports))
+        .and_then(|(url, address)| Some((url.parse::<tauri::Url>().ok()?, address)))
     else {
         return false;
     };
@@ -8272,7 +8357,9 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     };
     url.set_path(COMPUTER_SETTINGS_PATH);
     trust_owned_app(app, url.as_str());
-    if window.navigate(url).is_err() {
+    // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
+    let load = owned_app_entry(&shell, &root, &address, &url);
+    if window.navigate(load).is_err() {
         return false;
     }
     let _ = window.show();
@@ -8798,6 +8885,8 @@ fn serve_shown_deployment<R: tauri::Runtime>(
     address: engine::Address,
     server_port: u16,
 ) {
+    // The install's token too, which the window enters the app with.
+    learn_install_token(shell, root, &address);
     let token = match server_host_token(&address, root) {
         Ok(Some(token)) => token,
         Ok(None) => {
@@ -8833,6 +8922,66 @@ fn server_host_token(address: &engine::Address, root: &Path) -> Result<Option<St
 #[cfg(test)]
 fn server_host_token(_address: &engine::Address, root: &Path) -> Result<Option<String>, String> {
     Ok(tests::host_token_given_to_server(root))
+}
+
+/// The install's token `root`'s running `server` container was given, asked of the engine that
+/// holds it.
+#[cfg(not(test))]
+fn server_install_token(address: &engine::Address, root: &Path) -> Result<Option<String>, String> {
+    stack::server_install_token(address, root)
+}
+
+/// Tests never ask a real engine, and no server they describe was given an install's token.
+#[cfg(test)]
+fn server_install_token(
+    _address: &engine::Address,
+    _root: &Path,
+) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+/// Read the install's token `root`'s server was given, and remember it for this session. A Start
+/// and a deployment the window takes over both learn it here, so the window enters the OpenBot they
+/// show with exactly the token that server checks. Not remembered when it could not be read: the
+/// next window that opens the app asks again.
+fn learn_install_token(shell: &Shell, root: &Path, address: &engine::Address) -> Option<String> {
+    match server_install_token(address, root) {
+        Ok(token) => {
+            *shell.install_token.lock().unwrap() = Some((root.to_path_buf(), token.clone()));
+            token
+        }
+        Err(error) => {
+            log::warn!("[install-token] could not read the token the server was given: {error}");
+            None
+        }
+    }
+}
+
+/// The install's token `root`'s server was given, as this session learned it, or read now.
+fn install_token_for(shell: &Shell, root: &Path, address: &engine::Address) -> Option<String> {
+    let known = shell.install_token.lock().unwrap().clone();
+    match known {
+        Some((known, token)) if known == root => token,
+        _ => learn_install_token(shell, root, address),
+    }
+}
+
+/**
+Where a window opens `page` of the owned OpenBot at `root`: through its entry address, which leaves the
+webview the install's cookie and goes on to `page`, when that server was given a token; and `page`
+itself for one from a release before it, which has no entry address. Every native load of the owned
+app goes through here. A load the page makes itself, on the same origin, carries the cookie already.
+*/
+fn owned_app_entry(
+    shell: &Shell,
+    root: &Path,
+    address: &engine::Address,
+    page: &tauri::Url,
+) -> tauri::Url {
+    openbot_desktop_lib::install_token::entry(
+        page,
+        install_token_for(shell, root, address).as_deref(),
+    )
 }
 
 /// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
@@ -8939,6 +9088,13 @@ fn show_test_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
         return;
     };
     trust_owned_app(app, address);
+    // A test's own OpenBot, given its install's token the way start.sh gives it, in the environment.
+    let url = openbot_desktop_lib::install_token::entry(
+        &url,
+        std::env::var(openbot_desktop_lib::install_token::NAME)
+            .ok()
+            .as_deref(),
+    );
     if let Err(error) = window.navigate(url) {
         log::warn!("[window] could not show the test OpenBot: {error}");
     }
@@ -8984,10 +9140,21 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
             installed: Box::new(|| true),
             app_answers: Box::new(move || port.is_some_and(recorder_ping_app_answers)),
             app_url: Box::new(move || Some(url.clone())),
+            // The test's own OpenBot, given its token the way start.sh gives it, in the environment.
+            install_token: Box::new(|| {
+                std::env::var(openbot_desktop_lib::install_token::NAME)
+                    .ok()
+                    .filter(|token| !token.is_empty())
+            }),
         };
     }
     let installed = root.is_some();
     let ping_root = root.clone();
+    let token_root = root.clone();
+    // The engine whose `server` container `app_url` proved publishes the app, which the install's
+    // token is then read from: the host is a process of its own and holds no engine.
+    let publisher: std::sync::Arc<Mutex<Option<engine::Address>>> = Default::default();
+    let proved = publisher.clone();
     recorder_host::HostEnvironment {
         installed: Box::new(move || installed),
         // No ownership check: a ping proves nothing and sends nothing secret, and the handoff checks before it does.
@@ -9000,7 +9167,17 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
         app_url: Box::new(move || {
             let root = root.as_deref()?;
             let ports = openbot_env::Ports::read(root).ok()?;
-            app_url_published_by(None, root, &ports)
+            let (url, address) = app_published_by(None, root, &ports)?;
+            *proved.lock().unwrap() = Some(address);
+            Some(url)
+        }),
+        install_token: Box::new(move || {
+            let root = token_root.as_deref()?;
+            let address = publisher.lock().unwrap().clone()?;
+            server_install_token(&address, root).unwrap_or_else(|error| {
+                eprintln!("[recorder-host] could not read the install's token: {error}");
+                None
+            })
         }),
     }
 }
@@ -10946,26 +11123,32 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     };
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
+    // The page the window belongs on, and the address it loads it at: for the owned app, through its
+    // entry address (`owned_app_entry`), and only when the window is not on that app already.
     let destination = startup.as_ref().and_then(|_| {
         let root = cleanup_root(&shell, &stack::default_root());
         if let Some((url, address)) = (!recovery_required_or_pending_quit_notice(&shell, &root))
             .then(|| owned_app(&shell, &root, ports))
             .flatten()
         {
-            hold_shown_deployment(app, &shell, &root, address, ports.server);
+            hold_shown_deployment(app, &shell, &root, address.clone(), ports.server);
             refresh_menus(app);
             trust_owned_app(app, &url);
-            url.parse().ok()
+            let page: tauri::Url = url.parse().ok()?;
+            let entered = owned_app_entry(&shell, &root, &address, &page);
+            Some((page, entered))
         } else {
-            setup_destination(app).ok()
+            setup_destination(app)
+                .ok()
+                .map(|setup| (setup.clone(), setup))
         }
     });
-    if let Some(destination) = destination {
+    if let Some((destination, load)) = destination {
         let already_showing = window
             .url()
             .is_ok_and(|current| same_window_app(&current, &destination));
         if !already_showing {
-            let _ = window.navigate(destination);
+            let _ = window.navigate(load);
         }
     }
     let _ = window.show();
@@ -12556,6 +12739,13 @@ fn main() {
             {
                 remember_selected_root(&app.state::<Shell>(), &root);
             }
+            // The first launch of a new version says the update that brought it, once, with the
+            // installation's release to know where it came from and whether a move is still due.
+            let installed = (!connected)
+                .then(|| deployment::installed(&selected_root_or_default(app.handle())))
+                .flatten()
+                .map(|found| found.version);
+            desktop_telemetry::observe_launch(app.handle(), installed.as_deref());
             // Where the Compose provider OpenBot installs itself lives, OpenBot's own Docker
             // configuration (the one without the person's credential helper) and the registry
             // mirror k3d writes into a new back end node. Before anything asks for an engine.
@@ -12640,6 +12830,12 @@ fn main() {
                             "OpenBot couldn't start shutting down. Try Quit again.",
                         );
                     }
+                }
+                // Windows ending the session exits here without Quit. With a fix's restart owed,
+                // that is setup's planned restart, from the Start menu as the screen offers, not an
+                // abandonment. After Quit, setup already said how it ended and this adds nothing.
+                tauri::RunEvent::Exit if windows_restart_owed(app) => {
+                    desktop_telemetry::restart_required(app);
                 }
                 _ => {}
             }
@@ -13065,7 +13261,7 @@ mod update_download_fallback_tests {
                 }
                 builder.build()
             },
-            || {
+            |_| {
                 begun.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             },
             |chunk, _| {
@@ -13110,6 +13306,123 @@ mod update_download_fallback_tests {
             logged.contains(&source),
             "the log names where it came from: {logged:#?}"
         );
+    }
+
+    /**
+    OpenBot updating itself, through the real updater, as `install_app_update_steps` downloads it:
+    `update_started`, with this version and the one the feed names, as the download begins. An
+    archive whose signature does not match is `update_failed` (`signature_invalid`), with both
+    versions again. A genuine one leaves the update started, and the new version's first launch
+    completes it. With usage data off, nothing is recorded at all.
+    */
+    #[test]
+    fn an_update_says_it_started_and_how_it_ended() {
+        let _ports = test_support::hold_ports();
+        for sharing in [true, false] {
+            for genuine in [false, true] {
+                let archive = Arc::new(Mutex::new(String::new()));
+                let named = archive.clone();
+                let (base, _) = serve(move |path| match path {
+                    "/latest.json" => Some(feed(&named.lock().unwrap())),
+                    "/OpenBot.app.tar.gz" if genuine => Some(PACKAGE.to_vec()),
+                    "/OpenBot.app.tar.gz" => Some(b"not the archive that was signed\n".to_vec()),
+                    _ => None,
+                });
+                *archive.lock().unwrap() = format!("{base}/OpenBot.app.tar.gz");
+                let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+                context.config_mut().plugins.0.insert(
+                    "updater".into(),
+                    serde_json::json!({
+                        "pubkey": PUBKEY,
+                        "endpoints": [format!("{base}/latest.json")],
+                        "dangerousInsecureTransportProtocol": true,
+                    }),
+                );
+                let data = test_support::temp_root("app-update-telemetry");
+                use tauri_plugin_updater as updater_plugin;
+                let app = tauri::test::mock_builder()
+                    .plugin(updater_plugin::Builder::new().build())
+                    .manage(Shell::default())
+                    .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                        data.clone(),
+                        sharing,
+                    ))
+                    .build(context)
+                    .unwrap();
+                let feeds = app_update::endpoints(app.config().plugins.0.get("updater")).unwrap();
+                let attempt = desktop_telemetry::AppUpdate::default();
+                let downloaded = tauri::async_runtime::block_on(download_app_update_recorded(
+                    app.handle(),
+                    &attempt,
+                    &feeds,
+                    |feed| {
+                        use tauri_plugin_updater::UpdaterExt;
+                        let mut builder = app.updater_builder().on_before_exit(|| {});
+                        if let Some(feed) = feed {
+                            builder = builder.endpoints(vec![feed])?;
+                        }
+                        builder.build()
+                    },
+                ));
+                assert_eq!(downloaded.is_ok(), genuine, "sharing {sharing}");
+                let queued: Vec<_> = app
+                    .state::<desktop_telemetry::DesktopTelemetry>()
+                    .queued()
+                    .iter()
+                    .map(|event| serde_json::to_value(event).unwrap())
+                    .collect();
+                drop(app);
+                if !sharing {
+                    assert!(queued.is_empty(), "{queued:?}");
+                    assert!(!telemetry::state_path(&data).exists());
+                    continue;
+                }
+                let started = serde_json::json!({
+                    "kind": "update_started",
+                    "from_version": "1.2.3",
+                    "to_version": "99.0.0"
+                });
+                if !genuine {
+                    assert_eq!(queued.len(), 2, "{queued:?}");
+                    assert_eq!(queued[0], started);
+                    assert_eq!(queued[1]["kind"], "update_failed");
+                    assert_eq!(queued[1]["from_version"], "1.2.3");
+                    assert_eq!(queued[1]["to_version"], "99.0.0");
+                    assert_eq!(queued[1]["failure_class"], "signature_invalid");
+                    assert!(queued[1]["duration_ms"].is_u64());
+                    continue;
+                }
+                assert_eq!(queued, std::slice::from_ref(&started));
+                // The restart: the new version opens the same usage data.
+                let relaunched = telemetry::Telemetry::open_with_env(
+                    &data,
+                    telemetry::Context {
+                        distribution: telemetry::Distribution::Desktop,
+                        app_version: telemetry::AppVersion::parse("99.0.0").unwrap(),
+                        platform: telemetry::Platform::Macos,
+                        arch: telemetry::Architecture::Aarch64,
+                        os_version: None,
+                        engine: telemetry::Engine::None,
+                        runtime_env: telemetry::RuntimeEnv::Test,
+                    },
+                    telemetry::Config::disabled_for_tests(),
+                    telemetry::EnvOverride::Enabled,
+                )
+                .unwrap();
+                let queued: Vec<_> = relaunched
+                    .snapshot()
+                    .unwrap()
+                    .queue
+                    .iter()
+                    .map(|event| serde_json::to_value(&event.data).unwrap())
+                    .collect();
+                assert_eq!(queued.len(), 2, "{queued:?}");
+                assert_eq!(queued[0], started);
+                assert_eq!(queued[1]["kind"], "update_completed");
+                assert_eq!(queued[1]["from_version"], "1.2.3");
+                assert_eq!(queued[1]["to_version"], "99.0.0");
+            }
+        }
     }
 }
 
@@ -21320,6 +21633,221 @@ fn main() {
         assert_eq!(report.unwrap().outcome, local_eval::Outcome::Failed);
         app.state::<desktop_telemetry::DesktopTelemetry>().deliver();
         assert!(sink.next(std::time::Duration::from_secs(2)).is_none());
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// The Intelligence release this app's CLI installs, in the update tests below.
+    const BUNDLED_RELEASE: &str = "0.16.0-rc.3";
+
+    /// The CLI's refusal of a `local update`, as its `LocalUpdateBlocker` prints it with `--json`:
+    /// `incompatible_release`, whichever of its three checks refused, with only its sentence to
+    /// say which.
+    fn update_refused(summary: &str) -> String {
+        serde_json::json!({
+            "version": 1,
+            "command": "local update",
+            "status": "blocked",
+            "error": null,
+            "nextAction": {
+                "reason": "incompatible_release",
+                "summary": summary,
+                "instructions": ["copilotkit local status --stack local-abc123"],
+                "resumeCommand": "copilotkit local status --stack local-abc123",
+                "url": null,
+                "linkLabel": null,
+                "linkFile": null,
+                "caveats": [],
+                "requiredEnvVars": [],
+                "artifacts": []
+            },
+            "diagnostics": []
+        })
+        .to_string()
+    }
+
+    /// `local status` for a ready stack on `installed`, with the update the CLI keeps on record
+    /// when it did not finish, if any.
+    fn status_on(installed: &str, update: serde_json::Value) -> String {
+        serde_json::json!({
+            "version": 1,
+            "command": "local status",
+            "status": "completed",
+            "stack": {
+                "id": "local-abc123",
+                "installedRelease": installed,
+                "step": "ready",
+                "urls": {
+                    "api": "http://localhost:8082",
+                    "dashboard": "http://intelligence.localhost:8080",
+                    "gateway": "ws://[::1]:4401"
+                },
+                "failedStep": null,
+                "update": update,
+                "observed": {
+                    "running": true,
+                    "services": [{ "name": "cpki-app-api-test", "phase": "Running", "ready": true }]
+                }
+            },
+            "auth": { "running": true },
+            "nextAction": null,
+            "error": null,
+            "diagnostics": []
+        })
+        .to_string()
+    }
+
+    /// `local update` through `run_local_eval`, as the window runs it, against a CLI that answers
+    /// `update` with `refusal` and `status` with `status`: the window's answer, and the
+    /// `setup_failed` events it recorded.
+    fn update_through_the_command(
+        cli: &desktop_telemetry::fake_cli::FakeCli,
+        refusal: &str,
+        status: &str,
+        label: &str,
+    ) -> (
+        Result<local_eval::Report, local_eval::Failure>,
+        Vec<telemetry::EventData>,
+    ) {
+        cli.forget_calls();
+        cli.answer_to("update", refusal, 2);
+        cli.answer_to("status", status, 0);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root(&format!("{label}-telemetry")),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let report = tauri::async_runtime::block_on(run_local_eval(
+            app.handle().clone(),
+            format!("{label}-attempt"),
+            local_eval::Action::Update,
+            "local-abc123".into(),
+        ));
+        assert!(cli.calls().contains("local update"), "{}", cli.calls());
+        (report, setup_failures(&app))
+    }
+
+    /// Found in production telemetry from 1.0.2 to 1.1.0-rc.1: every upgrader sent
+    /// `setup_failed` at `local_update` with `incompatible_release`, and the window said the
+    /// services couldn't update, for a stack that already ran the release. The CLI refuses an
+    /// update that does not move to a newer release with the same reason as a real
+    /// incompatibility. A stack on the release the update would install, or past it, now has
+    /// nothing to update: the window gets a completed answer and no `setup_failed` is sent. That
+    /// holds whether the release is the one this app's CLI installs or the one an update the CLI
+    /// keeps on record was moving to.
+    #[test]
+    fn an_update_to_the_release_the_stack_already_runs_is_not_a_setup_failure() {
+        if crate::test_support::isolated_process(
+            "tests::an_update_to_the_release_the_stack_already_runs_is_not_a_setup_failure",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-update-already-on-it-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-already-cli", false);
+        let on_record = |to: &str| {
+            serde_json::json!({
+                "attemptedRelease": to,
+                "state": "prepared",
+                "observedSchema": null,
+                "recoveryCommand": "copilotkit local update --stack local-abc123"
+            })
+        };
+        for (installed, update) in [
+            (BUNDLED_RELEASE, serde_json::Value::Null),
+            ("0.16.0", serde_json::Value::Null),
+            (BUNDLED_RELEASE, on_record(BUNDLED_RELEASE)),
+            ("0.16.0", on_record(BUNDLED_RELEASE)),
+        ] {
+            let (report, failures) = update_through_the_command(
+                &cli,
+                &update_refused(&format!(
+                    "This stack already runs {installed}. Local update only moves to a newer release."
+                )),
+                &status_on(installed, update.clone()),
+                "openbot-update-already-on-it",
+            );
+            assert_eq!(failures, vec![], "{installed} {update}");
+            let report = report.expect("the CLI answered");
+            assert_eq!(
+                report.outcome,
+                local_eval::Outcome::Completed,
+                "{installed} {update}"
+            );
+            assert_eq!(report.reason, None, "{installed} {update}");
+            assert_eq!(report.update_to, None, "{installed} {update}");
+            assert_eq!(
+                report.stack.map(|stack| stack.installed_release).as_deref(),
+                Some(installed)
+            );
+        }
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// The CLI's other two `incompatible_release` refusals are real: a release whose database
+    /// schema cannot be migrated in place, and one that needs a new local cluster. On a stack
+    /// behind the release, each is still handed to the window as refused and sent as one
+    /// `setup_failed` at `local_update`, exactly as before. So is a refusal when the stack's
+    /// release cannot be read, or its status does not answer: nothing says it is already on it.
+    #[test]
+    fn a_real_incompatible_release_is_still_a_setup_failure() {
+        if crate::test_support::isolated_process(
+            "tests::a_real_incompatible_release_is_still_a_setup_failure",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-update-incompatible-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
+        let cli =
+            desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-incompatible-cli", false);
+        let schema = format!(
+            "Release {BUNDLED_RELEASE} is not compatible with this stack's database, so it cannot update it in place. Saved data is unchanged."
+        );
+        let cluster = format!(
+            "Release {BUNDLED_RELEASE} needs a new local Kubernetes cluster, so it cannot update this stack in place. Saved data is unchanged."
+        );
+        for (refusal, status) in [
+            (&schema, status_on("0.16.0-rc.2", serde_json::Value::Null)),
+            (&cluster, status_on("0.15.1", serde_json::Value::Null)),
+            (&schema, status_on("latest", serde_json::Value::Null)),
+            (&schema, "not json".to_owned()),
+        ] {
+            let (report, failures) = update_through_the_command(
+                &cli,
+                &update_refused(refusal),
+                &status,
+                "openbot-update-incompatible",
+            );
+            let report = report.expect("the CLI answered");
+            assert_eq!(report.outcome, local_eval::Outcome::Blocked, "{status}");
+            assert_eq!(
+                report.reason,
+                Some(local_eval::Reason::IncompatibleRelease),
+                "{status}"
+            );
+            assert_eq!(
+                failures,
+                vec![telemetry::EventData::SetupFailed {
+                    step: telemetry::Step::Install,
+                    error_class: telemetry::SetupErrorClass::Unknown,
+                    failing_step: Some(telemetry::FailingStep::LocalUpdate),
+                    cli_reason: Some(telemetry::CliReason::IncompatibleRelease),
+                    cli_failure: None,
+                    resources: None,
+                }],
+                "{status}"
+            );
+        }
         let _ = std::fs::remove_dir_all(&cli.dir);
     }
 

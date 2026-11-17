@@ -236,6 +236,16 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  /*
+   * The release this build is made for, which an error report from the app carries
+   * (lib/error-reporting.tsx). An image built for a release sets OPENBOT_BUILD_VERSION; any other
+   * build leaves it empty, and the report then says no version.
+   */
+  define: {
+    __OPENBOT_APP_VERSION__: JSON.stringify(
+      process.env.OPENBOT_BUILD_VERSION ?? "",
+    ),
+  },
   server: serving,
   preview: serving,
   build: {

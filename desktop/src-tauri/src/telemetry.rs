@@ -101,6 +101,20 @@ pub struct Telemetry {
     session_last_step_viewed: Mutex<Option<Step>>,
     flush_lock: Mutex<()>,
     client: Client,
+    /// What this launch found about the version that ran before it, for `observe_launch` once.
+    launch: Mutex<Option<LaunchSeen>>,
+}
+
+/// The version that last ran, as this launch found it in the saved state.
+#[derive(Debug, Clone)]
+struct LaunchSeen {
+    /// The version the state says last ran: its own record, or for a state saved before there was
+    /// one, the newest event it still holds.
+    previous: Option<AppVersion>,
+    /// The state was saved by a version that kept no record of itself (1.0.3 and before).
+    legacy: bool,
+    /// An update this app ran itself ended at this launch, and has said so.
+    update_ended: bool,
 }
 
 impl Telemetry {
@@ -121,7 +135,8 @@ impl Telemetry {
         }
 
         fs::create_dir_all(data_dir.as_ref())?;
-        let mut state = if state_path.exists() {
+        let existed = state_path.exists();
+        let mut state = if existed {
             let state = serde_json::from_slice::<PersistedState>(&fs::read(&state_path)?)?;
             state.validate()?;
             state
@@ -129,10 +144,36 @@ impl Telemetry {
             PersistedState::new(new_uuid())
         };
 
+        // The version that ran before this one, read before this launch adds anything of its own.
+        let legacy = existed && state.last_run_version.is_none();
+        let previous = state.last_run_version.clone().or_else(|| {
+            legacy
+                .then(|| {
+                    state
+                        .queue
+                        .last()
+                        .map(|event| event.context.app_version.clone())
+                })
+                .flatten()
+        });
+        state.last_run_version = Some(context.app_version.clone());
+        let mut update_ended = false;
+
         if !state.activated {
             if let Some(step) = state.last_step.take() {
                 state.push_bounded(
                     Event::new(EventData::SetupAbandoned { step }, context.clone()),
+                    normalized_max_queue(config.max_queue),
+                );
+            }
+        }
+        // An update the last launch started ends here: this launch is the version it was moving to,
+        // or still the one it was moving from.
+        if let Some(update) = state.update.take() {
+            if let Some(ended) = update.ended(&context.app_version) {
+                update_ended = true;
+                state.push_bounded(
+                    Event::new(ended, context.clone()),
                     normalized_max_queue(config.max_queue),
                 );
             }
@@ -147,7 +188,87 @@ impl Telemetry {
             session_last_step_viewed: Mutex::new(None),
             flush_lock: Mutex::new(()),
             client: client()?,
+            launch: Mutex::new(Some(LaunchSeen {
+                previous,
+                legacy,
+                update_ended,
+            })),
         }))
+    }
+
+    /**
+    The first launch of a new version says the update that brought it, once: `update_completed` from
+    the version that last ran to this one, marked `observed_at_first_launch`. This is how a move from
+    a version that never said its own updates (1.0.3) is seen at all.
+
+    `installed` is the release of the installation on this computer, if there is one. It names the
+    version that last ran when the saved state predates that record. When it is that older version,
+    the installation is still to be moved to this release, so the update is said only once the move
+    has gone through (`installation_settled`); a move that is put back or fails says
+    `update_restored` or `update_failed` instead, and this one is never said. An update this app ran
+    itself already ended with its own `update_completed` at this launch, and is not said twice.
+    Called once a launch; with usage data off it records nothing.
+    */
+    pub fn observe_launch(&self, installed: Option<AppVersion>) {
+        let Some(seen) = self.launch.lock().ok().and_then(|mut seen| seen.take()) else {
+            return;
+        };
+        if seen.update_ended {
+            return;
+        }
+        let Some(previous) = seen
+            .previous
+            .or_else(|| seen.legacy.then(|| installed.clone()).flatten())
+        else {
+            return;
+        };
+        let Ok(context) = self.context.lock().map(|context| context.clone()) else {
+            return;
+        };
+        if previous == context.app_version {
+            return;
+        }
+        let Ok(mut guard) = self.state.lock() else {
+            return;
+        };
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let observed = FirstLaunch {
+            from_version: previous.clone(),
+            to_version: context.app_version.clone(),
+        };
+        if installed.as_ref() == Some(&previous) {
+            state.first_launch = Some(observed);
+        } else {
+            state.push_bounded(
+                Event::new(observed.completed(), context),
+                normalized_max_queue(self.config.max_queue),
+            );
+        }
+        let _ = write_state(&self.state_path, state);
+    }
+
+    /// The installation is on this release: moved to it, or found already there. A first launch
+    /// waiting on it says its update now (`observe_launch`).
+    pub fn installation_settled(&self) {
+        let Ok(context) = self.context.lock().map(|context| context.clone()) else {
+            return;
+        };
+        let Ok(mut guard) = self.state.lock() else {
+            return;
+        };
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        let Some(observed) = state.first_launch.take() else {
+            return;
+        };
+        state.push_bounded(
+            Event::new(observed.completed(), context),
+            normalized_max_queue(self.config.max_queue),
+        );
+        let _ = write_state(&self.state_path, state);
     }
 
     fn disabled(state_path: PathBuf, context: Context, config: Config) -> Result<Self> {
@@ -159,6 +280,7 @@ impl Telemetry {
             session_last_step_viewed: Mutex::new(None),
             flush_lock: Mutex::new(()),
             client: client()?,
+            launch: Mutex::new(None),
         })
     }
 
@@ -250,6 +372,14 @@ impl Telemetry {
         Ok(())
     }
 
+    /// The version every event is recorded under, as `Context` says it.
+    pub fn app_version(&self) -> Option<AppVersion> {
+        self.context
+            .lock()
+            .ok()
+            .map(|context| context.app_version.clone())
+    }
+
     pub fn update_engine(&self, engine: Engine) -> Result<()> {
         let mut context = self.context.lock().map_err(|_| TelemetryError::Poisoned)?;
         context.engine = engine;
@@ -293,6 +423,32 @@ impl Telemetry {
             return Ok(());
         };
 
+        // An update started is kept until it ends, so the version it restarts into can say how.
+        match &data {
+            EventData::UpdateStarted {
+                from_version,
+                to_version,
+            } => {
+                state.update = Some(PendingUpdate {
+                    from_version: from_version.clone(),
+                    to_version: to_version.clone(),
+                    started_at_ms: now_ms(),
+                });
+            }
+            EventData::UpdateCompleted { .. } | EventData::UpdateFailed { .. } => {
+                state.update = None;
+            }
+            _ => {}
+        }
+        // A move of the installation that was put back or failed says so itself: the first launch
+        // waiting on it says nothing.
+        if matches!(
+            data,
+            EventData::UpdateRestored { .. } | EventData::UpdateFailed { .. }
+        ) {
+            state.first_launch = None;
+        }
+
         match &data {
             EventData::StepViewed { step } => {
                 let mut last_step = self
@@ -316,7 +472,9 @@ impl Telemetry {
                     .lock()
                     .map_err(|_| TelemetryError::Poisoned)? = None;
             }
-            EventData::SetupAbandoned { .. } => {
+            // Both end the setup session at its step: neither this launch's quit nor the next
+            // launch says it again.
+            EventData::SetupAbandoned { .. } | EventData::SetupRestartRequired { .. } => {
                 if state.activated {
                     return Ok(());
                 }
@@ -385,7 +543,7 @@ impl Telemetry {
                 .client
                 .post(endpoint)
                 .header("X-CopilotKit-Telemetry-Id", &install_id)
-                .json(&event.to_sink_payload())
+                .json(&event.to_sink_payload(&install_id))
                 .send();
             match response {
                 Ok(response) if response.status().is_success() => {
@@ -407,17 +565,33 @@ impl Telemetry {
         }
     }
 
+    /// The setup step this launch is on, while setup has not yet activated.
+    fn setup_step(&self) -> Result<Option<Step>> {
+        let guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        Ok(guard
+            .as_ref()
+            .and_then(|state| (!state.activated).then_some(state.last_step).flatten()))
+    }
+
     pub fn shutdown(&self) -> Result<()> {
-        let step = {
-            let guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
-            guard
-                .as_ref()
-                .and_then(|state| (!state.activated).then_some(state.last_step).flatten())
-        };
-        if let Some(step) = step {
+        if let Some(step) = self.setup_step()? {
             self.record(EventData::SetupAbandoned { step })?;
         }
         self.flush_with_lock_wait(FLUSH_BUDGET)
+    }
+
+    /**
+    Windows is restarting for the fix setup asked for (Windows Subsystem for Linux), during setup:
+    `setup_restart_required` at the step it is on, saved before Windows ends the app. Setup goes on
+    after the restart under the same installation, so the exit is not an abandonment: neither this
+    launch nor the next one says `setup_abandoned` for it. Nothing once setup has activated, or
+    when this setup session already ended.
+    */
+    pub fn restart_required(&self) -> Result<()> {
+        if let Some(step) = self.setup_step()? {
+            self.record(EventData::SetupRestartRequired { step })?;
+        }
+        Ok(())
     }
 
     pub fn snapshot(&self) -> Result<PersistedState> {
@@ -544,6 +718,9 @@ pre-release its label, as in `1.0.0-rc.5`. Cut at the first `-`, every 1.0 relea
 
 The label is a closed word (`alpha`, `beta`, `rc`, `dev`, `pre`, `preview`, `canary`) with at most
 one number after a dot. Anything else after the `-` is not sent: only the numeric part is, as before.
+
+An internal build (`1.1.0-internal.1263.gabc1234`) keeps the word `internal` and nothing after it:
+`1.1.0-internal`, so it is never counted as the release it was cut before.
 */
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppVersion {
@@ -560,6 +737,8 @@ pub enum PrereleaseLabel {
     Pre,
     Preview,
     Canary,
+    /// An internal build, made from any commit. Never with a number.
+    Internal,
 }
 
 impl PrereleaseLabel {
@@ -572,6 +751,7 @@ impl PrereleaseLabel {
             "pre" => Self::Pre,
             "preview" => Self::Preview,
             "canary" => Self::Canary,
+            "internal" => Self::Internal,
             _ => return None,
         })
     }
@@ -585,6 +765,7 @@ impl PrereleaseLabel {
             Self::Pre => "pre",
             Self::Preview => "preview",
             Self::Canary => "canary",
+            Self::Internal => "internal",
         }
     }
 }
@@ -622,6 +803,11 @@ impl AppVersion {
                         })
                     })
                     .transpose()?;
+                if word == PrereleaseLabel::Internal && number.is_some() {
+                    return Err(TelemetryError::InvalidState(
+                        "an internal build's label has no number".into(),
+                    ));
+                }
                 Some((word, number))
             }
         };
@@ -631,17 +817,22 @@ impl AppVersion {
         })
     }
 
-    /// The version the app was built as, keeping a release candidate's label. A label outside the
-    /// closed set keeps only the numeric part, as every version did before. None when even that
-    /// is not a numeric version.
+    /// The version the app was built as, keeping a release candidate's label, and an internal
+    /// build's word without the commit count and hash after it. A label outside the closed set
+    /// keeps only the numeric part, as every version did before. None when even that is not a
+    /// numeric version.
     pub fn from_package(value: &str) -> Option<Self> {
         Self::parse(value).ok().or_else(|| {
-            NumericVersion::parse(value.split(['-', '+']).next()?)
-                .ok()
-                .map(|numeric| Self {
-                    numeric,
-                    prerelease: None,
-                })
+            let numeric = NumericVersion::parse(value.split(['-', '+']).next()?).ok()?;
+            let internal = value
+                .split('+')
+                .next()
+                .and_then(|version| version.split_once('-'))
+                .is_some_and(|(_, label)| label == "internal" || label.starts_with("internal."));
+            Some(Self {
+                numeric,
+                prerelease: internal.then_some((PrereleaseLabel::Internal, None)),
+            })
         })
     }
 }
@@ -709,6 +900,69 @@ pub struct PersistedState {
     pub activated: bool,
     pub last_step: Option<Step>,
     pub queue: Vec<Event>,
+    /// An update started and not yet ended, for the launch after its restart to end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<PendingUpdate>,
+    /// The version that ran last, so the first launch of another one can say the update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_version: Option<AppVersion>,
+    /// A first launch's update waiting on the installation's move to this release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_launch: Option<FirstLaunch>,
+}
+
+/// An update seen by the first launch of the version it brought: from the version that last ran.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirstLaunch {
+    pub from_version: AppVersion,
+    pub to_version: AppVersion,
+}
+
+impl FirstLaunch {
+    fn completed(self) -> EventData {
+        EventData::UpdateCompleted {
+            from_version: self.from_version,
+            to_version: self.to_version,
+            duration_ms: None,
+            observed_at_first_launch: true,
+        }
+    }
+}
+
+/// OpenBot updating itself: the version it moves from and to, and when its download began.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PendingUpdate {
+    pub from_version: AppVersion,
+    pub to_version: AppVersion,
+    pub started_at_ms: u64,
+}
+
+impl PendingUpdate {
+    /// How the update ended, seen from the first launch after it: `update_completed` when that is
+    /// the version it was moving to, `update_failed` (`restart_failed`) when it is still the one it
+    /// was moving from, and nothing when it is some other version.
+    fn ended(self, launched: &AppVersion) -> Option<EventData> {
+        let duration_ms = now_ms().saturating_sub(self.started_at_ms);
+        if *launched == self.to_version {
+            Some(EventData::UpdateCompleted {
+                from_version: self.from_version,
+                to_version: self.to_version,
+                duration_ms: Some(duration_ms),
+                observed_at_first_launch: false,
+            })
+        } else if *launched == self.from_version {
+            Some(EventData::UpdateFailed {
+                from_version: self.from_version,
+                to_version: self.to_version,
+                duration_ms,
+                failure_class: UpdateFailureClass::RestartFailed,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl PersistedState {
@@ -720,6 +974,9 @@ impl PersistedState {
             activated: false,
             last_step: None,
             queue: Vec::new(),
+            update: None,
+            last_run_version: None,
+            first_launch: None,
         }
     }
 
@@ -813,12 +1070,17 @@ impl Event {
         Ok(())
     }
 
-    fn to_sink_payload(&self) -> SinkPayload {
+    /// What the sink receives for this event, sent under `deployment_id`: the install id the
+    /// request's `X-CopilotKit-Telemetry-Id` names. The server's own events carry the same id as
+    /// `deployment_id` (the desktop hands it over as `CPK_TELEMETRY_ID`), so the two join on it.
+    fn to_sink_payload(&self, deployment_id: &str) -> SinkPayload {
+        let mut global_properties = self.context.to_global_properties();
+        global_properties["deployment_id"] = serde_json::json!(deployment_id);
         SinkPayload {
             event: self.event_name.clone(),
             event_id: self.event_id.clone(),
             properties: serde_json::to_value(&self.data).unwrap_or_else(|_| serde_json::json!({})),
-            global_properties: self.context.to_global_properties(),
+            global_properties,
             package: SinkPackage {
                 name: "openbot-desktop".to_string(),
                 version: self.context.app_version.to_string(),
@@ -878,6 +1140,11 @@ pub enum EventData {
     SetupAbandoned {
         step: Step,
     },
+    /// Setup ended its session for the Windows restart a fix needs (`Telemetry::restart_required`),
+    /// at the last screen the window showed. Setup goes on after it, under the same installation.
+    SetupRestartRequired {
+        step: Step,
+    },
     /// The Account step's CopilotKit sign-in: started, and how it ended, with how long the person
     /// was in their browser. `restored` is an account check that found this computer already
     /// signed in, once a launch.
@@ -904,6 +1171,39 @@ pub enum EventData {
         step: FailingStep,
         stalled_seconds: u64,
     },
+    /// OpenBot updating itself to a newer release: the download of `to_version` began, in
+    /// `from_version`. Kept across the restart (`PersistedState::update`), so the first launch
+    /// after it says how it ended.
+    UpdateStarted {
+        from_version: AppVersion,
+        to_version: AppVersion,
+    },
+    /// The first launch after an update is the version it was moving to, `duration_ms` after its
+    /// download began. `observed_at_first_launch` is an update this app did not run itself, seen by
+    /// the first launch of a new version from the version that last ran (`observe_launch`), with no
+    /// duration to give.
+    UpdateCompleted {
+        from_version: AppVersion,
+        to_version: AppVersion,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        observed_at_first_launch: bool,
+    },
+    /// An update stopped, `duration_ms` after it began, for a closed reason. Said by the version
+    /// that saw it fail, or by the first launch after it when that is still `from_version`.
+    UpdateFailed {
+        from_version: AppVersion,
+        to_version: AppVersion,
+        duration_ms: u64,
+        failure_class: UpdateFailureClass,
+    },
+    /// A Start's move of the installation to the app's new release failed, and the release it was
+    /// on (`from_version`) was put back, its database included (`upgrade`).
+    UpdateRestored {
+        from_version: AppVersion,
+        to_version: AppVersion,
+    },
 }
 
 impl EventData {
@@ -919,12 +1219,55 @@ impl EventData {
             Self::SetupFailed { .. } => "oss.desktop.setup_failed",
             Self::Activated => "oss.desktop.activated",
             Self::SetupAbandoned { .. } => "oss.desktop.setup_abandoned",
+            Self::SetupRestartRequired { .. } => "oss.desktop.setup_restart_required",
             Self::SignIn { .. } => "oss.desktop.sign_in",
             Self::SetupStalled { .. } => "oss.desktop.setup_stalled",
             Self::UiStalled { .. } => "oss.desktop.ui_stalled",
+            Self::UpdateStarted { .. } => "oss.desktop.update_started",
+            Self::UpdateCompleted { .. } => "oss.desktop.update_completed",
+            Self::UpdateFailed { .. } => "oss.desktop.update_failed",
+            Self::UpdateRestored { .. } => "oss.desktop.update_restored",
         }
     }
 }
+
+/// Why an update stopped, by what the shell can tell apart: the updater's own error, or what the
+/// next launch found. Never its words.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateFailureClass {
+    /// The feed or the archive could not be reached: no connection, or it timed out.
+    NetworkUnavailable,
+    /// The archive did not come: an answer that was not it, or a feed that named none for this
+    /// computer.
+    DownloadFailed,
+    /// The archive's signature did not match the key this build carries.
+    SignatureInvalid,
+    /// The updater could not put the new version in place.
+    InstallFailed,
+    /// The system refused to let the app be replaced, or its administrator prompt was dismissed.
+    PermissionDenied,
+    /// The first launch after the update was still the version it was moving from: the installer
+    /// did not finish, or OpenBot quit before it began.
+    RestartFailed,
+    /// What failed could not be put back: the previous app, or the installation's previous release.
+    RestoreFailed,
+    /// Stop or Quit came before the new version was installed.
+    Cancelled,
+    Unknown,
+}
+
+const UPDATE_FAILURE_CLASSES: &[&str] = &[
+    "network_unavailable",
+    "download_failed",
+    "signature_invalid",
+    "install_failed",
+    "permission_denied",
+    "restart_failed",
+    "restore_failed",
+    "cancelled",
+    "unknown",
+];
 
 /// Which journey a stalled step is part of: the back end's first setup (`local setup`), its update
 /// (`local update`), OpenBot's own start, or OpenBot updating itself.
@@ -1389,9 +1732,10 @@ const CLI_FAILURES: &[&str] = &[
     "download_stalled",
 ];
 
-/// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`).
+/// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`):
+/// one of the words with at most one number, or `internal` alone.
 pub const APP_VERSION_PATTERN: &str =
-    r"^\d+(?:\.\d+){1,3}(?:-(?:alpha|beta|rc|dev|pre|preview|canary)(?:\.\d{1,9})?)?$";
+    r"^\d+(?:\.\d+){1,3}(?:-(?:(?:alpha|beta|rc|dev|pre|preview|canary)(?:\.\d{1,9})?|internal))?$";
 
 pub fn schema_json() -> serde_json::Value {
     let steps = [
@@ -1440,6 +1784,7 @@ pub fn schema_json() -> serde_json::Value {
             },
             "activated": {},
             "setup_abandoned": { "step": steps },
+            "setup_restart_required": { "step": steps },
             "sign_in": {
                 "outcome": ["started", "completed", "failed", "cancelled", "restored"],
                 "duration_ms": "option_u64",
@@ -1454,8 +1799,31 @@ pub fn schema_json() -> serde_json::Value {
             "ui_stalled": {
                 "step": FAILING_STEPS,
                 "stalled_seconds": "u64"
+            },
+            "update_started": {
+                "from_version": { "pattern": APP_VERSION_PATTERN },
+                "to_version": { "pattern": APP_VERSION_PATTERN }
+            },
+            "update_completed": {
+                "from_version": { "pattern": APP_VERSION_PATTERN },
+                "to_version": { "pattern": APP_VERSION_PATTERN },
+                "duration_ms": "option_u64",
+                "observed_at_first_launch": "bool"
+            },
+            "update_failed": {
+                "from_version": { "pattern": APP_VERSION_PATTERN },
+                "to_version": { "pattern": APP_VERSION_PATTERN },
+                "duration_ms": "u64",
+                "failure_class": UPDATE_FAILURE_CLASSES
+            },
+            "update_restored": {
+                "from_version": { "pattern": APP_VERSION_PATTERN },
+                "to_version": { "pattern": APP_VERSION_PATTERN }
             }
-        }
+        },
+        // Sent beside the context on every event: the install id the event is sent under, which
+        // the server's events carry as their own `deployment_id`.
+        "global_properties": { "deployment_id": "uuid" }
     })
 }
 
@@ -2017,6 +2385,9 @@ mod tests {
             },
             EventData::Activated,
             EventData::SetupAbandoned { step: Step::Ask },
+            EventData::SetupRestartRequired {
+                step: Step::Install,
+            },
             EventData::SignIn {
                 outcome: SignInOutcome::Cancelled,
                 duration_ms: Some(12),
@@ -2031,6 +2402,32 @@ mod tests {
             EventData::UiStalled {
                 step: FailingStep::CreateMachine,
                 stalled_seconds: 42,
+            },
+            EventData::UpdateStarted {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0-internal").unwrap(),
+            },
+            EventData::UpdateCompleted {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+                duration_ms: Some(61_000),
+                observed_at_first_launch: false,
+            },
+            EventData::UpdateCompleted {
+                from_version: AppVersion::parse("1.0.3").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+                duration_ms: None,
+                observed_at_first_launch: true,
+            },
+            EventData::UpdateFailed {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0-rc.2").unwrap(),
+                duration_ms: 3_000,
+                failure_class: UpdateFailureClass::RestoreFailed,
+            },
+            EventData::UpdateRestored {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
             },
         ]
     }
@@ -2047,7 +2444,7 @@ mod tests {
                 .is_some_and(|steps| steps.iter().any(|step| step == "connect_openbot")),
             "{listed}"
         );
-        for kind in ["step_viewed", "setup_abandoned"] {
+        for kind in ["step_viewed", "setup_abandoned", "setup_restart_required"] {
             let sent = serde_json::json!({ "kind": kind, "step": "connect_openbot" });
             let event = serde_json::from_value::<EventData>(sent.clone()).unwrap();
             assert_eq!(serde_json::to_value(event).unwrap(), sent);
@@ -2115,6 +2512,11 @@ mod tests {
                     continue;
                 }
                 if let Some(string) = child.as_str() {
+                    // A version is a closed form rather than a list: the app version's pattern.
+                    if schema[key]["pattern"] == APP_VERSION_PATTERN {
+                        assert!(AppVersion::parse(string).is_ok(), "{key}={string}");
+                        continue;
+                    }
                     let allowed = schema[key]
                         .as_array()
                         .expect("string fields must be enum arrays");
@@ -2142,6 +2544,9 @@ mod tests {
                 EventData::Activated,
                 context("1.2.3", Engine::None),
             )],
+            update: None,
+            last_run_version: None,
+            first_launch: None,
         };
         fs::write(state_path(&dir), serde_json::to_vec_pretty(&state).unwrap()).unwrap();
 
@@ -2559,6 +2964,114 @@ mod tests {
         )));
     }
 
+    /// A first Windows install that needs WSL restarts Windows. Windows ends the app without a Quit
+    /// and OpenBot opens again after sign-in. That launch sends `setup_restart_required` at the
+    /// step, and never `setup_abandoned`; setup then goes on under the same installation id.
+    #[test]
+    fn a_planned_windows_restart_sends_restart_required_and_setup_goes_on_after_it() {
+        let dir = temp_dir("windows-restart");
+        let before = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let install_id = before.install_id().unwrap();
+        before
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        // Restart now: saved, then Windows ends the process. No Quit, so no `shutdown`.
+        before.restart_required().unwrap();
+        drop(before);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            vec![
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        let after = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        after.flush().unwrap();
+        let sent = server.join().unwrap();
+        assert!(sent[0].contains("oss.desktop.step_viewed"), "{sent:?}");
+        assert!(
+            sent[1].contains("oss.desktop.setup_restart_required"),
+            "{sent:?}"
+        );
+        assert!(sent[1].contains(r#""step":"install""#), "{sent:?}");
+        assert!(sent.iter().all(|request| request.contains(&install_id)));
+        assert!(after.snapshot().unwrap().queue.is_empty(), "nothing else");
+
+        // The same setup goes on: the same installation, and the step the window shows next is
+        // counted, so a real quit after the restart is still an abandonment.
+        assert_eq!(after.install_id().unwrap(), install_id);
+        after
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        after.record(EventData::Activated).unwrap();
+        let queue = after.snapshot().unwrap().queue;
+        assert!(matches!(
+            queue.iter().map(|event| &event.data).collect::<Vec<_>>()[..],
+            [
+                EventData::StepViewed {
+                    step: Step::Install
+                },
+                EventData::Activated
+            ]
+        ));
+    }
+
+    /// Quit during setup, with no restart planned, is an abandonment as it always was.
+    #[test]
+    fn a_plain_quit_during_setup_still_sends_setup_abandoned() {
+        let dir = temp_dir("plain-quit");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            vec![
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        telemetry
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        telemetry.shutdown().unwrap();
+        let sent = server.join().unwrap();
+        assert!(sent[0].contains("oss.desktop.step_viewed"), "{sent:?}");
+        assert!(sent[1].contains("oss.desktop.setup_abandoned"), "{sent:?}");
+        assert!(sent[1].contains(r#""step":"install""#), "{sent:?}");
+        assert!(
+            telemetry.snapshot().unwrap().queue.is_empty(),
+            "nothing else"
+        );
+        // A restart asked for after that is not a second ending of the same setup session.
+        telemetry.restart_required().unwrap();
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
+    }
+
     #[test]
     fn state_deserialize_refuses_unknown_fields_and_untyped_events() {
         let dir = temp_dir("schema");
@@ -2621,5 +3134,412 @@ mod tests {
                 step: Step::Harness
             }
         ));
+    }
+
+    /// One request the sink took, read to the end of its body: the id it was sent under
+    /// (`X-CopilotKit-Telemetry-Id`), and its JSON.
+    fn one_request(listener: TcpListener) -> (String, serde_json::Value) {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut received = Vec::new();
+        let mut buffer = [0u8; 8192];
+        let (head, body) = loop {
+            let read = stream.read(&mut buffer).unwrap();
+            received.extend_from_slice(&buffer[..read]);
+            let text = String::from_utf8_lossy(&received).into_owned();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let length = header(head, "content-length")
+                    .and_then(|length| length.parse::<usize>().ok())
+                    .unwrap_or(0);
+                if body.len() >= length {
+                    break (head.to_owned(), body.to_owned());
+                }
+            }
+            assert!(read > 0, "the request ended before its body");
+        };
+        stream.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}").unwrap();
+        (
+            header(&head, "x-copilotkit-telemetry-id").expect("the request names its id"),
+            serde_json::from_str(&body).unwrap(),
+        )
+    }
+
+    fn header(head: &str, name: &str) -> Option<String> {
+        head.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim()
+                .eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_owned())
+        })
+    }
+
+    /// An internal build's version (`1.1.0-internal.1263.gabc1234`) was cut to `1.1.0`, so every
+    /// internal build counted as that release. It keeps its label now, without the commit count and
+    /// hash after it, all the way to what the sink receives.
+    #[test]
+    fn an_internal_build_keeps_its_label_to_the_sink() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("internal-version");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            Context {
+                app_version: AppVersion::from_package("1.1.0-internal.1263.gabc").unwrap(),
+                ..context("1.2.3", Engine::None)
+            },
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        let server = thread::spawn(move || one_request(listener));
+        telemetry.flush().unwrap();
+        let (_, sent) = server.join().unwrap();
+        assert_eq!(
+            sent["global_properties"]["openbot_version"],
+            "1.1.0-internal"
+        );
+        assert_eq!(sent["package"]["version"], "1.1.0-internal");
+        assert_eq!(
+            telemetry
+                .runtime_env()
+                .get("OPENBOT_VERSION")
+                .map(String::as_str),
+            Some("1.1.0-internal")
+        );
+
+        let internal = AppVersion::parse("1.1.0-internal").unwrap();
+        assert_eq!(internal.to_string(), "1.1.0-internal");
+        assert_eq!(
+            AppVersion::from_package("1.1.0-internal.1263.gabc1234"),
+            Some(internal.clone())
+        );
+        assert_eq!(AppVersion::from_package("1.1.0-internal"), Some(internal));
+        // The label is the word alone: a number or anything else after it is never sent.
+        assert!(AppVersion::parse("1.1.0-internal.1263").is_err());
+        assert_eq!(
+            AppVersion::from_package("1.1.0-internalish").map(|v| v.to_string()),
+            Some("1.1.0".into())
+        );
+        let pattern = regex::Regex::new(APP_VERSION_PATTERN).unwrap();
+        assert!(pattern.is_match("1.1.0-internal"));
+        for refused in ["1.1.0-internal.1263.gabc1234", "1.1.0-internal.1263"] {
+            assert!(!pattern.is_match(refused), "{refused}");
+        }
+    }
+
+    /// The server's events carry `deployment_id`, which on the desktop is this install's id (the
+    /// `CPK_TELEMETRY_ID` `runtime_env` gives it). Every desktop event carries it too, the very id it
+    /// is sent under, so the two join. An event queued before the id rotated keeps its own.
+    #[test]
+    fn every_event_carries_the_id_it_is_sent_under_as_deployment_id() {
+        let _ports = crate::test_support::hold_ports();
+        let dir = temp_dir("deployment-id");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.2.3", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let old_id = telemetry.install_id().unwrap();
+        telemetry.bind_account(&"a".repeat(64)).unwrap();
+        telemetry.record(EventData::Activated).unwrap();
+        telemetry.bind_account(&"b".repeat(64)).unwrap();
+        let new_id = telemetry.install_id().unwrap();
+        assert_ne!(old_id, new_id);
+        telemetry
+            .record(EventData::HarnessChosen {
+                harness: Harness::ByoUrl,
+            })
+            .unwrap();
+        let server = thread::spawn(move || {
+            [
+                one_request(listener.try_clone().unwrap()),
+                one_request(listener),
+            ]
+        });
+        telemetry.flush().unwrap();
+        let sent = server.join().unwrap();
+        for (header_id, payload) in &sent {
+            assert_eq!(
+                payload["global_properties"]["deployment_id"],
+                serde_json::json!(header_id),
+                "{payload}"
+            );
+        }
+        assert_eq!(sent[0].0, old_id);
+        assert_eq!(sent[1].0, new_id);
+        assert_eq!(
+            telemetry.runtime_env().get("CPK_TELEMETRY_ID"),
+            Some(&new_id)
+        );
+    }
+
+    fn opened(dir: &Path, version: &str) -> Arc<Telemetry> {
+        Telemetry::open_with_env(
+            dir,
+            context(version, Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap()
+    }
+
+    fn sent(telemetry: &Telemetry) -> Vec<serde_json::Value> {
+        telemetry
+            .snapshot()
+            .unwrap()
+            .queue
+            .iter()
+            .map(|event| serde_json::to_value(&event.data).unwrap())
+            .collect()
+    }
+
+    /**
+    OpenBot updating itself: `update_started` as the new version's download begins, kept across the
+    restart, then at the next launch `update_completed` when it is the new version, or `update_failed`
+    (`restart_failed`) when it is still the old one. Both versions on each, and each said once. A
+    failure the old version saw itself ends the update there. With usage data off, nothing at all.
+    */
+    #[test]
+    fn an_update_is_started_then_completed_or_failed_across_the_restart() {
+        let started = EventData::UpdateStarted {
+            from_version: AppVersion::parse("1.0.4").unwrap(),
+            to_version: AppVersion::parse("1.1.0").unwrap(),
+        };
+        for (relaunched, outcome) in [("1.1.0", "update_completed"), ("1.0.4", "update_failed")] {
+            let dir = temp_dir("update");
+            opened(&dir, "1.0.4").record(started.clone()).unwrap();
+            let after = opened(&dir, relaunched);
+            let events = sent(&after);
+            assert_eq!(events.len(), 2, "{events:?}");
+            assert_eq!(
+                events[0],
+                serde_json::json!({
+                    "kind": "update_started",
+                    "from_version": "1.0.4",
+                    "to_version": "1.1.0"
+                })
+            );
+            assert_eq!(events[1]["kind"], outcome);
+            assert_eq!(events[1]["from_version"], "1.0.4");
+            assert_eq!(events[1]["to_version"], "1.1.0");
+            assert!(events[1]["duration_ms"].is_u64(), "{}", events[1]);
+            if outcome == "update_failed" {
+                assert_eq!(events[1]["failure_class"], "restart_failed");
+            }
+            assert_eq!(
+                after.snapshot().unwrap().queue[1]
+                    .context
+                    .app_version
+                    .to_string(),
+                relaunched
+            );
+            assert_eq!(
+                after.snapshot().unwrap().queue[1].event_name(),
+                format!("oss.desktop.{outcome}")
+            );
+            drop(after);
+            assert_eq!(sent(&opened(&dir, relaunched)).len(), 2, "said twice");
+        }
+
+        let dir = temp_dir("update-failed");
+        let before = opened(&dir, "1.0.4");
+        before.record(started.clone()).unwrap();
+        before
+            .record(EventData::UpdateFailed {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+                duration_ms: 1200,
+                failure_class: UpdateFailureClass::SignatureInvalid,
+            })
+            .unwrap();
+        drop(before);
+        let events = sent(&opened(&dir, "1.0.4"));
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(events[1]["failure_class"], "signature_invalid");
+
+        let dir = temp_dir("update-not-shared");
+        let off = Telemetry::open_with_env(
+            &dir,
+            context("1.0.4", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Disabled,
+        )
+        .unwrap();
+        off.record(started).unwrap();
+        assert!(off.snapshot().is_err());
+        assert!(!state_path(&dir).exists());
+    }
+
+    /// The state file exactly as OpenBot 1.0.3 saved it: no record of the version that ran.
+    fn saved_by_1_0_3(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            state_path(dir),
+            serde_json::json!({
+                "schema_version": 1,
+                "install_id": "2f0c6e6a-4d1b-4c3e-9b8a-7d5e4f3a2b1c",
+                "activated": true,
+                "last_step": null,
+                "queue": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    fn first_launch_completions(telemetry: &Telemetry) -> Vec<serde_json::Value> {
+        sent(telemetry)
+            .into_iter()
+            .filter(|event| event["kind"] == "update_completed")
+            .collect()
+    }
+
+    /**
+    The move from a version that never said it updated (1.0.3 to 1.1.0) is seen by the first launch
+    of the new version: one `update_completed`, from the version that last ran to this one, marked as
+    observed at first launch. The installation 1.0.3 left says which version that was, and it is said
+    once its move to this release has gone through. A second launch says nothing more.
+    */
+    #[test]
+    fn the_first_launch_of_a_new_version_says_the_update_once() {
+        let dir = temp_dir("first-launch");
+        saved_by_1_0_3(&dir);
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(Some(AppVersion::parse("1.0.3").unwrap()));
+        assert!(
+            first_launch_completions(&launched).is_empty(),
+            "before the move"
+        );
+        launched.installation_settled();
+        launched.installation_settled();
+        let completed = first_launch_completions(&launched);
+        assert_eq!(
+            completed,
+            vec![serde_json::json!({
+                "kind": "update_completed",
+                "from_version": "1.0.3",
+                "to_version": "1.1.0",
+                "observed_at_first_launch": true
+            })]
+        );
+        drop(launched);
+
+        let again = opened(&dir, "1.1.0");
+        again.observe_launch(Some(AppVersion::parse("1.1.0").unwrap()));
+        again.installation_settled();
+        assert_eq!(first_launch_completions(&again).len(), 1, "said again");
+    }
+
+    /// Connected to an OpenBot that runs elsewhere there is no installation to move: the first launch
+    /// says it straight away, from the version the saved state last ran.
+    #[test]
+    fn with_no_installation_the_first_launch_says_it_at_once() {
+        let dir = temp_dir("first-launch-connected");
+        drop(opened(&dir, "1.1.0-rc.1"));
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(None);
+        assert_eq!(
+            first_launch_completions(&launched),
+            vec![serde_json::json!({
+                "kind": "update_completed",
+                "from_version": "1.1.0-rc.1",
+                "to_version": "1.1.0",
+                "observed_at_first_launch": true
+            })]
+        );
+    }
+
+    /// A move of the installation that was put back, or could not be, is said by `update_restored` or
+    /// `update_failed`, and the first launch adds no `update_completed` to it. An update this app ran
+    /// itself is ended by its own marker, and is not said a second time either.
+    #[test]
+    fn the_first_launch_never_doubles_another_update_event() {
+        let dir = temp_dir("first-launch-restored");
+        saved_by_1_0_3(&dir);
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(Some(AppVersion::parse("1.0.3").unwrap()));
+        launched
+            .record(EventData::UpdateRestored {
+                from_version: AppVersion::parse("1.0.3").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+            })
+            .unwrap();
+        launched.installation_settled();
+        assert!(first_launch_completions(&launched).is_empty());
+
+        let dir = temp_dir("first-launch-marker");
+        opened(&dir, "1.0.4")
+            .record(EventData::UpdateStarted {
+                from_version: AppVersion::parse("1.0.4").unwrap(),
+                to_version: AppVersion::parse("1.1.0").unwrap(),
+            })
+            .unwrap();
+        let launched = opened(&dir, "1.1.0");
+        launched.observe_launch(None);
+        launched.installation_settled();
+        assert_eq!(first_launch_completions(&launched).len(), 1);
+
+        let dir = temp_dir("first-launch-not-shared");
+        saved_by_1_0_3(&dir);
+        let off = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Disabled,
+        )
+        .unwrap();
+        off.observe_launch(Some(AppVersion::parse("1.0.3").unwrap()));
+        off.installation_settled();
+        assert!(off.snapshot().is_err());
+        assert!(!state_path(&dir).exists());
+    }
+
+    /// The update events carry closed values only: two versions in the app version's closed form,
+    /// numbers, and a failure class from its list. A sentence, a path or any other property is refused.
+    #[test]
+    fn update_events_round_trip_and_refuse_anything_open() {
+        let failed = serde_json::json!({
+            "kind": "update_failed",
+            "from_version": "1.0.4",
+            "to_version": "1.1.0-rc.2",
+            "duration_ms": 5400,
+            "failure_class": "download_failed"
+        });
+        let event = serde_json::from_value::<EventData>(failed.clone()).unwrap();
+        assert_eq!(event.event_name(), "oss.desktop.update_failed");
+        assert_eq!(serde_json::to_value(event).unwrap(), failed);
+        let restored = serde_json::json!({
+            "kind": "update_restored",
+            "from_version": "1.0.4",
+            "to_version": "1.1.0"
+        });
+        let event = serde_json::from_value::<EventData>(restored.clone()).unwrap();
+        assert_eq!(event.event_name(), "oss.desktop.update_restored");
+        assert_eq!(serde_json::to_value(event).unwrap(), restored);
+        for (path, value) in [
+            (
+                "failure_class",
+                serde_json::json!("the archive was not found"),
+            ),
+            ("from_version", serde_json::json!("1.0.4-private-name")),
+            (
+                "to_version",
+                serde_json::json!("/Users/someone/OpenBot.app"),
+            ),
+            ("duration_ms", serde_json::json!("5400")),
+            (
+                "url",
+                serde_json::json!("https://downloads.example/OpenBot.app.tar.gz"),
+            ),
+        ] {
+            let mut open = failed.clone();
+            open[path] = value;
+            assert!(serde_json::from_value::<EventData>(open).is_err(), "{path}");
+        }
     }
 }
