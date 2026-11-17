@@ -1,4 +1,7 @@
-import type { UpdateReadiness } from "@openbot/shared/desktop-updates";
+import type {
+  UpdateOutcome,
+  UpdateReadiness,
+} from "@openbot/shared/desktop-updates";
 import { queryOptions } from "@tanstack/react-query";
 import { desktopShell } from "./shell";
 
@@ -74,6 +77,21 @@ export type DesktopAppUpdate = {
    * before the app starts on it, and absent from a desktop app older than the field.
    */
   ready?: UpdateReadiness | null;
+  /**
+   * The version this person minimized the panel on, until a newer one comes out; `version` is null
+   * meanwhile. Absent from a desktop app older than the field.
+   */
+  minimized?: string | null;
+  /**
+   * The release notes the feed gives for the offered or minimized version; null when it has none.
+   * Absent from a desktop app older than the field.
+   */
+  notes?: string | null;
+  /**
+   * How the last update ended, for the panel to say once; null when there is nothing to say.
+   * Absent from a desktop app older than the field.
+   */
+  outcome?: UpdateOutcome | null;
 };
 
 /**

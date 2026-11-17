@@ -90,11 +90,29 @@ export function checkAppUpdateMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** Close the update banner on `version`, until a newer version comes out. */
+/** Minimize the update panel on `version`, until a newer version comes out. */
 export function dismissAppUpdateMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (version: string): Promise<void> =>
       invokeDesktop("dismiss_update", { version }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
+/** Open the minimized update panel again, on the version it was minimized on. */
+export function restoreAppUpdateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("restore_update"),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
+  });
+}
+
+/** Clear the outcome of the last update, once the panel has said it. */
+export function clearUpdateOutcomeMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("clear_update_outcome"),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate }),
   });
