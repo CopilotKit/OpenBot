@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Personal Assistant has clearer instructions for interactive answers, including editable plans and
+  labeled charts, while keeping simple replies brief.
+
 ## 1.1.0
 
 **Before upgrading.** Read these first: several of them change what a script, a proxy, a Compose
