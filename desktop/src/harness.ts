@@ -5,4 +5,4 @@ export type HarnessChoice = {
 };
 
 /** What OpenBot sets up. David's call. */
-export const DEFAULT_HARNESS = "langgraph";
+export const DEFAULT_HARNESS = "langgraph-ts";

@@ -484,6 +484,116 @@ test("runs the LangGraph harness as the managed Bot, and neither retired Bot", (
   expect(address.port).toBe(/^EXPOSE (\d+)$/m.exec(dockerfile)?.[1]);
 });
 
+/**
+ * The TypeScript LangGraph engine, the default Bot engine, runs beside the Python one: built from its
+ * own folder in a checkout, pulled from the release elsewhere, on the port the engine fixes (4215),
+ * and ready when `/health` answers. Nothing gates it behind a profile, as nothing gates the managed
+ * Bot, because the server's new Bots run on it.
+ */
+test("runs the TypeScript LangGraph engine beside the others", () => {
+  const services = composeServices();
+  const engine = services["agent-langgraph-ts"];
+  expect(engine?.build?.dockerfile).toBe("agent-langgraph-ts/Dockerfile");
+  expect(engine?.profiles).toBeUndefined();
+
+  const config = runComposeConfig({ MANAGED_AGENT_TOKEN: "synthetic-token" });
+  const running = config.services["agent-langgraph-ts"];
+  expect(running.environment.MANAGED_AGENT_TOKEN).toBe("synthetic-token");
+  expect(running.healthcheck?.test?.join(" ")).toContain(
+    "http://127.0.0.1:4215/health",
+  );
+  expect(composeFile()).toContain(
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture.
+    '"127.0.0.1:${LANGGRAPH_TS_PORT:-4215}:4215"',
+  );
+
+  // The server finds it by name, on the compose network, when the deployment says it runs.
+  const told = runComposeConfig({
+    LANGGRAPH_TS_AG_UI_URL: "http://127.0.0.1:4215/",
+  });
+  expect(told.services.server.environment.LANGGRAPH_TS_AG_UI_URL).toBe(
+    "http://agent-langgraph-ts:4215/",
+  );
+  const untold = runComposeConfig({});
+  expect(untold.services.server.environment.LANGGRAPH_TS_AG_UI_URL ?? "").toBe(
+    "",
+  );
+});
+
+test("tags the TypeScript engine's built image by the stack's project, unless LANGGRAPH_TS_IMAGE names one", () => {
+  const image = (env: Record<string, string>) =>
+    (
+      JSON.parse(
+        execFileSync(
+          "docker",
+          [
+            "compose",
+            "-p",
+            "one",
+            "--env-file",
+            "/dev/null",
+            "config",
+            "--format",
+            "json",
+          ],
+          {
+            cwd: join(import.meta.dir, ".."),
+            env: { PATH: process.env.PATH ?? "", ...env },
+            encoding: "utf8",
+          },
+        ),
+      ) as { services: Record<string, { image: string }> }
+    ).services["agent-langgraph-ts"].image;
+  expect(image({})).toBe("one-agent-langgraph-ts:latest");
+  const published = "ghcr.io/copilotkit/openbot-agent-langgraph-ts:v9.9.9";
+  expect(image({ LANGGRAPH_TS_IMAGE: published })).toBe(published);
+});
+
+/**
+ * A ChatGPT plan's Bot is the TypeScript engine, and LangChain's ChatGPT plan model is Python only,
+ * so the Python engine runs beside it holding the plan's token store, and the Bot and the server
+ * send the plan's model calls there. The address names that service on the port its image listens
+ * on, and the token store reaches it as a folder, because the plan's tokens are renewed in place.
+ */
+test("runs the ChatGPT plan's model calls through the Python engine, with the token store mounted there", () => {
+  const plan = "http://agent-langgraph-agui:4206";
+  const config = runComposeConfig({
+    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
+    CHATGPT_PLAN_HARNESS_URL: plan,
+    CHATGPT_PLAN_HARNESS_TOKEN: "synthetic-plan-token",
+  });
+  const python = config.services["agent-langgraph-agui"];
+  expect(python.environment.CHATGPT_AUTH_FILE).toBe(
+    "/root/.langchain/chatgpt-auth.json",
+  );
+  expect(python.volumes).toContainEqual(
+    expect.objectContaining({ type: "bind", target: "/root/.langchain" }),
+  );
+  for (const service of ["agent-harness", "agent-langgraph-ts", "server"]) {
+    expect(config.services[service].environment).toMatchObject({
+      CHATGPT_PLAN_HARNESS_URL: plan,
+      CHATGPT_PLAN_HARNESS_TOKEN: "synthetic-plan-token",
+    });
+  }
+  const address = new URL(plan);
+  expect(composeServices()[address.hostname]?.build?.dockerfile).toBe(
+    "agent-langgraph-agui/Dockerfile",
+  );
+  const dockerfile = readFileSync(
+    join(import.meta.dir, "..", "agent-langgraph-agui", "Dockerfile"),
+    "utf8",
+  );
+  expect(address.port).toBe(/^EXPOSE (\d+)$/m.exec(dockerfile)?.[1]);
+
+  // Any other sign-in: no address, so the Bot calls its provider directly.
+  const key = runComposeConfig({ OPENAI_API_KEY: "sk-synthetic" });
+  for (const service of ["agent-harness", "agent-langgraph-ts", "server"]) {
+    expect(
+      key.services[service].environment.CHATGPT_PLAN_HARNESS_URL ?? "",
+    ).toBe("");
+  }
+});
+
 test("provides PostgreSQL with pgvector for local development", () => {
   const compose = composeFile();
 
@@ -506,6 +616,7 @@ test("publishes every service on a settable port with the documented default", (
     ["COMPUTER_PORT", "4100", "4100"],
     ["SUPERVISOR_PORT", "4500", "4300"],
     ["LANGGRAPH_PORT", "4201", "4206"],
+    ["LANGGRAPH_TS_PORT", "4215", "4215"],
     ["SERVER_PORT", "3001", "3001"],
   ] as const;
 
@@ -539,6 +650,7 @@ test("publishes every service that holds a secret on loopback only", () => {
     "SUPERVISOR_PORT",
     "COMPUTER_PORT",
     "LANGGRAPH_PORT",
+    "LANGGRAPH_TS_PORT",
     "PICKED_HARNESS_PORT",
     "APP_PORT",
     "SERVER_PORT",
@@ -602,7 +714,11 @@ for (const { name, environment, expected } of compatibleEndpointCases) {
       OPENAI_API_KEY: "synthetic-openai-key",
       ...environment,
     });
-    for (const service of ["agent-langgraph-agui", "agent-harness"]) {
+    for (const service of [
+      "agent-langgraph-agui",
+      "agent-langgraph-ts",
+      "agent-harness",
+    ]) {
       expect(config.services[service].environment.OPENAI_BASE_URL).toBe(
         expected,
       );
@@ -620,7 +736,11 @@ test("passes every other provider's key and endpoint into the managed Bot and th
 
   // A service either receives the variable or it does not; reading the file's text cannot tell
   // the difference, because any one service declaring it would satisfy a raw `toContain`.
-  for (const service of ["agent-langgraph-agui", "agent-harness"]) {
+  for (const service of [
+    "agent-langgraph-agui",
+    "agent-langgraph-ts",
+    "agent-harness",
+  ]) {
     expect(config.services[service].environment).toMatchObject({
       ANTHROPIC_API_KEY: "sk-ant-synthetic",
       ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
@@ -1078,7 +1198,11 @@ test("gives the selected harness the same governed callback as the managed Bot",
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
     AGENT_TOOL_TOKEN: "synthetic-callback-token",
   });
-  for (const service of ["agent-harness", "agent-langgraph-agui"] as const) {
+  for (const service of [
+    "agent-harness",
+    "agent-langgraph-agui",
+    "agent-langgraph-ts",
+  ] as const) {
     expect(config.services[service].environment).toMatchObject({
       OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
       AGENT_TOOL_TOKEN: "synthetic-callback-token",

@@ -86,7 +86,8 @@ fn installation_uses(folder: &Path, service: &str) -> bool {
 }
 
 /// The services Start raises for the installation in `root`: [`SERVICES`], the `worker` its own
-/// Compose file uses, if it does (`installation_uses`), and the Bot the person picked.
+/// Compose file uses, if it does (`installation_uses`), the Bot the person picked, and on a
+/// ChatGPT plan the service that holds the plan's model transport (`chatgpt_plan_runs`).
 pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     let mut services = SERVICES.to_vec();
     if installation_uses(root, WORKER) {
@@ -94,8 +95,33 @@ pub fn selected_services(root: &Path, harness: bool) -> Vec<&'static str> {
     }
     if harness {
         services.push("agent-harness");
+        if chatgpt_plan_runs(root) {
+            services.push(crate::plan::CHATGPT_PLAN_SERVICE);
+        }
     }
     services
+}
+
+/**
+Whether the installation in `root` runs the ChatGPT plan's model service beside its Bot.
+
+Read from what the start before Compose wrote: `.env` names the service's address only on a ChatGPT
+plan (`crate::env::compose`), and empties it on any other answer. Read from the file rather than
+passed in so every path that raises the stack (Start, a restart, an update's start) asks the same
+question and gets the same answer. Only where the installation's own Compose file defines the
+service: an update that rolled back may have a file that does not, and Compose refuses a name its
+file does not define.
+*/
+fn chatgpt_plan_runs(root: &Path) -> bool {
+    let named = crate::env::already_set(&root.join(".env"), &["CHATGPT_PLAN_HARNESS_URL"]);
+    named
+        .get("CHATGPT_PLAN_HARNESS_URL")
+        .is_some_and(|url| !url.trim().is_empty())
+        && std::fs::read_to_string(root.join("docker-compose.yml")).is_ok_and(|text| {
+            compose_service_names(&text)
+                .iter()
+                .any(|name| name == crate::plan::CHATGPT_PLAN_SERVICE)
+        })
 }
 
 /// [`selected_services`] and the one-shot `migrate`, where the file uses it: every service whose
@@ -9101,6 +9127,86 @@ fn main() {
             assert!(!selected_services(&root, false).contains(&"agent-harness"));
             assert!(selected_services(&root, true).contains(&"agent-harness"));
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /**
+    A ChatGPT plan keeps the Python LangGraph image running beside its Bot, and nothing else does.
+
+    The Bot is the TypeScript engine, which sends a ChatGPT plan's model calls to the Python image
+    (`crate::plan::CHATGPT_PLAN_SERVICE`). Read from the `.env` the start wrote, as `crate::env`
+    writes it for each sign-in, so a key or a Claude plan raises one Bot image and not two.
+    */
+    #[test]
+    fn a_chatgpt_plan_raises_the_python_image_beside_its_bot_and_nothing_else_does() {
+        use crate::env::ModelCredential;
+        let root = temp_root("chatgpt-plan-services");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), THIS_RELEASES_COMPOSE).unwrap();
+        let plan = crate::plan::CHATGPT_PLAN_SERVICE;
+        for (credential, raised) in [
+            (
+                ModelCredential::ChatGptPlan {
+                    store: "{\"tokens\":{}}".into(),
+                },
+                true,
+            ),
+            (
+                ModelCredential::OpenAi {
+                    api_key: "sk-test".into(),
+                },
+                false,
+            ),
+            (
+                ModelCredential::ClaudePlan {
+                    token: "plan".into(),
+                },
+                false,
+            ),
+        ] {
+            let settings = crate::env::compose(
+                &crate::env::Intelligence {
+                    api_url: "https://api.example".into(),
+                    gateway_ws_url: "wss://realtime.example".into(),
+                    api_key: "key".into(),
+                },
+                &crate::env::Model {
+                    credential: credential.clone(),
+                },
+                &crate::engine::EngineStatus {
+                    engine: None,
+                    address: None,
+                    responding: true,
+                    engine_socket: None,
+                    detail: String::new(),
+                },
+                &crate::env::Ports::default(),
+                &[],
+                None,
+                &std::collections::BTreeMap::new(),
+            );
+            crate::env::write(
+                &root.join(".env"),
+                &settings,
+                &std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+            assert_eq!(
+                selected_services(&root, true).contains(&plan),
+                raised,
+                "{credential:?}"
+            );
+            // No Bot picked, no Bot to send the calls: nothing raised for it.
+            assert!(!selected_services(&root, false).contains(&plan));
+        }
+        // An installation whose Compose file has no such service is never asked to raise it.
+        std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            format!("CHATGPT_PLAN_HARNESS_URL={}\n", crate::plan::CHATGPT_PLAN_URL),
+        )
+        .unwrap();
+        assert!(!selected_services(&root, true).contains(&plan));
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -4511,20 +4511,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * the window says which Bot it will be while there is still a screen to say it on.
      */
     let requested_harness = harness.clone();
-    let harness =
-        match &credential {
-            openbot_env::ModelCredential::ClaudePlan { .. } => harness::speaking_for("anthropic")
-                .map(|id| harness::HarnessChoice {
-                    id: id.into(),
-                    agent_url: None,
-                }),
-            openbot_env::ModelCredential::ChatGptPlan { .. } => harness::speaking_for("openai")
-                .map(|id| harness::HarnessChoice {
-                    id: id.into(),
-                    agent_url: None,
-                }),
-            _ => harness,
-        };
+    let harness = harness::for_credential(&credential, harness);
     let picked = harness::picked(harness.as_ref(), &root).map_err(|error| {
         // Two registers, because one of these refusals is about a release and the other is
         // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
