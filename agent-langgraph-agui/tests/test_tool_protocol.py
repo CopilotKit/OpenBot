@@ -346,6 +346,86 @@ async def test_a_provider_out_of_credit_is_told_as_that_never_as_sign_in_again(
     assert said in message
 
 
+# OpenBot's sign-in proxy answering for Google, as it passes on Google's own refusals: Google's
+# words (captured with a free-tier Gemini sign-in on 2026-11-17), and the kind of refusal as `type`.
+GEMINI_SIGN_IN_QUOTA = (
+    429,
+    {
+        "error": {
+            "message": "You exceeded your current quota, please check your plan and billing "
+            "details. For more information on this error, head to: "
+            "https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head "
+            "to: https://ai.dev/rate-limit. Quota exceeded for metric… Please retry in "
+            "9h10m18.213644379s.",
+            "type": "rate_limit",
+            "code": "RESOURCE_EXHAUSTED",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_BUSY = (
+    503,
+    {
+        "error": {
+            "message": "This model is currently experiencing high demand. Spikes in demand are "
+            "usually temporary. Please try again later.",
+            "type": "server_error",
+            "code": "UNAVAILABLE",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_RETIRED = (
+    404,
+    {
+        "error": {
+            "message": "This model models/gemini-2.5-flash is no longer available to new users. "
+            "Please update your code to use models/gemini-3.8-flash for the latest features and "
+            "improvements. We recommend you to use the Interactions API "
+            "(https://aistudio.google.com/docs/get-started).",
+            "type": "model_not_found",
+            "code": "NOT_FOUND",
+            "param": None,
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal,category",
+    [
+        (GEMINI_SIGN_IN_QUOTA, "rate_limit"),
+        (GEMINI_SIGN_IN_BUSY, "server_error"),
+        (GEMINI_SIGN_IN_RETIRED, "model_not_found"),
+    ],
+)
+async def test_a_sign_in_refusal_keeps_google_words_and_the_kind_it_names(
+    boundary, refusal, category
+):
+    """Found on OpenBot Desktop signed in with Gemini: "ping" got no answer anybody could read.
+
+    The run ends with Google's own words and the kind the sign-in proxy named, as `errorCategory`,
+    for the server to say. Google's free-tier quota is a limit that resets, never out of credit,
+    however much its words mention billing.
+    """
+    boundary["model_refusal"] = refusal
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    status, body = refusal
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert events[-1]["message"] == f"Error code: {status} - {body['error']['message']}"
+    assert events[-1]["metadata"] == {"errorCategory": category}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_type_that_is_not_a_category_sends_none(boundary):
+    boundary["model_refusal"] = OPENAI_TOO_MANY_TOOLS
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert not events[-1].get("metadata")
+
+
 def closed_port():
     """A loopback port with nothing listening on it."""
     import socket
