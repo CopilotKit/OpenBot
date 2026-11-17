@@ -91,6 +91,14 @@ jobs:
         run: >-
           bun scripts/model-compat.ts --harness "$HARNESS" --tags latest,source --exit-zero
           --out "$RUNNER_TEMP/model-compat.json"
+      # The run's results, with the repository's own keys: `bun scripts/model-compat.ts lock` writes
+      # the lock from them when a pin moved (docs/releasing.md, "Model lock").
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: model-lock-${{ matrix.harness }}
+          path: ${{ runner.temp }}/model-compat.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Every model the lock verifies still answers
         env:
           HARNESS: ${{ matrix.harness }}

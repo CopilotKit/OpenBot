@@ -1,14 +1,81 @@
 import { expect, test } from "bun:test";
-import type { ModelLock } from "../shared/model-lock";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { MODEL_LOCK, type ModelLock } from "../shared/model-lock";
 import {
   brokenVerified,
   buildLock,
   describeLockChange,
   inconclusive,
+  PYTHON_CLIENTS,
+  pinnedClients,
   providerIdOf,
   type Result,
   type Results,
+  staleClients,
 } from "./model-compat";
+
+const ROOT = join(import.meta.dir, "..");
+
+/*
+ * THE LOCK MATCHES WHAT THIS COMMIT SHIPS. Written on a commit whose Claude Agent SDK harness
+ * pinned claude-agent-sdk 0.2.152 (Claude Code 2.1.259), the lock refused Opus 5.5 and Fable 5.2;
+ * main then bumped the pin to a Claude Code that runs both, and the lock kept hiding them. A lock
+ * proven on other clients than the ones pinned here is stale, and fails here until it is written
+ * again from a run of this commit.
+ */
+test("the lock was proven on the model clients each harness pins in this commit", () => {
+  expect(staleClients(MODEL_LOCK, ROOT)).toEqual([]);
+});
+
+test("every exact pin in a harness's requirements is a client the check records", () => {
+  const harnesses = readdirSync(ROOT).filter((name) =>
+    name.startsWith("agent-"),
+  );
+  for (const harness of harnesses) {
+    let text = "";
+    try {
+      text = readFileSync(join(ROOT, harness, "requirements.txt"), "utf8");
+    } catch {
+      continue;
+    }
+    for (const match of text.matchAll(
+      /^\s*([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*==/gm,
+    ))
+      expect(PYTHON_CLIENTS, `${harness}: ${match[1]}`).toContain(
+        (match[1] ?? "").toLowerCase().replace(/_/g, "-"),
+      );
+  }
+});
+
+test("a pin that moved past the lock is caught", () => {
+  const claude = pinnedClients(ROOT, "agent-claude-sdk");
+  expect(Object.keys(claude)).toContain("claude-agent-sdk");
+  const old: ModelLock = {
+    checkedAt: "2026-11-17",
+    engines: {
+      "agent-claude-sdk": {
+        clients: { ...claude, "claude-agent-sdk": "0.2.152" },
+        providers: {},
+      },
+    },
+  };
+  expect(staleClients(old, ROOT)).toEqual([
+    {
+      harness: "agent-claude-sdk",
+      client: "claude-agent-sdk",
+      pinned: claude["claude-agent-sdk"] ?? "",
+      locked: "0.2.152",
+    },
+  ]);
+  // The Codex version the LangGraph harness sends a ChatGPT plan, and Mastra's resolved clients.
+  expect(Object.keys(pinnedClients(ROOT, "agent-langgraph-agui"))).toContain(
+    "codex-client",
+  );
+  expect(Object.keys(pinnedClients(ROOT, "agent-mastra"))).toContain(
+    "@mastra/core",
+  );
+});
 
 /*
  * Writing the model lock from the model check's results, and holding a client bump to it. The

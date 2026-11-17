@@ -1150,6 +1150,11 @@ the harness is hidden, and a conversation already set to one runs on the default
   through it and through the published image, and fails when a model the lock verifies no longer
   answers through the change's image but still does through the published one. Models the bump
   newly fixes are added by the next daily refresh.
+- **The lock matches the pins.** The lock records the clients it was proven on, and
+  `scripts/model-lock.test.ts` fails when a harness pins a different version (an exact
+  `requirements.txt` pin, `agent-mastra/bun.lock`, or the Codex client version): a lock proven on
+  other clients may hide models that now work. Write it again from the change's own **Model lock**
+  run, whose results each harness uploads as `model-lock-<harness>`: download them and run `lock`.
 
 To write the lock from results by hand:
 

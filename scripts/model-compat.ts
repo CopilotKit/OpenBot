@@ -796,7 +796,7 @@ async function prepare(harness: Harness, tag: string) {
  * ecosystem installs them under. Whichever an image has are recorded in the lock beside the
  * models they were proven with, so a lock entry says what it was true for.
  */
-const PYTHON_CLIENTS = [
+export const PYTHON_CLIENTS = [
   "claude-agent-sdk",
   "ag-ui-claude-sdk",
   "openai",
@@ -808,6 +808,7 @@ const PYTHON_CLIENTS = [
   "agno",
   "crewai",
   "langgraph",
+  "ag-ui-langgraph",
   "langchain-core",
   "langchain-openai",
   "langchain-anthropic",
@@ -822,7 +823,7 @@ const PYTHON_CLIENTS = [
   "agent-framework",
   "agent-framework-core",
 ];
-const NODE_CLIENTS = [
+export const NODE_CLIENTS = [
   "@mastra/core",
   "ai",
   "@ai-sdk/openai",
@@ -1167,6 +1168,12 @@ async function check(argv: string[]): Promise<number> {
         ]);
         if (version.code !== 0) continue;
         const sends = version.stdout.trim();
+        // What the plan's backend is told, recorded with the image's other clients.
+        if (harness.image)
+          clients[harness.image] = {
+            ...clients[harness.image],
+            [tag]: { ...clients[harness.image]?.[tag], "codex-client": sends },
+          };
         if (!codex.ok) {
           results.push({
             harness: harness.image ?? "",
@@ -1421,6 +1428,71 @@ export function describeLockChange(
       );
   }
   return lines.length ? lines.join("\n") : "No model changed.";
+}
+
+/**
+ * The model-client versions a harness pins in this repository, by the names the lock records
+ * them under: exact `name==version` lines in its `requirements.txt`, the versions its `bun.lock`
+ * resolves for the Node clients, and the Codex client version the LangGraph harness sends a
+ * ChatGPT plan. Unpinned packages are left out: only what the repository fixes can disagree.
+ */
+export function pinnedClients(
+  root: string,
+  harness: string,
+): Record<string, string> {
+  const pinned: Record<string, string> = {};
+  const read = (file: string) => {
+    const path = join(root, harness, file);
+    return existsSync(path) ? readFileSync(path, "utf8") : "";
+  };
+  for (const line of read("requirements.txt").split("\n")) {
+    const match = /^\s*([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?\s*==\s*([^\s;#]+)/.exec(
+      line,
+    );
+    if (match?.[1] && match[2])
+      pinned[match[1].toLowerCase().replace(/_/g, "-")] = match[2];
+  }
+  const lockfile = read("bun.lock");
+  for (const name of NODE_CLIENTS) {
+    const escaped = name.replace(/[/.]/g, "\\$&");
+    const found = new RegExp(`"${escaped}": \\["${escaped}@([^"]+)"`).exec(
+      lockfile,
+    )?.[1];
+    if (found) pinned[name] = found;
+  }
+  const codex = /^DEFAULT_CLIENT_VERSION\s*=\s*"([^"]+)"/m.exec(
+    read("src/chatgpt_models.py"),
+  )?.[1];
+  if (codex) pinned["codex-client"] = codex;
+  return pinned;
+}
+
+/**
+ * Where the lock and the repository disagree about a harness's clients: each pinned client the
+ * lock recorded at another version, or didn't record. A lock that disagrees was proven on other
+ * clients than the ones this commit ships, so it may hide models that now work, or offer ones that
+ * no longer do. Regenerate it (`lock`) from a run of this commit.
+ */
+export function staleClients(
+  lock: ModelLock,
+  root: string,
+): { harness: string; client: string; pinned: string; locked?: string }[] {
+  const stale: {
+    harness: string;
+    client: string;
+    pinned: string;
+    locked?: string;
+  }[] = [];
+  for (const [harness, entry] of Object.entries(lock.engines)) {
+    for (const [client, pinned] of Object.entries(
+      pinnedClients(root, harness),
+    )) {
+      const locked = entry.clients[client];
+      if (locked !== pinned)
+        stale.push({ harness, client, pinned, ...(locked ? { locked } : {}) });
+    }
+  }
+  return stale;
 }
 
 /** Every model the lock verifies that now fails: what a client bump must not break. */
