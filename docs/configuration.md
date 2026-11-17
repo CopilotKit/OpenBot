@@ -422,6 +422,7 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Refused on a public address. Ignored when a provider is configured. |
+| `OPENBOT_INSTALL_TOKEN`      | The install's own token. The personal edition only admits requests carrying its install's token: a browser once through `/api/install/enter?token=<token>&to=/`, which leaves it a cookie, and a script in the `X-OpenBot-Install-Token` header. **Required** for a single-user server in a container. OpenBot Desktop and `scripts/start.sh` generate it. API keys on `/api/v2` do not need it. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
@@ -685,6 +686,19 @@ anyone who can see the Bot can read it. The personal edition does not show this 
 
 With both caps above at zero the screen says the capability is switched off, because a grant made
 then is a row nothing will read.
+
+## A Bot giving parts of its work to subagents
+
+| Variable                       | Meaning                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `BOT_SUBAGENTS_AT_ONCE`        | How many of one answer's subagents run at the same time. Any more wait for one to finish. Default `10`.       |
+| `BOT_SUBAGENTS_PER_ANSWER`     | How many subagents one answer may start in all, the guard against a run that never stops. Default `100`.     |
+
+A Bot working through a long list gives out every part: the first ones run, the rest wait their turn
+and start as places free up, so no part is refused for arriving late. Past the overall number, the
+next one is refused and the Bot is told to do the rest of the work itself. `BOT_SUBAGENTS_PER_ANSWER=0`
+refuses every one. Both are refused at start-up if they are not whole numbers, and
+`BOT_SUBAGENTS_AT_ONCE` must be at least `1`, because nothing would ever run.
 
 ## Slack and Microsoft Teams (OpenTag pairing)
 

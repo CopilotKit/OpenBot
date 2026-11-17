@@ -277,6 +277,9 @@ Making a release Latest also starts **Downloads sync**, so
 [downloads.copilotkit.ai](#downloadscopilotkitai) serves the same signed installers. Both attach jobs
 have `actions: write` for that.
 
+A release listed in the repository variable `RELEASE_HOLD_LATEST` is never made Latest by a
+signing run; see [Staged rollout](#staged-rollout).
+
 If either signing run is never approved, or fails, the release stays not Latest. Sign it again from
 its tag with `make-latest` set, or mark it Latest by hand on its release page.
 
@@ -758,6 +761,74 @@ console, not by infrastructure as code. The workflow signs in as the role `openb
 with GitHub's OIDC token, so there is no stored key. The role trusts only `downloads-sync.yml` on
 `main`, and may only read and write the bucket's objects and invalidate that distribution. The role
 ARN, bucket and distribution are written in the workflow; none is a secret.
+
+## Staged rollout
+
+A stable release can go to a share of people first: a share of new downloads from
+`downloads.copilotkit.ai/latest/`, and the same share of installed apps' update checks. Everyone
+else keeps getting the Latest release until the share is widened.
+
+It has three parts:
+
+- **Hold Latest.** The repository variable `RELEASE_HOLD_LATEST` lists release tags, separated by
+  spaces or commas, such as `v1.1.0`. A listed release is published and signed as usual, but the
+  signing run that would make it Latest leaves it not Latest
+  ([`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)). So `releases/latest`,
+  `downloads.copilotkit.ai/latest/` and both update feeds keep serving the release before it. Its
+  images are still tagged `latest`. Set the variable before the release PR merges.
+- **Rollout files.** Instead of making it Latest, that signing run starts Downloads sync with
+  `rollout` set. The sync copies the release's images and `releases/<tag>/` files as for any tag,
+  and puts under `rollout/<tag>/` what `latest/` would hold if it were Latest: each signed installer
+  under its fixed name and the rewritten `latest.json`, with the same checks. To run it by hand:
+  `gh workflow run downloads-sync.yml --ref main -f tag=v1.1.0 -f rollout=true`.
+- **Edge split.** The CloudFront Function `openbot-downloads-rollout`
+  ([`scripts/downloads-rollout.js`](../scripts/downloads-rollout.js), cloudfront-js-2.0) runs on
+  the viewer request of the distribution's default behavior. For the four files under `latest/`
+  (the three fixed names and `latest.json`) it hashes the release tag and the viewer's address, its
+  /64 for IPv6, to a number from 0 to 99. Below the percent, it rewrites the request to
+  `rollout/<tag>/<same file>`; otherwise the request stays on `latest/`. Every other path, `v2/`,
+  `releases/` and `tools/` included, passes through. The function runs before the cache, so each
+  folder is cached under its own key. A viewer gets the same answer for the feed and the installer
+  on every request, a wider percent keeps everyone the narrower one had, and each release draws a
+  new cohort. The tag and the percent are the keys `rollout-tag` and `rollout-percent` in the
+  CloudFront KeyValueStore `openbot-downloads-rollout`; a missing or malformed value sends every
+  request to `latest/`.
+
+An app that installed the newer release and later lands outside the share reads the older feed,
+and is offered nothing, because the updater only offers a newer version.
+
+### Ramp, finish and roll back
+
+Each change to the key value store reaches every edge location within seconds, with no change to
+the function or the distribution. From a shell with admin credentials for the account:
+
+```sh
+kvs="$(aws cloudfront describe-key-value-store --name openbot-downloads-rollout \
+  --query KeyValueStore.ARN --output text)"
+etag() { aws cloudfront-keyvaluestore describe-key-value-store --kvs-arn "$kvs" --query ETag --output text; }
+aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key rollout-tag --value v1.1.0
+aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key rollout-percent --value 5
+```
+
+- **Ramp:** put `rollout-percent` again, for example `25`.
+- **Roll back:** put `rollout-percent` to `0`. Every request is on `latest/` again. Apps that
+  already installed the newer release keep it.
+- **Finish at 100%:**
+  1. Remove the tag from `RELEASE_HOLD_LATEST`.
+  2. Mark the release Latest on its release page, or `gh release edit v1.1.0 --latest`.
+  3. Run Downloads sync for the Latest release, `gh workflow run downloads-sync.yml --ref main`, and
+     wait for it to finish, so `latest/` serves the release.
+  4. Remove the function's association from the default behavior (console: the distribution,
+     Behaviors, the default behavior, Function associations, Viewer request: No association), then
+     put `rollout-percent` to `0`.
+
+Between steps 3 and 4, `latest/` and `rollout/<tag>/` hold the same release, so nobody in the share
+is sent back to the older one.
+
+The test path `/rollout-test/latest/<file>` routes the same way, to `latest/` or `rollout/<tag>/`.
+It exists so the function can be attached to a test cache behavior (`/rollout-test/*`) and shown
+answering both ways through the real distribution before it touches `latest/`. With no such
+behavior it is never reached, and on the default behavior it serves what `latest/` would.
 
 ## What merging does
 

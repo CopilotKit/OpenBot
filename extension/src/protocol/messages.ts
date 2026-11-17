@@ -320,6 +320,9 @@ export type PageToBackground =
   | { type: "page.disconnect" }
   | { type: "page.desktop.available" }
   | { type: "page.connect.desktop" }
+  /** Opens a page of an OpenBot in a new tab (`url`, its full address): through OpenBot Desktop's entry address when it
+   * is OpenBot Desktop's own OpenBot, else at `url` itself. */
+  | { type: "page.openbot.open"; url: string }
   | { type: "page.kept.discard" } // the person discards every stopped recording's kept events
   | { type: "RECORDER_E2E_FLOOD"; count: number }; // e2e variant only: the router ignores it in a release build (Task 9), and a type emits no code
 export type PageStateResponse = {

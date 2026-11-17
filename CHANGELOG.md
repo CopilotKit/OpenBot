@@ -243,6 +243,12 @@ override or a Helm values file has to say.
   belongs to the conversation that asked.
 - **Work carried on after an approval continues at once after a restart or deploy**, where a task
   could read Working for up to 15 minutes.
+- **A Bot finishes a long list with subagents instead of stopping partway.** One answer could start
+  five subagents in all, so a Bot given twelve accounts or documents to work through ran out after
+  five and did the rest itself, one by one, or left them. Now up to 10 run at once and any more
+  wait their turn, up to 100 in one answer, and a Bot past that is told to do the rest itself. Both
+  numbers are settings, `BOT_SUBAGENTS_AT_ONCE` and `BOT_SUBAGENTS_PER_ANSWER`, and in the Helm
+  chart `config.subagents.atOnce` and `config.subagents.perAnswer`.
 
 ### Conversations
 

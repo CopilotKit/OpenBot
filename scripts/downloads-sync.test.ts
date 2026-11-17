@@ -573,6 +573,150 @@ test("a tag mirrors that stable release's releases/<tag>/ only, and leaves lates
   expect(fake.invalidations()).toEqual([]);
 });
 
+// A staged rollout: the edge function sends a share of the latest/ requests to rollout/<tag>/, so
+// that folder must hold the same signed files under the same names, and a feed that names this
+// address, while latest/ keeps serving the Latest release.
+test("a rollout puts a stable release's signed installers and feed under rollout/<tag>/, and leaves latest/ alone", () => {
+  const fake = downloads();
+  const github =
+    "https://github.com/CopilotKit/OpenBot/releases/download/v0.4.0";
+  const feed = `${JSON.stringify(
+    {
+      version: "0.4.0",
+      platforms: {
+        "darwin-aarch64": {
+          signature: "c2lnbmVkIGFybTY0",
+          url: `${github}/OpenBot-darwin-aarch64.app.tar.gz`,
+        },
+        "windows-x86_64": {
+          signature: "c2lnbmVkIHdpbmRvd3M=",
+          url: `${github}/OpenBot_0.4.0_x64-setup.exe`,
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+  fake.release("v0.3.0", signed("0.3.0"));
+  fake.setLatest("v0.3.0");
+  expect(run(fake).code).toBe(0);
+  const latest = Object.fromEntries(
+    Object.entries(fake.bucket()).filter(([key]) => key.startsWith("latest/")),
+  );
+  // 0.4.0 is published and signed, but held back from Latest.
+  fake.release("v0.4.0", { ...signed("0.4.0"), "latest.json": feed });
+  const before = fake.calls().length;
+  const result = run(fake, {
+    DOWNLOADS_TAG: "v0.4.0",
+    DOWNLOADS_ROLLOUT: "true",
+    DOWNLOADS_VERIFY_DELAY: "0",
+  });
+  expect(result.code).toBe(0);
+  const bucket = fake.bucket();
+  expect(
+    Object.keys(bucket)
+      .filter((key) => key.includes("0.4.0"))
+      .sort(),
+  ).toEqual([
+    "releases/v0.4.0/OpenBot-darwin-aarch64.app.tar.gz",
+    "releases/v0.4.0/OpenBot_0.4.0_aarch64.dmg",
+    "releases/v0.4.0/OpenBot_0.4.0_x64-setup.exe",
+    "releases/v0.4.0/OpenBot_0.4.0_x64.dmg",
+    "releases/v0.4.0/container-images.json",
+    "rollout/v0.4.0/OpenBot-mac-arm64.dmg",
+    "rollout/v0.4.0/OpenBot-mac-x64.dmg",
+    "rollout/v0.4.0/OpenBot-windows-x64-setup.exe",
+    "rollout/v0.4.0/latest.json",
+  ]);
+  expect(bucket["rollout/v0.4.0/OpenBot-mac-arm64.dmg"]).toEqual({
+    content: "signed arm64 0.4.0",
+    cacheControl: LATEST,
+    contentType: "application/x-apple-diskimage",
+    sha256: true,
+  });
+  // The feed is the release's own, byte for byte, but for the URLs of what was mirrored.
+  const mirror = "https://downloads.copilotkit.ai/releases/v0.4.0";
+  expect(bucket["rollout/v0.4.0/latest.json"]).toEqual({
+    content: feed
+      .replace(
+        `"${github}/OpenBot-darwin-aarch64.app.tar.gz"`,
+        `"${mirror}/OpenBot-darwin-aarch64.app.tar.gz"`,
+      )
+      .replace(
+        `"${github}/OpenBot_0.4.0_x64-setup.exe"`,
+        `"${mirror}/OpenBot_0.4.0_x64-setup.exe"`,
+      ),
+    cacheControl: LATEST,
+    contentType: "application/json",
+    sha256: true,
+  });
+  // latest/ still serves the Latest release, untouched.
+  expect(
+    Object.fromEntries(
+      Object.entries(bucket).filter(([key]) => key.startsWith("latest/")),
+    ),
+  ).toEqual(latest);
+  const calls = fake.calls().slice(before);
+  expect(calls.some((call) => call.includes("--key latest/"))).toBe(false);
+  // The feed goes up last, after every download it names answered.
+  expect(puts(fake).at(-1)).toBe("rollout/v0.4.0/latest.json");
+  expect(
+    calls.indexOf(
+      `curl --silent --head --output /dev/null --write-out %{http_code} ${mirror}/OpenBot-darwin-aarch64.app.tar.gz`,
+    ),
+  ).toBeGreaterThan(-1);
+  expect(fake.invalidations()).toEqual([
+    `${DISTRIBUTION} /latest/*`,
+    `${DISTRIBUTION} /rollout/v0.4.0/*`,
+  ]);
+
+  // Again, with nothing new: no upload, no invalidation.
+  const again = run(fake, {
+    DOWNLOADS_TAG: "v0.4.0",
+    DOWNLOADS_ROLLOUT: "true",
+  });
+  expect(again.code).toBe(0);
+  expect(again.out).toContain("Nothing to upload.");
+  expect(fake.invalidations()).toHaveLength(2);
+});
+
+test("a rollout needs a signed stable release named by tag, and changes nothing otherwise", () => {
+  const fake = downloads();
+  fake.release("v0.3.0", signed("0.3.0"));
+  fake.setLatest("v0.3.0");
+  fake.release("v0.4.0-rc.1", candidate("0.4.0-rc.1"), { prerelease: true });
+  const half: Record<string, string> = signed("0.4.0");
+  delete half["OpenBot-windows-x64-setup.exe"];
+  fake.release("v0.4.0", half);
+
+  const untagged = run(fake, { DOWNLOADS_ROLLOUT: "true" });
+  expect(untagged.code).toBe(1);
+  expect(untagged.out).toContain(
+    "::error::A rollout names its release: set DOWNLOADS_TAG",
+  );
+
+  const rc = run(fake, {
+    DOWNLOADS_TAG: "v0.4.0-rc.1",
+    DOWNLOADS_ROLLOUT: "true",
+  });
+  expect(rc.code).toBe(1);
+  expect(rc.out).toContain(
+    "::error::v0.4.0-rc.1 is a candidate or a beta. A rollout serves a stable release.",
+  );
+
+  const unsigned = run(fake, {
+    DOWNLOADS_TAG: "v0.4.0",
+    DOWNLOADS_ROLLOUT: "true",
+  });
+  expect(unsigned.code).toBe(1);
+  expect(unsigned.out).toContain(
+    "::error::v0.4.0 does not have the signed OpenBot-windows-x64-setup.exe yet",
+  );
+
+  expect(fake.calls().some((call) => call.startsWith("aws "))).toBe(false);
+  expect(fake.bucket()).toEqual({});
+});
+
 test("a scratch prefix keeps every key, and the invalidation, under it", () => {
   const fake = downloads();
   fake.release("v0.3.0", signed("0.3.0"));
@@ -660,6 +804,71 @@ test("making a stable release Latest dispatches the sync, and nothing else does"
   // Four runs of the script, each spawning several processes.
 }, 20_000);
 
+// A staged rollout holds a signed stable release back from Latest, so releases/latest, the
+// website's latest/ links and the app's feeds keep serving the release before it. The release is
+// still published and signed, and its rollout/<tag>/ folder is filled for the edge to hand out.
+test("a held release is signed but stays not Latest, and fills its rollout folder instead", () => {
+  const promote = (fake: FakeRepo, hold: string) =>
+    runScript(
+      makeLatest,
+      [],
+      fake,
+      {
+        RELEASE_TAG: "v0.4.0",
+        MAKE_LATEST: "true",
+        HOLD_LATEST: hold,
+        FEED_RETRY_DELAY: "0",
+      },
+      fake.dir,
+    );
+  const complete = (fake: FakeRepo) => {
+    fake.attachFile("latest.json", JSON.stringify(feedFor("0.4.0")));
+    fake.attach(
+      "OpenBot-mac-arm64.dmg",
+      "OpenBot-mac-x64.dmg",
+      "OpenBot-windows-x64-setup.exe",
+    );
+  };
+  const rollout =
+    "gh workflow run downloads-sync.yml -R CopilotKit/OpenBot --ref main -f tag=v0.4.0 -f rollout=true";
+
+  for (const hold of ["v0.4.0", "v0.3.9, v0.4.0", "v0.3.9 v0.4.0"]) {
+    const held = fakeRepo("v0.3.0");
+    cleanups.push(held.cleanup);
+    complete(held);
+    const result = promote(held, hold);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(
+      "v0.4.0 is held back from Latest (RELEASE_HOLD_LATEST), so v0.3.0 stays Latest.",
+    );
+    expect(held.latest()).toBe("v0.3.0");
+    expect(held.calls().some((call) => call.includes("--latest"))).toBe(false);
+    expect(held.calls()).toContain(rollout);
+    expect(held.calls()).not.toContain(
+      "gh workflow run downloads-sync.yml -R CopilotKit/OpenBot --ref main",
+    );
+  }
+
+  // Holding another release, or nothing, leaves this one to become Latest as before.
+  for (const hold of ["", "v0.4.1", "v0.4.0-rc.1"]) {
+    const free = fakeRepo("v0.3.0");
+    cleanups.push(free.cleanup);
+    complete(free);
+    expect(promote(free, hold).code).toBe(0);
+    expect(free.latest()).toBe("v0.4.0");
+    expect(free.calls()).not.toContain(rollout);
+  }
+
+  // Not complete yet: nothing is held, marked or synced.
+  const waiting = fakeRepo("v0.3.0");
+  cleanups.push(waiting.cleanup);
+  waiting.attach("latest.json", "OpenBot-mac-arm64.dmg");
+  expect(promote(waiting, "v0.4.0").code).toBe(0);
+  expect(
+    waiting.calls().some((call) => call.startsWith("gh workflow run")),
+  ).toBe(false);
+}, 30_000);
+
 type Job = {
   if?: string;
   permissions?: Record<string, string>;
@@ -713,5 +922,20 @@ test("the sync workflow runs on main only, one at a time, with the role and noth
       contents: "write",
       actions: "write",
     });
+    // Either may be the run that would make it Latest, so both read the hold.
+    expect(workflow(path).jobs.publish?.env?.HOLD_LATEST).toBe(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow's own expression, unexpanded.
+      "${{ vars.RELEASE_HOLD_LATEST }}",
+    );
   }
+
+  // A rollout is asked for by tag, by hand or by the signing run that holds the release.
+  const inputs = (
+    sync.on.workflow_dispatch as {
+      inputs: Record<string, { type: string; default: unknown }>;
+    }
+  ).inputs;
+  expect(inputs.rollout).toMatchObject({ type: "boolean", default: false });
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow's own expression, unexpanded.
+  expect(job.env?.DOWNLOADS_ROLLOUT).toBe("${{ inputs.rollout }}");
 });

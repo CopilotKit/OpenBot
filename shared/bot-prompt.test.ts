@@ -400,6 +400,45 @@ describe("how a Bot asks, and how an unattended run ends", () => {
       expect(said).not.toContain(app);
   });
 
+  test("a Bot talks about its work in plain words, never its tools' names or machinery", () => {
+    // Found on the Desktop: replies named "run_subagent", "delegate" and "deferred tools", and read
+    // like a debug log. The rule covers what a Bot can do, what it did and what failed, on every
+    // harness, and is shown with the words to use instead.
+    const said = flat(REPLY_GUIDANCE);
+    expect(said).toContain(
+      "talk about your work in the person's words, never in your own machinery's",
+    );
+    expect(said).toContain(
+      "say what you can do, what you did and what did not work as things done in their apps",
+    );
+    expect(said).toContain("'i looked into each account separately'");
+    expect(said).toContain("'i've started this as a task'");
+    expect(said).toContain(
+      "never name a tool, a function or an app action's code name, in code formatting or otherwise",
+    );
+    expect(said).toContain(
+      "never say how your tools are found, loaded, handed out or run",
+    );
+    expect(said).toContain("never quote an error the way a tool gave it");
+    // Said once, in the reply rules: the sources section points at it rather than saying it again.
+    expect(flat(PROVENANCE_GUIDANCE)).not.toContain("never name a tool");
+    expect(flat(PROVENANCE_GUIDANCE)).toContain(
+      "cite it in plain words, as the reply rules below say",
+    );
+  });
+
+  test("the working rules give a Bot no app action's code name to repeat, and no word for how tools load", () => {
+    // The rule used to name GMAIL_GET_PROFILE as what not to say, which is one more name to say.
+    for (const model of ["claude-sonnet-5-5", "gpt-5.6-terra"])
+      for (const brought of [false, true]) {
+        const rules = workingGuidance({ brought, untrusted: "", model }).join(
+          "\n",
+        );
+        expect(rules.toLowerCase()).not.toContain("deferred");
+        expect(rules).not.toMatch(/\b[A-Z]+_[A-Z_]{3,}\b/);
+      }
+  });
+
   test("an inference, however likely, is still called unconfirmed, on every model", () => {
     // GPT-5.6 Terra took company names from email domains and reported them "reliably inferred, so
     // none remain unconfirmed", which the claims grader fails.

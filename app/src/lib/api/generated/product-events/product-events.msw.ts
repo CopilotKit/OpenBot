@@ -4,7 +4,7 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { ProductEvent } from "../model";
+import type { AppError, ProductEvent } from "../model";
 
 export const getRecordProductEventMockHandler = (
   overrideResponse?:
@@ -32,4 +32,34 @@ export const getRecordProductEventMockHandler = (
     options,
   );
 };
-export const getProductEventsMock = () => [getRecordProductEventMockHandler()];
+
+export const getRecordAppErrorMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, AppError>
+        >[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }, AppError>(
+    "*/api/v2/organizations/:organizationId/app-errors",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, AppError>
+      >[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
+export const getProductEventsMock = () => [
+  getRecordProductEventMockHandler(),
+  getRecordAppErrorMockHandler(),
+];

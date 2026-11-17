@@ -704,6 +704,17 @@ fn secret() -> String {
     BASE64.encode(bytes)
 }
 
+/// A new value for `key`. The install's token travels in an address and a cookie, so it is 32
+/// random bytes in the URL-safe alphabet with no padding, which both carry as they are.
+fn minted(key: &str) -> String {
+    if key == crate::install_token::NAME {
+        let mut bytes = [0u8; 32];
+        rand::rng().fill_bytes(&mut bytes);
+        return base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    }
+    secret()
+}
+
 /// The settings the shell owns, in the order a person reading the file would want them.
 ///
 /// Addresses use `127.0.0.1` rather than `localhost` deliberately. Compose publishes on both
@@ -986,7 +997,7 @@ pub fn compose(
             // present, is published, and must still be replaced. It also holds
             // `KEY_ENCRYPTION_KEY` to the 32 bytes it has to decode to.
             .filter(|value| usable(key, value))
-            .unwrap_or_else(secret);
+            .unwrap_or_else(|| minted(key));
         env.insert(key.into(), value);
     }
 
@@ -1352,7 +1363,7 @@ pub const NO_KEY_NEEDED: &str = "no-key-needed";
 const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
 
 /// The secrets this deployment mints for itself, once.
-pub const MINTED: [&str; 7] = [
+pub const MINTED: [&str; 8] = [
     "AGENT_TOOL_TOKEN",
     "COMPUTER_TOKEN",
     "KEY_ENCRYPTION_KEY",
@@ -1360,6 +1371,9 @@ pub const MINTED: [&str; 7] = [
     // the person's plan. See `learning_model`.
     crate::learning_model::TOKEN,
     "MANAGED_AGENT_TOKEN",
+    // The install's own token, which the personal edition only admits requests carrying. Kept, not
+    // minted again, so a window that already has its cookie stays let in. See `install_token`.
+    crate::install_token::NAME,
     "SUPERVISOR_TOKEN",
     "WORKER_SHARED_SECRET",
 ];
@@ -2012,6 +2026,54 @@ HTTPS_PROXY=http://proxy:8080
         for key in MINTED {
             assert_eq!(first.get(key), second.get(key), "{key} was minted again");
         }
+    }
+
+    /**
+    The install's token, which the personal edition only admits requests carrying: minted by the
+    first Start, and kept by every Start after it, a restart, an upgrade, and a put-back to an older
+    app and forward again alike, because each reads it back from the credential store (`MINTED`).
+    Never written to `.env`, and minted in a shape a URL and a cookie carry as it is.
+    */
+    #[test]
+    fn the_install_token_is_minted_once_kept_and_never_written_to_the_file() {
+        let name = crate::install_token::NAME;
+        assert!(MINTED.contains(&name), "Start reads only MINTED back");
+        let first = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let minted = first.get(name).cloned().expect("the first Start mints it");
+        assert!(minted.len() >= 43, "32 random bytes: {}", minted.len());
+        assert!(
+            minted
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "a URL and a cookie carry it as it is"
+        );
+
+        // What the credential store is given, and what the next Start reads back from it.
+        let (settings, secrets) = crate::vault::split(first);
+        assert!(!settings.contains_key(name), "never in .env");
+        assert_eq!(secrets.get(name), Some(&minted));
+        let kept: BTreeMap<String, String> = secrets
+            .into_iter()
+            .filter(|(key, _)| MINTED.contains(&key.as_str()))
+            .collect();
+        let again = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &kept,
+        );
+        assert_eq!(again.get(name), Some(&minted), "minted again");
     }
 
     /// A blank one is not a value to keep. An empty line is what clearing looks like, not a secret.
