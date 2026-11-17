@@ -21616,6 +21616,221 @@ fn main() {
         let _ = std::fs::remove_dir_all(&cli.dir);
     }
 
+    /// The Intelligence release this app's CLI installs, in the update tests below.
+    const BUNDLED_RELEASE: &str = "0.16.0-rc.3";
+
+    /// The CLI's refusal of a `local update`, as its `LocalUpdateBlocker` prints it with `--json`:
+    /// `incompatible_release`, whichever of its three checks refused, with only its sentence to
+    /// say which.
+    fn update_refused(summary: &str) -> String {
+        serde_json::json!({
+            "version": 1,
+            "command": "local update",
+            "status": "blocked",
+            "error": null,
+            "nextAction": {
+                "reason": "incompatible_release",
+                "summary": summary,
+                "instructions": ["copilotkit local status --stack local-abc123"],
+                "resumeCommand": "copilotkit local status --stack local-abc123",
+                "url": null,
+                "linkLabel": null,
+                "linkFile": null,
+                "caveats": [],
+                "requiredEnvVars": [],
+                "artifacts": []
+            },
+            "diagnostics": []
+        })
+        .to_string()
+    }
+
+    /// `local status` for a ready stack on `installed`, with the update the CLI keeps on record
+    /// when it did not finish, if any.
+    fn status_on(installed: &str, update: serde_json::Value) -> String {
+        serde_json::json!({
+            "version": 1,
+            "command": "local status",
+            "status": "completed",
+            "stack": {
+                "id": "local-abc123",
+                "installedRelease": installed,
+                "step": "ready",
+                "urls": {
+                    "api": "http://localhost:8082",
+                    "dashboard": "http://intelligence.localhost:8080",
+                    "gateway": "ws://[::1]:4401"
+                },
+                "failedStep": null,
+                "update": update,
+                "observed": {
+                    "running": true,
+                    "services": [{ "name": "cpki-app-api-test", "phase": "Running", "ready": true }]
+                }
+            },
+            "auth": { "running": true },
+            "nextAction": null,
+            "error": null,
+            "diagnostics": []
+        })
+        .to_string()
+    }
+
+    /// `local update` through `run_local_eval`, as the window runs it, against a CLI that answers
+    /// `update` with `refusal` and `status` with `status`: the window's answer, and the
+    /// `setup_failed` events it recorded.
+    fn update_through_the_command(
+        cli: &desktop_telemetry::fake_cli::FakeCli,
+        refusal: &str,
+        status: &str,
+        label: &str,
+    ) -> (
+        Result<local_eval::Report, local_eval::Failure>,
+        Vec<telemetry::EventData>,
+    ) {
+        cli.forget_calls();
+        cli.answer_to("update", refusal, 2);
+        cli.answer_to("status", status, 0);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root(&format!("{label}-telemetry")),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let report = tauri::async_runtime::block_on(run_local_eval(
+            app.handle().clone(),
+            format!("{label}-attempt"),
+            local_eval::Action::Update,
+            "local-abc123".into(),
+        ));
+        assert!(cli.calls().contains("local update"), "{}", cli.calls());
+        (report, setup_failures(&app))
+    }
+
+    /// Found in production telemetry from 1.0.2 to 1.1.0-rc.1: every upgrader sent
+    /// `setup_failed` at `local_update` with `incompatible_release`, and the window said the
+    /// services couldn't update, for a stack that already ran the release. The CLI refuses an
+    /// update that does not move to a newer release with the same reason as a real
+    /// incompatibility. A stack on the release the update would install, or past it, now has
+    /// nothing to update: the window gets a completed answer and no `setup_failed` is sent. That
+    /// holds whether the release is the one this app's CLI installs or the one an update the CLI
+    /// keeps on record was moving to.
+    #[test]
+    fn an_update_to_the_release_the_stack_already_runs_is_not_a_setup_failure() {
+        if crate::test_support::isolated_process(
+            "tests::an_update_to_the_release_the_stack_already_runs_is_not_a_setup_failure",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-update-already-on-it-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
+        let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-already-cli", false);
+        let on_record = |to: &str| {
+            serde_json::json!({
+                "attemptedRelease": to,
+                "state": "prepared",
+                "observedSchema": null,
+                "recoveryCommand": "copilotkit local update --stack local-abc123"
+            })
+        };
+        for (installed, update) in [
+            (BUNDLED_RELEASE, serde_json::Value::Null),
+            ("0.16.0", serde_json::Value::Null),
+            (BUNDLED_RELEASE, on_record(BUNDLED_RELEASE)),
+            ("0.16.0", on_record(BUNDLED_RELEASE)),
+        ] {
+            let (report, failures) = update_through_the_command(
+                &cli,
+                &update_refused(&format!(
+                    "This stack already runs {installed}. Local update only moves to a newer release."
+                )),
+                &status_on(installed, update.clone()),
+                "openbot-update-already-on-it",
+            );
+            assert_eq!(failures, vec![], "{installed} {update}");
+            let report = report.expect("the CLI answered");
+            assert_eq!(
+                report.outcome,
+                local_eval::Outcome::Completed,
+                "{installed} {update}"
+            );
+            assert_eq!(report.reason, None, "{installed} {update}");
+            assert_eq!(report.update_to, None, "{installed} {update}");
+            assert_eq!(
+                report.stack.map(|stack| stack.installed_release).as_deref(),
+                Some(installed)
+            );
+        }
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
+    /// The CLI's other two `incompatible_release` refusals are real: a release whose database
+    /// schema cannot be migrated in place, and one that needs a new local cluster. On a stack
+    /// behind the release, each is still handed to the window as refused and sent as one
+    /// `setup_failed` at `local_update`, exactly as before. So is a refusal when the stack's
+    /// release cannot be read, or its status does not answer: nothing says it is already on it.
+    #[test]
+    fn a_real_incompatible_release_is_still_a_setup_failure() {
+        if crate::test_support::isolated_process(
+            "tests::a_real_incompatible_release_is_still_a_setup_failure",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        std::env::remove_var("DO_NOT_TRACK");
+        let empty = temp_root("openbot-update-incompatible-no-engine");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
+        let cli =
+            desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-incompatible-cli", false);
+        let schema = format!(
+            "Release {BUNDLED_RELEASE} is not compatible with this stack's database, so it cannot update it in place. Saved data is unchanged."
+        );
+        let cluster = format!(
+            "Release {BUNDLED_RELEASE} needs a new local Kubernetes cluster, so it cannot update this stack in place. Saved data is unchanged."
+        );
+        for (refusal, status) in [
+            (&schema, status_on("0.16.0-rc.2", serde_json::Value::Null)),
+            (&cluster, status_on("0.15.1", serde_json::Value::Null)),
+            (&schema, status_on("latest", serde_json::Value::Null)),
+            (&schema, "not json".to_owned()),
+        ] {
+            let (report, failures) = update_through_the_command(
+                &cli,
+                &update_refused(refusal),
+                &status,
+                "openbot-update-incompatible",
+            );
+            let report = report.expect("the CLI answered");
+            assert_eq!(report.outcome, local_eval::Outcome::Blocked, "{status}");
+            assert_eq!(
+                report.reason,
+                Some(local_eval::Reason::IncompatibleRelease),
+                "{status}"
+            );
+            assert_eq!(
+                failures,
+                vec![telemetry::EventData::SetupFailed {
+                    step: telemetry::Step::Install,
+                    error_class: telemetry::SetupErrorClass::Unknown,
+                    failing_step: Some(telemetry::FailingStep::LocalUpdate),
+                    cli_reason: Some(telemetry::CliReason::IncompatibleRelease),
+                    cli_failure: None,
+                    resources: None,
+                }],
+                "{status}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&cli.dir);
+    }
+
     /// A CLI that finds a folder's stack as the CopilotKit CLI does: `.copilotkit/local.json` in the
     /// folder it runs in, then in every folder above it, or with `--app-path <folder>` only in that
     /// folder. `local setup` resumes the stack it finds, else the stack recorded for the folder, else

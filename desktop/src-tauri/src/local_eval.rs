@@ -404,7 +404,7 @@ Nothing in the cluster had changed and every check passed, yet the CLI reports `
 long as the record stays, and the window said the back end was not healthy and stopped.
 
 Only facts the window turns into its own sentences: the release (an identifier, like
-`installedRelease`), whether the update was still `prepared`, and whether it stopped downloading.
+`installedRelease`), how far the update got (`UpdateState`), and whether it stopped downloading.
 The recovery command and the schema are not kept.
 */
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -415,12 +415,46 @@ pub struct UnfinishedUpdate {
     /// The CLI's update state is still `prepared`: no migration has started, so the release that
     /// answers is the one installed (`installedRelease`).
     pub prepared: bool,
+    /// How far the update got, from the CLI's `update.state`.
+    pub state: UpdateState,
     /// The step that failed was one of the image downloads.
     pub stopped_downloading: bool,
     /// The step the CLI recorded as failed (`failedStep`), an identifier such as `update-quiesce`,
     /// so the window can say where the update stopped. Absent when none is recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_step: Option<String>,
+}
+
+/**
+How far an unfinished update got, as the CLI's `update.state` records it. The window says whether the
+services still run the version they had from this, never from the CLI's own text.
+
+Found on a Mac, rc.11 to rc.13: the CLI was stopped at `migrated`, while the new services started.
+The database was already on the new release, yet the window said the services ran the version they
+had.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateState {
+    /// Nothing migrated yet: the release installed is the one that answers.
+    Prepared,
+    /// The database migration started and did not finish: part-way.
+    Migrating,
+    /// The database is on the new release; the new services had not finished starting.
+    Migrated,
+    /// A state this build does not know.
+    Other,
+}
+
+impl UpdateState {
+    fn read(state: Option<&str>) -> Self {
+        match state {
+            Some("prepared") => Self::Prepared,
+            Some("migrating") => Self::Migrating,
+            Some("migrated") => Self::Migrated,
+            _ => Self::Other,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -2193,6 +2227,7 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
             Some(UnfinishedUpdate {
                 to: text(update.get("attemptedRelease"))?,
                 prepared: update.get("state").and_then(Value::as_str) == Some("prepared"),
+                state: UpdateState::read(update.get("state").and_then(Value::as_str)),
                 // The steps the CLI's own progress calls downloading the release's images.
                 stopped_downloading: matches!(
                     saved.get("failedStep").and_then(Value::as_str),
@@ -2535,18 +2570,85 @@ calling `start`, and on a stopped one the CLI refuses `start` while a `prepared`
 left alone.
 */
 pub fn update_due(report: &Report, target: Option<&str>) -> Option<String> {
-    let target = target?;
+    let (to, newer) = update_releases(report, target)?;
+    newer.then(|| to.to_owned())
+}
+
+/// The release `local update` on `report`'s stack installs (the one an unfinished update on record
+/// moves to, else `target`), and whether it is newer than the release the stack runs. `None` when
+/// the report is not a completed status with a stack, or either version cannot be read.
+fn update_releases<'a>(report: &'a Report, target: Option<&'a str>) -> Option<(&'a str, bool)> {
     let stack = report.stack.as_ref()?;
     if report.outcome != Outcome::Completed {
         return None;
     }
     let version = |text: &str| semver::Version::parse(text.trim().trim_start_matches('v')).ok();
     let to = if stack.update_in_progress {
-        &stack.unfinished_update.as_ref()?.to
+        stack.unfinished_update.as_ref()?.to.as_str()
     } else {
-        target
+        target?
     };
-    (version(to)? > version(&stack.installed_release)?).then(|| to.to_owned())
+    Some((to, version(to)? > version(&stack.installed_release)?))
+}
+
+/**
+Whether a `local update` the CLI refused as `incompatible_release` was refused only because the stack
+already runs the release it would install, or a newer one: nothing to update, not a failure.
+
+THE PROBLEM. The CLI refuses an update that does not move to a newer release with the same reason,
+`incompatible_release`, as the two that are real failures: a release whose database schema cannot
+be migrated in place, and one that needs a new local Kubernetes cluster. Its JSON names no other
+code and carries no stack, so the refusal alone cannot tell them apart. Every upgrader's Desktop
+sent `setup_failed` for it (`local_update`, `incompatible_release`), and the window said the
+services couldn't update, while the stack ran the release the app installs.
+
+THE RULE. Read from `status`, the stack's `local status` after the refusal: already on it when the
+release the update would install, as `update_releases` reads it, is not newer than the one the stack
+runs. That is the CLI's own first check, and the schema and cluster refusals come only after it
+passed, so a stack behind its update is never taken for one already on it. Never when the status did
+not complete, or a version cannot be read: then the refusal stands, and is reported as before.
+*/
+fn already_on_release(status: &Report, target: Option<&str>) -> bool {
+    update_releases(status, target).is_some_and(|(_, newer)| !newer)
+}
+
+/**
+`report`, `local update`'s answer, or the stack's `local status` in its place when the update was
+refused only because the stack already runs that release (`already_on_release`): a completed answer,
+so neither the window nor telemetry treats it as a failed update. Any other answer is kept as it is,
+and `status` is asked only after an `incompatible_release` refusal.
+*/
+fn nothing_to_update(
+    report: Result<Report, Failure>,
+    status: impl FnOnce() -> Option<Report>,
+    target: Option<&str>,
+) -> Result<Report, Failure> {
+    let refused = matches!(
+        &report,
+        Ok(Report {
+            outcome: Outcome::Blocked,
+            reason: Some(Reason::IncompatibleRelease),
+            ..
+        })
+    );
+    if !refused {
+        return report;
+    }
+    match status() {
+        Some(status) if already_on_release(&status, target) => {
+            if let Some(stack) = &status.stack {
+                log::info!(
+                    "[local update] nothing to update: the backend already runs {}",
+                    stack.installed_release
+                );
+            }
+            Ok(Report {
+                update_to: None,
+                ..status
+            })
+        }
+        _ => report,
+    }
 }
 
 pub fn installed() -> Result<PinnedCli, Failure> {
@@ -4176,9 +4278,22 @@ pub(crate) fn run_with(
     match action {
         // The calls that start the back end: the engine is checked around them.
         Action::Start => checked_call("local start", Some(stack), call),
-        Action::Update => checked_call("local update", Some(stack), || {
-            update_repairing(stack, cancel, call)
-        }),
+        Action::Update => nothing_to_update(
+            checked_call("local update", Some(stack), || {
+                update_repairing(stack, cancel, call)
+            }),
+            || {
+                run(
+                    cli,
+                    Action::Status,
+                    stack,
+                    Limits::for_action(Action::Status),
+                    cancel,
+                )
+                .ok()
+            },
+            bundled_release().as_deref(),
+        ),
         Action::Status => call().map(|report| checked_when_unhealthy(report, stack)),
         Action::Stop => call(),
     }
@@ -5621,6 +5736,85 @@ mod tests {
         assert_eq!(update_due(&blocked, target), None);
     }
 
+    /// The CLI refuses `local update` as `incompatible_release` both for a stack already on the
+    /// release it would install and for a release that cannot update the stack in place. Only the
+    /// stack's status after the refusal tells them apart: on the release, or past it, there is
+    /// nothing to update; behind it, or with a version or status that cannot be read, the refusal
+    /// stands. No other answer asks the status at all.
+    #[test]
+    fn an_update_refused_on_a_stack_already_on_its_release_is_nothing_to_update() {
+        let target = Some("0.16.0-rc.9");
+        let refused: Result<Report, Failure> = Ok(Report {
+            outcome: Outcome::Blocked,
+            reason: Some(Reason::IncompatibleRelease),
+            ..Report::engine_not_answering()
+        });
+        for current in ["0.16.0-rc.9", "v0.16.0-rc.9", "0.16.0-rc.10", "0.16.0"] {
+            let answer =
+                nothing_to_update(refused.clone(), || Some(on_release(current)), target).unwrap();
+            assert_eq!(answer.outcome, Outcome::Completed, "{current}");
+            assert_eq!(answer.reason, None, "{current}");
+            assert_eq!(answer.update_to, None, "{current}");
+            assert_eq!(answer.stack.unwrap().installed_release, current);
+        }
+        // An update on record, moving to the release the stack already runs: the CLI's resume
+        // refuses it the same way, and there is nothing to update whatever this app installs.
+        let mut resuming = envelope();
+        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.9");
+        resuming["stack"]["update"] =
+            json!({ "attemptedRelease": "0.16.0-rc.9", "state": "prepared" });
+        for target in [target, Some("0.16.0-rc.10"), None] {
+            let resuming = status(&resuming).unwrap();
+            let answer = nothing_to_update(refused.clone(), || Some(resuming), target).unwrap();
+            assert_eq!(answer.outcome, Outcome::Completed);
+        }
+        // Behind the release, it is a real refusal (a schema or a cluster it cannot update in
+        // place), as it is when the status fails or says nothing readable.
+        let mut moving_on = envelope();
+        moving_on["stack"]["installedRelease"] = json!("0.16.0-rc.9");
+        moving_on["stack"]["update"] =
+            json!({ "attemptedRelease": "0.16.0-rc.10", "state": "prepared" });
+        let mut not_completed = on_release("0.16.0-rc.9");
+        not_completed.outcome = Outcome::Blocked;
+        for status in [
+            Some(on_release("0.16.0-rc.8")),
+            Some(status(&moving_on).unwrap()),
+            Some(on_release("latest")),
+            Some(not_completed),
+            None,
+        ] {
+            assert_eq!(
+                nothing_to_update(refused.clone(), || status, target),
+                refused
+            );
+        }
+        // Without the release this app installs, a stack with nothing on record cannot be read.
+        assert_eq!(
+            nothing_to_update(refused.clone(), || Some(on_release("0.16.0-rc.9")), None),
+            refused
+        );
+        // Every other answer is kept as it is, without asking the status.
+        let mut recovery = refused.clone().unwrap();
+        recovery.reason = Some(Reason::UpdateRecoveryRequired);
+        let mut failed = refused.clone().unwrap();
+        failed.outcome = Outcome::Failed;
+        for other in [
+            Ok(on_release("0.16.0-rc.9")),
+            Ok(recovery),
+            Ok(failed),
+            Err(Failure::Timeout),
+        ] {
+            assert_eq!(
+                nothing_to_update(
+                    other.clone(),
+                    || -> Option<Report> { panic!("status asked") },
+                    target
+                ),
+                other
+            );
+        }
+    }
+
     /// `local update --stack <id> --json`, fixed like every other call, and read like them: its
     /// completed report, including the CLI's answer that the stack already runs that release.
     #[test]
@@ -5680,6 +5874,41 @@ mod tests {
             assert_eq!(observed.running, running);
             assert!(!observed.services[0].ready);
             assert_eq!(report.readiness, Readiness::Unknown);
+            assert!(!exposes_secret(&report));
+        }
+    }
+
+    /// The window is told how far an unfinished update got as one of four words, never the CLI's
+    /// own text: a state this build does not know is `other`.
+    #[test]
+    fn an_unfinished_update_tells_the_window_how_far_it_got() {
+        for (state, expected, said) in [
+            (json!("prepared"), UpdateState::Prepared, "prepared"),
+            (json!("migrating"), UpdateState::Migrating, "migrating"),
+            (json!("migrated"), UpdateState::Migrated, "migrated"),
+            (json!(SECRET), UpdateState::Other, "other"),
+            (json!(null), UpdateState::Other, "other"),
+        ] {
+            let mut input = envelope();
+            input["stack"]["update"] = json!({
+                "attemptedRelease": "0.16.0-rc.13",
+                "state": state,
+                "recoveryCommand": "copilotkit local update",
+            });
+            let report = status(&input).unwrap();
+            let update = report.stack.clone().unwrap().unfinished_update.unwrap();
+            assert_eq!(update.state, expected, "{state}");
+            assert_eq!(
+                update.prepared,
+                expected == UpdateState::Prepared,
+                "{state}"
+            );
+            let window = serde_json::to_value(&report).unwrap();
+            assert_eq!(
+                window["stack"]["unfinishedUpdate"]["state"],
+                json!(said),
+                "{state}"
+            );
             assert!(!exposes_secret(&report));
         }
     }
