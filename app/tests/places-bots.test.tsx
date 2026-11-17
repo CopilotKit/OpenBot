@@ -210,7 +210,7 @@ test("a Bot's activity is read only when its row is opened", async () => {
   expect(reads).toBe(0);
 
   fireEvent.click(view.getByRole("button", { name: "What Mine is doing" }));
-  await view.findByText("Nothing under way or lined up.");
+  await view.findByText("Nothing is running or lined up.");
   expect(reads).toBe(1);
 });
 
@@ -225,7 +225,7 @@ test("a Bot's activity that can't be read says so, not that nothing is under way
   await view.findByText(
     "Couldn't load what it is doing. Try again in a moment.",
   );
-  expect(view.queryByText("Nothing under way or lined up.")).toBeNull();
+  expect(view.queryByText("Nothing is running or lined up.")).toBeNull();
 });
 
 test("a roster that can't be read says so", async () => {

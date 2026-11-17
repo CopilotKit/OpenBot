@@ -7,6 +7,7 @@ import { NewBotSheet } from "@/components/agents/new-bot-sheet";
 import { ActivityRow, upcomingOf } from "@/components/bot-profile/activity";
 import { useWaitingOnYou } from "@/components/bot-profile/attention";
 import { Button } from "@/components/ui/button";
+import { useOptionalSidebar } from "@/components/ui/sidebar";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { botActivityQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -141,7 +142,7 @@ function BotUpcoming({ agentId }: { agentId: string }) {
     );
   }
   if (upcoming.length === 0) {
-    return <PlaceEmpty>Nothing under way or lined up.</PlaceEmpty>;
+    return <PlaceEmpty>Nothing is running or lined up.</PlaceEmpty>;
   }
   return (
     <div className="flex flex-col pl-4">
@@ -155,6 +156,7 @@ function BotUpcoming({ agentId }: { agentId: string }) {
 function NewBotAction() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const sidebar = useOptionalSidebar();
   return (
     <>
       <Button
@@ -169,6 +171,8 @@ function NewBotAction() {
         onClose={() => setOpen(false)}
         onCreated={(id) => {
           setOpen(false);
+          /* The phone sheet closes only on followed links, and this navigation is not one. */
+          sidebar?.setOpenMobile(false);
           void navigate({ to: "/bots/$agentId", params: { agentId: id } });
         }}
         open={open}

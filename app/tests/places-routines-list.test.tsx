@@ -97,33 +97,38 @@ function renderPlace({
   checkIns = [],
   shown = [bot("ada", "Ada")],
   hidden = [],
-  goalsFail = false,
+  failing = [],
 }: {
   routines?: RoutineRecord[];
   goals?: ResponsibilityRecord[];
   checkIns?: ProactiveSetting[];
   shown?: AgentProfile[];
   hidden?: AgentProfile[];
-  /** The goals read fails instead of answering. */
-  goalsFail?: boolean;
+  /** The reads that fail instead of answering. */
+  failing?: ("routines" | "goals" | "check-ins")[];
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   clients.push(queryClient);
-  queryClient.setQueryData(routineKeys.list(), { routines });
-  if (goalsFail) {
+  if (failing.length > 0) {
     globalThis.fetch = Object.assign(
       async () => Response.json({ error: "down" }, { status: 500 }),
       { preconnect: originalFetch.preconnect },
     );
-  } else {
+  }
+  if (!failing.includes("routines")) {
+    queryClient.setQueryData(routineKeys.list(), { routines });
+  }
+  if (!failing.includes("goals")) {
     queryClient.setQueryData(responsibilityKeys.all, goals);
   }
-  queryClient.setQueryData(proactiveKeys.settings, {
-    settings: checkIns,
-    allowed: true,
-  });
+  if (!failing.includes("check-ins")) {
+    queryClient.setQueryData(proactiveKeys.settings, {
+      settings: checkIns,
+      allowed: true,
+    });
+  }
   queryClient.setQueryData(agentKeys.list(false), shown);
   queryClient.setQueryData(agentKeys.list(true), hidden);
   const router = createRouter({
@@ -187,10 +192,22 @@ test("with no routines the list says so", async () => {
 });
 
 test("a read that failed says what and what to do, and keeps the rest of the list", async () => {
-  const view = renderPlace({ goalsFail: true, routines: [routine()] });
+  const view = renderPlace({ failing: ["goals"], routines: [routine()] });
   expect((await view.findByRole("alert")).textContent).toBe(
     "Couldn't load your goals. Try again in a moment.",
   );
   expect(view.getByText("Send yesterday's new leads")).toBeTruthy();
   expect(view.queryByText(/No routines yet/)).toBeNull();
+});
+
+test("reads that failed are named as a list", async () => {
+  const two = renderPlace({ failing: ["routines", "goals"] });
+  expect((await two.findByRole("alert")).textContent).toBe(
+    "Couldn't load your routines and goals. Try again in a moment.",
+  );
+  cleanup();
+  const three = renderPlace({ failing: ["routines", "goals", "check-ins"] });
+  expect((await three.findByRole("alert")).textContent).toBe(
+    "Couldn't load your routines, goals and check-ins. Try again in a moment.",
+  );
 });

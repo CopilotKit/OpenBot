@@ -17,6 +17,12 @@ import {
   PlaceRow,
 } from "./place-row";
 
+/** "routines", "routines and goals", "routines, goals and check-ins". */
+function listOf(names: string[]): string {
+  if (names.length < 2) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 function RoutinesPlace() {
   const { rows, bots, pending, failed } = useMergedRoutines();
   const nameOf = (agentId: string) => bots.get(agentId)?.name ?? "A Bot";
@@ -26,7 +32,7 @@ function RoutinesPlace() {
     <div className="flex flex-col pb-2">
       {failed.length > 0 ? (
         <p className="px-2 py-3 text-muted-foreground text-xs" role="alert">
-          Couldn't load your {failed.join(" and ")}. Try again in a moment.
+          Couldn't load your {listOf(failed)}. Try again in a moment.
         </p>
       ) : null}
       {rows.length === 0 && failed.length === 0 ? (
