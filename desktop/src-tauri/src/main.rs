@@ -19265,6 +19265,234 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A CLI whose `local stop` takes the stack from running to stopped only once the test lets it,
+    /// recording each stop that began and each that finished. One cut short leaves the stack
+    /// "stopping", half stopped, as a real stop cancelled partway would. The tests below never
+    /// depend on how long it takes; it only gives a cancel that should not happen time to land.
+    #[cfg(unix)]
+    const STOPPING_CLI: &str = r##"
+use std::{env, fs, io::Write, time::{Duration, Instant}};
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--warm") { return; }
+    let here = env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let mut calls = fs::OpenOptions::new().create(true).append(true).open(here.join("calls")).unwrap();
+    assert_eq!(args[..2], ["local", "stop"], "{args:?}");
+    let stack = &args[3];
+    writeln!(calls, "began {}", std::process::id()).unwrap();
+    fs::write(here.join("stack"), "stopping").unwrap();
+    let until = Instant::now() + Duration::from_secs(60);
+    while !here.join("release").exists() {
+        assert!(Instant::now() < until, "never released");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Stopping takes a while once it may: a stop cancelled meanwhile is cut short here.
+    std::thread::sleep(Duration::from_millis(500));
+    fs::write(here.join("stack"), "stopped").unwrap();
+    writeln!(calls, "finished {}", std::process::id()).unwrap();
+    println!(r#"{{"version":1,"command":"local stop","status":"completed","stack":{{"id":"{stack}","installedRelease":"0.15.0","step":"ready","urls":{{"api":"http://localhost:8082","dashboard":"http://intelligence.localhost:8080","gateway":"ws://[::1]:4401"}},"failedStep":null,"update":null}},"auth":{{"running":false}},"nextAction":null,"error":null,"diagnostics":[]}}"#);
+}
+"##;
+
+    /// A local Intelligence OpenBot created, stopped through the production Stop and Quit steps
+    /// by `STOPPING_CLI`. Sets the process's CLI, so only in an isolated test.
+    #[cfg(unix)]
+    struct StoppingBackend {
+        cli: PathBuf,
+        root: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl StoppingBackend {
+        fn new(label: &str) -> Self {
+            let cli = temp_root(&format!("{label}-cli"));
+            std::fs::create_dir_all(&cli).unwrap();
+            std::fs::write(cli.join("cli.rs"), STOPPING_CLI).unwrap();
+            let program = cli.join("cli");
+            crate::test_support::compile_fixture(&cli.join("cli.rs"), &program);
+            use sha2::Digest;
+            let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+            std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", digest);
+            std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY");
+            let root = local_eval_root(label, Some(local_eval_state::Ownership::Created));
+            std::fs::write(cli.join("stack"), "running").unwrap();
+            Self { cli, root }
+        }
+
+        fn stack(&self) -> String {
+            std::fs::read_to_string(self.cli.join("stack")).unwrap()
+        }
+
+        fn calls(&self, what: &str) -> usize {
+            std::fs::read_to_string(self.cli.join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.starts_with(what))
+                .count()
+        }
+
+        /// Until a CLI stop is running, holding the stack half stopped.
+        fn wait_for_a_stop_running(&self) {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while self.calls("began") == 0 {
+                assert!(std::time::Instant::now() < until, "no stop began");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        fn let_stops_finish(&self) {
+            std::fs::write(self.cli.join("release"), "").unwrap();
+        }
+
+        fn stop(
+            &self,
+            shell: &std::sync::Arc<Shell>,
+            closed: Option<std::sync::mpsc::Sender<()>>,
+        ) -> std::thread::JoinHandle<Stopped> {
+            let (shell, root) = (shell.clone(), self.root.clone());
+            std::thread::spawn(move || {
+                stop_everything_then(
+                    &shell,
+                    &root,
+                    |_| Ok(0),
+                    move |_| {
+                        if let Some(closed) = closed {
+                            closed.send(()).unwrap();
+                        }
+                        Ok(())
+                    },
+                    intelligence_step(Shutdown::Stop),
+                )
+            })
+        }
+
+        fn quit(
+            &self,
+            shell: &std::sync::Arc<Shell>,
+            closed: Option<std::sync::mpsc::Sender<()>>,
+        ) -> std::thread::JoinHandle<Stopped> {
+            let (shell, root) = (shell.clone(), self.root.clone());
+            std::thread::spawn(move || {
+                exit_cleanup_then(
+                    &shell,
+                    &root,
+                    |_| Ok(0),
+                    move |_| {
+                        if let Some(closed) = closed {
+                            closed.send(()).unwrap();
+                        }
+                        Ok(())
+                    },
+                    intelligence_step(Shutdown::Quit),
+                )
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for StoppingBackend {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.cli);
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /**
+    Stop pressed twice, from the menu and from Settings, while the first is asking the CLI to stop
+    the local Intelligence. The second Stop used to cancel the first one's CLI stop: the first then
+    said some of OpenBot's services didn't stop. Both now finish, neither says anything failed, and
+    the stack is stopped.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn two_stops_at_once_stop_the_backend_and_neither_reports_a_failure() {
+        if test_support::isolated_process(
+            "tests::two_stops_at_once_stop_the_backend_and_neither_reports_a_failure",
+        ) {
+            return;
+        }
+        let backend = StoppingBackend::new("openbot-two-stops");
+        let shell = std::sync::Arc::new(Shell::default());
+        let first = backend.stop(&shell, None);
+        backend.wait_for_a_stop_running();
+        let (closed, second_closed) = std::sync::mpsc::channel();
+        let second = backend.stop(&shell, Some(closed));
+        // The second Stop has closed local evaluation and is taking OpenBot's containers down.
+        second_closed.recv().unwrap();
+        backend.let_stops_finish();
+
+        assert_eq!(first.join().unwrap(), Stopped::default());
+        assert_eq!(second.join().unwrap(), Stopped::default());
+        assert_eq!(backend.stack(), "stopped");
+        assert_eq!(
+            backend.calls("began"),
+            backend.calls("finished"),
+            "a stop was cut short"
+        );
+    }
+
+    /**
+    Stop pressed while Quit is asking the CLI to stop the local Intelligence. Quit's own stop is
+    never cancelled: Quit finishes it and says nothing failed, and the Stop leaves it to Quit.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_during_quit_leaves_quits_own_stop_to_finish() {
+        if test_support::isolated_process(
+            "tests::a_stop_during_quit_leaves_quits_own_stop_to_finish",
+        ) {
+            return;
+        }
+        let backend = StoppingBackend::new("openbot-stop-during-quit");
+        let shell = std::sync::Arc::new(Shell::default());
+        let quitting = backend.quit(&shell, None);
+        backend.wait_for_a_stop_running();
+        let (closed, stop_closed) = std::sync::mpsc::channel();
+        let stopping = backend.stop(&shell, Some(closed));
+        stop_closed.recv().unwrap();
+        backend.let_stops_finish();
+
+        assert_eq!(quitting.join().unwrap(), Stopped::default());
+        assert_eq!(stopping.join().unwrap(), Stopped::default());
+        assert_eq!(backend.stack(), "stopped");
+        // Quit's stop was the only one, and it ran to the end.
+        assert_eq!((backend.calls("began"), backend.calls("finished")), (1, 1));
+    }
+
+    /**
+    Quit while a Stop is asking the CLI to stop the local Intelligence. Quit does not wait behind
+    it: it cancels that stop, leaving the stack half stopped for a moment, and stops the stack
+    itself. The stack ends stopped, and the Stop, whose work Quit took over, reports no failure.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn quit_during_a_stop_takes_over_its_stop_and_finishes_it() {
+        if test_support::isolated_process(
+            "tests::quit_during_a_stop_takes_over_its_stop_and_finishes_it",
+        ) {
+            return;
+        }
+        let backend = StoppingBackend::new("openbot-quit-during-stop");
+        let shell = std::sync::Arc::new(Shell::default());
+        let stopping = backend.stop(&shell, None);
+        backend.wait_for_a_stop_running();
+        let (closed, quit_closed) = std::sync::mpsc::channel();
+        let quitting = backend.quit(&shell, Some(closed));
+        // Quit has closed local evaluation for good, which cancels the Stop's CLI stop.
+        quit_closed.recv().unwrap();
+        backend.let_stops_finish();
+
+        assert_eq!(stopping.join().unwrap(), Stopped::default());
+        assert_eq!(quitting.join().unwrap(), Stopped::default());
+        assert_eq!(backend.stack(), "stopped");
+        // The Stop's was cut short; Quit's own ran to the end.
+        assert_eq!((backend.calls("began"), backend.calls("finished")), (2, 1));
+    }
+
     #[test]
     fn stop_closes_local_eval_before_anything_else_and_reopens_after() {
         // Closing is process-wide, and Quit's never reopens.
@@ -20698,6 +20926,16 @@ fn main() {
                 std::fs::write(fixture.a.join("fail-up"), "").unwrap();
             }
             fixture.start(&fixture.a, false);
+            // A local Podman Start wrote OpenBot's drop-in under this fixture's own configuration
+            // home, so fixtures running at once never share one.
+            #[cfg(target_os = "linux")]
+            if podman && !case.contains("named") {
+                assert!(fixture
+                    .base
+                    .join("config")
+                    .join(engine::local_api::HOST_LOOPBACK_CONFIG)
+                    .is_file());
+            }
             let owner =
                 std::fs::read_to_string(fixture.a.join("fixture-containers-running")).unwrap();
             std::fs::write(fixture.base.join("docker-ready"), "").unwrap();
