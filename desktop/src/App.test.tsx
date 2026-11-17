@@ -104,7 +104,26 @@ const { ShuttingDownWindow, isShuttingDownPage } = await import(
   "./ShuttingDown"
 );
 
-beforeAll(() => GlobalRegistrator.register());
+/*
+ * The booking calendar's frame is never fetched from Calendly: a test of the window goes nowhere on
+ * the web. Its frame gets an empty page, which says nothing, as a calendar that has not loaded yet.
+ */
+beforeAll(() =>
+  GlobalRegistrator.register({
+    settings: {
+      fetch: {
+        interceptor: {
+          beforeAsyncRequest: async ({ request, window }) =>
+            new URL(request.url).hostname === "calendly.com"
+              ? new window.Response("<!doctype html><title></title>", {
+                  headers: { "content-type": "text/html" },
+                })
+              : undefined,
+        },
+      },
+    },
+  }),
+);
 afterEach(() => {
   // Unmounting can still call (a running local step is cancelled), so clear the record after it.
   cleanup();
@@ -639,7 +658,7 @@ test("the first screen offers Self-hosted and OpenBot for Business, shows Cloud 
   expect([cloud.checked, cloud.disabled]).toEqual([false, true]);
   expect([business.checked, business.disabled]).toEqual([false, false]);
   expect(business.closest("label")?.textContent).toContain(
-    "For your whole team. Connect to the OpenBot your company runs.",
+    "For your whole team. Book a call to see it.",
   );
   // What Self-hosted asks of this computer, and why: every part of OpenBot runs on it.
   expect(
@@ -661,20 +680,159 @@ test("the first screen offers Self-hosted and OpenBot for Business, shows Cloud 
     "4 CPU cores or more",
     "40 GB of free disk space",
   ]);
-  expect(buttons(view)).toEqual(["Install"]);
-  // The one booking link, for a company with no OpenBot of its own: under the Business row, not
-  // part of it, so opening it leaves the choice where it was.
-  const demo = view.getByRole("link", { name: "Book a demo" });
-  expect(demo.getAttribute("href")).toBe("https://open.bot/business");
-  expect(demo.parentElement?.textContent).toBe(
-    "No OpenBot at your company yet? Book a demo.",
+  // Connecting to a company's own OpenBot is a link under the rows, not one of them. No booking
+  // link of its own: OpenBot for Business is the booking.
+  const connect = view.getByRole("button", { name: "Connect to it" });
+  expect(connect.parentElement?.textContent).toBe(
+    "Already have OpenBot at work? Connect to it.",
   );
-  expect(demo.closest("label")).toBeNull();
-  await userEvent.click(demo);
-  expect([self.checked, business.checked]).toEqual([true, false]);
-  expect(buttons(view)).toEqual(["Install"]);
+  expect(connect.closest("label")).toBeNull();
+  expect(view.queryByRole("link", { name: "Book a demo" })).toBeNull();
+  expect(view.queryByText(/No OpenBot at your company yet/)).toBeNull();
+  expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   expectPlain(view);
   expect(localCliCalls()).toEqual([]);
+});
+
+/*
+ * OpenBot for Business books a call: picked, it shows what the app's OpenBot for Business view
+ * shows, what it adds and the booking calendar, and never an address to type. Before, it replaced
+ * Install with an address field and Connect.
+ */
+test("picking OpenBot for Business shows what it adds and the booking calendar, and no address field", async () => {
+  setupRootConfiguration("/tmp/business-booker", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+    "plugin:opener|open_url": null,
+  });
+  const view = await renderApp();
+  const business = view.getByRole("radio", {
+    name: /^OpenBot for Business/,
+  }) as HTMLInputElement;
+  await userEvent.click(business);
+  expect(business.checked).toBe(true);
+  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
+    "checked",
+    false,
+  );
+  // No address and no Connect: that is the link under the rows.
+  expect(view.queryByLabelText("OpenBot address")).toBeNull();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Install" })).toBeNull();
+  expect(
+    view.queryByRole("heading", { name: "What this computer needs" }),
+  ).toBeNull();
+  // What it adds, in the app's words.
+  expect(
+    view.getByText(
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+    ),
+  ).toBeTruthy();
+  expect(
+    view.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
+  ).toEqual([
+    "For your whole organization",
+    "Where your Bots work",
+    "In control",
+  ]);
+  expect(view.getByText("A computer for each Bot")).toBeTruthy();
+  expect(view.getByText("A full audit trail, with export")).toBeTruthy();
+  // The calendar: OpenBot for Business's Calendly event, as an inline embed, while it loads.
+  expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
+  const calendar = view.getByTitle("Booking calendar") as HTMLIFrameElement;
+  const src = new URL(calendar.getAttribute("src") ?? "");
+  expect(`${src.origin}${src.pathname}`).toBe(
+    "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business",
+  );
+  expect(src.searchParams.get("embed_type")).toBe("Inline");
+  expect(src.searchParams.get("embed_domain")).toBe(window.location.host);
+  expect(view.getByText("Loading the calendar")).toBeTruthy();
+  // Calendly says it is there: the spinner goes.
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://calendly.com",
+        source: calendar.contentWindow,
+        data: { event: "calendly.page_height", payload: { height: "640px" } },
+      }),
+    );
+  });
+  expect(view.queryByText("Loading the calendar")).toBeNull();
+  expect(calendar.style.height).toBe("640px");
+  expectPlain(view);
+  // Self-hosted again: its needs and Install, as before.
+  await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
+  expect(buttons(view)).toEqual(["Connect to it", "Install"]);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(localCliCalls()).toEqual([]);
+});
+
+test("a calendar that can't load gives way to Book a demo, which opens the OpenBot for Business page in the browser", async () => {
+  setupRootConfiguration("/tmp/business-booker-blocked", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+    "plugin:opener|open_url": null,
+  });
+  const view = await renderApp();
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  );
+  // Blocked: the frame errors.
+  await act(async () => {
+    view.getByTitle("Booking calendar").dispatchEvent(new Event("error"));
+  });
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(
+    view.getByText(
+      "Couldn't load the calendar. Book a demo opens it in your browser.",
+    ),
+  ).toBeTruthy();
+  const demo = view.getByRole("link", { name: "Book a demo" });
+  expect(demo.getAttribute("href")).toBe("https://open.bot/business");
+  await userEvent.click(demo);
+  expect(invokeCalls).toContainEqual({
+    command: "plugin:opener|open_url",
+    args: { url: "https://open.bot/business" },
+  });
+  // Opening it leaves the screen where it was.
+  expect(
+    view.getByRole("radio", { name: /^OpenBot for Business/ }),
+  ).toHaveProperty("checked", true);
+  expect(localCliCalls()).toEqual([]);
+});
+
+test("offline, OpenBot for Business offers Book a demo in the browser straight away", async () => {
+  setupRootConfiguration("/tmp/business-booker-offline", async () =>
+    emptyConfiguration(),
+  );
+  withLocalCli({
+    connection: THIS_COMPUTER,
+    record_setup_event: null,
+    "plugin:opener|open_url": null,
+  });
+  const view = await renderApp();
+  // Offline, on this window's navigator only; the prototype's answer comes back after.
+  Object.defineProperty(navigator, "onLine", {
+    configurable: true,
+    get: () => false,
+  });
+  try {
+    await userEvent.click(
+      view.getByRole("radio", { name: /^OpenBot for Business/ }),
+    );
+    expect(view.queryByTitle("Booking calendar")).toBeNull();
+    expect(
+      view.getByRole("link", { name: "Book a demo" }).getAttribute("href"),
+    ).toBe("https://open.bot/business");
+  } finally {
+    delete (navigator as { onLine?: boolean }).onLine;
+  }
 });
 
 /*
@@ -753,7 +911,7 @@ const CONNECT_PROBLEMS: Array<{
   },
 ];
 
-/** A first run on which the person picks OpenBot for Business: the connect screen. */
+/** A first run on which the person connects to their company's OpenBot: the connect screen. */
 async function chooseConnect(shell: Record<string, unknown> = {}) {
   setupRootConfiguration("/tmp/connect-elsewhere", async () =>
     emptyConfiguration(),
@@ -765,9 +923,7 @@ async function chooseConnect(shell: Record<string, unknown> = {}) {
     ...shell,
   });
   const view = await renderApp();
-  await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   return view;
 }
 
@@ -797,13 +953,19 @@ function connectedShell(answers: Record<string, unknown>) {
   return strays;
 }
 
-test("choosing OpenBot for Business asks for an address in place of Install, and going back brings Install back", async () => {
+test("Connect to it asks for an address in place of Install, and going back brings Install back", async () => {
   const view = await chooseConnect();
   const business = view.getByRole("radio", {
     name: /^OpenBot for Business/,
   }) as HTMLInputElement;
-  expect(business.checked).toBe(true);
+  const self = view.getByRole("radio", {
+    name: /^Self-hosted/,
+  }) as HTMLInputElement;
+  // None of the three: this app connects to an OpenBot that already runs.
+  expect([self.checked, business.checked]).toEqual([false, false]);
   const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  // The link brought the person to the field.
+  expect(document.activeElement).toBe(field);
   expect(field.placeholder).toBe("https://openbot.example.com");
   expect(field.value).toBe("");
   expect(
@@ -825,37 +987,35 @@ test("choosing OpenBot for Business asks for an address in place of Install, and
     "disabled",
     true,
   );
-  // The one booking link is still there, once, under the Business row, and opening it leaves the
-  // choice where it is.
-  const demo = view.getByRole("link", { name: "Book a demo" });
-  expect(demo.getAttribute("href")).toBe("https://open.bot/business");
-  expect(demo.parentElement?.textContent).toBe(
-    "No OpenBot at your company yet? Book a demo.",
-  );
-  expect(demo.closest("label")).toBeNull();
-  await userEvent.click(demo);
-  expect(business.checked).toBe(true);
-  expect(view.getByLabelText("OpenBot address")).toBeTruthy();
-  expect(view.queryByText(/Don't have one yet\?/)).toBeNull();
+  // The link that led here is gone while its form shows.
+  expect(view.queryByText(/Already have OpenBot at work/)).toBeNull();
   // OpenBot Cloud is still to come.
   expect(view.getByRole("radio", { name: /^OpenBot Cloud/ })).toHaveProperty(
     "disabled",
     true,
   );
   expectPlain(view);
-  // Back, by the control that says so, and by the row itself.
+  // Back, by the control that says so, and by the rows themselves.
   await userEvent.type(field, "openbot.example.com");
   await userEvent.click(
     view.getByRole("button", { name: "Use OpenBot on this computer instead" }),
   );
-  expect(buttons(view)).toEqual(["Install"]);
-  await userEvent.click(business);
+  expect(buttons(view)).toEqual(["Connect to it", "Install"]);
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   // What was typed is still there.
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe("openbot.example.com");
+  // OpenBot for Business from here is its booker, and Connect to it goes back to the address.
+  await userEvent.click(business);
+  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  expect(view.queryByLabelText("OpenBot address")).toBeNull();
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
+  expect(
+    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+  ).toBe("openbot.example.com");
   await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
-  expect(buttons(view)).toEqual(["Install"]);
+  expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   expect(
     view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
@@ -1024,9 +1184,14 @@ test("a launch after the sign-in ended says so once, with the address filled in 
   });
   const view = await renderApp(true);
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
+  // The connect form, which is none of the three rows: OpenBot for Business books a call.
   expect(
     view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  ).toHaveProperty("checked", true);
+  ).toHaveProperty("checked", false);
+  expect(view.getByRole("radio", { name: /^Self-hosted/ })).toHaveProperty(
+    "checked",
+    false,
+  );
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
@@ -1061,7 +1226,7 @@ test("asked from Settings to choose where OpenBot runs, the first screen opens o
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   expect(
     view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  ).toHaveProperty("checked", true);
+  ).toHaveProperty("checked", false);
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
@@ -1111,7 +1276,7 @@ test("asked from Settings on an install on this computer, the first screen shows
     true,
   );
   // OpenBot is already installed here: the way on is Continue, not Install.
-  expect(buttons(view)).toEqual(["Continue"]);
+  expect(buttons(view)).toEqual(["Connect to it", "Continue"]);
   expect(view.queryByText(/Setup takes/)).toBeNull();
   await new Promise((resolve) => setTimeout(resolve, 30));
   const started = () =>
@@ -1131,9 +1296,7 @@ test("asked from Settings on an install on this computer, the first screen shows
       );
   expect(started()).toEqual([]);
   // The other choice, with the address connected to before, and back.
-  await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
@@ -1207,9 +1370,7 @@ test("Use OpenBot on this computer instead switches a saved connection back, and
     view.getByRole("heading", { name: "What this computer needs" }),
   ).toBeTruthy();
   // The address is still there for somebody who changes their mind.
-  await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   expect(
     (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
   ).toBe(ELSEWHERE);
@@ -4486,7 +4647,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   withLocalCli(readyLocal());
   const view = await renderApp();
   await view.findByRole("heading", { name: "Set up OpenBot" });
-  expect(buttons(view)).toEqual(["Install"]);
+  expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   await new Promise((resolve) => setTimeout(resolve, 20));
   // Nothing hosted is started, and nothing local either, until Install.
   expect(
@@ -5647,7 +5808,7 @@ test("a clean Windows machine without WSL opens at the choice, and nothing about
   expect(
     view.getByRole("radio", { name: /^OpenBot for Business/ }),
   ).toHaveProperty("disabled", false);
-  expect(buttons(view)).toEqual(["Install"]);
+  expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(view.queryByText("Before OpenBot can start")).toBeNull();
   expect(windowsCalls()).toEqual([]);
@@ -5680,9 +5841,7 @@ test("on that machine, connecting to an OpenBot that runs elsewhere never asks W
     connect_to_openbot: () => signIn.promise,
   });
   const view = await renderApp();
-  await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   await userEvent.type(
     view.getByLabelText("OpenBot address"),
     `${ELSEWHERE}{Enter}`,
@@ -5780,16 +5939,14 @@ test("a clean computer's first screen downloads nothing, and connecting to an Op
   );
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(earlyDownloadCalls()).toEqual([]);
-  // Back and forth between the two, then Business and its address.
+  // Back and forth between the two, then the company's OpenBot and its address.
   await userEvent.click(
     view.getByRole("radio", { name: /^OpenBot for Business/ }),
   );
   await userEvent.click(view.getByRole("radio", { name: /^Self-hosted/ }));
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(earlyDownloadCalls()).toEqual([]);
-  await userEvent.click(
-    view.getByRole("radio", { name: /^OpenBot for Business/ }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   await userEvent.type(
     view.getByLabelText("OpenBot address"),
     `${ELSEWHERE}{Enter}`,

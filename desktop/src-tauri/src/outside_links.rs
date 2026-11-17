@@ -9,7 +9,8 @@
 //! page stays.
 //!
 //! A FRAME IN THE PAGE IS NOT THE WINDOW LEAVING. OpenBot embeds one site: the booking calendar on
-//! onboarding's Book a demo step (Calendly), which itself frames reCAPTCHA and Stripe. On macOS
+//! onboarding's Book a demo step and on the setup window's OpenBot for Business choice (Calendly),
+//! which itself frames reCAPTCHA and Stripe. On macOS
 //! the window's guard is asked about every frame's navigation, not only the page's, so it would
 //! have sent the calendar and its parts to the browser and left an empty frame. Those hosts load
 //! in their frames (`loads_in_a_frame`); OpenBot never sends the window itself to any of them.

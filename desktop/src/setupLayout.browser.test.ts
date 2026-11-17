@@ -761,8 +761,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         return card.scrollHeight - card.clientHeight;
       });
       expect(overflow).toBeLessThanOrEqual(0);
-      // And with the other choice picked, OpenBot for Business: its address field and Connect.
-      await page.getByText("OpenBot for Business").click();
+      // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
+      await page.getByRole("button", { name: "Connect to it" }).click();
       await page.getByLabel("OpenBot address", { exact: true }).waitFor();
       await page.waitForTimeout(400);
       expect(
@@ -778,7 +778,87 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       await page.close();
     }
   });
+
+  /*
+   * OpenBot for Business books a call: picked, it shows the app's OpenBot for Business view, what it
+   * adds and the booking calendar, where it used to show an address field. Taller than the window,
+   * it scrolls in the card as any tall step does; the page never does, nothing runs off the card's
+   * side, and the calendar takes the height Calendly reports.
+   */
+  test("at 1000x760, OpenBot for Business shows its booker in the card, which scrolls, and no address field", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 760 },
+    });
+    try {
+      await routeCalendar(page);
+      await open(page);
+      await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+      await page.getByText("OpenBot for Business").click();
+      await page
+        .locator(
+          '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+        )
+        .waitFor();
+      expect(
+        await page.getByLabel("OpenBot address", { exact: true }).count(),
+      ).toBe(0);
+      expect(
+        await page
+          .getByRole("button", { name: "Connect", exact: true })
+          .count(),
+      ).toBe(0);
+      expect(
+        await page.getByText("A full audit trail, with export").count(),
+      ).toBe(1);
+      const shape = await page.evaluate(() => {
+        const card = document.querySelector("main > .sheet") as HTMLElement;
+        const frame = document.querySelector(
+          'iframe[title="Booking calendar"]',
+        ) as HTMLElement;
+        const wider = [...card.querySelectorAll("*")].filter(
+          (element) =>
+            element.getBoundingClientRect().right >
+            card.getBoundingClientRect().right + 0.5,
+        );
+        return {
+          page: document.documentElement.scrollHeight,
+          cardScrolls: card.scrollHeight > card.clientHeight + 1,
+          sideways: card.scrollWidth - card.clientWidth,
+          wider: wider.map((element) => element.className),
+          frame: frame.getBoundingClientRect().height,
+        };
+      });
+      expect(shape.page).toBeLessThanOrEqual(760);
+      expect(shape.cardScrolls).toBe(true);
+      expect(shape.sideways).toBeLessThanOrEqual(0);
+      expect(shape.wider).toEqual([]);
+      expect(shape.frame).toBe(660);
+      // The way to connect is still under the rows, and leads to the address.
+      await page.getByRole("button", { name: "Connect to it" }).click();
+      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      expect(
+        await page.locator('iframe[title="Booking calendar"]').count(),
+      ).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
 });
+
+/**
+ * Calendly, as far as the window can tell: a page in the calendar's frame that says its height, as
+ * Calendly's inline embed does once it is drawn. The real one is on the web, which a test never is.
+ */
+async function routeCalendar(page: Page) {
+  await page.route("https://calendly.com/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><body style="margin:0;height:660px;background:#fff"><script>
+        parent.postMessage({ event: "calendly.page_height", payload: { height: "660px" } }, "*");
+      </script></body>`,
+    }),
+  );
+}
 
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
