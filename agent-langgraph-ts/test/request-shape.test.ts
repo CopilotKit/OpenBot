@@ -54,7 +54,8 @@ test("OpenAI: Chat Completions with the chosen model, its effort, the tools and 
         conversation({
           tools: [WEATHER_TOOL],
           forwardedProps: {
-            openbotModel: { model: "gpt-5.5", reasoningEffort: "low" },
+            // A model OpenAI serves tools and an effort for on Chat Completions.
+            openbotModel: { model: "gpt-5.2", reasoningEffort: "low" },
           },
         }),
       );
@@ -67,7 +68,7 @@ test("OpenAI: Chat Completions with the chosen model, its effort, the tools and 
     const { path, headers, body } = provider.requests[0]!;
     assert.equal(path, "/v1/chat/completions");
     assert.equal(headers.authorization, "Bearer sk-test");
-    assert.equal(body.model, "gpt-5.5");
+    assert.equal(body.model, "gpt-5.2");
     assert.equal(body.reasoning_effort, "low");
     assert.equal(body.stream, true);
     assert.deepEqual(

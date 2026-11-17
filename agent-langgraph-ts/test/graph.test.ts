@@ -98,7 +98,8 @@ test(`A run takes at most ${MAX_STEPS} steps, and the last one answers in words 
           forwardedProps: {
             openbotDeploymentTools: ["lookup"],
             openbotRun: "signed-run-statement",
-            openbotModel: { model: "gpt-5.5" },
+            // On Chat Completions, whose request this test reads.
+            openbotModel: { model: "gpt-5.2" },
           },
         }),
       ),
