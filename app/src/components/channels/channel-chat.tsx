@@ -103,6 +103,7 @@ import {
   readThreadMessages,
   withCurrentA2uiVersions,
 } from "@/lib/copilot/thread-messages";
+import { useAttachmentLimits } from "@/lib/deployment/queries";
 import {
   useConnectionLost,
   useReconnected,
@@ -1028,6 +1029,7 @@ export function ChannelChat({
   useConversationActivity(runtimeAgentId, agent.messages);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
+  const attachmentLimits = useAttachmentLimits();
   /*
    * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
    * model, so only it gets a picker; a Bot on its own framework picks its own model.
@@ -1859,6 +1861,7 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
                 <StarterSuggestions

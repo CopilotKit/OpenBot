@@ -8,8 +8,9 @@ import {
   ACCEPTED_DOCUMENT_MIME,
   ACCEPTED_IMAGE_MIME,
   ACCEPTED_TEXT_MIME,
+  type AttachmentLimits,
   attachmentUrl,
-  MAX_IMAGE_BYTES,
+  largestAttachmentBytes,
 } from "@/lib/channels/attachments";
 import { ClientError } from "@/lib/client";
 import { newId } from "@/lib/new-id";
@@ -195,13 +196,13 @@ export const FILE_PICKER_ACCEPT = [
  * not — and phrases its refusals for a person. The narrow list is kept where it is honest about
  * being a hint: `FILE_PICKER_ACCEPT`, above, on the file dialog.
  *
- * `maxSize` is `MAX_IMAGE_BYTES`, the largest ceiling (`MAX_DOCUMENT_BYTES` is the same number): the SDK config has only one
- * number for every kind of file. The tighter `MAX_FILE_BYTES` limit for text attachments is
- * enforced by our own pre-check ahead of upload, and again by the server on arrival — which is
- * the authority either way, so letting a text file past this one number costs nothing. It is left
- * in place, unlike `accept`, because it can only ever agree with the screen: the loosest thing
- * `screenPickedFiles` passes is a file of exactly `MAX_IMAGE_BYTES`, so this backstop cannot fire
- * on a file we accepted.
+ * `maxSize` is the largest of the server's limits (`largestAttachmentBytes`): the SDK config has
+ * only one number for every kind of file. A tighter limit for one kind (text, on a server that keeps
+ * 1MB for it) is enforced by our own pre-check ahead of upload, and again by the server on arrival,
+ * which is the authority either way, so letting a text file past this one number costs nothing. It
+ * is left in place, unlike `accept`, because it can only ever agree with the screen: the loosest
+ * thing `screenPickedFiles` passes is a file of exactly that size, given the same limits, so this
+ * backstop cannot fire on a file we accepted.
  */
 export function attachmentsConfigFor(
   channelId: string,
@@ -225,12 +226,14 @@ export function attachmentsConfigFor(
    * about. Reporting the row and reconciling afterwards needs no such correlation.
    */
   onUploaded: (attachmentId: string) => void,
+  /** The limits `screenPickedFiles` screened against, so the two agree. */
+  limits: AttachmentLimits,
 ): AttachmentsConfig {
   const upload = uploadToChannel(channelId, uploadGroup);
   return {
     enabled: true,
     accept: "*/*",
-    maxSize: MAX_IMAGE_BYTES,
+    maxSize: largestAttachmentBytes(limits),
     onUpload: async (file) => {
       const uploaded = await upload(file);
       const rowId = stagedRowId(uploaded);
@@ -273,11 +276,13 @@ export function attachmentsConfigFor(
 export function heldAttachmentsConfig(
   onUploadFailed: (error: AttachmentUploadError) => void,
   onHeld: (previewUrl: string) => void,
+  /** The limits `screenPickedFiles` screened against, so the two agree. */
+  limits: AttachmentLimits,
 ): AttachmentsConfig {
   return {
     enabled: true,
     accept: "*/*",
-    maxSize: MAX_IMAGE_BYTES,
+    maxSize: largestAttachmentBytes(limits),
     onUpload: async (file) => {
       const previewUrl = URL.createObjectURL(file);
       onHeld(previewUrl);

@@ -32,11 +32,13 @@ import { RoutineComposerButton } from "@/components/routines/new-routine-button"
 import {
   attachmentAddress,
   classifyAttachment,
+  DEFAULT_ATTACHMENT_LIMITS,
   MAX_ATTACHMENTS_PER_MESSAGE,
   mayBeTruncatedForModel,
   mediaTypeOf,
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
+import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "@/lib/new-id";
 import { cn } from "@/lib/utils";
 import { Button } from "../../ui/button";
@@ -231,6 +233,13 @@ export type ComposerProps = {
    */
   holdsFilesUntilSent?: boolean;
   /**
+   * How large a picked file may be, as the server says (`useAttachmentLimits`), and how to ask it
+   * again. The screen refuses with these numbers, and asks again after any refusal, because a
+   * refusal may be the first sign the server's limits changed. Absent is the defaults in
+   * `shared/attachments.ts`, the smallest any server takes.
+   */
+  attachmentLimits?: ComposerAttachmentLimits;
+  /**
    * Files to put back on the strip when this composer mounts, as `initialValue` puts words back:
    * the home screen restoring a first message whose start failed after it had navigated away.
    * Screened like any other pick. Read once.
@@ -387,6 +396,7 @@ export function Composer({
   autoFocus = false,
   channelId,
   holdsFilesUntilSent = false,
+  attachmentLimits,
   initialFiles,
   stoppable,
   initialValue,
@@ -463,6 +473,14 @@ export function Composer({
    * would leave the strip the way a failed upload always does, and the sentence explaining it
    * would never arrive. Every upload refusal in the app comes through here.
    */
+  const limits = attachmentLimits?.limits ?? DEFAULT_ATTACHMENT_LIMITS;
+  /*
+   * A ref, so the callbacks below that report a refusal keep their identity (the SDK config is
+   * rebuilt from them) while still reaching the latest way to ask again.
+   */
+  const refreshLimits = useRef(attachmentLimits?.refresh);
+  refreshLimits.current = attachmentLimits?.refresh;
+
   const recordRejection = useCallback((failure: UploadFailure) => {
     setRejected((current) => [
       ...current,
@@ -472,6 +490,7 @@ export function Composer({
         reason: failure.message,
       },
     ]);
+    refreshLimits.current?.();
   }, []);
 
   /**
@@ -552,9 +571,10 @@ export function Composer({
             uploadGroup,
             recordRejection,
             recordUpload,
+            limits,
           )
         : holdsFilesUntilSent
-          ? heldAttachmentsConfig(recordRejection, recordHeld)
+          ? heldAttachmentsConfig(recordRejection, recordHeld, limits)
           : undefined,
     [
       channelId,
@@ -563,6 +583,7 @@ export function Composer({
       recordRejection,
       recordUpload,
       recordHeld,
+      limits,
     ],
   );
 
@@ -835,9 +856,11 @@ export function Composer({
         // see `queuedAttachmentCount`. Without the second half the client accepts a pick the
         // server then refuses with a 409 the person was given no chance to avoid.
         alreadyStaged: stagedCount.current + queuedAttachmentCount,
+        limits,
       });
       if (screened.rejected.length > 0) {
         setRejected((current) => [...current, ...screened.rejected]);
+        refreshLimits.current?.();
       }
       if (screened.accepted.length === 0) {
         return;
@@ -852,7 +875,7 @@ export function Composer({
         staging.current -= screened.accepted.length;
       }
     },
-    [disabled, processFiles, queuedAttachmentCount],
+    [disabled, processFiles, queuedAttachmentCount, limits],
   );
 
   /** `initialFiles` has been put back once, and is not owed again for the life of this composer. */
