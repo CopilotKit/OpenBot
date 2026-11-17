@@ -1736,9 +1736,14 @@ fn append_container_create_args(
         Engine::Podman => "bind-nonrecursive=true",
     };
     let readonly = if writable { "" } else { ",readonly" };
+    // The grant keeps its folder canonical for containment checks, which on Windows is the
+    // extended-length form, `\\?\D:\...`. Docker refuses that form as a bind source, so the
+    // mount names the same folder plainly. `plain` keeps the prefix when it carries meaning
+    // (a device name, a trailing space): nothing plainer names that folder.
+    let mount_source = crate::paths::plain(root.to_path_buf());
     command.arg(format!(
         "type=bind,src={},dst={APPROVED_MOUNT}{readonly},{bind_recursion}",
-        root.display()
+        mount_source.display()
     ));
     command.arg("--user");
     command.arg(format!("{uid}:{gid}"));
@@ -2898,6 +2903,75 @@ mod tests {
             .iter()
             .any(|arg| arg.contains("docker.sock") || arg.contains("podman.sock")));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A granted folder is kept canonical, `\\?\D:\...` on Windows; Docker rejects that form as a
+    /// bind source, so the mount names the same folder plainly (#1763).
+    #[cfg(windows)]
+    #[test]
+    fn docker_mount_source_drops_the_extended_length_prefix() {
+        let root = PathBuf::from(r"\\?\D:\dev\MyProject");
+        let config = HostAccessConfig::new(
+            "http://127.0.0.1:3001",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let mut command = quiet_command("docker");
+        append_container_create_args(
+            &mut command,
+            &config,
+            "test-instance",
+            "case",
+            &root,
+            false,
+            "true",
+        );
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let mount = args
+            .iter()
+            .find(|arg| arg.starts_with("type=bind,"))
+            .expect("bind mount");
+        assert!(mount.contains(r"src=D:\dev\MyProject"), "{mount}");
+        assert!(!mount.contains(r"\\?\"), "{mount}");
+    }
+
+    /// The prefix stays when it carries meaning: `plain` cannot spell such a folder without it,
+    /// and inventing a different spelling would mount somewhere else.
+    #[cfg(windows)]
+    #[test]
+    fn docker_mount_source_keeps_a_prefix_that_carries_meaning() {
+        let root = PathBuf::from(r"\\?\D:\dev\CON");
+        let config = HostAccessConfig::new(
+            "http://127.0.0.1:3001",
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let mut command = quiet_command("docker");
+        append_container_create_args(
+            &mut command,
+            &config,
+            "test-instance",
+            "case",
+            &root,
+            false,
+            "true",
+        );
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let mount = args
+            .iter()
+            .find(|arg| arg.starts_with("type=bind,"))
+            .expect("bind mount");
+        assert!(mount.contains(r"src=\\?\D:\dev\CON"), "{mount}");
     }
 
     #[test]
