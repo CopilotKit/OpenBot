@@ -3754,7 +3754,9 @@ test("relaunch upgrades an older installation to this app's release as part of S
     detail: said,
   });
   // Headed as the update it is: "Starting OpenBot" read as if nothing were being updated.
-  expect(view.getByRole("heading", { name: "Updating OpenBot" })).toBeTruthy();
+  expect(
+    view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
+  ).toBeTruthy();
   expect(view.queryByRole("heading", { name: "Starting OpenBot" })).toBeNull();
   expect(view.getByText(said)).toBeTruthy();
   await act(async () =>
@@ -3786,6 +3788,73 @@ test("relaunch upgrades an older installation to this app's release as part of S
     root: "/tmp/local-eval-older-release",
     ...LOCAL_ADDRESSES,
   });
+});
+
+/*
+ * A dogfooding report: an app that shows a screen while it updates is unusual, and the screen said
+ * nothing of why. It is headed as the self-contained OpenBot's update now, and under the progress
+ * says that everything runs on this computer, then offers OpenBot for Business, whose Book a demo
+ * opens its page in the person's browser. Nothing in it is a step: the update goes on by itself.
+ */
+test("updating OpenBot says it runs on this computer, and Book a demo opens OpenBot for Business", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-self-contained",
+    localStatus("ready", "valid"),
+  );
+  const moving = deferred<unknown>();
+  withOlderDeployment(() => moving.promise);
+  const view = await renderApp();
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "upgrade_and_start"),
+    ).toBe(true),
+  );
+  await emitProgress({
+    step: "release",
+    ok: true,
+    running: true,
+    detail: "Downloading the update.",
+  });
+  expect(
+    view.getByRole("heading", {
+      level: 1,
+      name: "Updating OpenBot (Self-Contained)",
+    }),
+  ).toBeTruthy();
+  const note = view.getByRole("region", {
+    name: "Everything runs on this computer",
+  });
+  expect(note.textContent).toContain(
+    "This OpenBot is self-contained. Its services run here, so they update here too.",
+  );
+  expect(note.textContent).toContain(
+    "For teams and production, OpenBot for Business runs in OpenBot Cloud, your own cloud or on-prem.",
+  );
+  // Under the progress, and nothing in it to press to go on.
+  const journey = view.getByRole("region", { name: "How far along" });
+  expect(
+    journey.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(within(note).queryAllByRole("button")).toHaveLength(0);
+
+  await userEvent.click(
+    within(note).getByRole("link", { name: "Book a demo" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls
+        .filter((call) => call.command === "plugin:opener|open_url")
+        .map((call) => call.args),
+    ).toEqual([{ url: "https://open.bot/business" }]),
+  );
+  // The update carries on, on the same screen, and opens OpenBot when it is done.
+  expect(
+    view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
+  ).toBeTruthy();
+  await act(async () =>
+    moving.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+  );
+  await view.findByRole("heading", { name: "OpenBot is running" });
 });
 
 /*
@@ -3842,8 +3911,16 @@ async function handsOverWithoutRunning() {
     await expectHandover();
     // While the window is asked to show OpenBot, and after it answered and OpenBot's page loads.
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
-    const heading = updates ? "Updating OpenBot" : "Starting OpenBot";
+    const heading = updates
+      ? "Updating OpenBot (Self-Contained)"
+      : "Starting OpenBot";
     expect(view.getByRole("heading", { name: heading })).toBeTruthy();
+    // Why the screen is there is said while it updates OpenBot, and not on a plain Start.
+    expect(
+      view.queryByRole("region", {
+        name: "Everything runs on this computer",
+      }) !== null,
+    ).toBe(updates);
     await act(async () => showing.resolve(null));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
     expect(view.getByRole("heading", { name: heading })).toBeTruthy();
@@ -3971,7 +4048,7 @@ test("the journey says the update step running now, never one that finished, on 
   for (const [events, said, bytes] of upgrade) {
     for (const event of events) await emitProgress(event);
     expect(
-      view.getByRole("heading", { name: "Updating OpenBot" }),
+      view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
     ).toBeTruthy();
     // A download's measure is said with the download it counts, never as the bar's own caption: on
     // Windows K the time line read "About 2 minutes left · 304.0 MB of 317.0 MB" beside a bar a

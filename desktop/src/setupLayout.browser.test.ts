@@ -61,6 +61,7 @@ type Page = {
 type Browser = {
   newPage(options: {
     viewport: { width: number; height: number };
+    colorScheme?: "light" | "dark";
   }): Promise<Page>;
   close(): Promise<void>;
 };
@@ -113,8 +114,11 @@ fake.finishInstall = () => finishInstall(null);
 const none = { openai: false, anthropic: false };
 export function convertFileSrc(path) { return path; }
 fake.calls = [];
-export async function invoke(command) {
+// The pages opened in the person's browser, by address.
+fake.opened = [];
+export async function invoke(command, args) {
   fake.calls.push(command);
+  if (command === "plugin:opener|open_url") fake.opened.push(args.url);
   switch (command) {
     case "windows_restart_pending":
     case "take_ai_connection_change":
@@ -1486,7 +1490,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         card: document.querySelector(".journey-time")?.textContent ?? "",
       }));
       // This Start updates OpenBot, and its heading says so.
-      expect(said.heading).toBe("Updating OpenBot");
+      expect(said.heading).toBe("Updating OpenBot (Self-Contained)");
       expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
       expect(said.lede).not.toMatch(/minute|second|hour/i);
       expect(said.card).toMatch(/left/);
@@ -1665,6 +1669,117 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
     }
   }, 30_000);
 });
+
+/*
+ * A dogfooding report: the screen OpenBot Desktop shows while it updates OpenBot is a strange one
+ * for an app, and said nothing of why. It is headed as the self-contained OpenBot's update now, and
+ * under its progress says that everything runs on this computer, then offers OpenBot for Business
+ * with a link to book a demo. That adds no click and no scroll: at the window's default size (1000x800
+ * less a title bar), in light and dark, the card shows whole, the progress first, the note under it.
+ * Run with `OPENBOT_APP_ENGINE=webkit` too, the engine the Mac window draws with.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, taken before anything is asserted.
+ */
+describe.skipIf(!asked)(
+  "the Start screen that updates OpenBot says why",
+  () => {
+    for (const scheme of ["light", "dark"] as const) {
+      test(`in ${scheme}, at 1000x760, it says it runs on this computer under the progress, whole and without a scroll`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 760 },
+          colorScheme: scheme,
+        });
+        try {
+          await toStart(page);
+          // OpenBot updating itself, its download under way, as in the report.
+          await emitProgress(page, {
+            step: "release",
+            ok: true,
+            running: true,
+            detail: "Downloading the update.",
+          });
+          await page
+            .locator(".journey-said", { hasText: "Downloading the update" })
+            .waitFor();
+          await page.waitForTimeout(400);
+          const shots = process.env.OPENBOT_APP_SHOTS;
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}.png`,
+            });
+
+          const seen = await page.evaluate(() => {
+            const sheet = document.querySelector(
+              "main > .sheet",
+            ) as HTMLElement;
+            const note = document.querySelector(
+              "main > .sheet > .self-contained",
+            ) as HTMLElement | null;
+            const journey = document.querySelector(".journey");
+            const box = (element: Element | null | undefined) => {
+              const rect = element?.getBoundingClientRect();
+              return rect ? { top: rect.top, bottom: rect.bottom } : null;
+            };
+            return {
+              heading: document.querySelector("main h1")?.textContent,
+              note: note?.textContent ?? null,
+              noteBox: box(note),
+              sheetBox: box(sheet),
+              journey: box(journey),
+              rows: box(
+                document.querySelector('[aria-label="Opening OpenBot"]'),
+              ),
+              scrolls: sheet.scrollHeight - sheet.clientHeight,
+              page: document.documentElement.scrollHeight,
+              window: window.innerHeight,
+              cut: note ? note.scrollWidth > note.clientWidth : null,
+              buttons: note?.querySelectorAll("button").length ?? null,
+              link: note?.querySelector("a")?.getAttribute("href") ?? null,
+            };
+          });
+          expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
+          expect(seen.note).toContain("Everything runs on this computer");
+          expect(seen.note).toContain("This OpenBot is self-contained.");
+          expect(seen.note).toContain("OpenBot for Business");
+          expect(seen.note).not.toMatch(/—/);
+          // Nothing to click to go on: its one link opens a page, and the update carries on.
+          expect(seen.buttons).toBe(0);
+          expect(seen.link).toBe("https://open.bot/business");
+          // The progress first, the note under it, all of the card in the window, nothing scrolled.
+          const { journey, rows, noteBox, sheetBox } = seen;
+          expect(journey && rows && noteBox && sheetBox).toBeTruthy();
+          if (journey && rows && noteBox && sheetBox) {
+            expect(noteBox.top).toBeGreaterThan(journey.bottom);
+            expect(noteBox.top).toBeGreaterThan(rows.bottom);
+            expect(noteBox.bottom).toBeLessThanOrEqual(sheetBox.bottom);
+            expect(sheetBox.bottom).toBeLessThanOrEqual(760);
+          }
+          expect(seen.scrolls).toBeLessThanOrEqual(0);
+          expect(seen.page).toBeLessThanOrEqual(seen.window);
+          expect(seen.cut).toBe(false);
+
+          // Book a demo opens OpenBot for Business's page in the person's browser.
+          await page.getByRole("link", { name: "Book a demo" }).click();
+          await page.waitForTimeout(200);
+          expect(
+            await page.evaluate(
+              () =>
+                (globalThis as unknown as { __fake: { opened: string[] } })
+                  .__fake.opened,
+            ),
+          ).toEqual(["https://open.bot/business"]);
+          // Still the update, on the same screen.
+          expect(
+            await page.evaluate(
+              () => document.querySelector("main h1")?.textContent,
+            ),
+          ).toBe("Updating OpenBot (Self-Contained)");
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+    }
+  },
+);
 
 describe.skipIf(!asked)(
   "the account step for a person already signed in",

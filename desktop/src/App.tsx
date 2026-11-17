@@ -32,6 +32,7 @@ import {
   recordedModel,
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
+import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
 import { StartFresh } from "./StartFresh";
 import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import {
@@ -1542,17 +1543,19 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   const returning = handingOver?.returning ?? returningToInstallation;
 
   if (starting && returning && !refreshIntelligence) {
+    // A Start that moves the installation to this app's release is an update, and says so:
+    // "Starting OpenBot" over "Updating OpenBot..." read as if nothing were updated. It says why
+    // an update has a screen at all, too: this OpenBot runs on this computer (`SelfContainedNote`).
+    const updatingSelf = localStarting && releaseDue && !installingAfresh;
     return (
       <main>
         <div className="sheet connection-sheet">
           <h1>
-            {localStarting || installingAfresh
-              ? // A Start that moves the installation to this app's release is an update, and says
-                // so: "Starting OpenBot" over "Updating OpenBot..." read as if nothing were updated.
-                releaseDue && !installingAfresh
-                ? "Updating OpenBot"
-                : "Starting OpenBot"
-              : "OpenBot is stopped"}
+            {updatingSelf
+              ? UPDATING_SELF_CONTAINED
+              : localStarting || installingAfresh
+                ? "Starting OpenBot"
+                : "OpenBot is stopped"}
           </h1>
           <p className="lede">
             {localStarting || installingAfresh
@@ -1575,6 +1578,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           {pauseCard}
           {updatingLine}
           {displayedFailure && <Failure problem={displayedFailure} />}
+          {updatingSelf && <SelfContainedNote />}
           {/* While a local step runs, its Cancel is the only control. */}
           {!localStarting && !installingAfresh && (
             <>
