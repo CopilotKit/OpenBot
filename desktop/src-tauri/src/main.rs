@@ -86,6 +86,10 @@ struct Shell {
     root: Mutex<Option<PathBuf>>,
     /// Containers may outlive a failed Start before any host root is published.
     containers: Mutex<Option<ContainerDeployment>>,
+    /// The install's token the `server` of the deployment at this root was given, None for a server
+    /// from a release before it (`install_token`). Read from its container, which is exactly what the
+    /// server checks, and kept nowhere but here.
+    install_token: Mutex<Option<(PathBuf, Option<String>)>>,
     /// A verified down allows a following Stop/Quit to be an idempotent no-op.
     stopped_container_root: Mutex<Option<PathBuf>>,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
@@ -4774,6 +4778,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 "the local container runtime is unavailable",
             )
         })?;
+    // What the server this Start raised was given, read back from it: none for an installation
+    // whose Compose file is an earlier release's, which runs that release's server.
+    learn_install_token(&shell, &root, &address);
     let broker = start_host_access(&app, &root, ports.server, address, host_token.clone())?;
     *shell.host_access.lock().unwrap() = Some(broker);
     preparation::record_launch(&root, requested_harness.as_ref())?;
@@ -6573,7 +6580,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let (url, address) = owned_app(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
-    hold_shown_deployment(&app, &shell, &root, address, ports.server);
+    hold_shown_deployment(&app, &shell, &root, address.clone(), ports.server);
     refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
@@ -6592,12 +6599,13 @@ fn show_openbot_on<R: tauri::Runtime>(
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there to show it in")?;
+    let destination: tauri::Url = destination
+        .parse()
+        .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?;
+    // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
+    let destination = owned_app_entry(&shell, &root, &address, &destination);
     let outcome = window
-        .navigate(
-            destination
-                .parse()
-                .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?,
-        )
+        .navigate(destination)
         .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
     log::info!("[show] navigate returned {outcome:?}");
     // Setup is over and OpenBot is what the person uses now: in front, wherever they had gone
@@ -8260,10 +8268,11 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     {
         return false;
     }
-    let Some(mut url) = ports_for_shell(app)
+    let shell = app.state::<Shell>();
+    let Some((mut url, address)) = ports_for_shell(app)
         .ok()
-        .and_then(|ports| owned_app_url(&app.state::<Shell>(), &root, &ports))
-        .and_then(|url| url.parse::<tauri::Url>().ok())
+        .and_then(|ports| owned_app(&shell, &root, &ports))
+        .and_then(|(url, address)| Some((url.parse::<tauri::Url>().ok()?, address)))
     else {
         return false;
     };
@@ -8272,7 +8281,9 @@ fn show_status_in_app(app: &tauri::AppHandle) -> bool {
     };
     url.set_path(COMPUTER_SETTINGS_PATH);
     trust_owned_app(app, url.as_str());
-    if window.navigate(url).is_err() {
+    // Through the entry address, so the window has the install's cookie (`owned_app_entry`).
+    let load = owned_app_entry(&shell, &root, &address, &url);
+    if window.navigate(load).is_err() {
         return false;
     }
     let _ = window.show();
@@ -8798,6 +8809,8 @@ fn serve_shown_deployment<R: tauri::Runtime>(
     address: engine::Address,
     server_port: u16,
 ) {
+    // The install's token too, which the window enters the app with.
+    learn_install_token(shell, root, &address);
     let token = match server_host_token(&address, root) {
         Ok(Some(token)) => token,
         Ok(None) => {
@@ -8833,6 +8846,66 @@ fn server_host_token(address: &engine::Address, root: &Path) -> Result<Option<St
 #[cfg(test)]
 fn server_host_token(_address: &engine::Address, root: &Path) -> Result<Option<String>, String> {
     Ok(tests::host_token_given_to_server(root))
+}
+
+/// The install's token `root`'s running `server` container was given, asked of the engine that
+/// holds it.
+#[cfg(not(test))]
+fn server_install_token(address: &engine::Address, root: &Path) -> Result<Option<String>, String> {
+    stack::server_install_token(address, root)
+}
+
+/// Tests never ask a real engine, and no server they describe was given an install's token.
+#[cfg(test)]
+fn server_install_token(
+    _address: &engine::Address,
+    _root: &Path,
+) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+/// Read the install's token `root`'s server was given, and remember it for this session. A Start
+/// and a deployment the window takes over both learn it here, so the window enters the OpenBot they
+/// show with exactly the token that server checks. Not remembered when it could not be read: the
+/// next window that opens the app asks again.
+fn learn_install_token(shell: &Shell, root: &Path, address: &engine::Address) -> Option<String> {
+    match server_install_token(address, root) {
+        Ok(token) => {
+            *shell.install_token.lock().unwrap() = Some((root.to_path_buf(), token.clone()));
+            token
+        }
+        Err(error) => {
+            log::warn!("[install-token] could not read the token the server was given: {error}");
+            None
+        }
+    }
+}
+
+/// The install's token `root`'s server was given, as this session learned it, or read now.
+fn install_token_for(shell: &Shell, root: &Path, address: &engine::Address) -> Option<String> {
+    let known = shell.install_token.lock().unwrap().clone();
+    match known {
+        Some((known, token)) if known == root => token,
+        _ => learn_install_token(shell, root, address),
+    }
+}
+
+/**
+Where a window opens `page` of the owned OpenBot at `root`: through its entry address, which leaves the
+webview the install's cookie and goes on to `page`, when that server was given a token; and `page`
+itself for one from a release before it, which has no entry address. Every native load of the owned
+app goes through here. A load the page makes itself, on the same origin, carries the cookie already.
+*/
+fn owned_app_entry(
+    shell: &Shell,
+    root: &Path,
+    address: &engine::Address,
+    page: &tauri::Url,
+) -> tauri::Url {
+    openbot_desktop_lib::install_token::entry(
+        page,
+        install_token_for(shell, root, address).as_deref(),
+    )
 }
 
 /// [`owned_app_url`] without a window: the Recorder's native host is a process of its own, started
@@ -8939,6 +9012,13 @@ fn show_test_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>, address: &str) {
         return;
     };
     trust_owned_app(app, address);
+    // A test's own OpenBot, given its install's token the way start.sh gives it, in the environment.
+    let url = openbot_desktop_lib::install_token::entry(
+        &url,
+        std::env::var(openbot_desktop_lib::install_token::NAME)
+            .ok()
+            .as_deref(),
+    );
     if let Err(error) = window.navigate(url) {
         log::warn!("[window] could not show the test OpenBot: {error}");
     }
@@ -8984,10 +9064,21 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
             installed: Box::new(|| true),
             app_answers: Box::new(move || port.is_some_and(recorder_ping_app_answers)),
             app_url: Box::new(move || Some(url.clone())),
+            // The test's own OpenBot, given its token the way start.sh gives it, in the environment.
+            install_token: Box::new(|| {
+                std::env::var(openbot_desktop_lib::install_token::NAME)
+                    .ok()
+                    .filter(|token| !token.is_empty())
+            }),
         };
     }
     let installed = root.is_some();
     let ping_root = root.clone();
+    let token_root = root.clone();
+    // The engine whose `server` container `app_url` proved publishes the app, which the install's
+    // token is then read from: the host is a process of its own and holds no engine.
+    let publisher: std::sync::Arc<Mutex<Option<engine::Address>>> = Default::default();
+    let proved = publisher.clone();
     recorder_host::HostEnvironment {
         installed: Box::new(move || installed),
         // No ownership check: a ping proves nothing and sends nothing secret, and the handoff checks before it does.
@@ -9000,7 +9091,17 @@ fn recorder_host_environment() -> recorder_host::HostEnvironment {
         app_url: Box::new(move || {
             let root = root.as_deref()?;
             let ports = openbot_env::Ports::read(root).ok()?;
-            app_url_published_by(None, root, &ports)
+            let (url, address) = app_published_by(None, root, &ports)?;
+            *proved.lock().unwrap() = Some(address);
+            Some(url)
+        }),
+        install_token: Box::new(move || {
+            let root = token_root.as_deref()?;
+            let address = publisher.lock().unwrap().clone()?;
+            server_install_token(&address, root).unwrap_or_else(|error| {
+                eprintln!("[recorder-host] could not read the install's token: {error}");
+                None
+            })
         }),
     }
 }
@@ -10946,26 +11047,32 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     };
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
+    // The page the window belongs on, and the address it loads it at: for the owned app, through its
+    // entry address (`owned_app_entry`), and only when the window is not on that app already.
     let destination = startup.as_ref().and_then(|_| {
         let root = cleanup_root(&shell, &stack::default_root());
         if let Some((url, address)) = (!recovery_required_or_pending_quit_notice(&shell, &root))
             .then(|| owned_app(&shell, &root, ports))
             .flatten()
         {
-            hold_shown_deployment(app, &shell, &root, address, ports.server);
+            hold_shown_deployment(app, &shell, &root, address.clone(), ports.server);
             refresh_menus(app);
             trust_owned_app(app, &url);
-            url.parse().ok()
+            let page: tauri::Url = url.parse().ok()?;
+            let entered = owned_app_entry(&shell, &root, &address, &page);
+            Some((page, entered))
         } else {
-            setup_destination(app).ok()
+            setup_destination(app)
+                .ok()
+                .map(|setup| (setup.clone(), setup))
         }
     });
-    if let Some(destination) = destination {
+    if let Some((destination, load)) = destination {
         let already_showing = window
             .url()
             .is_ok_and(|current| same_window_app(&current, &destination));
         if !already_showing {
-            let _ = window.navigate(destination);
+            let _ = window.navigate(load);
         }
     }
     let _ = window.show();

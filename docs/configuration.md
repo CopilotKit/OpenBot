@@ -422,6 +422,7 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Refused on a public address. Ignored when a provider is configured. |
+| `OPENBOT_INSTALL_TOKEN`      | The install's own token. The personal edition only admits requests carrying its install's token: a browser once through `/api/install/enter?token=<token>&to=/`, which leaves it a cookie, and a script in the `X-OpenBot-Install-Token` header. **Required** for a single-user server in a container. OpenBot Desktop and `scripts/start.sh` generate it. API keys on `/api/v2` do not need it. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |

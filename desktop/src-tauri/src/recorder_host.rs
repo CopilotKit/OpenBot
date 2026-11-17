@@ -6,7 +6,7 @@
 //! from the host may be at most 1 MB. The browser closes the host's stdin when it is done with it.
 //! <https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging>
 //!
-//! The host answers three messages, each within its own deadline ([`DEADLINES`]), which sits below the time the
+//! The host answers four messages, each within its own deadline ([`DEADLINES`]), which sits below the time the
 //! extension waits for the answer, so the extension always hears why instead of giving up.
 //!
 //! `ping` says, cheaply, whether a connect would work now: an OpenBot is installed and its app answers on its port. It
@@ -20,6 +20,11 @@
 //! mints nothing. The Recorder takes a connect from a page with no Connect click only when the page's origin is exactly
 //! this address: any other program on this computer can serve a page on a loopback port, and only the host knows which
 //! one is OpenBot Desktop's.
+//!
+//! `entry` says where the Recorder opens a page of this computer's OpenBot in the person's own browser: the personal
+//! edition only admits requests carrying its install's token, so it is the entry address for that page, which carries
+//! it, after the same ownership checks an address makes. It takes only a path on that OpenBot's own origin. A server
+//! from a release before the token has none, and the page's own address comes back. The token is never logged.
 //!
 //! Every reply carries `ok`. `ok: false` comes with `error`, one of the stable codes of [`Refusal`]. A code is never
 //! written to a log.
@@ -64,6 +69,8 @@ pub enum Refusal {
     HostFailed,
     /// `unknown-message`: a message the host does not know.
     UnknownMessage,
+    /// `bad-path`: an entry asked for something other than a path on the OpenBot's own origin.
+    BadPath,
 }
 
 impl Refusal {
@@ -77,6 +84,7 @@ impl Refusal {
             Refusal::TimedOut => "timed-out",
             Refusal::HostFailed => "host-failed",
             Refusal::UnknownMessage => "unknown-message",
+            Refusal::BadPath => "bad-path",
         }
     }
 }
@@ -92,6 +100,10 @@ pub struct HostEnvironment {
     pub app_answers: Check<bool>,
     /// For a handoff: the owned app's address, None when it is not running or another process holds its port.
     pub app_url: Check<Option<String>>,
+    /// For a handoff or an entry, asked after `app_url` answered: the install's token that app's server was given
+    /// (`install_token`), sent with the request for a code or put in the entry address. None for a server from a
+    /// release before it.
+    pub install_token: Check<Option<String>>,
 }
 
 /// How long the host gives each message before it answers `timed-out`.
@@ -100,6 +112,7 @@ pub struct Deadlines {
     pub ping: Duration,
     pub handoff: Duration,
     pub address: Duration,
+    pub entry: Duration,
 }
 
 /// The extension waits 3 s for a ping and 8 s for a handoff, counted from when it asks Chrome, so the time Chrome takes
@@ -109,11 +122,13 @@ pub struct Deadlines {
 /// of a freshly built binary took about 0.5 s. On Windows those ownership checks run PowerShell and netstat, twice (not
 /// timed here), and only the handoff and the address run them. Each deadline leaves a second of the extension's wait for
 /// a slow start. The address runs the handoff's ownership checks without its request for a code, so it has the
-/// handoff's deadline, and the extension waits 8 s for it too.
+/// handoff's deadline, and the extension waits 8 s for it too. So does the entry, which runs the same checks and then
+/// reads the install's token from the server's container.
 pub const DEADLINES: Deadlines = Deadlines {
     ping: Duration::from_millis(2_000),
     handoff: Duration::from_millis(7_000),
     address: Duration::from_millis(7_000),
+    entry: Duration::from_millis(7_000),
 };
 
 /// How long a ping waits for the app on each loopback. A running app answers in milliseconds, and a closed port is
@@ -253,6 +268,45 @@ fn address(origin_allowed: bool, env: &HostEnvironment) -> Result<String, Refusa
     (env.app_url)().ok_or(Refusal::NotRunning)
 }
 
+/// A path on the OpenBot's own origin, which the entry address may send the browser on to: it starts with one `/`, and
+/// has no backslash or control character, any of which a browser can read as another host (`//host`, `/\host`, or a
+/// tab or newline it drops first).
+fn own_origin_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && !path.contains('\\')
+        && !path.chars().any(char::is_control)
+}
+
+/// Where the Recorder opens `path` of this computer's OpenBot in the person's own browser: the entry address for it
+/// once the app is proved to be this OpenBot's and its server was given a token (`install_token::entry`), else the
+/// page's own address.
+fn entry(
+    origin_allowed: bool,
+    path: Option<&str>,
+    env: &HostEnvironment,
+) -> Result<String, Refusal> {
+    if !origin_allowed {
+        return Err(Refusal::OriginNotAllowed);
+    }
+    let path = path
+        .filter(|path| own_origin_path(path))
+        .ok_or(Refusal::BadPath)?;
+    if !(env.installed)() {
+        return Err(Refusal::NotInstalled);
+    }
+    let app_url = (env.app_url)().ok_or(Refusal::NotRunning)?;
+    let page = reqwest::Url::parse(&app_url)
+        .and_then(|app| app.join(path))
+        .map_err(|_| {
+            eprintln!("[recorder-host] the local OpenBot's address and the path asked for make no address");
+            Refusal::HostFailed
+        })?;
+    // Asked only now, once the app is proved to be this OpenBot's: the token goes to nobody else.
+    let token = (env.install_token)();
+    Ok(crate::install_token::entry(&page, token.as_deref()).into())
+}
+
 fn handoff(
     origin_allowed: bool,
     env: &HostEnvironment,
@@ -265,7 +319,7 @@ fn handoff(
         return Err(Refusal::NotInstalled);
     }
     let app_url = (env.app_url)().ok_or(Refusal::NotRunning)?;
-    let response = client
+    let mut request = client
         .post(format!(
             "{}{CONNECT_CODES_PATH}",
             app_url.trim_end_matches('/')
@@ -275,7 +329,13 @@ fn handoff(
         .header(
             "Idempotency-Key",
             format!("{:032x}", rand::random::<u128>()),
-        )
+        );
+    // The personal edition only admits requests carrying its install's token. Asked only now, once
+    // the app is proved to be this OpenBot's: the token goes to nobody else.
+    if let Some(token) = (env.install_token)().filter(|token| !token.trim().is_empty()) {
+        request = request.header(crate::install_token::HEADER, token);
+    }
+    let response = request
         .json(&json!({ "via": "desktop" }))
         .send()
         .map_err(|error| {
@@ -312,7 +372,8 @@ fn handoff(
     }
 }
 
-/// Answers one message, however long that takes. Only "handoff" mints anything.
+/// Answers one message, however long that takes. Only "handoff" mints anything; only "handoff" and "entry" read the
+/// install's token.
 fn handle(message: &Value, origin_allowed: bool, env: &HostEnvironment, client: &Client) -> Value {
     match message.get("type").and_then(Value::as_str) {
         Some("ping") => ping_reply(ping(origin_allowed, env)),
@@ -322,6 +383,14 @@ fn handle(message: &Value, origin_allowed: bool, env: &HostEnvironment, client: 
         },
         Some("address") => match address(origin_allowed, env) {
             Ok(app_url) => json!({ "ok": true, "openbotUrl": app_url }),
+            Err(refusal) => refused(refusal),
+        },
+        Some("entry") => match entry(
+            origin_allowed,
+            message.get("path").and_then(Value::as_str),
+            env,
+        ) {
+            Ok(url) => json!({ "ok": true, "url": url }),
             Err(refusal) => refused(refusal),
         },
         _ => refused(Refusal::UnknownMessage),
@@ -341,6 +410,7 @@ fn answer(
         Some("ping") => ("ping", deadlines.ping),
         Some("handoff") => ("handoff", deadlines.handoff),
         Some("address") => ("address", deadlines.address),
+        Some("entry") => ("entry", deadlines.entry),
         _ => return refused(Refusal::UnknownMessage),
     };
     let failed = |refusal| {
@@ -678,26 +748,33 @@ mod tests {
     struct Asked {
         app_answers: AtomicUsize,
         app_url: AtomicUsize,
+        install_token: AtomicUsize,
     }
 
     /// A computer's OpenBot as a test describes it.
     struct Computer {
         installed: bool,
         app_url: Option<String>,
+        install_token: Option<String>,
     }
 
-    /// Installed, running at `app_url`.
+    /// Installed, running at `app_url`, from a release before the install's token.
     fn running(app_url: &str) -> Computer {
         Computer {
             installed: true,
             app_url: Some(app_url.to_string()),
+            install_token: None,
         }
     }
 
     fn environment(computer: Computer) -> (Arc<HostEnvironment>, Arc<Asked>) {
         let asked = Arc::new(Asked::default());
-        let (a, c) = (asked.clone(), asked.clone());
-        let Computer { installed, app_url } = computer;
+        let (a, c, t) = (asked.clone(), asked.clone(), asked.clone());
+        let Computer {
+            installed,
+            app_url,
+            install_token,
+        } = computer;
         let answers = app_url.is_some();
         let environment = HostEnvironment {
             installed: Box::new(move || installed),
@@ -708,6 +785,10 @@ mod tests {
             app_url: Box::new(move || {
                 c.app_url.fetch_add(1, Ordering::SeqCst);
                 app_url.clone()
+            }),
+            install_token: Box::new(move || {
+                t.install_token.fetch_add(1, Ordering::SeqCst);
+                install_token.clone()
             }),
         };
         (Arc::new(environment), asked)
@@ -789,6 +870,7 @@ mod tests {
             Refusal::TimedOut,
             Refusal::HostFailed,
             Refusal::UnknownMessage,
+            Refusal::BadPath,
         ]
         .into_iter()
         .map(Refusal::code)
@@ -804,6 +886,7 @@ mod tests {
                 "timed-out",
                 "host-failed",
                 "unknown-message",
+                "bad-path",
             ]
         );
     }
@@ -882,6 +965,68 @@ mod tests {
             json!({ "via": "desktop" })
         );
         assert_eq!(asked.app_url.load(Ordering::SeqCst), 1);
+        // A server from a release before the install's token is asked as it always was.
+        assert!(!head.contains("x-openbot-install-token"));
+    }
+
+    /// The personal edition only admits requests carrying its install's token, and the host is a
+    /// process of its own, so it sends the one the app's server was given.
+    #[test]
+    fn handoff_sends_the_install_token_the_server_was_given() {
+        let (url, listener) = fake_app();
+        let app = answer_once(listener, reply("201 Created", MINTED));
+        let (environment, asked) = environment(Computer {
+            install_token: Some("install-token-abc".into()),
+            ..running(&url)
+        });
+        assert_eq!(
+            ask(json!({ "type": "handoff" }), true, &environment),
+            json!({ "ok": true, "openbotUrl": url, "code": "obc_fixture" })
+        );
+        let (head, _) = app.join().unwrap();
+        let sent: Vec<&str> = head
+            .lines()
+            .filter_map(|line| {
+                line.split_once(':')
+                    .filter(|(name, _)| name.eq_ignore_ascii_case(crate::install_token::HEADER))
+                    .map(|(_, value)| value.trim())
+            })
+            .collect();
+        assert_eq!(sent, ["install-token-abc"]);
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 1);
+    }
+
+    /// Asked only for a handoff or an entry, and only once the app is proved to be this OpenBot's.
+    #[test]
+    fn the_install_token_is_asked_for_by_a_handoff_or_an_entry_alone() {
+        let (url, listener) = fake_app();
+        let with_token = |computer: Computer| Computer {
+            install_token: Some("install-token-abc".into()),
+            ..computer
+        };
+        for message in ["ping", "address"] {
+            let (environment, asked) = environment(with_token(running(&url)));
+            ask(json!({ "type": message }), true, &environment);
+            assert_eq!(asked.install_token.load(Ordering::SeqCst), 0, "{message}");
+        }
+        let (environment, asked) = environment(with_token(Computer {
+            app_url: None,
+            ..running(&url)
+        }));
+        assert_eq!(
+            ask(json!({ "type": "handoff" }), true, &environment),
+            not("not-running")
+        );
+        assert_eq!(
+            ask(
+                json!({ "type": "entry", "path": "/settings/browsers" }),
+                true,
+                &environment
+            ),
+            not("not-running")
+        );
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 0);
+        assert_untouched(&listener);
     }
 
     #[test]
@@ -1030,6 +1175,148 @@ mod tests {
         assert_untouched(&listener);
     }
 
+    /// The personal edition only admits requests carrying its install's token, so a page the Recorder opens at its
+    /// OpenBot in the person's own browser goes through the entry address, which carries it.
+    #[test]
+    fn entry_answers_the_entry_address_for_the_path_the_recorder_asked() {
+        let (url, listener) = fake_app();
+        let (environment, asked) = environment(Computer {
+            install_token: Some("install-token-abc".into()),
+            ..running(&url)
+        });
+        for (path, to) in [
+            ("/settings/browsers", "%2Fsettings%2Fbrowsers"),
+            ("/browser?recordings=1", "%2Fbrowser%3Frecordings%3D1"),
+        ] {
+            assert_eq!(
+                ask(json!({ "type": "entry", "path": path }), true, &environment),
+                json!({
+                    "ok": true,
+                    "url": format!("{url}/api/install/enter?token=install-token-abc&to={to}")
+                }),
+                "{path}"
+            );
+        }
+        // The ownership checks ran before the token was read, and nothing asked the app for anything.
+        assert_eq!(asked.app_url.load(Ordering::SeqCst), 2);
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 2);
+        assert_untouched(&listener);
+    }
+
+    #[test]
+    fn entry_from_a_foreign_origin_is_refused_before_anything_else() {
+        let (url, listener) = fake_app();
+        let (environment, asked) = environment(Computer {
+            install_token: Some("install-token-abc".into()),
+            ..running(&url)
+        });
+        assert_eq!(
+            ask(
+                json!({ "type": "entry", "path": "/settings/browsers" }),
+                false,
+                &environment
+            ),
+            not("origin-not-allowed")
+        );
+        assert_eq!(asked.app_url.load(Ordering::SeqCst), 0);
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 0);
+        assert_untouched(&listener);
+    }
+
+    /// Only a path on the OpenBot's own origin: the entry address sends the browser on to it, carrying the cookie.
+    #[test]
+    fn entry_refuses_a_path_that_is_not_on_the_openbots_own_origin() {
+        let (url, listener) = fake_app();
+        let (environment, asked) = environment(Computer {
+            install_token: Some("install-token-abc".into()),
+            ..running(&url)
+        });
+        for path in [
+            json!(""),
+            json!("settings/browsers"),
+            json!("//evil.example/settings"),
+            json!("/\\evil.example/settings"),
+            json!("\\\\evil.example"),
+            json!("/settings\\browsers"),
+            json!("https://evil.example/"),
+            json!("/\t/evil.example"),
+            json!("/settings\n/browsers"),
+            json!(5),
+            json!(null),
+        ] {
+            assert_eq!(
+                ask(json!({ "type": "entry", "path": path }), true, &environment),
+                not("bad-path"),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            ask(json!({ "type": "entry" }), true, &environment),
+            not("bad-path")
+        );
+        assert_eq!(asked.app_url.load(Ordering::SeqCst), 0);
+        assert_eq!(asked.install_token.load(Ordering::SeqCst), 0);
+        assert_untouched(&listener);
+    }
+
+    /// A server from a release before the install's token has none in its environment, and is opened as before.
+    #[test]
+    fn entry_without_a_token_is_the_plain_address_with_the_path() {
+        let (url, listener) = fake_app();
+        for token in [None, Some("  ".to_string())] {
+            let (environment, _) = environment(Computer {
+                install_token: token.clone(),
+                ..running(&url)
+            });
+            assert_eq!(
+                ask(
+                    json!({ "type": "entry", "path": "/browser?recordings=1" }),
+                    true,
+                    &environment
+                ),
+                json!({ "ok": true, "url": format!("{url}/browser?recordings=1") }),
+                "{token:?}"
+            );
+        }
+        assert_untouched(&listener);
+    }
+
+    #[test]
+    fn entry_says_why_there_is_none() {
+        let (url, listener) = fake_app();
+        for (computer, code) in [
+            (
+                Computer {
+                    installed: false,
+                    ..running(&url)
+                },
+                "not-installed",
+            ),
+            (
+                Computer {
+                    app_url: None,
+                    ..running(&url)
+                },
+                "not-running",
+            ),
+        ] {
+            let (environment, asked) = environment(Computer {
+                install_token: Some("install-token-abc".into()),
+                ..computer
+            });
+            assert_eq!(
+                ask(
+                    json!({ "type": "entry", "path": "/settings/browsers" }),
+                    true,
+                    &environment
+                ),
+                not(code)
+            );
+            assert_eq!(asked.install_token.load(Ordering::SeqCst), 0, "{code}");
+        }
+        assert_untouched(&listener);
+    }
+
     #[test]
     fn an_unknown_message_is_answered_without_touching_anything() {
         let (url, listener) = fake_app();
@@ -1075,6 +1362,7 @@ mod tests {
                 json!({ "type": "ping" }),
                 json!({ "type": "handoff" }),
                 json!({ "type": "address" }),
+                json!({ "type": "entry", "path": "/settings/browsers" }),
                 json!({ "type": "connect" }),
             ],
             &environment,
@@ -1085,6 +1373,7 @@ mod tests {
             replies,
             [
                 unavailable("not-installed"),
+                not("not-installed"),
                 not("not-installed"),
                 not("not-installed"),
                 not("unknown-message")
@@ -1104,11 +1393,13 @@ mod tests {
                 std::thread::sleep(Duration::from_secs(3));
                 None
             }),
+            install_token: Box::new(|| None),
         };
         let deadlines = Deadlines {
             ping: Duration::from_millis(100),
             handoff: Duration::from_millis(150),
             address: Duration::from_millis(150),
+            entry: Duration::from_millis(150),
         };
         let started = Instant::now();
         let (status, replies) = serve_all(
@@ -1116,6 +1407,7 @@ mod tests {
                 json!({ "type": "ping" }),
                 json!({ "type": "handoff" }),
                 json!({ "type": "address" }),
+                json!({ "type": "entry", "path": "/settings/browsers" }),
                 json!({ "type": "connect" }),
             ],
             &Arc::new(slow),
@@ -1133,6 +1425,7 @@ mod tests {
                 unavailable("timed-out"),
                 not("timed-out"),
                 not("timed-out"),
+                not("timed-out"),
                 not("unknown-message")
             ]
         );
@@ -1144,6 +1437,7 @@ mod tests {
             installed: Box::new(|| panic!("a broken check")),
             app_answers: Box::new(|| true),
             app_url: Box::new(|| None),
+            install_token: Box::new(|| None),
         };
         let (status, replies) = serve_all(
             &[json!({ "type": "ping" }), json!({ "type": "handoff" })],
@@ -1156,15 +1450,18 @@ mod tests {
 
     #[test]
     fn each_deadline_leaves_a_second_of_the_extensions_wait() {
-        // extension/src/background/native-host.ts: PING_TIMEOUT_MS, HANDOFF_TIMEOUT_MS and ADDRESS_TIMEOUT_MS.
-        let (extension_ping, extension_handoff, extension_address) = (
+        // extension/src/background/native-host.ts: PING_TIMEOUT_MS, HANDOFF_TIMEOUT_MS, ADDRESS_TIMEOUT_MS and
+        // ENTRY_TIMEOUT_MS.
+        let (extension_ping, extension_handoff, extension_address, extension_entry) = (
             Duration::from_secs(3),
+            Duration::from_secs(8),
             Duration::from_secs(8),
             Duration::from_secs(8),
         );
         assert!(DEADLINES.ping + Duration::from_secs(1) <= extension_ping);
         assert!(DEADLINES.handoff + Duration::from_secs(1) <= extension_handoff);
         assert!(DEADLINES.address + Duration::from_secs(1) <= extension_address);
+        assert!(DEADLINES.entry + Duration::from_secs(1) <= extension_entry);
         // Two probes, one per loopback, fit in a ping.
         assert!(PING_PROBE_PATIENCE * 2 < DEADLINES.ping);
     }
