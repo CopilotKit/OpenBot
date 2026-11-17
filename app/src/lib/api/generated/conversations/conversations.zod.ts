@@ -1019,6 +1019,10 @@ export const ListConversationMessagesQueryParams = zod.object({
 
 export const listConversationMessagesResponseMessagesItemToolCallsMin = 0;
 
+export const listConversationMessagesResponseMessagesItemFilesItemSizeBytesMin = 0;
+
+export const listConversationMessagesResponseMessagesItemFilesMax = 20;
+
 export const listConversationMessagesResponseNextCursorMax = 4096;
 
 export const listConversationMessagesResponseNextCursorRegExp = new RegExp(
@@ -1084,6 +1088,28 @@ export const ListConversationMessagesResponse = zod.object({
           .optional()
           .describe(
             "How many tools the Bot called in this message, when it called any.",
+          ),
+        files: zod
+          .array(
+            zod
+              .object({
+                id: zod.string().describe("The attachment's id."),
+                name: zod.string().describe("The file's name."),
+                mimeType: zod
+                  .string()
+                  .describe("The type OpenBot recognised it as."),
+                sizeBytes: zod
+                  .int()
+                  .min(
+                    listConversationMessagesResponseMessagesItemFilesItemSizeBytesMin,
+                  ),
+              })
+              .describe("A file held for a message, or sent with one."),
+          )
+          .max(listConversationMessagesResponseMessagesItemFilesMax)
+          .optional()
+          .describe(
+            "In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.",
           ),
       })
       .describe(
