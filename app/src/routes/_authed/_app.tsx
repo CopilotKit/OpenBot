@@ -4,7 +4,9 @@ import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { PlacesSidebar } from "@/components/places/places-sidebar";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { usePlacesEnabled } from "@/lib/places/store";
 import { useActiveSkin } from "@/skins/registry";
 
 export const Route = createFileRoute("/_authed/_app")({
@@ -12,6 +14,7 @@ export const Route = createFileRoute("/_authed/_app")({
 });
 
 function RouteComponent() {
+  const placesOn = usePlacesEnabled();
   const { Frame } = useActiveSkin();
 
   if (Frame) {
@@ -33,7 +36,7 @@ function RouteComponent() {
      * page, grow it, and grow again. Admin and settings use the same panel.
      */
     <SidebarShell className="h-svh overflow-hidden">
-      <AppSidebar />
+      {placesOn ? <PlacesSidebar /> : <AppSidebar />}
       <SidebarInset className="min-h-0 overflow-hidden">
         <ConnectionBanner />
         <UpdateBanner />

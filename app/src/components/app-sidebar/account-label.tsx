@@ -15,7 +15,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { OpenBotVersion } from "../layout/openbot-version";
 
-function UserAvatar() {
+export function UserAvatar() {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const initials =
     currentUser?.name
@@ -33,7 +33,7 @@ function UserAvatar() {
 }
 
 /** The person's name, and the organization they are working in where OpenBot lists them. */
-function useAccountNames() {
+export function useAccountNames() {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const choices = useOrganizationChoices();
   const organization = choices?.organizations.find(
