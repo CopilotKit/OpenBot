@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -177,3 +178,34 @@ def bot_settings(
         )
 
     return BotSettings(provider=provider, model=model)
+
+
+# `requiresResponsesApi` in shared/model-providers.ts, the rule every Bot in the box decides by:
+# `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, and the `-pro` and
+# `-codex` models are not served on Chat Completions at all.
+_RESPONSES_API_MODEL = re.compile(
+    r"^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
+)
+
+
+def requires_responses_api(model: str) -> bool:
+    """Whether this OpenAI model has to be driven through the Responses API.
+
+    A gateway's namespaced name (`openai/gpt-5.6-terra`) is the model it names.
+    """
+    return bool(_RESPONSES_API_MODEL.search(model.strip().split("/")[-1]))
+
+
+def openai_api(model: str, env: Mapping[str, str] | None = None) -> str:
+    """`responses` or `chat`: which OpenAI API a Bot calls for this model.
+
+    THE MODEL DECIDES, NOT THE ADDRESS, as `chooseOpenAIApi` on the server does: a gateway or a
+    proxy in front of OpenAI is an `OPENAI_BASE_URL` too, and the address cannot say which API a
+    model takes. `COPILOTKIT_OPENAI_API=responses` or `chat` is an operator's choice for every
+    model, and wins.
+    """
+    environ = os.environ if env is None else env
+    chosen = (environ.get("COPILOTKIT_OPENAI_API") or "").strip().lower()
+    if chosen in ("responses", "chat"):
+        return chosen
+    return "responses" if requires_responses_api(model) else "chat"
