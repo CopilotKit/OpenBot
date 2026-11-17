@@ -1,0 +1,10 @@
+data: {"type":"RUN_STARTED","threadId":"t","runId":"r"}
+
+data: {"type":"TOOL_CALL_START","toolCallId":"toolu_1","toolCallName":"get_weather","parentMessageId":"m1"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"toolu_1","delta":"{\"city\":\"Paris\"}"}
+
+data: {"type":"TOOL_CALL_END","toolCallId":"toolu_1"}
+
+data: {"type":"RUN_FINISHED","threadId":"t","runId":"r"}
+

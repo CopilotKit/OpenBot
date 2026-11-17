@@ -13,13 +13,21 @@
  *    harness. Nothing here knows it is Google.
  *  - A ChatGPT plan: `CHATGPT_PLAN_HARNESS_URL` names agent-langgraph-agui, which holds the Codex
  *    transport, and every model call goes there (`plan-model.ts`). Selected by its presence.
+ *
+ * THE LIVE AI CONNECTION, PER RUN. Where the deployment names its model gateway
+ * (`OPENBOT_MODEL_GATEWAY_URL`), the server says how each run's model is reached
+ * (`forwardedProps.openbotModelRoute`), and that is all that decides it: `openai` or `anthropic`
+ * through the gateway with the run's own token (the gateway adds the connection's key), or
+ * `chatgpt-plan` / `claude-plan` to that plan's engine. This engine holds no provider key, so the
+ * person changing the connection changes the next run, with nothing restarted. See `routedModel`.
  */
 import { readFileSync } from "node:fs";
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogle } from "@langchain/google";
 import { ChatOpenAI } from "@langchain/openai";
-import { PlanHarnessChatModel } from "./plan-model.ts";
+import { HarnessRunError, MODEL_UNREACHABLE } from "./errors.ts";
+import { claudeThreadId, PlanHarnessChatModel } from "./plan-model.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -56,7 +64,42 @@ export type RunModel = {
   sendOnce: boolean;
   /** The Bot the run is for, sent on to a plan's harness. */
   botId?: string;
+  /** How the server said this run's model is reached, when it said. */
+  route?: ModelRoute;
+  /** The run's thread, which a Claude plan's query is kept under. */
+  threadId?: string;
+  /** The run's own stop, which cancels a Claude plan's query. */
+  signal?: AbortSignal;
 };
+
+export const ROUTES = new Set([
+  "openai",
+  "anthropic",
+  "chatgpt-plan",
+  "claude-plan",
+] as const);
+export type ModelRoute = {
+  via: "openai" | "anthropic" | "chatgpt-plan" | "claude-plan";
+  /** The run's gateway token, for `openai` and `anthropic`. */
+  token?: string;
+};
+
+/** `forwardedProps.openbotModelRoute`, as the server sends it. Anything else is no route. */
+export function runRoute(
+  props: Record<string, unknown>,
+): ModelRoute | undefined {
+  const route = props.openbotModelRoute;
+  if (!route || typeof route !== "object") return undefined;
+  const { via, token } = route as { via?: unknown; token?: unknown };
+  if (typeof via !== "string" || !ROUTES.has(via as ModelRoute["via"]))
+    return undefined;
+  return {
+    via: via as ModelRoute["via"],
+    ...(typeof token === "string" && token.trim()
+      ? { token: token.trim() }
+      : {}),
+  };
+}
 
 /** The `(model, effort)` the server chose for this run, from `forwardedProps.openbotModel`. */
 export function runModel(props: Record<string, unknown>): {
@@ -281,6 +324,8 @@ export function chatModel(
   run: RunModel,
   env: Env = process.env,
 ): BaseChatModel {
+  const routed = routedModel(run, env);
+  if (routed) return routed;
   const planUrl = env.CHATGPT_PLAN_HARNESS_URL?.trim();
   if (planUrl) {
     const token =
@@ -310,4 +355,80 @@ export function chatModel(
       `This Bot cannot run on the provider "${settings.provider}".`,
     );
   return make(model, run, env);
+}
+
+/** The model gateway's root (`OPENBOT_MODEL_GATEWAY_URL`), or undefined where there is none. */
+export function gatewayUrl(env: Env): string | undefined {
+  return env.OPENBOT_MODEL_GATEWAY_URL?.trim().replace(/\/+$/, "") || undefined;
+}
+
+/** A `provider:model` name, as the server may send it, is the model it names. */
+function bareModel(model: string): string {
+  const separator = model.indexOf(":");
+  return separator > 0 && PROVIDER_ALIASES[model.slice(0, separator)]
+    ? model.slice(separator + 1)
+    : model;
+}
+
+/**
+ * The model the server's route names for this run, or undefined where there is no route (or no
+ * gateway, as on a deployment from before the live connection), which is today's environment.
+ *
+ *  - `openai`: ChatOpenAI at `${gateway}/v1` with the run token as its key; Responses or Chat
+ *    Completions by the model, as for a key.
+ *  - `anthropic`: ChatAnthropic at `${gateway}/anthropic` with the run token as its key.
+ *  - `chatgpt-plan`: the ChatGPT plan's engine, as `CHATGPT_PLAN_HARNESS_URL` reaches it today.
+ *  - `claude-plan`: the Claude engine's `/model` (`CLAUDE_PLAN_HARNESS_URL`), the deployment's
+ *    token, one Claude query per Bot and thread, cancelled when the run is stopped.
+ */
+function routedModel(run: RunModel, env: Env): BaseChatModel | undefined {
+  const gateway = gatewayUrl(env);
+  const route = run.route;
+  if (!gateway || !route) return undefined;
+  if (route.via === "chatgpt-plan" || route.via === "claude-plan") {
+    const claude = route.via === "claude-plan";
+    const url = (
+      claude ? env.CLAUDE_PLAN_HARNESS_URL : env.CHATGPT_PLAN_HARNESS_URL
+    )?.trim();
+    if (!url)
+      throw new HarnessRunError(
+        `OpenBot can't reach ${claude ? "Claude" : "ChatGPT"} on the plan: its engine isn't set up here.`,
+        MODEL_UNREACHABLE,
+      );
+    const token =
+      (claude ? undefined : env.CHATGPT_PLAN_HARNESS_TOKEN?.trim()) ||
+      env.MANAGED_AGENT_TOKEN?.trim() ||
+      "";
+    return new PlanHarnessChatModel({
+      plan: claude ? "claude" : "chatgpt",
+      url: claude ? `${url.replace(/\/+$/, "")}/model` : url,
+      token,
+      model: run.model,
+      effort: run.effort,
+      botId: run.botId,
+      ...(claude
+        ? {
+            threadId: claudeThreadId(run.botId ?? "", run.threadId ?? ""),
+            signal: run.signal,
+          }
+        : {}),
+    });
+  }
+  if (!route.token)
+    throw new HarnessRunError(
+      "This run came without its pass for OpenBot's model gateway. Try again.",
+    );
+  const model =
+    bareModel(run.model) || spec(env).providers[route.via]?.default_model || "";
+  if (route.via === "anthropic")
+    return anthropicModel(model, run, {
+      ...env,
+      ANTHROPIC_BASE_URL: `${gateway}/anthropic`,
+      ANTHROPIC_API_KEY: route.token,
+    });
+  return openAIModel(model, run, {
+    ...env,
+    OPENAI_BASE_URL: `${gateway}/v1`,
+    OPENAI_API_KEY: route.token,
+  });
 }

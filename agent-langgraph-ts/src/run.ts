@@ -49,10 +49,12 @@ import { modelMessages, STANDING_ROLE_PREFIX } from "./history.ts";
 import {
   chatModel,
   type Env,
+  gatewayUrl,
   modelBaseUrl,
   providerName,
   type RunModel,
   runModel,
+  runRoute,
 } from "./models.ts";
 
 /** Model steps a run may take: the built-in Bot's `TOOL_STEPS`. The last one answers in words. */
@@ -498,7 +500,26 @@ function botIdOf(messages: readonly Message[]): string | undefined {
     : undefined;
 }
 
-function failureContext(env: Env) {
+/** Who serves the model and where it is dialled, for the sentence a failed run ends with. */
+function failureContext(env: Env, run: RunModel) {
+  const gateway = gatewayUrl(env);
+  const via = gateway ? run.route?.via : undefined;
+  if (via === "anthropic")
+    return { provider: "Anthropic", baseUrl: `${gateway}/anthropic` };
+  if (via === "openai")
+    // The gateway can stand in front of any OpenAI-compatible provider: named by its model where
+    // that says (Gemini, Grok), as for the sign-in proxy.
+    return {
+      provider: providerName({
+        OPENAI_BASE_URL: `${gateway}/v1`,
+        BOT_MODEL: run.model,
+      }),
+      baseUrl: `${gateway}/v1`,
+    };
+  if (via === "claude-plan")
+    return { provider: "Claude", baseUrl: env.CLAUDE_PLAN_HARNESS_URL };
+  if (via === "chatgpt-plan")
+    return { provider: "ChatGPT", baseUrl: env.CHATGPT_PLAN_HARNESS_URL };
   try {
     return { provider: providerName(env), baseUrl: modelBaseUrl(env) };
   } catch {
@@ -527,10 +548,14 @@ export async function runAgent(
     typeof props.openbotSystemPrompt === "string"
       ? props.openbotSystemPrompt
       : undefined;
+  // The route and its token stay in this run's model: neither is logged or sent anywhere else.
   const choice: RunModel = {
     ...runModel(props),
     sendOnce: props.openbotSendOnce === true,
     botId: botIdOf(input.messages ?? []),
+    route: runRoute(props),
+    threadId: input.threadId,
+    signal: options.signal,
   };
   const emit = options.emit;
   emit({
@@ -585,7 +610,7 @@ export async function runAgent(
     } as BaseEvent);
   } catch (error) {
     if (options.signal?.aborted) return;
-    const failure = runFailure(error, failureContext(env));
+    const failure = runFailure(error, failureContext(env, choice));
     if (failure.code)
       log.warn(`The model provider refused the run: ${failure.message}`);
     else log.error("The run failed before it finished", error);
