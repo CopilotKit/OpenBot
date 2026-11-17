@@ -21433,10 +21433,24 @@ fn main() {
         }
         let root = temp_root("openbot-harness-start-ipc");
         write_installed_deployment(&root);
+        // A release's Compose file defines the ChatGPT plan's model service, and Start raises it
+        // only where the file does (`stack::selected_services`).
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            format!(
+                "{INSTALLED_COMPOSE}  {}: {{}}\n",
+                openbot_desktop_lib::plan::CHATGPT_PLAN_SERVICE
+            ),
+        )
+        .unwrap();
         let mut images: deployment::Images =
             serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
                 .unwrap();
-        for name in ["agent-langgraph-agui", "agent-claude-sdk"] {
+        for name in [
+            "agent-langgraph-ts",
+            "agent-langgraph-agui",
+            "agent-claude-sdk",
+        ] {
             images.images.insert(
                 name.into(),
                 deployment::Image {
@@ -21468,7 +21482,7 @@ fn main() {
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
@@ -21479,7 +21493,7 @@ fn main() {
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
@@ -21490,7 +21504,7 @@ fn main() {
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness agent-langgraph-agui", Some("agent-langgraph-ts"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
@@ -21610,9 +21624,23 @@ fn main() {
                 "PICKED_HARNESS_URL",
                 "PICKED_HARNESS_KIND",
                 "PICKED_HARNESS_IMAGE",
+                "CHATGPT_PLAN_HARNESS_URL",
+                "LANGGRAPH_IMAGE",
             ],
         )
         .unwrap();
+        // A ChatGPT plan's model calls go to the Python image, pinned to the release, which this
+        // start raised beside the Bot (`expected_up`). Every other sign-in names no such address.
+        assert_eq!(
+            settings.get("CHATGPT_PLAN_HARNESS_URL").map(String::as_str),
+            (case == "chatgpt-plan").then_some(openbot_desktop_lib::plan::CHATGPT_PLAN_URL),
+            "case={case}"
+        );
+        assert_eq!(
+            settings.get("LANGGRAPH_IMAGE").map(String::as_str),
+            Some("localhost/agent-langgraph-agui@sha256:00"),
+            "case={case}"
+        );
         assert_eq!(
             settings.get("TENANT_PACKAGE_DIR").map(String::as_str),
             Some("../examples/personal")

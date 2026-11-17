@@ -9203,7 +9203,10 @@ fn main() {
         std::fs::write(root.join("docker-compose.yml"), RELEASED_COMPOSE_1_0_2).unwrap();
         std::fs::write(
             root.join(".env"),
-            format!("CHATGPT_PLAN_HARNESS_URL={}\n", crate::plan::CHATGPT_PLAN_URL),
+            format!(
+                "CHATGPT_PLAN_HARNESS_URL={}\n",
+                crate::plan::CHATGPT_PLAN_URL
+            ),
         )
         .unwrap();
         assert!(!selected_services(&root, true).contains(&plan));

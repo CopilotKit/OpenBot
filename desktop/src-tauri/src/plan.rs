@@ -469,8 +469,8 @@ impl SigningIn {
 /// The published name of the image whose `langchain-openai` runs the ChatGPT sign-in.
 ///
 /// The LangGraph harness, used as a tool rather than as a Bot for the same reason the Claude one is:
-/// it is the image that already carries the vendor's own login. It is also the default harness, so
-/// on the common path this image is being pulled anyway.
+/// it is the image that already carries the vendor's own login. Every install pulls it, because a
+/// ChatGPT plan also runs it as its model service (`CHATGPT_PLAN_SERVICE`).
 ///
 /// A name, not a reference: see `SIGN_IN_IMAGE`.
 pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";

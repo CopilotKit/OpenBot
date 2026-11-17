@@ -387,7 +387,10 @@ mod tests {
         else {
             panic!("the default Bot installs an image");
         };
-        assert_eq!(image, "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc");
+        assert_eq!(
+            image,
+            "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc"
+        );
         assert_eq!(port, 4215);
         assert_eq!(run_path, "");
         let _ = std::fs::remove_dir_all(&root);
@@ -436,12 +439,7 @@ mod tests {
                 },
                 ts,
             ),
-            (
-                ModelCredential::ChatGptPlan {
-                    store: "{}".into(),
-                },
-                ts,
-            ),
+            (ModelCredential::ChatGptPlan { store: "{}".into() }, ts),
             (
                 ModelCredential::ClaudePlan {
                     token: "plan".into(),
@@ -472,9 +470,7 @@ mod tests {
             ModelCredential::OpenAi {
                 api_key: "sk-test".into(),
             },
-            ModelCredential::ChatGptPlan {
-                store: "{}".into(),
-            },
+            ModelCredential::ChatGptPlan { store: "{}".into() },
         ] {
             assert_eq!(
                 installed_image(&root, for_credential(&credential, saved.clone())),

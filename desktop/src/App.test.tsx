@@ -1453,7 +1453,10 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(installationCalls()).toEqual([
     {
       command: "prepare_installation",
-      args: { root: "/tmp/local-eval-install", harness: { id: DEFAULT_HARNESS } },
+      args: {
+        root: "/tmp/local-eval-install",
+        harness: { id: DEFAULT_HARNESS },
+      },
     },
   ]);
   expect(
@@ -4859,7 +4862,9 @@ async function reopenAfterUpdate(
   setupConnectedLocalStack(root, localStatus("ready", "valid"), {
     saved: { ...savedOpenAiConfiguration().saved, model: "claude-plan" },
     // Installed with the default Bot, as the window itself installs: what it recorded as finished
-    // has to be installed again all the same.
+    // has to be installed again all the same. Saved by an earlier app, whose default Bot was the
+    // Python LangGraph image (`langgraph`): this window still knows it as the installation it is
+    // returning to, now that the default is the TypeScript one.
     launch: { harness: { id: "langgraph" } },
   });
   const installed = deferred<null>();

@@ -87,7 +87,8 @@ pub const IMAGE_VARIABLES: [(&str, &str); 3] = [
 /// default is a name built on this machine, and a start that raised it would have nothing to run.
 /// Not required: a release laid out by an older app, or a test manifest, need not name it, and an
 /// installation that never starts the service never reads the variable.
-pub const OPTIONAL_IMAGE_VARIABLES: [(&str, &str); 1] = [("agent-langgraph-agui", "LANGGRAPH_IMAGE")];
+pub const OPTIONAL_IMAGE_VARIABLES: [(&str, &str); 1] =
+    [("agent-langgraph-agui", "LANGGRAPH_IMAGE")];
 
 /// Read the manifest laid down beside the deployment and turn it into Compose variables.
 ///
