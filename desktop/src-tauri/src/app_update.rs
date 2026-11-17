@@ -571,7 +571,8 @@ pub struct Status {
     /// Whether this build updates itself (`Feed::of` finds it a feed). An internal or candidate
     /// build, or one without the updater, never does, and a window says so up front.
     pub updates_itself: bool,
-    /// How ready the offered version is to install (`Readiness`), when OpenBot has started on it.
+    /// How ready the offered version, or the minimized one, is to install (`Readiness`), when
+    /// OpenBot has started on it.
     pub ready: Option<Readiness>,
     /// The version the panel is minimized on: the newest version, which this person closed the
     /// offer on, while nothing is installing. `version` is `None` then, so a page that does not
@@ -611,7 +612,10 @@ pub fn status(
         None
     };
     Status {
-        ready: version.as_ref().and_then(|v| known.readiness(v)),
+        ready: version
+            .as_ref()
+            .or(minimized.as_ref())
+            .and_then(|v| known.readiness(v)),
         notes: version
             .as_ref()
             .or(minimized.as_ref())
@@ -1041,6 +1045,20 @@ mod tests {
         let shown = status(&known, &v("1.0.3"), Some(&config), true);
         assert_eq!(shown.version, None);
         assert_eq!(shown.minimized.as_deref(), Some("1.0.4"));
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn status_says_how_ready_the_minimized_version_is() {
+        let config = crate::test_support::temp_root("app-update-minimized-ready");
+        let known = Known::default();
+        known.record(&Ok(Some(v("1.0.4"))));
+        dismiss(&config, &v("1.0.4")).unwrap();
+        known.readying(&v("1.0.4"), Readiness::Ready);
+        let shown = status(&known, &v("1.0.3"), Some(&config), true);
+        assert_eq!(shown.version, None);
+        assert_eq!(shown.minimized.as_deref(), Some("1.0.4"));
+        assert_eq!(shown.ready, Some(Readiness::Ready));
         let _ = std::fs::remove_dir_all(&config);
     }
 
