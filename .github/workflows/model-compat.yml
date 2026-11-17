@@ -75,7 +75,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          UNBIASED_API_KEY: ${{ secrets.UNBIASED_API_KEY }}
         run: >-
           bun scripts/model-compat.ts --harness "$HARNESS" --tags "$TAGS" --exit-zero
           --out "$RUNNER_TEMP/model-compat-$HARNESS.json"
