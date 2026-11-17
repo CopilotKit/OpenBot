@@ -273,6 +273,82 @@ function probeDocument(url: string): Promise<boolean> {
  * also puts a document back in step with the picture beside it — an `<img>` handed a 401 shows a
  * broken image, not a sentence swearing the file was deleted.
  */
+/** What the server says about a file it serves: whether it is gone, and its size and type. */
+export type FileFacts = {
+  missing: boolean;
+  sizeBytes?: number;
+  mimeType?: string;
+};
+
+const factsInFlight = new Map<string, Promise<FileFacts>>();
+
+/**
+ * The same bodyless question as {@link probeDocument}, keeping the size and the type the answer
+ * carries. Only 404 is "missing", for the reasons given there.
+ */
+function probeFile(url: string): Promise<FileFacts> {
+  const existing = factsInFlight.get(url);
+  if (existing) return existing;
+
+  /*
+   * `no-store`, so the browser does not answer from the picture it just failed to draw: a
+   * revalidation of that comes back 304 with no length and no type, and the tile lost its size.
+   */
+  const probe = fetch(url, {
+    method: "HEAD",
+    credentials: "include",
+    cache: "no-store",
+  })
+    .then((response): FileFacts => {
+      if (response.status === 404) return { missing: true };
+      if (!response.ok) return { missing: false };
+      const length = Number(response.headers.get("Content-Length"));
+      const type = response.headers.get("Content-Type")?.split(";")[0]?.trim();
+      return {
+        missing: false,
+        ...(Number.isFinite(length) && length > 0 ? { sizeBytes: length } : {}),
+        ...(type ? { mimeType: type } : {}),
+      };
+    })
+    .finally(() => {
+      factsInFlight.delete(url);
+    });
+
+  factsInFlight.set(url, probe);
+  return probe;
+}
+
+/**
+ * What the server says about a file, asked only when `ask` turns true.
+ *
+ * For a PICTURE THAT WOULD NOT DRAW. Its own load failing says the browser could not draw it, not
+ * that the file is gone: a picture up to 100MB can be intact on the server and still not draw in a
+ * phone's browser. So the tile asks, and only a 404 makes it "unavailable"; anything else draws it
+ * as the file it is, with the size and type when the answer carried them. A request that never
+ * arrived is not an answer either way, and the tile is drawn as the file without them.
+ */
+export function useFileFacts(url: string, ask: boolean): FileFacts | undefined {
+  const [facts, setFacts] = useState<FileFacts>();
+
+  useEffect(() => {
+    if (!ask) return;
+    setFacts(undefined);
+    let cancelled = false;
+    void probeFile(url)
+      .then((answer) => {
+        if (!cancelled) setFacts(answer);
+      })
+      .catch(() => {
+        if (!cancelled) setFacts({ missing: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ask, url]);
+
+  return ask ? facts : undefined;
+}
+
 export function useDocumentIsGone(url: string, ask: boolean): boolean {
   const [gone, setGone] = useState(false);
 

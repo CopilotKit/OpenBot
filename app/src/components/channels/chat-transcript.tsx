@@ -25,7 +25,9 @@ import {
   IconBox,
   IconChevronDown,
   IconClock,
+  IconDownload,
   IconFile,
+  IconPhoto,
 } from "@tabler/icons-react";
 import { QueryClientContext, useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
@@ -64,6 +66,7 @@ import {
   WorkedFor,
 } from "@/components/tasks/worked-for";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
 import {
   MessageContent,
   MessageFooter,
@@ -87,6 +90,7 @@ import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { useComponentTest } from "@/lib/copilot/tool-steps";
+import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type FolderNames,
@@ -132,6 +136,7 @@ import {
   LightboxPicture,
   unavailableSentence,
   useDocumentIsGone,
+  useFileFacts,
 } from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
@@ -1165,7 +1170,14 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
    * without anybody being asked.
    */
   const gone = useDocumentIsGone(address, servable && modality === "document");
-  const unavailable = failedToLoad || gone || !servable;
+  /*
+   * A PICTURE THAT WOULD NOT DRAW IS ASKED ABOUT, NOT DECLARED GONE. Its own load failing says this
+   * browser could not draw it; only the server can say the file is gone. A picture up to 100MB can
+   * be intact and still not draw on a phone, and this tile used to say, in the file's own name, that
+   * it was unavailable. Now a 404 says that, and anything else draws the file tile below.
+   */
+  const facts = useFileFacts(address, servable && failedToLoad);
+  const unavailable = facts?.missing === true || gone || !servable;
 
   /*
    * ABSENCE IS DECIDED BEFORE MODALITY IS, and that ordering is the whole point of this block
@@ -1213,6 +1225,12 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
     );
   }
 
+  if (failedToLoad) {
+    return (
+      <PictureFileTile address={address} facts={facts} filename={filename} />
+    );
+  }
+
   return (
     <AttachmentLightbox filename={filename} url={address}>
       <img
@@ -1222,6 +1240,53 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
         src={address}
       />
     </AttachmentLightbox>
+  );
+}
+
+/**
+ * A picture this browser could not draw, as the file it is: the same card a document gets, with
+ * the kind and size the server gave and a Download for the file itself.
+ *
+ * Drawn from the moment the picture fails, before the server has answered, with "Image" until the
+ * answer brings the kind and size: a blank or a broken box is never shown in between.
+ */
+function PictureFileTile({
+  address,
+  facts,
+  filename,
+}: {
+  address: string;
+  facts: { sizeBytes?: number; mimeType?: string } | undefined;
+  filename?: string;
+}) {
+  const name = filename ?? "Untitled file";
+  const kind = facts?.mimeType ? kindLabel(facts.mimeType, name) : "Image";
+  return (
+    <div className="flex h-32 w-44 flex-col justify-between rounded-xl border border-border bg-muted/40 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <IconPhoto aria-hidden className="size-6 text-muted-foreground" />
+        <Button
+          aria-label={`Download ${name}`}
+          nativeButton={false}
+          render={<a download={name} href={address} />}
+          size="icon-sm"
+          variant="outline"
+        >
+          <IconDownload />
+        </Button>
+      </div>
+      <div className="min-w-0">
+        {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
+        <p className="truncate font-medium text-sm" title={name}>
+          {name}
+        </p>
+        <p className="truncate text-muted-foreground text-xs">
+          {facts?.sizeBytes === undefined
+            ? kind
+            : `${kind} · ${fileSize(facts.sizeBytes)}`}
+        </p>
+      </div>
+    </div>
   );
 }
 
