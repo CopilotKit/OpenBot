@@ -7,6 +7,11 @@ import {
 } from "@copilotkit/react-core/v2";
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import {
+  type CheckInMessage,
+  checkInMessageArriving,
+  readCheckInMessage,
+} from "@openbot/shared/check-in-message";
+import {
   readConnectPrompt,
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
@@ -137,6 +142,7 @@ import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import { AppAccessCard } from "./app-access-card";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
+import { CheckInItems, CheckInRan } from "./check-in-message";
 import {
   attachmentModality,
   type SentAttachment,
@@ -747,6 +753,42 @@ function RoutineFiring({ instruction }: { instruction: string }) {
   );
 }
 
+/**
+ * A check-in that found something, saying so in its conversation, drawn as the three things it is.
+ *
+ * What a check-in finds is filed on the Needs you board, behind a dot on Bots, and on its own that
+ * leaves the conversation the person has with that Bot saying nothing happened. A message carrying
+ * `@openbot/shared/check-in-message` is the Bot saying it here as well, and it is drawn in the order
+ * a person would say it:
+ *
+ * - that the check-in ran, quiet and start-aligned like a routine's firing, because it is an event
+ *   and nobody typed it;
+ * - the Bot's sentence, as its own reply;
+ * - a card for each thing it raised, answered here with the board's own Work on it and dismiss.
+ *
+ * The board, its dot and the hourly notice are unchanged. This is one more place the same items are
+ * read from, not a second copy of them. See `CheckInItems`.
+ */
+function CheckInSpoke({
+  said,
+  sentence,
+}: {
+  said: Pick<CheckInMessage, "checkInId" | "ranAt" | "itemIds">;
+  /** The Bot's words, already drawn as its reply. Null when it said nothing beside the cards. */
+  sentence: React.ReactNode;
+}) {
+  return (
+    <div
+      className="flex w-full min-w-0 flex-col gap-2.5"
+      data-check-in={said.checkInId}
+    >
+      <CheckInRan checkInId={said.checkInId} ranAt={said.ranAt} />
+      {sentence}
+      <CheckInItems itemIds={said.itemIds} />
+    </div>
+  );
+}
+
 /** `manual/requested` reads as "manual"; anything else keeps its event type beside the source. */
 function describeTrigger(trigger: string): string {
   const [source, type] = trigger.split("/", 2);
@@ -850,6 +892,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
   );
   const firing = isUser ? readFiring(text) : null;
   /*
+   * A check-in speaking first: a Bot's message, and read from the whole of it, never from the part
+   * the paced reveal has shown so far, which would spell its marker out a few characters at a time.
+   */
+  const checkIn = isUser ? null : readCheckInMessage(text);
+  /*
    * A task thread's first message is the Bot's brief, not something the person typed: drawn as sent
    * from the Bot, without the words that frame it for the model. See `frameBrief`.
    */
@@ -876,6 +923,47 @@ const TranscriptMessage = memo(function TranscriptMessage({
       </MessageRow>
     );
   }
+  if (checkIn !== null) {
+    return (
+      <MessageRow align="start">
+        <MessageContent>
+          <Arriving>
+            <CheckInSpoke
+              said={checkIn}
+              sentence={
+                checkIn.message ? (
+                  /*
+                   * The Bot's own words, drawn as any reply of its is, and whole: a sentence or two
+                   * typed out above cards that are already there would be motion for its own sake.
+                   */
+                  <Bubble align="start" className="w-full" variant="ghost">
+                    <BubbleContent className="w-full">
+                      <div ref={resultRef}>
+                        <BotMarkdown
+                          components={markdownComponents}
+                          mode="static"
+                          plugins={markdownPlugins}
+                          remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                        >
+                          {checkIn.message}
+                        </BotMarkdown>
+                      </div>
+                    </BubbleContent>
+                  </Bubble>
+                ) : null
+              }
+            />
+          </Arriving>
+        </MessageContent>
+      </MessageRow>
+    );
+  }
+  /*
+   * One still being written, with its marker half here: held back for the moment that lasts, so the
+   * row is never drawn as a reply reading `[check-in]{"checkInId":…`. Only while it streams. A
+   * finished message that will not read as a check-in is drawn below as what it says.
+   */
+  if (!isUser && streaming && checkInMessageArriving(text)) return null;
   const align = isUser ? "end" : "start";
   // Slack/Teams turns carry a model-facing participant line; show a marker instead of the line.
   const origin = isUser ? splitChatOrigin(text) : null;

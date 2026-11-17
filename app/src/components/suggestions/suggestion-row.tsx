@@ -34,19 +34,32 @@ import { queryClient } from "@/query-client";
  *
  * Which Bot found it is the group's header where the row sits in one (`inGroup`), and said on the
  * row otherwise. Each row has its own request, so dismissing one leaves the others' buttons alone.
+ *
+ * The same row is the card a check-in's message draws for the item in its conversation
+ * (`inConversation`, see `CheckInItems`): one component, so the two places cannot come to offer
+ * different answers or send them differently.
  */
 export function SuggestionRow({
   suggestion,
   botName,
   setting,
   inGroup = false,
+  inConversation = false,
 }: {
   suggestion: ProactiveSuggestion;
-  /** The Bot it came from, said on the row unless the row sits under that Bot's header. */
-  botName: string;
+  /**
+   * The Bot it came from, said on the row unless the row sits under that Bot's header. Left out
+   * where the row is drawn in the Bot's own conversation.
+   */
+  botName?: string;
   /** The check-in that found it, when it is still there to turn off. */
   setting?: ProactiveSetting;
   inGroup?: boolean;
+  /**
+   * Drawn under the Bot's own message about it. Why it was raised is read in full, as part of what
+   * the Bot is saying, and the Bot and the time are left to the message above, which says both.
+   */
+  inConversation?: boolean;
 }) {
   const act = useMutation(resolveSuggestionMutationOptions(queryClient));
   const stop = useMutation(changeProactiveSettingMutationOptions(queryClient));
@@ -117,12 +130,17 @@ export function SuggestionRow({
           <IconRadar />
         )
       }
+      readDetail={inConversation}
       meta={[
         suggestion.sourceApp ? (
           <MetaTag key="app">{suggestion.sourceApp}</MetaTag>
         ) : null,
-        inGroup ? null : <span key="bot">{botName}</span>,
-        <span key="when">{relativeTime(suggestion.createdAt)}</span>,
+        inGroup || inConversation || !botName ? null : (
+          <span key="bot">{botName}</span>
+        ),
+        inConversation ? null : (
+          <span key="when">{relativeTime(suggestion.createdAt)}</span>
+        ),
         suggestion.sourceLink ? (
           <a
             className="inline-flex items-center gap-0.5 hover:text-foreground"
