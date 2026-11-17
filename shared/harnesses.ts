@@ -181,6 +181,16 @@ export function withCurrentFrameworkNames(title: string): string {
 export const OPENBOT_HARNESS_NAME = "OpenBot";
 
 /**
+ * The engine a new Bot that runs inside OpenBot is made on, by harness id: OpenBot's own LangGraph
+ * agent in TypeScript (`agent-langgraph-ts`).
+ *
+ * The New Bot sheet sends it with a Bot that has no address, and the server records it on that Bot.
+ * The server still decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and
+ * a deployment whose administrator switched the default back runs its Bots on the built-in agent.
+ */
+export const DEFAULT_BOT_ENGINE = "langgraph-ts";
+
+/**
  * A framework a person may declare for an agent they run themselves, by id: any named harness, never
  * "An agent you already run", which names none.
  */

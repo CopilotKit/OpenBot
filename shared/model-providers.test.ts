@@ -239,6 +239,12 @@ describe("what a Bot runs from the spec file", () => {
       provider: "openai",
       model: "gpt-4o-mini",
     });
+    // The engine new Bots run on replaces the built-in agent, which runs the provider's current
+    // default, so it starts there too rather than on an older model.
+    expect(botSettings("agent-langgraph-ts", {})).toEqual({
+      provider: "openai",
+      model: "gpt-5.5",
+    });
     expect(botSettings("agent-agno", {})).toEqual({
       provider: "openai",
       model: "gpt-5.5",
