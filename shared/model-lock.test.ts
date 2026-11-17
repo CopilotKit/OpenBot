@@ -67,7 +67,7 @@ test("a model released after the last check waits for it", () => {
 });
 
 test("what the check never ran is open, so nobody loses their models to missing data", () => {
-  // OpenBot's own runtime is no harness image.
+  // No engine named, or one the lock has no entry for.
   expect(offered(undefined, "anthropic", anthropicIds)).toEqual(anthropicIds);
   // No key for xAI in CI.
   expect(lockVerdict(MODEL_LOCK, "agent-agno", "xai", "grok-4.7")).toEqual({

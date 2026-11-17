@@ -1135,8 +1135,8 @@ the harness is hidden, and a conversation already set to one runs on the default
 
 - **Which harness.** A Claude plan runs every Bot through `agent-claude-sdk`, a ChatGPT plan through
   `agent-langgraph-agui`, and with a key, the harness picked in setup when it takes OpenBot's model
-  choice. OpenBot's own runtime is not a harness image, so its models are not locked.
-- **What is locked.** Only a harness and provider pair this check has run. A pair it never ran (a
+  choice.
+- **What is locked.** Only an engine and provider pair that has been checked. A pair never checked (a
   provider with no key here, such as xAI today) stays open, and a gateway is never locked.
 - **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
   request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that

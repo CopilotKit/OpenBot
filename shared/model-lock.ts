@@ -17,8 +17,8 @@ import manifest from "./model-lock.json";
  * harness before it merges. See docs/releasing.md, "Model lock".
  *
  * THE RULE. A harness and provider pair the check has run is locked: only the models that passed
- * are offered. A pair it has never run (no key for that provider in CI, or a harness it does not
- * start) is open: nothing is known, so nothing is taken away. A model the provider lists that the
+ * are offered. A pair it has never run (no key for that provider in CI, or an engine it has no
+ * entry for) is open: nothing is known, so nothing is taken away. A model the provider lists that the
  * check has not reached yet (released since the last run) is not offered until it passes.
  */
 
@@ -58,7 +58,7 @@ export const MODEL_LOCK: ModelLock = manifest as ModelLock;
  * - `verified`: it answered through the harness's own client.
  * - `refused`: the provider turned it down through that client; `said` is the provider's words.
  * - `unchecked`: the pair is locked, and this model was not in the run (released since).
- * - `open`: the pair was never checked, or there is no harness to check (OpenBot's own runtime).
+ * - `open`: the pair was never checked, or the lock has no entry for the engine.
  */
 export type LockVerdict =
   | { status: "verified" }
