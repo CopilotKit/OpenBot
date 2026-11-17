@@ -1669,6 +1669,62 @@ a:hover {
 }
 
 /*
+ * Why updating OpenBot has a screen, under its progress (`SelfContainedNote`): the window's icon
+ * tile, then the reason and OpenBot for Business, on the muted ground the app gives an aside, in
+ * the rows' smaller type so the progress above stays what the eye reads first.
+ */
+.self-contained {
+  margin-top: 16px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  /* Its own areas: `.mark-tile` names its area `mark`, as the hosting tiles lay it out. */
+  grid-template-areas: "mark words";
+  column-gap: 14px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--muted) 55%, var(--card));
+}
+
+.self-contained-words {
+  grid-area: words;
+}
+
+.self-contained h2 {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.self-contained p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.self-contained p + p {
+  margin-top: 6px;
+}
+
+.self-contained a {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/*
+ * While Docker Desktop's three-line hand-off shows, the journey is 44px taller, and the card
+ * scrolled at the window's default size. The note keeps its heading, which says why, and the pitch
+ * with its link, and leaves out the sentence between until the hand-off goes.
+ */
+main > .sheet:has(.journey.handing-off) .self-contained-why {
+  display: none;
+}
+
+/*
  * The background install's row, last in the step (`BehindSlot`). ONE height, its tallest form's
  * (its name, one line, and a download bar with its bytes under them), whatever it says: a plain
  * line, a download, unpacking, waiting for you, installed. Each line is one line, cut short with
