@@ -933,7 +933,11 @@ async function check(argv: string[]): Promise<number> {
   );
   const unpulled = new Map<string, string>();
   await pool(images, 3, async ({ harness, tag }) => {
+    const began = Date.now();
     const ready = await prepare(harness, tag);
+    console.error(
+      `${tag === SOURCE ? "built" : "pulled"} ${imageOf(harness, tag)} in ${Math.round((Date.now() - began) / 1000)}s${ready.code ? " (failed)" : ""}`,
+    );
     if (ready.code !== 0)
       unpulled.set(
         imageOf(harness, tag),
