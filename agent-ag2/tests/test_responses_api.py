@@ -1,8 +1,8 @@
 """OpenAI models that take function tools only on the Responses API get it, tools and results alike.
 
-OpenAI's own words for `gpt-5.6` and later on Chat Completions: "Function tools with
-reasoning_effort are not supported for this model in /v1/chat/completions. To use function tools,
-use /v1/responses". The `-pro` models are not served there at all: "This is not a chat model and
+OpenAI's own words for `gpt-5.6` and later on Chat Completions, and for `gpt-5.4` and `gpt-5.5` with
+a reasoning effort: "Function tools with reasoning_effort are not supported for this model in
+/v1/chat/completions. To use function tools, use /v1/responses". The `-pro` models are not served there at all: "This is not a chat model and
 thus not supported in the v1/chat/completions endpoint." The real AG2 and OpenAI clients run here;
 only the provider at the other end of OPENAI_BASE_URL is local, and it answers the way OpenAI
 does, refusals included.
@@ -37,11 +37,23 @@ TOOL = {
 }
 ARGUMENTS = {"order": "A-1001"}
 
-# What the picker lists that OpenAI serves function tools for only on /v1/responses.
-RESPONSES_MODELS = ["gpt-5.6-luna", "gpt-6-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-5.5-pro", "o3-pro"]
+# What the picker lists that OpenAI serves function tools for only on /v1/responses, or, for the
+# 5.4 and 5.5 families, only there once a run carries a reasoning effort (OpenAI, 2026-11-17).
+RESPONSES_MODELS = [
+    "gpt-5.6-luna",
+    "gpt-6-sol",
+    "gpt-6.1-terra",
+    "gpt-6.2-astra",
+    "gpt-5.5-pro",
+    "o3-pro",
+    "gpt-5.5",
+    "gpt-5.4-mini",
+]
+REFUSED_ONLY_WITH_EFFORT = {"gpt-5.5", "gpt-5.4-mini"}
 # Reasoning and non-reasoning models that still take tools on Chat Completions.
-CHAT_MODELS = ["gpt-5.5", "o3", "gpt-4.1-mini"]
-REASONING = {"gpt-5.5", "o3", *RESPONSES_MODELS}
+CHAT_MODELS = ["gpt-5.2", "o3", "gpt-4.1-mini"]
+# The models that refuse `temperature`. `gpt-5.2` and `gpt-5.4-mini` take it (OpenAI, 2026-11-17).
+REASONING = {"o3", *RESPONSES_MODELS} - {"gpt-5.4-mini"}
 
 
 def _provider_app(seen):
@@ -60,7 +72,9 @@ def _provider_app(seen):
         model = body["model"]
         if model.endswith("-pro"):
             return refuse("This is not a chat model and thus not supported in the v1/chat/completions endpoint.", 404)
-        if model in RESPONSES_MODELS and body.get("tools"):
+        if model in RESPONSES_MODELS and body.get("tools") and (
+            model not in REFUSED_ONLY_WITH_EFFORT or body.get("reasoning_effort") not in (None, "none")
+        ):
             return refuse(
                 f"Function tools with reasoning_effort are not supported for {model} in "
                 "/v1/chat/completions. To use function tools, use /v1/responses or set "
