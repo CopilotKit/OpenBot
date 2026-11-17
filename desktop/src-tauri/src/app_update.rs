@@ -187,6 +187,17 @@ pub fn newer(current: &Version, feed: &[u8], platform: &str) -> Result<Option<Ve
     Ok(signed.then_some(version))
 }
 
+/// The feed's own version and its release notes, whatever that version is: older than `current`,
+/// equal to it or newer. `None` when the feed is not JSON, names no version, or has no notes or
+/// only empty ones. The notes belong to the version the feed names, so they are returned with it.
+pub fn feed_notes(feed: &[u8]) -> Option<(Version, String)> {
+    let feed: Value = serde_json::from_slice(feed).ok()?;
+    let text = feed.get("version")?.as_str()?;
+    let version = Version::parse(text.strip_prefix('v').unwrap_or(text)).ok()?;
+    let notes = feed.get("notes")?.as_str()?;
+    (!notes.trim().is_empty()).then(|| (version, notes.to_string()))
+}
+
 /// Read the feed and say what it offers, from the first address that answers with a feed, as the
 /// updater does: an address that fails, answers with an error status, or serves something that is
 /// not a feed gives way to the next.
@@ -195,6 +206,17 @@ pub fn check(
     endpoints: &[reqwest::Url],
     platform: &str,
 ) -> Result<Option<Version>, String> {
+    check_with_notes(current, endpoints, platform).map(|(found, _)| found)
+}
+
+/// `check`, and the release notes the same read carried (`feed_notes`). The notes come back
+/// whether or not the feed offers anything newer, so a page can show them for the version it
+/// names.
+pub fn check_with_notes(
+    current: &Version,
+    endpoints: &[reqwest::Url],
+    platform: &str,
+) -> Result<(Option<Version>, Option<(Version, String)>), String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(TIMEOUT)
         .build()
@@ -220,7 +242,7 @@ pub fn check(
                 }
                 Ok(body)
             })
-            .and_then(|body| newer(current, &body, platform));
+            .and_then(|body| Ok((newer(current, &body, platform)?, feed_notes(&body))));
         match answer {
             Ok(found) => return Ok(found),
             Err(error) => last = format!("{url}: {error}"),
@@ -252,6 +274,11 @@ impl Feed {
 
     pub fn read(&self) -> Result<Option<Version>, String> {
         check(&self.current, &self.endpoints, &self.platform)
+    }
+
+    /// `read`, and the release notes the same read carried.
+    pub fn read_with_notes(&self) -> Result<(Option<Version>, Option<(Version, String)>), String> {
+        check_with_notes(&self.current, &self.endpoints, &self.platform)
     }
 }
 
@@ -299,9 +326,12 @@ pub fn ask(feed: Option<&Feed>, current: &Version, known: &Known) -> Result<Aske
             current: current_text,
         });
     };
-    let answer = feed.read();
-    known.record(&answer);
-    Ok(match answer? {
+    let answer = feed.read_with_notes();
+    known.record(&answer.clone().map(|(found, _)| found));
+    if let Ok((_, notes)) = &answer {
+        known.record_notes(notes.clone());
+    }
+    Ok(match answer?.0 {
         Some(version) => Asked::Available {
             ready: known.readiness(&version),
             version: version.to_string(),
@@ -449,6 +479,7 @@ pub struct Known {
     newer: Mutex<Option<Version>>,
     installing: Mutex<Option<Installing>>,
     ready: Mutex<Option<(Version, Readiness)>>,
+    notes: Mutex<Option<(Version, String)>>,
 }
 
 impl Known {
@@ -462,6 +493,23 @@ impl Known {
 
     pub fn newer(&self) -> Option<Version> {
         self.newer.lock().unwrap().clone()
+    }
+
+    /// Keep the release notes a read carried, with the version they belong to. A read that
+    /// carried none clears them, so notes never outlive the feed that had them. Call it only for
+    /// a read that worked: a failed read changes nothing, as with `record`.
+    pub fn record_notes(&self, notes: Option<(Version, String)>) {
+        *self.notes.lock().unwrap() = notes;
+    }
+
+    /// The release notes for `version`, when the last good read carried notes for exactly it.
+    pub fn notes_for(&self, version: &Version) -> Option<String> {
+        self.notes
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|(noted, _)| noted == version)
+            .map(|(_, notes)| notes.clone())
     }
 
     pub fn begin_install(&self) {
@@ -525,6 +573,12 @@ pub struct Status {
     pub updates_itself: bool,
     /// How ready the offered version is to install (`Readiness`), when OpenBot has started on it.
     pub ready: Option<Readiness>,
+    /// The version the panel is minimized on: the newest version, which this person closed the
+    /// offer on, while nothing is installing. `version` is `None` then, so a page that does not
+    /// know `minimized` draws no offer.
+    pub minimized: Option<String>,
+    /// The release notes for `version`, or for `minimized` when `version` is `None`.
+    pub notes: Option<String>,
 }
 
 /// What to offer, given what the feed said and what this person closed.
@@ -546,12 +600,23 @@ pub fn status(
     let newer = known.newer();
     // An install under way keeps its version on screen whatever was closed before.
     let version = if installing.is_some() {
-        newer
+        newer.clone()
     } else {
         to_offer(newer.as_ref(), config.and_then(dismissed).as_ref())
     };
+    // Closed on the newest version: no offer, but the panel keeps a pill for it.
+    let minimized = if installing.is_none() && version.is_none() {
+        newer
+    } else {
+        None
+    };
     Status {
         ready: version.as_ref().and_then(|v| known.readiness(v)),
+        notes: version
+            .as_ref()
+            .or(minimized.as_ref())
+            .and_then(|v| known.notes_for(v)),
+        minimized: minimized.map(|v| v.to_string()),
         version: version.map(|v| v.to_string()),
         current: current.to_string(),
         installing,
@@ -589,6 +654,15 @@ pub fn dismiss(config: &Path, version: &Version) -> std::io::Result<()> {
         .map_err(std::io::Error::other)?,
     )?;
     std::fs::rename(partial, target)
+}
+
+/// Open the minimized version again: forget what this person closed. Nothing closed is not an
+/// error.
+pub fn restore(config: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(config.join(DISMISSED_FILE)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -959,6 +1033,69 @@ mod tests {
     }
 
     #[test]
+    fn status_keeps_version_null_while_minimized() {
+        let config = crate::test_support::temp_root("app-update-minimized");
+        let known = Known::default();
+        known.record(&Ok(Some(v("1.0.4"))));
+        dismiss(&config, &v("1.0.4")).unwrap();
+        let shown = status(&known, &v("1.0.3"), Some(&config), true);
+        assert_eq!(shown.version, None);
+        assert_eq!(shown.minimized.as_deref(), Some("1.0.4"));
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn status_opens_again_for_a_newer_version() {
+        let config = crate::test_support::temp_root("app-update-reopens");
+        let known = Known::default();
+        known.record(&Ok(Some(v("1.0.5"))));
+        dismiss(&config, &v("1.0.4")).unwrap();
+        let shown = status(&known, &v("1.0.3"), Some(&config), true);
+        assert_eq!(shown.version.as_deref(), Some("1.0.5"));
+        assert_eq!(shown.minimized, None);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn restore_clears_minimized() {
+        let config = crate::test_support::temp_root("app-update-restore");
+        let known = Known::default();
+        known.record(&Ok(Some(v("1.0.4"))));
+        dismiss(&config, &v("1.0.4")).unwrap();
+        restore(&config).unwrap();
+        let shown = status(&known, &v("1.0.3"), Some(&config), true);
+        assert_eq!(shown.version.as_deref(), Some("1.0.4"));
+        assert_eq!(shown.minimized, None);
+        // Nothing minimized is not an error.
+        restore(&config).unwrap();
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn feed_notes_reads_notes_for_any_version() {
+        let feed = br#"{"version":"1.0.3","notes":"- A fix","platforms":{}}"#;
+        assert_eq!(feed_notes(feed), Some((v("1.0.3"), "- A fix".to_string())));
+        assert_eq!(
+            feed_notes(br#"{"version":"1.0.3","notes":"","platforms":{}}"#),
+            None
+        );
+        assert_eq!(feed_notes(br#"{"version":"1.0.3","platforms":{}}"#), None);
+    }
+
+    #[test]
+    fn status_carries_notes_for_the_offered_version() {
+        let known = Known::default();
+        known.record(&Ok(Some(v("1.0.4"))));
+        known.record_notes(Some((v("1.0.4"), "x".to_string())));
+        assert_eq!(
+            status(&known, &v("1.0.3"), None, true).notes.as_deref(),
+            Some("x")
+        );
+        known.record_notes(Some((v("1.0.3"), "old".to_string())));
+        assert_eq!(status(&known, &v("1.0.3"), None, true).notes, None);
+    }
+
+    #[test]
     fn an_install_under_way_stays_on_screen_and_reports_progress() {
         let config = crate::test_support::temp_root("app-update-installing");
         let known = Known::default();
@@ -1255,6 +1392,8 @@ mod tests {
                 "installing": null,
                 "updatesItself": false,
                 "ready": null,
+                "minimized": null,
+                "notes": null,
             })
         );
         let release = status(&Known::default(), &v("0.3.2"), None, true);
