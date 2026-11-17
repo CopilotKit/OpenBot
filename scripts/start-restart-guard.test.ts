@@ -903,6 +903,8 @@ describe("start.sh and the managed Bot", () => {
    * The managed Bot is the LangGraph harness (agent-langgraph-agui), on whichever provider
    * BOT_PROVIDER names. agent-bot, an OpenAI-only proof of concept, and the TypeScript
    * agent-langgraph were retired, so neither is started or waited for, whichever provider is picked.
+   * The TypeScript LangGraph engine (agent-langgraph-ts), which new Bots run on, starts beside the
+   * managed Bot, is waited for on its own port, and the server is told where it is.
    */
   test.each([
     ["the default provider", {}],
@@ -920,12 +922,16 @@ describe("start.sh and the managed Bot", () => {
       stderr: "",
     });
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui agent-langgraph-ts",
     );
-    expect(result.dockerLog).not.toMatch(/agent-bot|agent-langgraph(?!-agui)/);
+    expect(result.dockerLog).not.toMatch(
+      /agent-bot|agent-langgraph(?!-agui|-ts)/,
+    );
     expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.curlLog).toContain("http://127.0.0.1:4215/health");
     expect(result.curlLog).not.toContain(":4200/health");
     expect(result.stdout).toContain("agent-langgraph-agui ready");
+    expect(result.stdout).toContain("agent-langgraph-ts ready");
     expect(result.stdout).not.toMatch(/agent-bot/);
     expect(result.stdout).toContain(
       "managed coworker endpoint: http://127.0.0.1:4201/",
@@ -1046,7 +1052,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui agent-langgraph-ts tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
     );
   });
 

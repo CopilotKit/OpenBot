@@ -329,6 +329,25 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test app/tests/build-cache.test.ts
 
+  # The TypeScript LangGraph engine, the default Bot engine: its type check and its own tests, on the
+  # Node it ships on, from its own lockfile, as each Python harness below runs its own.
+  langgraph-ts:
+    name: typescript langgraph engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: agent-langgraph-ts
+      - run: npm run typecheck
+        working-directory: agent-langgraph-ts
+      - run: npm test
+        working-directory: agent-langgraph-ts
+
   python-harness:
     name: python harness regressions
     # CPU-bound: runs on a 16-core larger runner (org runner group openbot-larger, billed per
@@ -521,7 +540,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, api, mobile, app-browser, test, test-total, startup, python-harness, build, component-dockerfiles]
+    needs: [static, api, mobile, app-browser, test, test-total, startup, langgraph-ts, python-harness, build, component-dockerfiles]
     steps:
       - name: Require every check
         env:

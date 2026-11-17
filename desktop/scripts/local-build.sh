@@ -25,7 +25,8 @@
 #
 # Settings, all optional:
 #   OPENBOT_LOCAL_IMAGES         Images to build from HEAD, space separated. Unset: the harness a
-#                                Claude plan runs. Empty: none, every image comes from the base release
+#                                Claude plan runs and the default Bot. Empty: none, every image comes
+#                                from the base release
 #                                and backend-images.env.
 #   OPENBOT_LOCAL_BASE_RELEASE   Release whose images fill in the rest. Default: the latest release.
 #   OPENBOT_LOCAL_REGISTRY_PORT  Default 5050.
@@ -42,8 +43,10 @@ REGISTRY="127.0.0.1:${REGISTRY_PORT}"
 STATE="${OPENBOT_LOCAL_BUILD_DIR:-$HOME/.openbot-local-build}"
 # agent-claude-sdk, the harness a Claude plan picks and the sign-in image. The server, supervisor
 # and agent-computer a Claude-plan install also runs are the published OpenBot images, at the tag
-# in backend-images.env.
-DEFAULT_IMAGES="agent-claude-sdk"
+# in backend-images.env. And agent-langgraph-ts, the default Bot every other sign-in runs: a base
+# release from before it has no digest to fill it in with, and the manifest must pin every image the
+# published list names.
+DEFAULT_IMAGES="agent-claude-sdk agent-langgraph-ts"
 IMAGES=()
 for image in ${OPENBOT_LOCAL_IMAGES-$DEFAULT_IMAGES}; do IMAGES+=("$image"); done
 
