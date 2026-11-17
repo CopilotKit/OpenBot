@@ -180,6 +180,8 @@ test("A surface tool ends the run on its call, and the next run carries on from 
   try {
     const env = {
       BOT_PROVIDER: "openai",
+      // On Chat Completions, whose request this test reads.
+      BOT_MODEL: "gpt-5.2",
       OPENAI_API_KEY: "sk-test",
       OPENAI_BASE_URL: `${provider.base}/v1`,
       AGENT_TOOL_TOKEN: "t",
