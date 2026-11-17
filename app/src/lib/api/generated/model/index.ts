@@ -1506,6 +1506,8 @@ export * from "./updatePersonRequest";
 export * from "./updatePreferencesHeaders";
 export * from "./updatePreferencesRequest";
 export * from "./updateRoute";
+export * from "./updateRoutineHeaders";
+export * from "./updateRoutineRequest";
 export * from "./updateRouting";
 export * from "./updateStandingInstructionsHeaders";
 export * from "./updateTeamHeaders";
