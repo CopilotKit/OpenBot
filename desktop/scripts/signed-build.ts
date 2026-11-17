@@ -8,9 +8,11 @@
  *   `container-images.json` is compiled in through `OPENBOT_PINNED_DEPLOYMENT`, exactly as
  *   desktop-build.yml pins the unsigned candidate, so whoever installs the signed candidate runs
  *   the images the final will ship. build.rs refuses a manifest from another commit.
- * - A pinned build carries no updater. It never asks `releases/latest` for anything, and it makes
- *   no updater archive, so the updater key never signs one. The signing overlay is copied without
- *   its updater for that build.
+ * - A pinned build makes no updater archive and is never listed in a feed, so the updater key never
+ *   reaches its build. It still carries the release's updater (`plugins.updater`: the same feed and
+ *   public key), so it is offered the final release and any later one, and installs it as a stable
+ *   app does. Without it, whoever installed a candidate stayed on it, with no Check for Updates….
+ *   The signing overlay is copied without its updater artifacts for that build.
  * - The Intelligence CLI is bundled whenever the tree can bundle one, as desktop-build.yml does.
  * - A Mac build names its Rust target, so both architectures build on one Apple silicon runner:
  *   `x86_64-apple-darwin` for Intel, `aarch64-apple-darwin` for Apple silicon. The bundle is then
@@ -48,7 +50,10 @@ export type Plan = {
   target: string | null;
   /** The release this build is pinned to, or null for an ordinary build. */
   pinned: string | null;
-  /** Whether the build carries the updater and makes updater archives. */
+  /**
+   * Whether the build makes updater archives, which the release's `latest.json` lists. A pinned
+   * build makes none, though it carries the updater to install a later release with.
+   */
   updater: boolean;
   /** The `--config` overlays, relative to desktop/, in the order Tauri merges them. */
   configs: string[];
@@ -97,20 +102,20 @@ function runChecked(run: Runner, cmd: string[], cwd: string): string {
   return result.stdout;
 }
 
-/** The overlay without the updater: no `plugins.updater` and no updater archives. */
-export function withoutUpdater(overlay: Json): Json {
+/**
+ * The overlay without updater archives, which only Tauri's updater key can sign. Its
+ * `plugins.updater` stays, so the app installs a later release from the release feed: the public
+ * key needs no secret, and the Windows signing build carries it the same way.
+ */
+export function withoutUpdaterArtifacts(overlay: Json): Json {
   const copy = structuredClone(overlay);
-  if (object(copy.plugins)) {
-    delete copy.plugins.updater;
-    if (Object.keys(copy.plugins).length === 0) delete copy.plugins;
-  }
   if (object(copy.bundle)) delete copy.bundle.createUpdaterArtifacts;
   return copy;
 }
 
 /**
  * Decides how a signed installer is built, and prepares what that needs: the pinned manifest,
- * the overlay without its updater, and the bundled CLI.
+ * the overlay without its updater archives, and the bundled CLI.
  */
 export function planSignedBuild(options: {
   desktop: string;
@@ -190,7 +195,7 @@ export function planSignedBuild(options: {
   if (plan.pinned) {
     writeFileSync(
       join(desktop, PINNED_OVERLAY),
-      `${JSON.stringify(withoutUpdater(signing), null, 2)}\n`,
+      `${JSON.stringify(withoutUpdaterArtifacts(signing), null, 2)}\n`,
     );
     plan.configs.push(PINNED_OVERLAY);
   } else {
@@ -301,7 +306,7 @@ function main(argv: string[]) {
   });
   console.log(
     plan.pinned
-      ? `Pinned to ${plan.pinned}, with no updater.`
+      ? `Pinned to ${plan.pinned}. Installs updates from the release feed, makes no updater archive.`
       : `Not pinned. Updater: ${plan.updater}.`,
   );
   if (plan.target) console.log(`Rust target: ${plan.target}.`);

@@ -65,8 +65,9 @@ export type DesktopAppUpdate = {
     restarting: boolean;
   } | null;
   /**
-   * False on a build that never updates itself: an internal or candidate build, or one without the
-   * updater. Absent from a desktop app older than the field, which still answers a check.
+   * False on a build that never updates itself: an internal build, or one without the updater (a
+   * candidate's unsigned installer among them). Absent from a desktop app older than the field,
+   * which still answers a check.
    */
   updatesItself?: boolean;
   /**
@@ -89,7 +90,7 @@ export type DesktopAppUpdateCheck =
     }
   | { found: "upToDate"; current: string }
   | { found: "installing"; version: string; current: string }
-  /** This build never updates itself: an internal or candidate build. */
+  /** This build never updates itself: an internal build, or one without the updater. */
   | { found: "notOffered"; current: string };
 
 /**

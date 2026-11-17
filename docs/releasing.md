@@ -176,8 +176,11 @@ that keychain afterwards, even when an earlier step failed.
 same product a candidate's ad-hoc installer is:
 
 - a candidate or beta is pinned to its release's own `container-images.json`, as its ad-hoc
-  installer is, and refuses one built from another commit. It has no updater, so it makes no
-  updater archive and no `latest.json`, and the updater key never reaches its build;
+  installer is, and refuses one built from another commit. It makes no updater archive and no
+  `latest.json`, and the updater key never reaches its build. It still carries the release's
+  `plugins.updater` (the same feed and public key), so it reads the stable feed against its own
+  version: `1.1.0-rc.1` is offered `1.1.0` once that is Latest, and installs it as a stable app
+  updates;
 - a stable release is not pinned, and carries the updater;
 - either bundles the Intelligence CLI whenever the tree has `tauri.bundled-cli.conf.json`, its
   dependencies installed for the installer's platform (`npm install --os --cpu`), so the Intel
@@ -239,6 +242,11 @@ build reads that folder as its update feed: it logs `[update ready] using a test
 offers the version, and downloads its images in the background. It installs nothing, since an
 internal build has no updater: install the next build by hand. A stable or candidate build never
 reads the variable.
+
+A signed candidate or beta reads the same feed as a stable app, against its own version. The feed
+only ever names a stable release, so a candidate is offered the final it leads to, or any later
+release, and never another candidate. Installed candidates from before this carry no updater and
+move to the final by hand, once.
 
 After it attaches `latest.json`, and marks the release Latest when it should (see below), the
 signing workflow fetches the GitHub address the way the app does, following redirects, and fails

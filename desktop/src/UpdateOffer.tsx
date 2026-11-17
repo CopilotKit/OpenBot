@@ -17,7 +17,7 @@ export type AppUpdate = {
     total: number | null;
     restarting: boolean;
   } | null;
-  /** False on a build that never updates itself: an internal or candidate build, or one without the updater. */
+  /** False on a build that never updates itself: an internal build, or one without the updater. */
   updatesItself: boolean;
   /**
    * How ready the newer version is: downloading in the background while this one runs, or all
@@ -41,7 +41,7 @@ const ASK_WHILE_INSTALLING_MS = 500;
  * here and in OpenBot's own banner alike.
  *
  * A failed check is silent: the shell keeps its last good answer, and a laptop on a plane has
- * nothing to fix. A build without the updater (internal, candidate, unsigned) is never offered
+ * nothing to fix. A build without the updater (internal, unsigned) is never offered
  * anything. A failed *install* is not silent: by then they asked for something and it did not
  * happen.
  *

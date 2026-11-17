@@ -399,7 +399,7 @@ export function LogsRow({ folder }: { folder: string }) {
  * tray: the app reads its update feed at once and says what it found. On Windows, which has no menu
  * bar, this and the tray are the places to ask.
  *
- * A build that never updates itself (internal, candidate, or without the updater) says so up front
+ * A build that never updates itself (internal, or without the updater) says so up front
  * in the setup window's words, with no button: the tray and the menus don't offer the check either.
  *
  * A newer version found says how ready it is, as the banner does: downloading in the background

@@ -39,7 +39,7 @@ type UpdatesItself = boolean | "unknown" | null;
  * OpenBot's own page, and Check for Updates… in the menus. Asked for, a newer version is named even
  * if this person closed the offer on it before.
  *
- * A build that never updates itself (internal, candidate, or without the updater) says so up front,
+ * A build that never updates itself (internal, or without the updater) says so up front,
  * with nothing to check: it never promises updates it can't install.
  */
 export function CheckForUpdates() {

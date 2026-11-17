@@ -5,8 +5,8 @@
 //! shell what to offer; neither reaches the network itself. A browser showing a self-hosted
 //! OpenBot has no shell to ask, so it never asks the feed anything.
 //!
-//! Offered only where the updater can install it: a stable, unpinned build whose configuration
-//! carries `plugins.updater` (the signed Mac and Windows releases). The feed is that block's own
+//! Offered only where the updater can install it: a stable, unpinned build or a candidate whose
+//! configuration carries `plugins.updater` (the signed Mac and Windows releases and candidates). The feed is that block's own
 //! `endpoints`, read in the updater's order, so the banner and the install read the same file.
 //!
 //! The person can close the banner. That is kept per version in the app's config directory, and
@@ -43,12 +43,20 @@ pub const DISMISSED_FILE: &str = "app-update.json";
 
 /// The version this build is offered newer ones against, or `None` when it is offered none.
 ///
-/// The builds the updater serves: a stable release that is not pinned. Candidates (`-rc.N`,
-/// `-beta.N`) are pinned to the release they were made from and carry no updater, so an offer there
-/// could never be installed. Internal builds (`0.3.4-internal.<commits>.g…` after 0.3.3) are made from
-/// any branch, so no release is sure to contain what one runs; the next internal build replaces it.
+/// The builds the updater serves: a stable release that is not pinned, and a candidate (`-rc.N`,
+/// `-beta.N`). A candidate is pinned to its release's images, and its signed build carries the
+/// release's updater, so it reads the same stable feed: `1.1.0-rc.1` is offered `1.1.0` once that
+/// is out (`newer`), rather than staying on the candidate. Its unsigned installer has no updater,
+/// and `Feed::of` finds it no feed. Internal builds (`0.3.4-internal.<commits>.g…` after 0.3.3, or
+/// `X.Y.Z-rc.N.internal.…`) are made from any branch, so no release is sure to contain what one
+/// runs; the next internal build replaces it.
 pub fn offered_against(version: &Version, pinned: bool) -> Option<Version> {
-    (!pinned && version.pre.is_empty()).then(|| version.clone())
+    let offered = if version.pre.is_empty() {
+        !pinned
+    } else {
+        !internal(version)
+    };
+    offered.then(|| version.clone())
 }
 
 /**
@@ -156,7 +164,8 @@ pub fn platform() -> Option<String> {
 }
 
 /// What a feed offers this build: its version, when that is a stable release strictly newer than
-/// `current` with a signed archive for `platform`. `Ok(None)` when there is nothing to install
+/// `current` by semver precedence with a signed archive for `platform`, so a candidate is offered
+/// the release it leads to (`1.1.0` > `1.1.0-rc.1`). `Ok(None)` when there is nothing to install
 /// here. `Err` when the feed is not one at all, which is a failed check.
 pub fn newer(current: &Version, feed: &[u8], platform: &str) -> Result<Option<Version>, String> {
     let feed: Value =
@@ -171,9 +180,14 @@ pub fn newer(current: &Version, feed: &[u8], platform: &str) -> Result<Option<Ve
         .get("platforms")
         .and_then(Value::as_object)
         .ok_or("the feed lists no platforms")?;
-    // Build metadata never makes a release newer, and a candidate is never offered to a stable app.
-    let release = |v: &Version| (v.major, v.minor, v.patch);
-    if !version.pre.is_empty() || release(&version) <= release(current) {
+    // Build metadata never makes a release newer, and a candidate is never offered to any app. A
+    // prerelease orders before its own release, as the updater plugin and the Windows installer
+    // order them, so a candidate's release is newer than the candidate.
+    let precedence = |v: &Version| Version {
+        build: semver::BuildMetadata::EMPTY,
+        ..v.clone()
+    };
+    if !version.pre.is_empty() || precedence(&version) <= precedence(current) {
         return Ok(None);
     }
     let prefix = format!("{platform}-");
@@ -238,8 +252,8 @@ pub struct Feed {
 }
 
 impl Feed {
-    /// This build's feed, or `None` for a build offered no updates: an internal, candidate or
-    /// pinned build (`offered_against`), one without the updater (`endpoints`), or a machine the
+    /// This build's feed, or `None` for a build offered no updates: an internal or pinned release
+    /// build (`offered_against`), one without the updater (`endpoints`), or a machine the
     /// updater has no name for (`platform`). The schedule and a check somebody asks for both start
     /// here, so they agree on which builds are offered anything.
     pub fn of(version: &Version, pinned: bool, updater: Option<&Value>) -> Option<Self> {
@@ -275,7 +289,7 @@ pub enum Asked {
         version: String,
         current: String,
     },
-    /// This build never updates itself: an internal or candidate build, or one without the updater.
+    /// This build never updates itself: an internal build, or one without the updater.
     NotOffered {
         current: String,
     },
@@ -520,8 +534,8 @@ pub struct Status {
     /// This app's own version.
     pub current: String,
     pub installing: Option<Installing>,
-    /// Whether this build updates itself (`Feed::of` finds it a feed). An internal or candidate
-    /// build, or one without the updater, never does, and a window says so up front.
+    /// Whether this build updates itself (`Feed::of` finds it a feed). An internal build, or one
+    /// without the updater, never does, and a window says so up front.
     pub updates_itself: bool,
     /// How ready the offered version is to install (`Readiness`), when OpenBot has started on it.
     pub ready: Option<Readiness>,
@@ -786,16 +800,75 @@ mod tests {
     }
 
     #[test]
-    fn internal_candidate_and_pinned_builds_are_never_offered_anything() {
+    fn internal_and_pinned_release_builds_are_never_offered_anything() {
         assert_eq!(offered_against(&v("0.3.1"), false), Some(v("0.3.1")));
         assert_eq!(offered_against(&v("0.3.1"), true), None);
         for build in [
             "0.3.1-internal.729.g14212047",
             "0.3.4-internal.860.g3b400d2c1abc",
-            "0.3.2-rc.1",
-            "0.3.2-beta.1",
+            "1.1.0-rc.1.internal.731.gabc123456789",
         ] {
-            assert_eq!(offered_against(&v(build), false), None, "{build}");
+            for pinned in [false, true] {
+                assert_eq!(offered_against(&v(build), pinned), None, "{build}");
+            }
+        }
+    }
+
+    /// The bug: 1.1.0-rc.1 had no Check for Updates… and was never offered 1.1.0, so whoever
+    /// installed a candidate stayed on it. A candidate is pinned to its own release's images, and
+    /// is still offered the stable feed's release against its own version.
+    #[test]
+    fn a_candidate_is_offered_updates_against_its_own_version() {
+        for build in ["1.1.0-rc.1", "1.1.0-rc.12", "1.1.0-beta.2"] {
+            for pinned in [true, false] {
+                assert_eq!(
+                    offered_against(&v(build), pinned),
+                    Some(v(build)),
+                    "{build}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_candidate_is_offered_the_release_it_leads_to_and_any_newer_one() {
+        for candidate in ["1.1.0-rc.1", "1.1.0-rc.12", "1.1.0-beta.2"] {
+            for (feed, offered) in [("1.1.0", "1.1.0"), ("1.1.1", "1.1.1"), ("1.2.0", "1.2.0")] {
+                assert_eq!(
+                    newer(
+                        &v(candidate),
+                        real_feed_at(feed).as_bytes(),
+                        "darwin-aarch64"
+                    ),
+                    Ok(Some(v(offered))),
+                    "{candidate} with the feed at {feed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_candidate_with_no_newer_release_is_up_to_date() {
+        // The feed still names the release before the one the candidate leads to.
+        for feed in ["1.0.4", "1.0.0", "0.3.1"] {
+            assert_eq!(
+                newer(
+                    &v("1.1.0-rc.1"),
+                    real_feed_at(feed).as_bytes(),
+                    "darwin-aarch64"
+                ),
+                Ok(None),
+                "{feed}"
+            );
+        }
+        // A stable app's comparison is unchanged: its own release, with build metadata or not, is
+        // not newer.
+        for feed in ["1.1.0", "1.1.0+mac"] {
+            assert_eq!(
+                newer(&v("1.1.0"), real_feed_at(feed).as_bytes(), "darwin-aarch64"),
+                Ok(None),
+                "{feed}"
+            );
         }
     }
 
@@ -1223,14 +1296,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
-    /// Internal and candidate builds, and builds without the updater, say so, and never read a feed.
+    /// A signed candidate, pinned to its images and carrying the release's updater block, is
+    /// offered updates: its menus carry Check for Updates… (`Feed::of` is what they ask), which
+    /// offers the release it leads to over real HTTP, and says up to date while there is none.
+    #[test]
+    fn a_signed_candidate_checks_the_stable_feed_and_is_offered_its_release() {
+        let candidate = v("1.1.0-rc.1");
+        for overlay in [
+            include_str!("../tauri.windows-signing.conf.json"),
+            include_str!("../tauri.macos-signing.conf.json"),
+        ] {
+            let overlay: Value = serde_json::from_str(overlay).unwrap();
+            let feed = Feed::of(&candidate, true, Some(&overlay["plugins"]["updater"]))
+                .expect("a signed candidate is offered updates");
+            assert_eq!(feed.current, candidate);
+            assert_eq!(
+                feed.endpoints.first().map(reqwest::Url::as_str),
+                Some("https://downloads.copilotkit.ai/latest/latest.json")
+            );
+        }
+
+        let (url, server) = serve(vec![(200, feed_for_this_machine("1.0.4"))]);
+        let known = Known::default();
+        let feed = Feed::of(&candidate, true, Some(&release_updater(&url)));
+        let asked = ask(feed.as_ref(), &candidate, &known);
+        assert_eq!(
+            asked,
+            Ok(Asked::UpToDate {
+                current: "1.1.0-rc.1".into()
+            })
+        );
+        assert_eq!(prompt(&asked).message, "OpenBot 1.1.0-rc.1 is up to date.");
+        server.join().unwrap();
+
+        let (url, server) = serve(vec![(200, feed_for_this_machine("1.1.0"))]);
+        let feed = Feed::of(&candidate, true, Some(&release_updater(&url)));
+        let asked = ask(feed.as_ref(), &candidate, &known);
+        assert_eq!(
+            asked,
+            Ok(Asked::Available {
+                version: "1.1.0".into(),
+                current: "1.1.0-rc.1".into(),
+                ready: None,
+            })
+        );
+        assert_eq!(prompt(&asked).title, "OpenBot 1.1.0 is available");
+        server.join().unwrap();
+        // Kept, so the banner and Settings say the same.
+        assert_eq!(
+            status(&known, &candidate, None, true).version.as_deref(),
+            Some("1.1.0")
+        );
+    }
+
+    /// Internal builds, pinned release builds and builds without the updater (an unsigned
+    /// candidate's installer among them) say so, and never read a feed.
     #[test]
     fn a_build_offered_no_updates_says_so_without_reading_anything() {
         let url = reqwest::Url::parse("http://127.0.0.1:9/latest.json").unwrap();
         let release = release_updater(&url);
         assert_eq!(Feed::of(&v("0.3.2"), false, None), None);
         assert_eq!(Feed::of(&v("0.3.2"), true, Some(&release)), None);
-        for build in ["0.3.2-internal.731.gabc1234", "0.3.3-rc.1"] {
+        assert_eq!(Feed::of(&v("0.3.3-rc.1"), true, None), None);
+        for build in [
+            "0.3.2-internal.731.gabc1234",
+            "0.3.3-rc.1.internal.731.gabc123456789",
+        ] {
             assert_eq!(Feed::of(&v(build), false, Some(&release)), None, "{build}");
         }
         assert_eq!(

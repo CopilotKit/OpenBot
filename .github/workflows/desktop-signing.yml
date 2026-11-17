@@ -237,7 +237,7 @@ jobs:
   # it lives in the `macos-signing` environment only, so this job runs there: its reviewers approve
   # it as they approve the Mac build, and the key is never in `windows-signing`. It needs no
   # repository write access and no Azure access. Only a run that attaches to a release signs for
-  # the updater; a pinned candidate or beta has no updater.
+  # the updater; a pinned candidate or beta is never listed in a feed, so it has nothing to sign.
   sign-update:
     name: Sign the installer for the updater
     needs: sign

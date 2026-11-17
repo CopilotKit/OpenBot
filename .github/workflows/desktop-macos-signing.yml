@@ -102,7 +102,8 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: brew install minisign
-      # What a release signs and attaches: a candidate pinned to its own images with no updater,
+      # What a release signs and attaches: a candidate pinned to its own images with no updater
+      # archive (its app still installs the final from the release feed),
       # a stable release made Latest only once its signed Mac and Windows installers are both on
       # it and both listed in one latest.json, the Windows installer signed for the updater with
       # the key its app trusts, every signed installer under its fixed download name too, and
@@ -324,9 +325,10 @@ jobs:
       # because Tauri deletes it once the image is written.
       #
       # signed-build.ts builds what desktop-build.yml built for the same release: a candidate or
-      # beta pinned to its release's images and with no updater, and the CLI whenever the tree can
-      # bundle one. This signed .dmg replaces the ad-hoc one on the release, so it must be the same
-      # product. `updater` says whether this build made an updater archive.
+      # beta pinned to its release's images and with no updater archive, and the CLI whenever the
+      # tree can bundle one. This signed .dmg replaces the ad-hoc one on the release, so it must be
+      # the same product, and it also carries the release's updater, so it installs the final.
+      # `updater` says whether this build made an updater archive.
       - name: Build, sign and notarize
         id: build
         env:

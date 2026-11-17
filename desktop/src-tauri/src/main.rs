@@ -2285,8 +2285,8 @@ async fn put_back_interrupted_upgrade(app: &tauri::AppHandle, root: &Path) -> Re
 }
 
 /// Read the update feed at launch and every six hours, on a thread of its own, when this build is
-/// offered updates at all: a stable, unpinned build with the updater (see `app_update`). Any other
-/// build never reads the feed.
+/// offered updates at all: a stable, unpinned build or a candidate, with the updater (see
+/// `app_update`). Any other build never reads the feed.
 fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(feed) = app_update_feed(app) else {
         let version = &app.package_info().version;
@@ -13056,7 +13056,16 @@ mod check_for_updates_tests {
     /// An app configured as a signed release is (`tauri.windows-signing.conf.json`'s updater block),
     /// its feed read from `feed`; with no feed, a build without the updater, as internal builds are.
     fn app(feed: Option<&str>) -> (tauri::App<MockRuntime>, tauri::WebviewWindow<MockRuntime>) {
+        app_at("0.1.0", feed)
+    }
+
+    /// `app`, as the build `version` is.
+    fn app_at(
+        version: &str,
+        feed: Option<&str>,
+    ) -> (tauri::App<MockRuntime>, tauri::WebviewWindow<MockRuntime>) {
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.package_info_mut().version = semver::Version::parse(version).unwrap();
         if let Some(feed) = feed {
             let overlay: serde_json::Value =
                 serde_json::from_str(include_str!("../tauri.windows-signing.conf.json")).unwrap();
@@ -13167,6 +13176,50 @@ mod check_for_updates_tests {
             app_update_status(app.handle()).version.as_deref(),
             Some("0.3.3")
         );
+    }
+
+    /// The bug: 1.1.0-rc.1 had no Check for Updates… in the OpenBot menu or the tray, and was never
+    /// offered 1.1.0. A signed candidate now carries both menus' item (they show it when
+    /// `app_update_feed` finds a feed), Settings and the setup window say it updates itself, and
+    /// its check offers the release it leads to, or says it is up to date.
+    #[test]
+    fn a_signed_candidate_shows_check_for_updates_and_is_offered_its_release() {
+        let (app, window) = app_at("1.1.0-rc.1", Some(&feed_at("1.0.4")));
+        assert!(
+            app_update_feed(app.handle()).is_some(),
+            "the menu item shows"
+        );
+        assert!(app_update_status(app.handle()).updates_itself);
+        assert_eq!(
+            check(&window),
+            Ok(serde_json::json!({ "found": "upToDate", "current": "1.1.0-rc.1" }))
+        );
+        let (app, window) = app_at("1.1.0-rc.1", Some(&feed_at("1.1.0")));
+        assert_eq!(
+            check(&window),
+            Ok(
+                serde_json::json!({ "found": "available", "version": "1.1.0", "current": "1.1.0-rc.1", "ready": null })
+            )
+        );
+        assert_eq!(
+            app_update_status(app.handle()).version.as_deref(),
+            Some("1.1.0")
+        );
+        // The final, once installed, is up to date against the same feed.
+        let (_app, window) = app_at("1.1.0", Some(&feed_at("1.1.0")));
+        assert_eq!(
+            check(&window),
+            Ok(serde_json::json!({ "found": "upToDate", "current": "1.1.0" }))
+        );
+        // An unsigned candidate has no updater, and no menu item.
+        let (app, _window) = app_at("1.1.0-rc.1", None);
+        assert!(app_update_feed(app.handle()).is_none());
+        // Nor has an internal build of a candidate, whatever its config.
+        let (app, _window) = app_at(
+            "1.1.0-rc.1.internal.731.gabc123456789",
+            Some(&feed_at("1.1.0")),
+        );
+        assert!(app_update_feed(app.handle()).is_none());
     }
 
     #[test]

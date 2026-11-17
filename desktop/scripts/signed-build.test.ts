@@ -117,7 +117,7 @@ test("a stable release is signed unpinned, with the updater, from the signing ov
   expect(calls).toEqual([]);
 });
 
-test("a candidate is pinned to its own release's images, and carries no updater", () => {
+test("a candidate is pinned to its own release's images, installs updates from the release feed, and makes no updater archive", () => {
   const dir = desktop(candidate);
   const { run, calls } = fakeRun({
     version: "v0.3.0-rc.1",
@@ -149,9 +149,13 @@ test("a candidate is pinned to its own release's images, and carries no updater"
     "src-tauri/tauri.build-version.conf.json",
   ]);
 
-  // The signing overlay without its updater: still the app and the dmg, no feed, no archives.
+  // The bug: a candidate carried no updater, so it had no Check for Updates… and was never
+  // offered its final. It keeps the release's updater (the same feed and public key), so it
+  // installs the final from the stable feed, and makes no updater archive of its own: still the
+  // app and the dmg.
   const overlay = JSON.parse(readFileSync(join(dir, PINNED_OVERLAY), "utf8"));
-  expect(overlay.plugins).toBeUndefined();
+  const signing = JSON.parse(real("src-tauri/tauri.macos-signing.conf.json"));
+  expect(overlay.plugins.updater).toEqual(signing.plugins.updater);
   expect(overlay.bundle.createUpdaterArtifacts).toBeUndefined();
   expect(overlay.bundle.targets).toEqual(["app", "dmg"]);
 
@@ -267,8 +271,9 @@ test("a Windows candidate is pinned, and its overlay keeps the signing command",
   expect(overlay.bundle.windows.signCommand.args).toContain(
     "../scripts/sign-windows.ps1",
   );
-  // Never offered anything: the updater is taken out with the rest of `plugins`.
-  expect(overlay.plugins).toBeUndefined();
+  // The same updater a Windows release carries, so the final installs over it.
+  const signing = JSON.parse(real("src-tauri/tauri.windows-signing.conf.json"));
+  expect(overlay.plugins.updater).toEqual(signing.plugins.updater);
 });
 
 test("the CLI is bundled whenever the tree has the overlay for it, pinned or not", () => {

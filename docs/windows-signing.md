@@ -92,7 +92,8 @@ with minisign
 the Mac's, and it is kept only in the `macos-signing` environment, so that job runs there and waits
 for a `macos-signing` reviewer. The attach job then uploads `OpenBot_<version>_x64-setup.exe.sig`
 and lists the installer in `latest.json` as `windows-x86_64`, beside the Mac archives. A candidate
-or beta is pinned, has no updater, and skips that job.
+or beta is pinned, is never listed in `latest.json`, and skips that job. Its app still carries the
+updater, so it installs the final from the stable feed.
 
 **Update and restart** downloads and verifies the installer while OpenBot keeps running, then stops
 OpenBot (the local Intelligence keeps running). The updater starts the installer in update mode and
