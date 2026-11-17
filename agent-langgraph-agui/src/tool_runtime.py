@@ -186,8 +186,8 @@ def provider_category(error: BaseException) -> str | None:
 
     OpenBot's own sign-in proxy (a Google or xAI sign-in on the desktop) reads the provider's
     status and puts the kind in its error's `type`: Google's RESOURCE_EXHAUSTED is `rate_limit`,
-    UNAVAILABLE `server_error`, NOT_FOUND `model_not_found`. No provider's own `type` is one of
-    these names, so any other error has none.
+    UNAVAILABLE `server_error`, NOT_FOUND `model_not_found`. Of the providers' own types, only
+    OpenAI's `server_error` is one of these names, and it means the same.
     """
     for link in _links(error):
         body = getattr(link, "body", None)
