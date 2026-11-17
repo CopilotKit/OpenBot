@@ -220,3 +220,315 @@ export const ReplaceModelChoiceResponse = zod
   .describe(
     "The model and thinking effort a person chose for one conversation. Null model: the default model. Null effort: none is sent, so the model thinks on its own default.",
   );
+
+/**
+ * Return the AI provider OpenBot's Bots run on, the way OpenBot signs in to it, the model or address host where one was named, and whether a run can use it now. Never a key. Also which other connections still have a key kept, so they can be used again without pasting it. Where whoever runs OpenBot sets the provider, editable is false and the connection can't be changed here. Only an administrator of the organization may read it.
+ * @summary Read how OpenBot reaches its AI provider
+ */
+
+export const GetAiConnectionParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const GetAiConnectionResponse = zod
+  .object({
+    provider: zod
+      .union([
+        zod
+          .enum([
+            "openai",
+            "anthropic",
+            "google",
+            "xai",
+            "unbiased",
+            "openai-compatible",
+          ])
+          .describe(
+            "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+          ),
+        zod.null(),
+      ])
+      .describe("The provider. Null while none is chosen yet."),
+    login: zod
+      .union([
+        zod
+          .enum(["plan", "api-key", "endpoint", "oauth"])
+          .describe(
+            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+          ),
+        zod.null(),
+      ])
+      .describe("How OpenBot signs in to it. Null while none is chosen yet."),
+    model: zod
+      .string()
+      .nullable()
+      .describe(
+        "The model named for an endpoint or a sign-in. Null for an API key or a plan, where the model catalogue offers the provider's models.",
+      ),
+    endpointHost: zod
+      .string()
+      .nullable()
+      .describe(
+        "The host of the endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.",
+      ),
+    keySet: zod
+      .boolean()
+      .describe("Whether a live key for this connection is kept in the vault."),
+    ready: zod
+      .boolean()
+      .describe(
+        "Whether a run can use it now: its key is kept, its sign-in can be read, or its plan's engine answers.",
+      ),
+    source: zod
+      .enum(["stored", "environment", "none"])
+      .describe(
+        "stored: set here, or carried over from how OpenBot was set up. environment: set by whoever runs OpenBot, in its configuration. none: nothing set yet.",
+      ),
+    editable: zod
+      .boolean()
+      .describe(
+        "Whether an administrator can change it here. False where whoever runs OpenBot sets the provider: its key is changed in the vault.",
+      ),
+    saved: zod
+      .array(
+        zod
+          .object({
+            provider: zod
+              .enum([
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "openai-compatible",
+              ])
+              .describe(
+                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+              ),
+            login: zod
+              .enum(["plan", "api-key", "endpoint", "oauth"])
+              .describe(
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+              ),
+            endpointHost: zod
+              .string()
+              .nullable()
+              .describe(
+                "The host of its address, for an endpoint. Null for an API key.",
+              ),
+          })
+          .describe(
+            "A connection with a key still kept in the vault, which can be used again without pasting the key (useSavedKey). Never the key.",
+          ),
+      )
+      .describe(
+        "The connections with a key still kept in the vault, so a switch to one of them needs no key pasted.",
+      ),
+    changedAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe("When it was last changed. Null if never."),
+  })
+  .describe(
+    "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
+  );
+
+/**
+ * Switch the AI provider OpenBot's Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization's vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider.
+ * @summary Change how OpenBot reaches its AI provider
+ */
+
+export const ReplaceAiConnectionParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const replaceAiConnectionHeaderIdempotencyKeyMax = 128;
+
+export const ReplaceAiConnectionHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(replaceAiConnectionHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const replaceAiConnectionBodyApiKeyMax = 65536;
+
+export const replaceAiConnectionBodyBaseUrlMax = 2048;
+
+export const replaceAiConnectionBodyBaseUrlRegExp = new RegExp(
+  "^https?://[^@/?#]+([/?#].*)?$",
+);
+export const replaceAiConnectionBodyModelMax = 500;
+
+export const replaceAiConnectionBodyModelRegExp = new RegExp("\\S");
+
+export const ReplaceAiConnectionBody = zod
+  .object({
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    apiKey: zod
+      .string()
+      .min(1)
+      .max(replaceAiConnectionBodyApiKeyMax)
+      .optional()
+      .describe(
+        "The provider's key. Required for api-key unless useSavedKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.",
+      ),
+    useSavedKey: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Use the key already kept for this provider (and, for an endpoint, this address) instead of sending one.",
+      ),
+    baseUrl: zod
+      .url()
+      .max(replaceAiConnectionBodyBaseUrlMax)
+      .regex(replaceAiConnectionBodyBaseUrlRegExp)
+      .optional()
+      .describe(
+        "The endpoint's address, http or https, with nothing in it that signs in. Required for endpoint.",
+      ),
+    model: zod
+      .string()
+      .min(1)
+      .max(replaceAiConnectionBodyModelMax)
+      .regex(replaceAiConnectionBodyModelRegExp)
+      .optional()
+      .describe(
+        "The model to run on. Required for endpoint and oauth. Trimmed.",
+      ),
+  })
+  .describe(
+    "The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.",
+  );
+
+export const ReplaceAiConnectionResponse = zod
+  .object({
+    provider: zod
+      .union([
+        zod
+          .enum([
+            "openai",
+            "anthropic",
+            "google",
+            "xai",
+            "unbiased",
+            "openai-compatible",
+          ])
+          .describe(
+            "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+          ),
+        zod.null(),
+      ])
+      .describe("The provider. Null while none is chosen yet."),
+    login: zod
+      .union([
+        zod
+          .enum(["plan", "api-key", "endpoint", "oauth"])
+          .describe(
+            "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+          ),
+        zod.null(),
+      ])
+      .describe("How OpenBot signs in to it. Null while none is chosen yet."),
+    model: zod
+      .string()
+      .nullable()
+      .describe(
+        "The model named for an endpoint or a sign-in. Null for an API key or a plan, where the model catalogue offers the provider's models.",
+      ),
+    endpointHost: zod
+      .string()
+      .nullable()
+      .describe(
+        "The host of the endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.",
+      ),
+    keySet: zod
+      .boolean()
+      .describe("Whether a live key for this connection is kept in the vault."),
+    ready: zod
+      .boolean()
+      .describe(
+        "Whether a run can use it now: its key is kept, its sign-in can be read, or its plan's engine answers.",
+      ),
+    source: zod
+      .enum(["stored", "environment", "none"])
+      .describe(
+        "stored: set here, or carried over from how OpenBot was set up. environment: set by whoever runs OpenBot, in its configuration. none: nothing set yet.",
+      ),
+    editable: zod
+      .boolean()
+      .describe(
+        "Whether an administrator can change it here. False where whoever runs OpenBot sets the provider: its key is changed in the vault.",
+      ),
+    saved: zod
+      .array(
+        zod
+          .object({
+            provider: zod
+              .enum([
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "openai-compatible",
+              ])
+              .describe(
+                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+              ),
+            login: zod
+              .enum(["plan", "api-key", "endpoint", "oauth"])
+              .describe(
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+              ),
+            endpointHost: zod
+              .string()
+              .nullable()
+              .describe(
+                "The host of its address, for an endpoint. Null for an API key.",
+              ),
+          })
+          .describe(
+            "A connection with a key still kept in the vault, which can be used again without pasting the key (useSavedKey). Never the key.",
+          ),
+      )
+      .describe(
+        "The connections with a key still kept in the vault, so a switch to one of them needs no key pasted.",
+      ),
+    changedAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe("When it was last changed. Null if never."),
+  })
+  .describe(
+    "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
+  );

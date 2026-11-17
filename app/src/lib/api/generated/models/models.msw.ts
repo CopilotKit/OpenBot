@@ -4,7 +4,13 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { ModelCatalogue, ModelChoice, ModelChoiceInput } from "../model";
+import type {
+  AiConnection,
+  AiConnectionInput,
+  ModelCatalogue,
+  ModelChoice,
+  ModelChoiceInput,
+} from "../model";
 
 export const getGetModelCatalogueResponseMock = (): ModelCatalogue => ({
   provider: "openai",
@@ -40,6 +46,32 @@ export const getGetModelChoiceResponseMock = (): ModelChoice => ({
 export const getReplaceModelChoiceResponseMock = (): ModelChoice => ({
   model: "gpt-6.1-pro",
   effort: "xhigh",
+});
+
+export const getGetAiConnectionResponseMock = (): AiConnection => ({
+  provider: "anthropic",
+  login: "api-key",
+  model: null,
+  endpointHost: null,
+  keySet: true,
+  ready: true,
+  source: "stored",
+  editable: true,
+  saved: [{ provider: "openai", login: "api-key", endpointHost: null }],
+  changedAt: "2026-11-17T09:00:00.000Z",
+});
+
+export const getReplaceAiConnectionResponseMock = (): AiConnection => ({
+  provider: "anthropic",
+  login: "api-key",
+  model: null,
+  endpointHost: null,
+  keySet: true,
+  ready: true,
+  source: "stored",
+  editable: true,
+  saved: [{ provider: "openai", login: "api-key", endpointHost: null }],
+  changedAt: "2026-11-17T09:00:00.000Z",
 });
 
 export const getGetModelCatalogueMockHandler = (
@@ -152,8 +184,66 @@ export const getReplaceModelChoiceMockHandler = (
     options,
   );
 };
+
+export const getGetAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnection
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AiConnection> | AiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connection",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplaceAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnection
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string }, AiConnectionInput>
+        >[0],
+      ) => Promise<AiConnection> | AiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<{ organizationId: string }, AiConnectionInput>(
+    "*/api/v2/organizations/:organizationId/ai-connection",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string }, AiConnectionInput>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getModelsMock = () => [
   getGetModelCatalogueMockHandler(),
   getGetModelChoiceMockHandler(),
   getReplaceModelChoiceMockHandler(),
+  getGetAiConnectionMockHandler(),
+  getReplaceAiConnectionMockHandler(),
 ];
