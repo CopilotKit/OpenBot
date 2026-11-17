@@ -329,12 +329,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test app/tests/build-cache.test.ts
 
-  # The TypeScript LangGraph engine, the default Bot engine: its own tests, on the Node it ships on,
-  # from its own lockfile, as each Python harness below runs its own. Its folder lands with the
-  # engine itself, on the same integration branch as this job: until then there is nothing to test,
-  # and this says so rather than failing every run of a branch that cannot contain it yet. Once it is
-  # in the tree, a missing folder is caught by `component dockerfiles`, which holds the published list
-  # to the Dockerfiles that exist.
+  # The TypeScript LangGraph engine, the default Bot engine: its type check and its own tests, on the
+  # Node it ships on, from its own lockfile, as each Python harness below runs its own.
   langgraph-ts:
     name: typescript langgraph engine
     runs-on: ubuntu-latest
@@ -345,23 +341,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.3
-      - name: Engine tests
-        run: |
-          set -euo pipefail
-          if [ ! -f agent-langgraph-ts/package.json ]; then
-            echo "::notice::agent-langgraph-ts is not in this tree yet; nothing to test."
-            exit 0
-          fi
-          cd agent-langgraph-ts
-          if [ -f bun.lock ]; then
-            bun install --frozen-lockfile
-          else
-            npm ci
-          fi
-          npm test
+      - run: npm ci
+        working-directory: agent-langgraph-ts
+      - run: npm run typecheck
+        working-directory: agent-langgraph-ts
+      - run: npm test
+        working-directory: agent-langgraph-ts
 
   python-harness:
     name: python harness regressions
