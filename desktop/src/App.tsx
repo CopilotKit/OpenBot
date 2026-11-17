@@ -281,7 +281,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * on any relaunch.
    */
   const [choosing, setChoosing] = useState<Hosting | null>(
-    choose ? "self-hosted" : null,
+    choose ? "this-computer" : null,
   );
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
@@ -1278,7 +1278,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <Welcome
           hosting={choosing}
           onConnect={() => setChoosing("connect")}
-          onThisComputer={() => setChoosing("self-hosted")}
+          onThisComputer={() => setChoosing("this-computer")}
           saved={{ address }}
           resumes
           onInstall={() => setChoosing(null)}
@@ -1292,7 +1292,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       <main>
         <Welcome
           // The same screen with the other choice picked: an OpenBot that runs elsewhere.
-          hosting={step === "welcome" ? "self-hosted" : "connect"}
+          hosting={step === "welcome" ? "this-computer" : "connect"}
           onConnect={() => setStep("connect_openbot")}
           onThisComputer={() => setStep("welcome")}
           saved={{ address }}

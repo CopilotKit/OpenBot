@@ -11531,6 +11531,7 @@ fn main() {
             log_folder: Some(&logs),
             home: Some(&home),
             engine: engine_in_use(),
+            server_log: None,
         });
 
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.

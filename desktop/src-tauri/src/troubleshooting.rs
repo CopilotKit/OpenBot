@@ -64,6 +64,8 @@ pub struct Facts {
     pub desktop_log: Option<(PathBuf, String)>,
     /// The CLI's log file and its end, or None when there is none on this computer.
     pub cli_log: Option<(PathBuf, String)>,
+    /// The end of the server container's log, or None when the server isn't running.
+    pub server_log: Option<String>,
 }
 
 /// Where `gather` finds what goes into a bundle.
@@ -76,6 +78,24 @@ pub struct Sources<'a> {
     pub home: Option<&'a str>,
     /// The engine to measure: the one the back end runs on, or the one answering.
     pub engine: Option<crate::engine::Address>,
+    /// The end of the server container's log, or None when the server isn't running.
+    pub server_log: Option<String>,
+}
+
+/// How many of the server's latest `model-provider-refused` lines go in.
+pub const SERVER_REFUSAL_LINES: usize = 50;
+
+/// How much of the end of the server container's log is read for them.
+pub const SERVER_LOG_LINES: u16 = 5000;
+
+/// The server's `model-provider-refused` lines in `log`, the latest `SERVER_REFUSAL_LINES` of them.
+pub fn provider_refusals(log: &str) -> String {
+    let lines: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains(r#""type":"model-provider-refused""#))
+        .map(str::trim_end)
+        .collect();
+    lines[lines.len().saturating_sub(SERVER_REFUSAL_LINES)..].join("\n")
 }
 
 /// Gather a bundle and lay it out, redacted.
@@ -93,6 +113,7 @@ pub fn gather(sources: Sources) -> String {
         cli_log: sources
             .home
             .and_then(|home| read(cli_log(Path::new(home)), CLI_TAIL_BYTES)),
+        server_log: sources.server_log,
     };
     bundle(&facts, sources.home)
 }
@@ -170,6 +191,14 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
     };
     file(&mut out, "OpenBot Desktop log (end)", &facts.desktop_log);
     file(&mut out, "Backend CLI log (end)", &facts.cli_log);
+    // What a model provider really said when a Bot's turn failed: the server writes it to its own
+    // log and nowhere else, and the person reads only a sentence about it.
+    out.push_str("\n## Model provider errors (server log)\n\n");
+    match facts.server_log.as_deref().map(provider_refusals) {
+        Some(lines) if !lines.is_empty() => out.push_str(&format!("```\n{lines}\n```\n")),
+        Some(_) => out.push_str("None in the server's recent log.\n"),
+        None => out.push_str("The server isn't running.\n"),
+    }
     redact(&out, home).into_owned()
 }
 
@@ -521,6 +550,7 @@ mod tests {
                 PathBuf::from("/Users/dana/.copilotkit/cli.log"),
                 r#"signed in {"email":"a@b.co","organizationId":"org_1"}"#.into(),
             )),
+            server_log: None,
         };
         let text = bundle(&facts, Some("/Users/dana"));
         assert!(text.starts_with(
@@ -552,6 +582,97 @@ mod tests {
             ..Facts::default()
         };
         assert!(bundle(&huge, None).len() < FAILURE_BYTES + 2048);
+    }
+
+    /**
+    FOUND LIVE. People signed in with a Claude plan kept reading "Claude turned down the request"
+    while the Claude app worked, and the bundle they sent said nothing about why: what Claude really
+    said went only to the server's own log, as a `model-provider-refused` line. The bundle now carries
+    the server's recent ones, redacted like every other line, and nothing else from that log.
+    */
+    #[test]
+    fn the_server_s_model_provider_errors_are_in_the_bundle_redacted() {
+        let key = fake("sk-ant-oat01-", "Zq3-Kp8_", 8);
+        let refused = |kind: &str, said: &str| {
+            format!(
+                r#"server-1  | {{"type":"model-provider-refused","bot":"personal-assistant","provider":"Claude","kind":"{kind}","error":"{said}"}}"#
+            )
+        };
+        let log = [
+            "server-1  | OpenBot server listening on 0.0.0.0:4000".to_owned(),
+            refused("other", "API Error: Connection dropped (ECONNRESET)"),
+            r#"server-1  | {"type":"run-model","agentId":"personal-assistant","runId":"run-1"}"#
+                .to_owned(),
+            refused("usage_limit", "You've hit your limit · resets 3pm"),
+            // A provider's words can carry a credential or an address; they go out redacted.
+            refused(
+                "key",
+                &format!("invalid bearer {key} for dana.rivera@acme-robotics.io"),
+            ),
+        ]
+        .join("\n");
+        let text = bundle(
+            &Facts {
+                server_log: Some(log),
+                ..Facts::default()
+            },
+            Some("/Users/dana"),
+        );
+        let section = text
+            .split("## Model provider errors (server log)\n\n")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no model provider section in\n{text}"));
+        for expected in [
+            "Connection dropped (ECONNRESET)",
+            "You've hit your limit · resets 3pm",
+            r#""kind":"usage_limit""#,
+        ] {
+            assert!(
+                section.contains(expected),
+                "missing {expected:?} in\n{section}"
+            );
+        }
+        assert!(!text.contains(&key), "{text}");
+        assert!(!text.contains("dana.rivera@acme-robotics.io"), "{text}");
+        // Only the provider's errors: the rest of the server's log stays out.
+        assert!(!text.contains("run-model"), "{text}");
+        assert!(!text.contains("listening on"), "{text}");
+
+        // A server that said nothing of the kind, and one that isn't running, each say so.
+        let quiet = bundle(
+            &Facts {
+                server_log: Some("server-1  | OpenBot server listening".into()),
+                ..Facts::default()
+            },
+            None,
+        );
+        assert!(
+            quiet.contains(
+                "## Model provider errors (server log)\n\nNone in the server's recent log.\n"
+            ),
+            "{quiet}"
+        );
+        let stopped = bundle(&Facts::default(), None);
+        assert!(
+            stopped
+                .contains("## Model provider errors (server log)\n\nThe server isn't running.\n"),
+            "{stopped}"
+        );
+    }
+
+    /// Only the most recent provider errors go in, however many the server wrote.
+    #[test]
+    fn the_server_s_model_provider_errors_are_bounded_to_the_latest() {
+        let log: Vec<String> = (0..500)
+            .map(|n| {
+                format!(
+                    r#"{{"type":"model-provider-refused","kind":"other","error":"number {n}"}}"#
+                )
+            })
+            .collect();
+        let kept = provider_refusals(&log.join("\n"));
+        assert_eq!(kept.lines().count(), SERVER_REFUSAL_LINES);
+        assert!(kept.ends_with(r#""error":"number 499"}"#), "{kept}");
     }
 
     #[test]
