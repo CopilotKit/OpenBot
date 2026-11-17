@@ -1,7 +1,6 @@
 import { IconDeviceLaptop } from "@tabler/icons-react";
+import { BUSINESS_URL } from "../../shared/openbot-for-business";
 import { ExternalLink } from "./ExternalLink";
-// OpenBot for Business's one booking link. The only line to change when it moves to a shared module.
-import { BOOK_A_DEMO } from "./Welcome";
 
 /** The heading Start shows while it updates the OpenBot that runs on this computer. */
 export const UPDATING_SELF_CONTAINED = "Updating OpenBot (Self-Contained)";
@@ -34,7 +33,7 @@ export function SelfContainedNote() {
         <p>
           For teams and production, OpenBot for Business runs in OpenBot Cloud,
           your own cloud or on-prem.{" "}
-          <ExternalLink href={BOOK_A_DEMO}>Book a demo</ExternalLink>
+          <ExternalLink href={BUSINESS_URL}>Book a demo</ExternalLink>
         </p>
       </div>
     </section>
