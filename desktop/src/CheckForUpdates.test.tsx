@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Checked } from "./CheckForUpdates";
-import type { AppUpdate } from "./UpdateOffer";
+import type { AppUpdate } from "./CheckForUpdates";
 
 /*
  * The shell's commands, answered the way main.rs answers them: `check_app_update` reads the update

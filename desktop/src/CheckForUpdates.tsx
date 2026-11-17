@@ -2,11 +2,34 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import {
   DOESNT_UPDATE_ITSELF,
+  installProgressSaid,
   type UpdateReadiness,
   updateOffered,
 } from "../../shared/desktop-updates";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
-import { type AppUpdate, describe } from "./UpdateOffer";
+
+/**
+ * What the shell offers. The same answer OpenBot's own page reads for its update banner, so the
+ * setup window and the app never offer two different things, and closing one closes both.
+ */
+export type AppUpdate = {
+  /** The version to offer; null when there is none, or the person closed the offer on it. */
+  version: string | null;
+  /** This app's own version. */
+  current: string;
+  installing: {
+    downloaded: number;
+    total: number | null;
+    restarting: boolean;
+  } | null;
+  /** False on a build that never updates itself: an internal or candidate build, or one without the updater. */
+  updatesItself: boolean;
+  /**
+   * How ready the newer version is: downloading in the background while this one runs, or all
+   * here. Null before the shell starts on it; absent from a shell older than the field.
+   */
+  ready?: UpdateReadiness | null;
+};
 
 /** What the shell found when asked, as `app_update::Asked` names it. */
 export type Checked =
@@ -174,7 +197,7 @@ export function CheckForUpdates() {
             disabled={installing}
             onClick={() => void install()}
           >
-            {installing ? describe(progress) : "Update and restart"}
+            {installing ? installProgressSaid(progress) : "Update and restart"}
           </button>
           {installFailure && (
             <p className="caution" role="alert">
