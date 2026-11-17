@@ -18,7 +18,8 @@
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC. Failures are static categories with no payload. The one place CLI words go is the
-//!   log, scrubbed, when a call that sets up, starts, updates or stops the stack ends: its exit,
+//!   log, scrubbed, when a call that sets up, starts, updates or stops the stack, or connects
+//!   OpenBot to it, ends: its exit,
 //!   its report's error and the end of its stderr (`ending_entry`), so a setup that stops can be
 //!   told apart from one OpenBot stopped. The account
 //!   sign-in's approval page and code are the one CLI-printed text the window shows, checked
@@ -3291,15 +3292,19 @@ thread_local! {
     static LAST_ENDING: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
-/// The calls whose ending is logged: the ones that change the stack. `status`, `list` and the
-/// account, connection and apps calls are not, since their stdout can carry a sign-in code or a key
-/// and a polled `status` would fill the log.
+/// The calls whose ending is logged: the ones that change the stack, and `connect`. `status`,
+/// `list`, the account and the apps calls are not, since their stdout can carry a sign-in code or a
+/// key and a polled `status` would fill the log.
+///
+/// `connect` is: a connect that failed left nothing in either log, since the CLI says why only in
+/// its report. Its report never holds the key, and only its status, error and reason are read from
+/// it (`ending_entry`); a connect that finished logs that it did and nothing more.
 fn logs_its_ending(arguments: &[&str]) -> bool {
     matches!(
         arguments,
         [
             "local",
-            "setup" | "start" | "update" | "stop" | "delete",
+            "setup" | "start" | "update" | "stop" | "delete" | "connect",
             ..
         ]
     )
@@ -3410,7 +3415,7 @@ fn execute_child(
     let output = Output::create()?;
     let mut command = command_for(cli, arguments, folder, engine.as_ref());
     // stderr can carry anything a dependency prints. It is read only for the log, and only for a
-    // call that changes the stack (`logs_its_ending`).
+    // call that changes the stack or connects to it (`logs_its_ending`).
     let stderr = match errors.and_then(|errors| errors.file.try_clone().ok()) {
         Some(file) => Stdio::from(file),
         None => Stdio::null(),
@@ -6475,6 +6480,82 @@ mod tests {
         for answer in [confirmation, conflict, failed] {
             assert!(!serde_json::to_string(&answer).unwrap().contains(SECRET));
         }
+    }
+
+    /// A first install on a Mac stopped at "Connecting OpenBot" with "Setup stopped partway through
+    /// with an error", and neither log said why: the CLI's error was in its report, and only the
+    /// reason was kept. A connect that fails now logs its exit and the CLI's own message, scrubbed
+    /// as every log line is, and one that finishes logs only that it did.
+    #[test]
+    fn a_connect_that_fails_logs_the_clis_message_scrubbed() {
+        let home = "/Users/dana";
+        let failed = json!({
+            "version": 1,
+            "command": "local connect",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": format!(
+                    "The app .env is tracked or is not ignored by Git. Stop tracking that \
+                     credential file before approving the local connection. Read \
+                     {home}/OpenBot/.env with CPK_INTELLIGENCE_API_KEY={SECRET}"
+                )
+            },
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+            "diagnostics": []
+        });
+        let fixture = Fixture::new("local-eval-connect-failed-logged", &format!("1\n{failed}"));
+        std::fs::write(
+            fixture.root.join("stderr"),
+            format!("Error: git check-ignore failed in {home}/OpenBot\n"),
+        )
+        .unwrap();
+        let installation = fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        last_ending();
+        let connection = connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(connection.reason, Some(Reason::LocalCommandFailed));
+        let entry = last_ending().expect("the connect's ending was logged");
+        assert!(
+            entry.starts_with("[local connect] failed after "),
+            "{entry}"
+        );
+        // As the log file writes it (`logging::line`): the key and the home folder are gone.
+        let written = crate::logging::scrub(&entry, Some(home));
+        for said in [
+            "exit 1",
+            "\"LOCAL_COMMAND_FAILED\"",
+            "\"local_command_failed\"",
+            "The app .env is tracked or is not ignored by Git.",
+            "~/OpenBot/.env",
+            "CPK_INTELLIGENCE_API_KEY=[redacted]",
+            "stderr ends: Error: git check-ignore failed in ~/OpenBot",
+        ] {
+            assert!(written.contains(said), "{said:?} is not in {written}");
+        }
+        assert!(!written.contains(SECRET), "{written}");
+        assert!(!written.contains(home), "{written}");
+
+        std::fs::write(
+            fixture.root.join("scenario"),
+            format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        )
+        .unwrap();
+        connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        let entry = last_ending().expect("the finished connect's ending was logged");
+        assert!(entry.starts_with("[local connect] finished in "), "{entry}");
     }
 
     #[test]

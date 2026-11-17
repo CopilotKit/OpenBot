@@ -1261,6 +1261,39 @@ test("a lost backend is said on the status card too, with Start fresh", async ()
   expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
+/**
+ * A first install on a Mac: on Finishing setup, "Connecting OpenBot" stopped with "Setup stopped
+ * partway through with an error. Retry. If it stops again, copy the logs below.", and nothing was
+ * below it but Retry. The card now offers the logs it names, with what failed in them.
+ */
+test("a step that stops offers the logs its sentence names", async () => {
+  const partway =
+    "Setup stopped partway through with an error. Retry. If it stops again, copy the logs below.";
+  invokeHandler = answers({
+    set_up_local_eval: [report()],
+    connect_local_eval: [
+      connection({
+        outcome: "failed",
+        stack: null,
+        reason: "local-command-failed",
+      }),
+    ],
+    save_troubleshooting_logs: [null],
+  });
+  const screen = view();
+  await waitFor(() =>
+    expect(row(screen, CONNECT).textContent).toContain(partway),
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Copy logs" })).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Save to a file" }));
+  await screen.findByText("Saved in the log folder.");
+  expect(
+    invokeCalls.find((call) => call.command === "save_troubleshooting_logs")
+      ?.args,
+  ).toEqual({ failure: partway });
+});
+
 const blockedOnSignIn = report({
   outcome: "blocked",
   stack: null,
