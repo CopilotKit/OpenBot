@@ -118,6 +118,9 @@ fn main() {
     }
     match joined.as_str() {
         "compose version" => println!("Docker Compose synthetic"),
+        // Read before a Start that remaps the Bot's host port. No COMPOSE_FILE is set, so Start
+        // finds the installation's own `docker-compose.yml`.
+        "compose config --environment" if SCENARIO == "harness" => {}
         // Start looks for a `migrate` or `worker` container an earlier release left. None here.
         value
             if value.starts_with(
@@ -135,7 +138,10 @@ fn main() {
         value
             if value.starts_with("compose up -d --no-build --pull never ")
                 || value
-                    .starts_with("compose --profile harness up -d --no-build --pull never ") =>
+                    .starts_with("compose --profile harness up -d --no-build --pull never ")
+                // The same, with the overlay that remaps the Bot's host port.
+                || (SCENARIO == "harness"
+                    && value.starts_with("compose -f docker-compose.yml -f .openbot-harness-port.yml --profile harness up -d --no-build --pull never ")) =>
         {
             if SCENARIO == "up-fails" {
                 eprintln!("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
