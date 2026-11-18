@@ -154,6 +154,14 @@ function shortfallSaid(
   if (shortfall.recovering && short.length === 0) {
     return `OpenBot is recovering from low disk space. Wait a few minutes, then ${then}.`;
   }
+  // An update the computer has no room for: what is free where it ran short, beside what the
+  // update needs there. CPUs or memory short too are said after it.
+  if (shortfall.updating && shortfall.disk && shortfall.diskGb) {
+    const rest = { ...shortfall, disk: false, updating: false };
+    const others =
+      rest.cpu || rest.memory ? ` ${shortfallSaid(rest, needs, then)}` : "";
+    return `${updateRoomSaid(shortfall, engine, then)}${others}`;
+  }
   if (short.length === 0) {
     const fix = shortfall.podman
       ? "Stop your Podman machine, raise them with podman machine set, start it again"
@@ -161,16 +169,17 @@ function shortfallSaid(
     return `${shortfall.podman ? "This computer doesn't give OpenBot" : "Docker Desktop doesn't give OpenBot"} enough CPUs, memory or disk space. ${fix}, then ${then}.`;
   }
   // The drive under OpenBot's machine ran short, on Windows: said as the person sees it in File
-  // Explorer, and as the first screen says it. "OpenBot has 13.2 GB of free disk" read badly.
+  // Explorer, and as the first screen says it. "OpenBot has 13.2 GB of free disk" read badly. On a
+  // Mac, its own disk.
   if (
     short.length === 1 &&
     shortfall.disk &&
     shortfall.freeOnDrive &&
-    shortfall.drive &&
+    (shortfall.drive || shortfall.mac) &&
     shortfall.diskGb &&
     !shortfall.nearlyFull
   ) {
-    return `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
+    return `${onTheDrive(shortfall)}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
   }
   const fix = shortfall.podman
     ? podmanFix(short, shortfall)
@@ -230,6 +239,35 @@ function podmanFix(short: Resource[], shortfall: Shortfall): string {
   return set || "";
 }
 
+/** What is free on the drive that ran short: "This Mac has 7.5 GB of free space". */
+function onTheDrive(shortfall: Shortfall): string {
+  return shortfall.mac || !shortfall.drive
+    ? `This ${shortfall.mac ? "Mac" : "computer"} has ${shortfall.diskGb} GB of free space`
+    : `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}`;
+}
+
+/**
+ * An update not started for lack of room (`local_eval::update_room`), with what is free where it
+ * ran short and what the update needs there: on the computer's own drive, which the person frees,
+ * or inside Docker Desktop or OpenBot's machine, which is raised or freed there.
+ */
+function updateRoomSaid(
+  shortfall: Shortfall,
+  engine: string,
+  then: string,
+): string {
+  const needs = shortfall.neededGb
+    ? `about ${shortfall.neededGb} GB to update`
+    : "more space to update";
+  if (shortfall.freeOnDrive) {
+    return `${onTheDrive(shortfall)}, and OpenBot needs ${needs}. Free up some space, then ${then}.`;
+  }
+  const fix = shortfall.podman
+    ? podmanFix(["disk"], shortfall)
+    : "Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker";
+  return `${engine} has ${shortfall.diskGb} GB of free disk space, and ${shortfall.podman ? "it" : "OpenBot"} needs ${needs}. ${fix}, then ${then}.`;
+}
+
 // What the CLI requires free, beside its own numbers: "Docker has 0 GB of free disk. OpenBot
 // needs 40 GB."
 const needed: Record<Resource, string> = {
@@ -257,6 +295,23 @@ export function resourcesShortSaid(shortfall: Shortfall): string {
     },
     "Retry",
   );
+}
+
+/**
+ * An update this computer has no room for: the screen's heading, and the few words the row that
+ * stopped says. The figures are the sentence under the heading (`resourcesShortSaid`).
+ */
+export const ROOM_HEADING = "OpenBot needs more free space to update";
+export const ROOM_REASON = "Not enough free space to update.";
+
+/**
+ * The shortfall of an update not started for lack of room (`local_eval::update_room`), from
+ * whichever place said it: OpenBot's own update, or the back end's. Null for anything else.
+ */
+export function updateRoomShort(
+  ...said: (Shortfall | null | undefined)[]
+): Shortfall | null {
+  return said.find((short) => short?.updating && short.disk) ?? null;
 }
 
 /** MiB as the GB a person reads: 6144 is "6", 3277 is "3.2". */

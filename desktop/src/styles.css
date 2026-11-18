@@ -337,6 +337,11 @@ h2 {
   flex-wrap: wrap;
 }
 
+/* Retry under the sentence that says what an update needs: with it, and apart from the rows. */
+.row.room-retry {
+  margin: 0 0 24px;
+}
+
 /*
  * Buttons are OpenBot's `Button`: sentence case in the body face, 10px corners, the near-black
  * primary fill. `lg` (40px) on these screens, as the app's own onboarding sets its Continue.
