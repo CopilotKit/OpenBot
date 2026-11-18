@@ -113,6 +113,7 @@ const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   id: "r1",
   botId: "expenses",
   schedule: "Weekdays at 09:00",
+  cron: "0 9 * * 1-5",
   timezone: "UTC",
   instruction: 'Run the goal "Reconcile receipts" (g1) with run_goal.',
   title: "Reconcile receipts",

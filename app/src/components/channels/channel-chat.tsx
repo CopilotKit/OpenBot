@@ -60,6 +60,7 @@ import {
 } from "@/lib/channels/queries";
 import { runReply } from "@/lib/channels/run-reply";
 import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
+import { turnDidWork } from "@/lib/channels/turn-did-work";
 import {
   onRunStartedAway,
   onTurnFinishedAway,
@@ -1536,7 +1537,15 @@ export function ChannelChat({
      * is the retry, the same way a failed composer send has always put its words back while the
      * transcript kept the turn.
      */
-    if (turnFailure.current !== null) {
+    /*
+     * EXCEPT A TURN THAT HAD ALREADY DONE SOMETHING. Its message was sent and acted on, so it is
+     * not handed back to be sent again: run again, it would repeat what already ran. The notice
+     * under it says what went wrong. See `turnDidWork`.
+     */
+    if (
+      turnFailure.current !== null &&
+      !turnDidWork(target.messages, existingMessageIds)
+    ) {
       throw new Error(turnFailure.current);
     }
     return target.messages

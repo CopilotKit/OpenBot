@@ -56,9 +56,9 @@ paths:
         instruction on the schedule and posts in the conversation, which must be
         one the caller and the Bot share. With goalId it is the routine that
         runs that goal on a schedule. A person may have 20 routines switched on,
-        and a routine runs at most once an hour. There is no operation to change
-        a routine: that is done by asking its Bot. A repeated request with the
-        same Idempotency-Key and body returns the first result."
+        and a routine runs at most once an hour. updateRoutine changes one. A
+        repeated request with the same Idempotency-Key and body returns the
+        first result."
       security:
         - webSession: []
         - appOAuth:
@@ -110,6 +110,62 @@ paths:
     parameters:
       - $ref: ./common.yaml#/components/parameters/OrganizationId
       - $ref: "#/components/parameters/RoutineId"
+    patch:
+      tags:
+        - Routines
+      operationId: updateRoutine
+      summary: Change a routine
+      description: "Change one of the caller's routines: its name, what the Bot does,
+        its schedule or its time zone. Only the fields sent change. It keeps
+        its id, its conversation and its runs. A new schedule or time zone
+        follows the same rules as a new routine's, and its next run is worked
+        out from now. One that does not exist, or is somebody else's, is not
+        found. A repeated request with the same Idempotency-Key and body
+        returns the first result."
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: ./common.yaml#/components/parameters/IdempotencyKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoutineRequest"
+            examples:
+              request:
+                value:
+                  instruction: Summarize my unread mail, today's calendar and the
+                    weather.
+                  cron: 30 8 * * 1-5
+      responses:
+        "200":
+          description: The routine, as saved.
+          headers: *a1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineResponse"
+              examples:
+                answer:
+                  $ref: "#/components/examples/RoutineResponseExample"
+        "400":
+          $ref: "#/components/responses/InvalidRoutine"
+        "401":
+          $ref: ./common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: ./common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: "#/components/responses/RoutineNotFound"
+        "409":
+          $ref: ./common.yaml#/components/responses/IdempotencyConflict
+        "500":
+          $ref: ./common.yaml#/components/responses/ServerError
+        default:
+          $ref: ./common.yaml#/components/responses/UnexpectedError
     delete:
       tags:
         - Routines
@@ -1777,6 +1833,7 @@ components:
         - id
         - botId
         - schedule
+        - cron
         - timezone
         - instruction
         - title
@@ -1796,6 +1853,11 @@ components:
         schedule:
           type: string
           description: When it runs, as text to show.
+        cron:
+          type: string
+          description: "The schedule as it is kept, five cron fields: minute, hour, day
+            of month, month, day of week. What a form that changes the schedule
+            starts from."
         timezone:
           type: string
           description: The IANA time zone the schedule is read in.
@@ -1947,6 +2009,38 @@ components:
           type: string
           description: The goal this routine runs, when it runs one.
           maxLength: 200
+    UpdateRoutineRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: What to change. Only the fields sent change, and at least one must
+        be sent.
+      properties:
+        title:
+          type: string
+          description: A new name, at most 100 characters. Empty takes the name away, and
+            the routine is called by what it does.
+          maxLength: 100
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: What the Bot does on each run from now on. At most 2,000
+            characters.
+        cron:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: "A new schedule, as five cron fields: minute, hour, day of month,
+            month, day of week. The same rules as a new routine's."
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: A new IANA time zone to read the schedule in.
     RoutineResponse:
       type: object
       required:
@@ -3649,6 +3743,7 @@ components:
           id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           schedule: Weekdays at 09:00
+          cron: 0 9 * * 1-5
           timezone: America/New_York
           instruction: Summarize my unread mail and today's calendar.
           title: Morning brief

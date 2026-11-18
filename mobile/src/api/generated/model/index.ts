@@ -503,3 +503,4 @@ export * from "./updateMemorySourceRequest";
 export * from "./updateOrganizationMemberRequest";
 export * from "./updateOrganizationRequest";
 export * from "./updateOrganizationSettingsRequest";
+export * from "./updateRoutineRequest";

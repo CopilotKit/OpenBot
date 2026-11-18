@@ -2,8 +2,9 @@
 
 OpenAI's own words, as its API answered this Bot before:
 
-- `gpt-5.6` and later on Chat Completions: "Function tools with reasoning_effort are not supported
-  for this model in /v1/chat/completions. To use function tools, use /v1/responses".
+- `gpt-5.6` and later on Chat Completions, and `gpt-5.4` and `gpt-5.5` with a reasoning effort:
+  "Function tools with reasoning_effort are not supported for this model in /v1/chat/completions.
+  To use function tools, use /v1/responses".
 - The `-pro` models: "This is not a chat model and thus not supported in the v1/chat/completions
   endpoint."
 - `gpt-5.5`: "Unsupported value: 'temperature' does not support 0.2 with this model."
@@ -38,9 +39,22 @@ TOOL = {
 }
 ARGUMENTS = {"order": "A-1001"}
 
-RESPONSES_MODELS = ["gpt-5.6-luna", "gpt-6-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-5.5-pro", "o3-pro"]
-CHAT_MODELS = ["gpt-5.5", "o3", "gpt-4.1-mini"]
-REASONING = {"gpt-5.5", "o3", *RESPONSES_MODELS}
+# The 5.4 and 5.5 families take tools on Chat Completions only without a reasoning effort, and on
+# the Responses API either way (OpenAI, 2026-11-17), so every Bot sends them to the Responses API.
+RESPONSES_MODELS = [
+    "gpt-5.6-luna",
+    "gpt-6-sol",
+    "gpt-6.1-terra",
+    "gpt-6.2-astra",
+    "gpt-5.5-pro",
+    "o3-pro",
+    "gpt-5.5",
+    "gpt-5.4-mini",
+]
+REFUSED_ONLY_WITH_EFFORT = {"gpt-5.5", "gpt-5.4-mini"}
+CHAT_MODELS = ["gpt-5.2", "o3", "gpt-4.1-mini"]
+# The models that refuse `temperature`. `gpt-5.2` and `gpt-5.4-mini` take it (OpenAI, 2026-11-17).
+REASONING = {"o3", *RESPONSES_MODELS} - {"gpt-5.4-mini"}
 
 
 def _refusal(model, path, body):
@@ -48,7 +62,9 @@ def _refusal(model, path, body):
     if path == "/v1/chat/completions":
         if model.endswith("-pro"):
             return 404, "This is not a chat model and thus not supported in the v1/chat/completions endpoint."
-        if model in RESPONSES_MODELS and body.get("tools"):
+        if model in RESPONSES_MODELS and body.get("tools") and (
+            model not in REFUSED_ONLY_WITH_EFFORT or body.get("reasoning_effort") not in (None, "none")
+        ):
             return 400, (
                 f"Function tools with reasoning_effort are not supported for {model} in "
                 "/v1/chat/completions. To use function tools, use /v1/responses or set "
@@ -242,7 +258,8 @@ def test_a_responses_only_model_calls_tools_and_reads_results_through_the_respon
     tool = next(t for t in first["tools"] if t["name"] == TOOL["name"])
     assert tool["type"] == "function"
     assert tool["parameters"]["properties"] == TOOL["parameters"]["properties"]
-    assert "temperature" not in first
+    if model in REASONING:
+        assert "temperature" not in first
     output = next(i for i in second["input"] if i.get("type") == "function_call_output")
     assert output["call_id"] == start["toolCallId"]
     assert result in json.dumps(output["output"])
