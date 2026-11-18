@@ -441,7 +441,7 @@ export const TranslateCapabilityChangesResponse = zod.object({
       zod
         .object({
           scopeKind: zod
-            .enum(["organization", "role", "group", "team"])
+            .string()
             .describe(
               "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
             ),
@@ -571,9 +571,9 @@ export const PreviewCapabilityChangesResponse = zod.object({
       email: zod.string(),
       name: zod.string().nullable(),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       groups: zod.array(zod.string()),
       capabilities: zod.array(
@@ -597,13 +597,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
           title: zod.string(),
           before: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum([
-              "default",
-              "organization",
-              "role",
-              "group",
-              "team",
-            ]),
+            decidedBy: zod.string(),
             scopeId: zod
               .string()
               .describe(
@@ -612,13 +606,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
           }),
           after: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum([
-              "default",
-              "organization",
-              "role",
-              "group",
-              "team",
-            ]),
+            decidedBy: zod.string(),
             scopeId: zod
               .string()
               .describe(

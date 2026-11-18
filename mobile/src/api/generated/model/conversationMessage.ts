@@ -4,7 +4,6 @@
 import type { Attachment } from "./attachment";
 import type { ConversationMessageConsent } from "./conversationMessageConsent";
 import type { ConversationMessageRole } from "./conversationMessageRole";
-import type { ConversationMessageStatus } from "./conversationMessageStatus";
 
 /**
  * One thing said in a conversation: a person's message, or one Bot's reply.
@@ -27,7 +26,7 @@ export interface ConversationMessage {
   /** What was said. Empty while another person's Bot is still writing it. */
   text: string;
   /** Where a Bot's reply stands. A person's message is completed. */
-  status: ConversationMessageStatus;
+  status: string;
   /**
    * When it was said. Null where the time was not kept.
    * @nullable

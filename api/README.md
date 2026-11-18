@@ -73,6 +73,72 @@ The `API spec` job in `.github/workflows/ci.yml` fails a pull request when:
   client goes through only when it is listed with its reason in
   [accepted-breaking-changes.md](accepted-breaking-changes.md).
 
+## Deprecating
+
+Something a client uses is never removed in place. It is marked deprecated in the spec, answers
+with the standard headers from then on, and is removed only when two things are both true: its
+sunset has passed, at least 12 months after it was deprecated, and nothing has used it over the
+last 12 months, by the count OpenBot Cloud keeps of every use.
+
+1. Mark it in its area file: `deprecated: true` on the operation, the query or header parameter, or
+   the property of a request or response body, with `x-deprecation-date` (the day it is deprecated)
+   and `x-sunset` (the earliest day it may go, the extension oasdiff reads), both `YYYY-MM-DD`. Say
+   in its description what to use instead.
+
+   ```yaml
+   cron:
+     type: string
+     deprecated: true
+     x-deprecation-date: 2026-12-01
+     x-sunset: 2027-12-01
+     description: Deprecated. Send `schedule` instead.
+   ```
+
+2. List it in [CHANGELOG.md](../CHANGELOG.md), in the Deprecated list under `## Unreleased`'s
+   "Before upgrading": one line naming it as the server counts it, in backticks, with what replaces
+   it and its sunset. An operation is its method and path; a part of one adds `query <name>`,
+   `header <name>`, `body <property>` or `response <property>`, with `[]` for an array's items.
+
+   ```markdown
+   - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
+     removed no earlier than its sunset, and only once nothing uses it.
+     - `PATCH /api/v2/organizations/{organizationId}/routines/{routineId} body cron`: send
+       `schedule` instead. Sunset 2027-12-01.
+   ```
+
+`shared/tests/api-deprecations.test.ts` fails a pull request whose marks are incomplete or whose
+deprecations the changelog doesn't list. The server reads the same marks from the spec it is
+generated from, so a request that uses a deprecated element is answered with `Deprecation`
+([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html)), `Sunset`
+([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594.html)) and `Link: <changelog>; rel="deprecation"`,
+and each use is counted by the app that made it, from its `OpenBot-Client` header. Nobody writes
+those headers by hand. A deprecated response property is listed and dated the same way, but no
+answer is marked for it: a server can't see which fields a client reads.
+
+## Enums that grow
+
+A value added to an enum a client reads in a response breaks a client that only knows the old
+values, so oasdiff fails it. An enum whose list is expected to grow (a status, a role, a kind of
+scope) is declared open instead: `x-extensible-enum` in place of `enum`, with the values it has
+today ([Zalando rule 112](https://opensource.zalando.com/restful-api-guidelines/#112)). oasdiff
+then lets a value be added, and the generated clients read it as a string.
+
+```yaml
+status:
+  type: string
+  x-extensible-enum: [queued, running, succeeded, failed]
+```
+
+Every OpenBot client is a tolerant reader: it ignores a response field it doesn't know, and reads an
+enum value it doesn't know as "other" instead of failing. `app/tests/tolerant-reader.test.ts` and
+`mobile/tests/tolerant-reader.test.ts` hand the generated clients both and check nothing throws.
+
+Only an enum no request carries can be open, because the server checks what a request sends
+against the list. An enum a client also sends, or sends back as it read it (a shared account's
+audience, which is read and then saved again), stays `enum`; a response gets its own open copy
+where it needs one, as `PersonRoleAnswer` is for `PersonRole`. `api/openapi-extensible-enums.test.ts`
+fails a request that reaches an open enum.
+
 ## The live channels
 
 `api/asyncapi.yaml` (AsyncAPI 3.1) describes every WebSocket: a Bot's run as it streams, what

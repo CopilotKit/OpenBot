@@ -946,7 +946,7 @@ components:
         needs, or what the person's Bots' check-ins found that needs them.
     DeliveryState:
       type: string
-      enum: [queued, running, accepted, sent, delivered, failed, unknown, opted_out]
+      x-extensible-enum: [queued, running, accepted, sent, delivered, failed, unknown, opted_out]
       description: >-
         Where it got to. accepted is the provider taking it without saying yet
         that it arrived. unknown is a send that may or may not have gone.
