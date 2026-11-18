@@ -1499,7 +1499,7 @@ pub fn start_alone(
             .output()
             .map_err(|error| {
                 Problem::with(
-                    "OpenBot couldn't start that engine. Try again.",
+                    "OpenBot couldn't start your plan. Try again.",
                     format!("could not run {} compose: {error}", engine.engine.binary()),
                 )
             })?;
@@ -1558,7 +1558,7 @@ pub fn remove_alone(engine: &Address, root: &Path, alone: Alone) -> Result<(), P
             .output()
             .map_err(|error| {
                 Problem::with(
-                    "OpenBot couldn't stop an engine it no longer needs.",
+                    "OpenBot couldn't stop a plan it no longer uses.",
                     format!("could not run {} compose: {error}", engine.engine.binary()),
                 )
             })?;
@@ -1567,7 +1567,7 @@ pub fn remove_alone(engine: &Address, root: &Path, alone: Alone) -> Result<(), P
         }
         let raw = command_said(&output.stderr);
         Err(Problem::with(
-            "OpenBot couldn't stop an engine it no longer needs.",
+            "OpenBot couldn't stop a plan it no longer uses.",
             raw,
         ))
     })

@@ -397,7 +397,7 @@ pub fn write_picked_harness_file(
     settings: &BTreeMap<String, String>,
 ) -> Result<(), Problem> {
     let failed =
-        |error: String| Problem::with("OpenBot couldn't record which engine runs your Bot.", error);
+        |error: String| Problem::with("OpenBot couldn't record what your Bot runs on.", error);
     let path = root.join(PICKED_HARNESS_FILE);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| failed(error.to_string()))?;
