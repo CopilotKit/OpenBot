@@ -4,13 +4,17 @@ import {
   deleteConversation,
   updateConversation,
 } from "@/lib/api/generated/conversations/conversations";
-import type { CreateRoutineRequest } from "@/lib/api/generated/model";
+import type {
+  CreateRoutineRequest,
+  UpdateRoutineRequest,
+} from "@/lib/api/generated/model";
 import {
   createRoutine as createRoutineRequest,
   deleteRoutine,
   pauseRoutine,
   resumeRoutine,
   runRoutine,
+  updateRoutine,
 } from "@/lib/api/generated/routines/routines";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { channelKeys } from "@/lib/channels/queries";
@@ -30,9 +34,8 @@ import { routineKeys } from "./queries";
 /**
  * Writes against a person's own standing instructions.
  *
- * Create is here, as a plan the form made, through the same store calls a Bot's tools make; there is no edit.
- * Changing a routine is conversational, through the `RoutineTools` a Bot calls mid-chat. See
- * the routines operations in the API spec for the full reasoning.
+ * Create is here, as a plan the form made, through the same store calls a Bot's tools make. So is
+ * Edit routine, which changes one in place: it keeps its id, its conversation and its runs.
  */
 
 const FALLBACK = "That routine could not be changed.";
@@ -288,6 +291,21 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
         once(),
         { fallback: FALLBACK },
       ),
+    onSuccess: () => invalidateRoutines(queryClient),
+  });
+}
+
+/**
+ * Change a routine's name, what it does, its schedule or its time zone. Only the fields sent change.
+ * The server says what it refused (a schedule too frequent, a time zone it doesn't know) in words a
+ * person reads, which the dialog shows as they are.
+ */
+export function updateRoutineMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: { id: string; changes: UpdateRoutineRequest }) =>
+      updateRoutine(organizationId(), variables.id, variables.changes, once(), {
+        fallback: "Couldn't save your changes. Try again.",
+      }).then((answer) => answer.routine),
     onSuccess: () => invalidateRoutines(queryClient),
   });
 }

@@ -338,8 +338,13 @@ test("a file attached with + on /channel/new is uploaded to the conversation it 
   expect(sentParts()).toEqual([
     {
       type: "document",
-      source: { type: "url", value: "/api/attachments/att-1" },
-      metadata: { attachmentId: "att-1", filename: "notes.txt" },
+      source: {
+        type: "url",
+        value: "/api/attachments/att-1",
+        mimeType: "text/plain",
+      },
+      // The size goes with the part, so a reader decides how to show the file without fetching it.
+      metadata: { attachmentId: "att-1", filename: "notes.txt", sizeBytes: 22 },
     },
   ]);
   // And the conversation draws the file in the message it was sent with.
@@ -372,8 +377,13 @@ test("a file dropped on the home composer goes with the message that starts the 
   expect(sentParts()).toEqual([
     {
       type: "document",
-      source: { type: "url", value: "/api/attachments/att-1" },
-      metadata: { attachmentId: "att-1", filename: "notes.txt" },
+      source: {
+        type: "url",
+        value: "/api/attachments/att-1",
+        mimeType: "text/plain",
+      },
+      // The size goes with the part, so a reader decides how to show the file without fetching it.
+      metadata: { attachmentId: "att-1", filename: "notes.txt", sizeBytes: 22 },
     },
   ]);
 });
