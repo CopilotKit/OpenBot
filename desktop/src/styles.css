@@ -492,6 +492,11 @@ button.text-link:hover:not(:disabled) {
   margin-top: 12px;
 }
 
+/* A card with nothing said above its button (the heading over it already says why): no gap above. */
+.local-alert.app-too-old > .row:first-child {
+  margin-top: 0;
+}
+
 /* Under its button, a line keeps the row's gap rather than touching the button. */
 .local-alert .row + .footnote {
   margin-top: 12px;

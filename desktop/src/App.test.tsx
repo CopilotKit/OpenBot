@@ -930,6 +930,12 @@ const CONNECT_PROBLEMS: Array<{
     said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.",
   },
   {
+    kind: "app-too-old-security",
+    at: "check",
+    offer: "Update and restart",
+    said: "This version of OpenBot has a security problem. Update to keep using it.",
+  },
+  {
     kind: "sign-in-cancelled",
     at: "connect",
     offer: "Sign in again",
@@ -3971,6 +3977,43 @@ test("an OpenBot on this computer that needs a newer app says Update OpenBot, no
   // One heading says it: the card under it does not say it again.
   expect(within(card).queryByRole("heading")).toBeNull();
   expect(heading.closest(".sheet")?.contains(card)).toBe(true);
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+});
+
+// The same, for a minimum raised because of a security problem: the security sentence is the heading,
+// in place of Update OpenBot, and the card under it offers the update without saying it again.
+test("an OpenBot on this computer that raised this app's minimum for a security problem says so as the heading", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-app-too-old-security",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "This version of OpenBot has a security problem. Update to keep using it.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "show_openbot")
+      throw {
+        said,
+        detail:
+          "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+        kind: "app-too-old-security",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.0",
+        installing: null,
+        updatesItself: true,
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  await view.findByRole("heading", { level: 1, name: said });
+  expect(view.queryByRole("heading", { name: "Update OpenBot" })).toBeNull();
+  expect(view.queryByRole("heading", { name: "OpenBot stopped" })).toBeNull();
+  expect(view.getAllByText(said)).toHaveLength(1);
   expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
   expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
 });

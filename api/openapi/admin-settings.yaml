@@ -1103,6 +1103,12 @@ components:
             pattern: ^v[1-9][0-9]{0,3}$
         minimumClients:
           $ref: '#/components/schemas/MinimumClients'
+        securityMinimumClients:
+          $ref: '#/components/schemas/MinimumClients'
+          description: >-
+            The part of minimumClients raised because of a security problem in
+            older releases: for each app named, the minimum is there for
+            security. Absent or empty when none is.
         launcherApi:
           type: integer
           minimum: 1

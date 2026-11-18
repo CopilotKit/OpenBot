@@ -3,7 +3,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { asProblem, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
-import { APP_TOO_OLD, UpdateOpenBot } from "./UpdateOpenBot";
+import {
+  APP_TOO_OLD,
+  APP_TOO_OLD_SECURITY,
+  UpdateOpenBot,
+} from "./UpdateOpenBot";
 
 /**
  * What the screen offers after something went wrong, chosen by the problem's `kind`. The sentence
@@ -26,6 +30,7 @@ function offerFor(kind: string | null | undefined): Offer {
     case "too-old":
       return "browser";
     case APP_TOO_OLD:
+    case APP_TOO_OLD_SECURITY:
       return "update";
     case "sign-in-cancelled":
     case "sign-in-failed":

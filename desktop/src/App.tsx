@@ -63,7 +63,7 @@ import {
   type SetupStep,
 } from "./telemetry";
 import { choseThisComputer, rememberThisComputer } from "./thisComputer";
-import { AppTooOld, appTooOld } from "./UpdateOpenBot";
+import { AppTooOld, appTooOld, forSecurity } from "./UpdateOpenBot";
 import { UsageDataChoice } from "./UsageDataChoice";
 import { type Hosting, Welcome } from "./Welcome";
 import {
@@ -1753,11 +1753,13 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         {/* Running, and needing a newer version of this app: nothing stopped, so the heading says
           what to do and the card under it offers the update. */}
         <h1>
-          {appTooOld(displayedFailure)
-            ? "Update OpenBot"
-            : displayedFailure
-              ? "OpenBot stopped"
-              : "OpenBot is running"}
+          {forSecurity(displayedFailure) && displayedFailure
+            ? displayedFailure.said
+            : appTooOld(displayedFailure)
+              ? "Update OpenBot"
+              : displayedFailure
+                ? "OpenBot stopped"
+                : "OpenBot is running"}
         </h1>
         {/* The back end runs the release it had: information, said where the lede goes. Nothing
           failed, so it is not drawn as a failure and offers no help. */}

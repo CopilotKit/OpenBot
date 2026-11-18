@@ -44,6 +44,12 @@ export const EXTENSION_API: number = policy.compatibility.extensionApi;
 
 /** What a person reads when the app is older than the OpenBot it talks to serves. */
 export const APP_UPDATE_SENTENCE = "Update OpenBot";
+/**
+ * What a person reads, in place of "Update OpenBot", when the minimum the app is below was raised
+ * because of a security problem in older releases.
+ */
+export const SECURITY_UPDATE_SENTENCE =
+  "This version of OpenBot has a security problem. Update to keep using it.";
 /** What a person reads when the OpenBot is older than the app can use. */
 export const SERVER_UPDATE_SENTENCE =
   "Ask whoever runs your OpenBot to update it";
@@ -142,9 +148,15 @@ export function belowMinimum(
 
 /**
  * The sentence a server refuses an app below its minimum with, as the problem's detail: what
- * happened, then what to do (`.claude/skills/openbot-copy`).
+ * happened, then what to do (`.claude/skills/openbot-copy`). When the minimum was raised because of
+ * a security problem in older releases (`security`), that is what it says.
  */
-export function clientUpdateDetail(kind: ClientKind, minimum: string): string {
+export function clientUpdateDetail(
+  kind: ClientKind,
+  minimum: string,
+  security?: boolean,
+): string {
+  if (security) return SECURITY_UPDATE_SENTENCE;
   const version = minimum.replace(/^v/, "");
   switch (kind) {
     case "web":
@@ -170,7 +182,9 @@ function major(version: string): number | undefined {
  * - `ok`: they can. Features the server lacks are hidden by the fields that offer them, never by a
  *   version.
  * - `app`: the app is too old. The server serves no API version the app speaks and only newer ones,
- *   or it names a minimum for this app above the app's version. "Update OpenBot".
+ *   or it names a minimum for this app above the app's version. "Update OpenBot". `security` when
+ *   the server also names that app in `securityMinimumClients` above the app's version: the minimum
+ *   is there for a security problem, and the person reads SECURITY_UPDATE_SENTENCE instead.
  * - `server`: the server is too old. It serves only API versions older than any the app speaks.
  *   "Ask whoever runs your OpenBot to update it".
  *
@@ -179,11 +193,15 @@ function major(version: string): number | undefined {
  */
 export type Compatibility =
   | { fit: "ok" }
-  | { fit: "app"; minimum?: string }
+  | { fit: "app"; minimum?: string; security?: true }
   | { fit: "server" };
 
 export function compatibility(
-  deployment: { api?: unknown; minimumClients?: unknown },
+  deployment: {
+    api?: unknown;
+    minimumClients?: unknown;
+    securityMinimumClients?: unknown;
+  },
   client: { kind: ClientKind; version: string; speaks?: readonly string[] },
 ): Compatibility {
   const speaks = client.speaks ?? API_VERSIONS;
@@ -202,14 +220,25 @@ export function compatibility(
     // Only newer versions than any the app speaks: the app is behind. Otherwise the server is.
     return newestServed > newestSpoken ? { fit: "app" } : { fit: "server" };
   }
-  const minimums =
-    deployment.minimumClients && typeof deployment.minimumClients === "object"
-      ? (deployment.minimumClients as Record<string, unknown>)
-      : {};
-  const minimum = minimums[client.kind];
-  if (isVersion(minimum)) {
-    const order = compareVersions(client.version, minimum);
-    if (order !== undefined && order < 0) return { fit: "app", minimum };
+  const minimum = minimumFor(deployment.minimumClients, client.kind);
+  if (minimum && below(client.version, minimum)) {
+    const floor = minimumFor(deployment.securityMinimumClients, client.kind);
+    return floor && below(client.version, floor)
+      ? { fit: "app", minimum, security: true }
+      : { fit: "app", minimum };
   }
   return { fit: "ok" };
+}
+
+/** The release `minimums` names for `kind`, when it names one. */
+function minimumFor(minimums: unknown, kind: ClientKind): string | undefined {
+  if (!minimums || typeof minimums !== "object") return undefined;
+  const minimum = (minimums as Record<string, unknown>)[kind];
+  return isVersion(minimum) ? minimum : undefined;
+}
+
+/** Whether `version` is a release before `minimum`. */
+function below(version: string, minimum: string): boolean {
+  const order = compareVersions(version, minimum);
+  return order !== undefined && order < 0;
 }

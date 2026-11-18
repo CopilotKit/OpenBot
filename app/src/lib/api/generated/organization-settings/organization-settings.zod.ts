@@ -33,6 +33,15 @@ export const getDeploymentResponseMinimumClientsMobileRegExp = new RegExp(
 export const getDeploymentResponseMinimumClientsRecorderRegExp = new RegExp(
   "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
 );
+export const getDeploymentResponseSecurityMinimumClientsWebRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseSecurityMinimumClientsDesktopRegExp =
+  new RegExp("^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$");
+export const getDeploymentResponseSecurityMinimumClientsMobileRegExp =
+  new RegExp("^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$");
+export const getDeploymentResponseSecurityMinimumClientsRecorderRegExp =
+  new RegExp("^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$");
 
 export const GetDeploymentResponse = zod
   .object({
@@ -133,6 +142,33 @@ export const GetDeploymentResponse = zod
       .optional()
       .describe(
         "The oldest release of each OpenBot app this OpenBot serves. An app names itself in the OpenBot-Client header, and one older than its minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but this deployment answer. An app not listed has no minimum. An OpenBot serves every app released in the last 12 months, so it names one only where its administrator raised it. Absent from a release before it was published.",
+      ),
+    securityMinimumClients: zod
+      .object({
+        web: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsWebRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        desktop: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsDesktopRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        mobile: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsMobileRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        recorder: zod
+          .string()
+          .regex(getDeploymentResponseSecurityMinimumClientsRecorderRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+      })
+      .optional()
+      .describe(
+        "The part of minimumClients raised because of a security problem in older releases: for each app named, the minimum is there for security. Absent or empty when none is.",
       ),
     launcherApi: zod
       .int()

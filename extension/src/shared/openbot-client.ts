@@ -6,6 +6,7 @@ import {
   clientToken,
   clientUpdateDetail,
   isVersion,
+  SECURITY_UPDATE_SENTENCE,
 } from "@openbot/shared/client-version";
 import {
   RECORDER_SIGNED_OUT,
@@ -31,6 +32,14 @@ export class OpenBotError extends Error {
   get updateRequired(): boolean {
     return this.body?.code === CLIENT_UPDATE_REQUIRED;
   }
+
+  /** True when that refusal's minimum was raised because of a security problem in older releases. */
+  get securityUpdateRequired(): boolean {
+    return (
+      this.updateRequired &&
+      (this.body as Record<string, unknown> | null)?.security === true
+    );
+  }
 }
 
 /** What the person reads when OpenBot serves only newer Recorders and its answer names no release we can use. */
@@ -40,11 +49,13 @@ export const RECORDER_UPDATE_REQUIRED =
 /**
  * The sentence for OpenBot refusing this Recorder as too old, or null for any other failure. It is the Recorder's own
  * sentence, the same one OpenBot words its refusal with (`clientUpdateDetail`), built from the app and release the
- * answer names. The text of the answer itself is never shown: any site can answer as OpenBot, and only a known app and a
- * release number pass through.
+ * answer names, or the security sentence when the minimum was raised for a security problem. The text of the answer
+ * itself is never shown: any site can answer as OpenBot, and only a known app, a release number and the security flag
+ * pass through.
  */
 export function updateRequiredSentence(error: unknown): string | null {
   if (!(error instanceof OpenBotError) || !error.updateRequired) return null;
+  if (error.securityUpdateRequired) return SECURITY_UPDATE_SENTENCE;
   const body = error.body as Record<string, unknown> | null;
   const named = body?.client;
   const kind: ClientKind = (CLIENT_KINDS as readonly unknown[]).includes(named)

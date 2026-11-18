@@ -63,8 +63,8 @@ pub enum Shape {
     /// Its revocation endpoint fails with a 500 whatever it is sent.
     RevokeBroken,
     /// Signs in as `Current` does, and answers `deployment` with one of the real answers in
-    /// `shared/fixtures/client-version/cases.json`, by name: `current`, `v1.1.0`, `raised` or
-    /// `v3-only`.
+    /// `shared/fixtures/client-version/cases.json`, by name: `current`, `v1.1.0`, `raised`,
+    /// `security` or `v3-only`.
     Answers(&'static str),
 }
 

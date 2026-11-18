@@ -24289,7 +24289,8 @@ fn main() {
 
     /// The OpenBot on this computer is read as every app reads it before the window opens it
     /// (API versioning design, 7.1). One whose admin raised the oldest app it serves above this
-    /// one, or one that serves only a newer API, is not shown: the window says "Update OpenBot"
+    /// one, or one that serves only a newer API, is not shown: the window says "Update OpenBot", or
+    /// that this version has a security problem when the minimum was raised for one,
     /// and offers this app's update, and Show Window keeps it on setup. One left at 1.1.0, which
     /// publishes no version fields, opens exactly as before. Every request names this app.
     #[test]
@@ -24320,17 +24321,32 @@ fn main() {
         let mut raised = answer("raised");
         let major: u64 = version.split('.').next().unwrap().parse().unwrap();
         raised["minimumClients"]["desktop"] = format!("{}.0.0", major + 1).into();
+        // The fixture's `security`, the same minimum raised for a security problem.
+        let mut security = answer("security");
+        security["minimumClients"]["desktop"] = format!("{}.0.0", major + 1).into();
+        security["securityMinimumClients"]["desktop"] = format!("{}.0.0", major + 1).into();
+        let plain = (
+            "app-too-old",
+            "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+        );
 
-        for too_new in [raised, answer("v3-only")] {
+        for (too_new, (kind, said)) in [
+            (raised, plain),
+            (answer("v3-only"), plain),
+            (
+                security,
+                (
+                    "app-too-old-security",
+                    "This version of OpenBot has a security problem. Update to keep using it.",
+                ),
+            ),
+        ] {
             std::fs::write(f.owned.join("deployment.json"), too_new.to_string()).unwrap();
             let app = f.app(&f.owned, "tauri://localhost/");
             assert!(already_running_now(app.handle(), &root));
             let problem = show_openbot_on(app.handle().clone(), &f.ports).unwrap_err();
-            assert_eq!(problem.kind, Some("app-too-old"), "{too_new}");
-            assert_eq!(
-                problem.said,
-                "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going."
-            );
+            assert_eq!(problem.kind, Some(kind), "{too_new}");
+            assert_eq!(problem.said, said);
             assert_eq!(window_url(&app), "http://127.0.0.1:9/stale-page");
             restore_window_on(app.handle(), &f.ports);
             assert_eq!(window_url(&app), "tauri://localhost/");

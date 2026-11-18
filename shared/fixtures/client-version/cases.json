@@ -1,5 +1,5 @@
 {
-  "$comment": "What each app decides from an OpenBot's deployment answer (shared/client-version.ts `compatibility`). The web app, the Recorder, OpenBot Desktop and the phone app each run every case. `deployments` are real answers: `current` is what this release's server answers with no admin raise (no built-in minimum: a server serves every app released in the last 12 months, and no OpenBot release is older than that yet), `v1.1.0` is what OpenBot 1.1.0 answers (no version fields; captured from a running v1.1.0 server), `raised` is this release with an admin's OPENBOT_MINIMUM_CLIENTS=desktop=1.2.0,mobile=1.2.0,recorder=1.2.0,web=1.1.0 (an admin can't raise the web app above the server's own release, whose pages it serves), `next` is a 1.2.0 server whose admin raised every app to 1.2.0, as a tab left open across that upgrade meets it, and `v3-only` is a later OpenBot that serves only a new API.",
+  "$comment": "What each app decides from an OpenBot's deployment answer (shared/client-version.ts `compatibility`). The web app, the Recorder, OpenBot Desktop and the phone app each run every case. `deployments` are real answers: `current` is what this release's server answers with no admin raise (no built-in minimum: a server serves every app released in the last 12 months, and no OpenBot release is older than that yet), `v1.1.0` is what OpenBot 1.1.0 answers (no version fields; captured from a running v1.1.0 server), `raised` is this release with an admin's OPENBOT_MINIMUM_CLIENTS=desktop=1.2.0,mobile=1.2.0,recorder=1.2.0,web=1.1.0 (an admin can't raise the web app above the server's own release, whose pages it serves), `next` is a 1.2.0 server whose admin raised every app to 1.2.0, as a tab left open across that upgrade meets it,, `security` is this release with every app but the web app raised to 1.2.0 because of a security problem in older releases (`securityMinimumClients` names the same minimums), and `v3-only` is a later OpenBot that serves only a new API. A case with `security` true expects the app's decision to say the minimum is there for security.",
   "deployments": {
     "current": {
       "edition": "team",
@@ -91,6 +91,39 @@
       "api": ["v2"],
       "minimumClients": {
         "web": "1.2.0",
+        "desktop": "1.2.0",
+        "mobile": "1.2.0",
+        "recorder": "1.2.0"
+      },
+      "launcherApi": 1,
+      "extensionApi": 1
+    },
+    "security": {
+      "edition": "team",
+      "localEvaluation": false,
+      "generativeUi": true,
+      "selfHostBanner": false,
+      "transcription": false,
+      "voice": false,
+      "durableHistory": true,
+      "authProviders": ["okta"],
+      "ssoConfigured": false,
+      "ssoRequired": false,
+      "builtInBots": true,
+      "isolatedBots": false,
+      "botComputers": true,
+      "attachmentLimits": {
+        "imageBytes": 8388608,
+        "documentBytes": 8388608,
+        "fileBytes": 1048576
+      },
+      "api": ["v2"],
+      "minimumClients": {
+        "desktop": "1.2.0",
+        "mobile": "1.2.0",
+        "recorder": "1.2.0"
+      },
+      "securityMinimumClients": {
         "desktop": "1.2.0",
         "mobile": "1.2.0",
         "recorder": "1.2.0"
@@ -241,6 +274,44 @@
       "client": {
         "kind": "web",
         "version": "1.1.0"
+      },
+      "fit": "ok"
+    },
+    {
+      "deployment": "security",
+      "client": {
+        "kind": "desktop",
+        "version": "1.1.0"
+      },
+      "fit": "app",
+      "minimum": "1.2.0",
+      "security": true
+    },
+    {
+      "deployment": "security",
+      "client": {
+        "kind": "mobile",
+        "version": "1.1.0"
+      },
+      "fit": "app",
+      "minimum": "1.2.0",
+      "security": true
+    },
+    {
+      "deployment": "security",
+      "client": {
+        "kind": "recorder",
+        "version": "1.1.0"
+      },
+      "fit": "app",
+      "minimum": "1.2.0",
+      "security": true
+    },
+    {
+      "deployment": "security",
+      "client": {
+        "kind": "desktop",
+        "version": "1.2.0"
       },
       "fit": "ok"
     }

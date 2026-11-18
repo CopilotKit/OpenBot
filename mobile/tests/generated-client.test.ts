@@ -60,6 +60,28 @@ const server = Bun.serve({
       return Response.json(deploymentAnswer.body, {
         status: deploymentAnswer.status,
       });
+    if (url.pathname === `${ORG}/bots/insecure`)
+      return Response.json(
+        {
+          type: "https://open.bot/errors/client-update-required",
+          title: "This app is too old for this OpenBot.",
+          status: 400,
+          detail:
+            "This version of OpenBot has a security problem. Update to keep using it.",
+          code: "CLIENT_UPDATE_REQUIRED",
+          category: "validation",
+          retryable: false,
+          requestId: "req_example",
+          traceId: "trace_example",
+          client: "mobile",
+          minimumVersion: "1.2.0",
+          security: true,
+        },
+        {
+          status: 400,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
     if (url.pathname === `${ORG}/bots/too-old`)
       return Response.json(
         {
@@ -362,9 +384,53 @@ test("anything but an app too old for its OpenBot decides nothing: the app opens
   expect(await checkVersion()).toEqual({ kind: "ok" });
 });
 
+test("an OpenBot that raised the phone app's minimum for a security problem says so, from its deployment and from a refusal", async () => {
+  deploymentAnswer = { status: 200, body: fixture.deployments.security };
+  expect(await checkVersion()).toEqual({
+    kind: "app",
+    detail:
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    security: true,
+  });
+  const heard: [string, boolean][] = [];
+  const stop = onUpdateRequired((detail, security) =>
+    heard.push([detail, security]),
+  );
+  try {
+    await getBot(ORGANIZATION_ID, "insecure").catch(() => undefined);
+    expect(heard).toEqual([
+      [
+        "This version of OpenBot has a security problem. Update to keep using it.",
+        true,
+      ],
+    ]);
+    deploymentAnswer = {
+      status: 400,
+      body: {
+        detail:
+          "This version of OpenBot has a security problem. Update to keep using it.",
+        code: "CLIENT_UPDATE_REQUIRED",
+        minimumVersion: "1.2.0",
+        security: true,
+      },
+    };
+    expect(await checkVersion()).toEqual({
+      kind: "app",
+      detail:
+        "This version of OpenBot has a security problem. Update to keep using it.",
+      security: true,
+    });
+  } finally {
+    stop();
+  }
+});
+
 test("a refusal of this app as too old, on any request, reaches the root layout as Update OpenBot with the server's sentence", async () => {
   const heard: string[] = [];
-  const stop = onUpdateRequired((detail) => heard.push(detail));
+  const stop = onUpdateRequired((detail, security) => {
+    heard.push(detail);
+    expect(security).toBe(false);
+  });
   try {
     const refused = await getBot(ORGANIZATION_ID, "too-old").catch(
       (error: unknown) => error,

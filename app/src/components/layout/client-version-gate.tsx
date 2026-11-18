@@ -1,6 +1,7 @@
 import {
   APP_UPDATE_SENTENCE,
   type Compatibility,
+  SECURITY_UPDATE_SENTENCE,
   SERVER_UPDATE_SENTENCE,
 } from "@openbot/shared/client-version";
 import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
@@ -31,10 +32,13 @@ import { queryClient } from "@/query-client";
  * - `desktop`: OpenBot Desktop, around this page, is older than the OpenBot serves. Only its own
  *   update fixes that, so the screen offers OpenBot Desktop's Update and restart.
  * - `server`: the OpenBot is older than this page can use. Only whoever runs it can update it.
+ *
+ * `security` on the first two: the minimum was raised because of a security problem in older
+ * releases, and the screen says so in place of "Update OpenBot".
  */
 export type UpdateVerdict =
-  | { update: "page" }
-  | { update: "desktop"; minimum?: string }
+  | { update: "page"; security?: true }
+  | { update: "desktop"; minimum?: string; security?: true }
   | { update: "server" };
 
 /**
@@ -48,11 +52,15 @@ export function updateVerdict(
   inDesktop: boolean,
 ): UpdateVerdict | null {
   if (refusal) {
+    const security = refusal.security ? { security: true as const } : {};
     return refusal.client === "desktop" && inDesktop
-      ? { update: "desktop", minimum: refusal.minimumVersion }
-      : { update: "page" };
+      ? { update: "desktop", minimum: refusal.minimumVersion, ...security }
+      : { update: "page", ...security };
   }
-  if (fit?.fit === "app") return { update: "page" };
+  if (fit?.fit === "app")
+    return fit.security
+      ? { update: "page", security: true }
+      : { update: "page" };
   if (fit?.fit === "server") return { update: "server" };
   return null;
 }
@@ -102,9 +110,12 @@ export function UpdateScreen({ verdict }: { verdict: UpdateVerdict }) {
         {verdict.update === "server" ? (
           <ServerUpdate />
         ) : verdict.update === "desktop" ? (
-          <DesktopUpdate minimum={verdict.minimum} />
+          <DesktopUpdate
+            minimum={verdict.minimum}
+            security={verdict.security === true}
+          />
         ) : (
-          <PageUpdate />
+          <PageUpdate security={verdict.security === true} />
         )}
       </div>
     </main>
@@ -131,12 +142,21 @@ function loadAgain() {
   window.location.reload();
 }
 
-/** This page is older than the OpenBot serves: the OpenBot serves the new one on the next load. */
-function PageUpdate() {
+/**
+ * This page is older than the OpenBot serves: the OpenBot serves the new one on the next load. For a
+ * security problem the heading says so and already says what to do, so no line repeats it.
+ */
+function PageUpdate({ security }: { security: boolean }) {
   return (
     <>
-      <Heading>{APP_UPDATE_SENTENCE}</Heading>
-      <Line>This page is from an older version of OpenBot.</Line>
+      {security ? (
+        <Heading>{SECURITY_UPDATE_SENTENCE}</Heading>
+      ) : (
+        <>
+          <Heading>{APP_UPDATE_SENTENCE}</Heading>
+          <Line>This page is from an older version of OpenBot.</Line>
+        </>
+      )}
       <Button className="mt-8 w-full" onClick={loadAgain} size="lg">
         Update
       </Button>
@@ -167,7 +187,13 @@ function ServerUpdate() {
  * offers it, with how far the download has got; or, on a build that never updates itself, what to
  * do instead.
  */
-function DesktopUpdate({ minimum }: { minimum?: string }) {
+function DesktopUpdate({
+  minimum,
+  security,
+}: {
+  minimum?: string;
+  security: boolean;
+}) {
   const offer = useQuery(desktopAppUpdateQueryOptions());
   const install = useMutation(installAppUpdateMutationOptions(queryClient));
   const updatesItself = offer.data?.updatesItself !== false;
@@ -175,7 +201,9 @@ function DesktopUpdate({ minimum }: { minimum?: string }) {
   const busy = install.isPending || progress !== null;
   return (
     <>
-      <Heading>{APP_UPDATE_SENTENCE}</Heading>
+      <Heading>
+        {security ? SECURITY_UPDATE_SENTENCE : APP_UPDATE_SENTENCE}
+      </Heading>
       <Line>
         {minimum
           ? `This OpenBot needs OpenBot Desktop ${minimum} or later.`

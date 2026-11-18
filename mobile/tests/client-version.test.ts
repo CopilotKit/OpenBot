@@ -4,9 +4,16 @@
  * shared/fixtures/client-version/cases.json.
  */
 import { expect, test } from "bun:test";
-import { clientUpdateDetail } from "../../shared/client-version";
+import {
+  clientUpdateDetail,
+  SECURITY_UPDATE_SENTENCE as SHARED_SECURITY_SENTENCE,
+} from "../../shared/client-version";
 import fixture from "../../shared/fixtures/client-version/cases.json";
-import { compatibility, phoneUpdateDetail } from "../src/client-version";
+import {
+  compatibility,
+  phoneUpdateDetail,
+  SECURITY_UPDATE_SENTENCE,
+} from "../src/client-version";
 
 type Case = {
   deployment: string;
@@ -17,6 +24,7 @@ type Case = {
   };
   fit: "ok" | "app" | "server";
   minimum?: string;
+  security?: boolean;
 };
 
 test("the phone app's rule decides every case in the shared fixture as the other apps do", () => {
@@ -31,7 +39,11 @@ test("the phone app's rule decides every case in the shared fixture as the other
       case: one,
       decided:
         one.fit === "app" && one.minimum
-          ? { fit: "app", minimum: one.minimum }
+          ? {
+              fit: "app",
+              minimum: one.minimum,
+              ...(one.security ? { security: true } : {}),
+            }
           : { fit: one.fit },
     });
   }
@@ -48,4 +60,14 @@ test("the update screen names the release it needs when OpenBot said one, in Ope
   expect(phoneUpdateDetail(undefined)).toBe(
     "This OpenBot needs a newer OpenBot phone app. Update OpenBot, then try again.",
   );
+});
+
+test("a minimum raised for a security problem says so, in OpenBot's own words", () => {
+  expect(phoneUpdateDetail("1.2.0", true)).toBe(
+    "This version of OpenBot has a security problem. Update to keep using it.",
+  );
+  expect(phoneUpdateDetail("1.2.0", true)).toBe(
+    clientUpdateDetail("mobile", "1.2.0", true),
+  );
+  expect(SECURITY_UPDATE_SENTENCE).toBe(SHARED_SECURITY_SENTENCE);
 });

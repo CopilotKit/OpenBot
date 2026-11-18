@@ -92,10 +92,13 @@ const backEndShort = location.hash === "#backend-short";
 // this computer needing a newer app once Start has it running.
 const CONNECTED_PROBLEMS = {
   "#connect-app-too-old": { said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.", kind: "app-too-old" },
+  "#connect-app-too-old-security": { said: "This version of OpenBot has a security problem. Update to keep using it.", kind: "app-too-old-security" },
   "#connect-session-ended": { said: "Your sign-in to openbot.example.com has ended. Sign in again to keep going.", kind: "session-ended" },
 };
 const connectedProblem = CONNECTED_PROBLEMS[location.hash];
-const localTooOld = location.hash === "#local-app-too-old";
+// The same, for a minimum raised because of a security problem.
+const localSecurity = location.hash === "#local-app-too-old-security";
+const localTooOld = location.hash === "#local-app-too-old" || localSecurity;
 // A launch that finds this computer's OpenBot already running, and that it needs a newer app.
 const runningTooOld = location.hash === "#local-app-too-old-running";
 // The same launch, where showing it fails as it could before: the slot the card above lands in.
@@ -144,6 +147,12 @@ export async function invoke(command, args) {
   if ((runningTooOld || runningFails) && command === "already_running") return true;
   if (runningFails && command === "show_openbot")
     throw { said: "Part of OpenBot needs recovery. Try starting OpenBot once more." };
+  if (localSecurity && command === "show_openbot")
+    throw {
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      detail: "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+      kind: "app-too-old-security",
+    };
   if ((localTooOld || runningTooOld) && command === "show_openbot")
     throw {
       said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
@@ -2192,6 +2201,18 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
       name: "connected-app-too-old-with-offer",
       at: "?offer#connect-app-too-old",
       said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-app-too-old-security",
+      at: "#connect-app-too-old-security",
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old-security",
+      at: "#local-app-too-old-security",
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
       way: { role: "button", name: "Update and restart" },
     },
     {

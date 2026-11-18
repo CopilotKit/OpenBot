@@ -114,8 +114,13 @@ pub fn probe(address: &str) -> Result<Metadata, Problem> {
     // only an older API is told as an OpenBot this app can't connect to always was.
     match client_version::fit(deployment) {
         client_version::Fit::Ok => {}
-        fit @ client_version::Fit::App { .. } => {
-            return Err(Kind::AppTooOld.problem(&host, client_version::why(deployment, &fit)));
+        fit @ client_version::Fit::App { security, .. } => {
+            let kind = if security {
+                Kind::AppTooOldSecurity
+            } else {
+                Kind::AppTooOld
+            };
+            return Err(kind.problem(&host, client_version::why(deployment, &fit)));
         }
         fit @ client_version::Fit::Server => {
             return Err(Kind::TooOld.problem(&host, client_version::why(deployment, &fit)));
@@ -365,6 +370,20 @@ mod tests {
             );
             assert!(server.seen_at(METADATA).is_empty(), "{name}");
         }
+        // One that raised this app's minimum for a security problem says so instead, and offers the
+        // same update.
+        let security = FakeOpenBot::start(Shape::Answers("security"));
+        let problem = check(&security.address()).expect_err("security");
+        assert_eq!(kind_of(&problem), Some(Kind::AppTooOldSecurity));
+        assert_eq!(
+            problem.said,
+            "This version of OpenBot has a security problem. Update to keep using it."
+        );
+        assert_eq!(
+            problem.detail.as_deref(),
+            Some("the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2")
+        );
+        assert!(security.seen_at(METADATA).is_empty());
         // What the log says beside the sentence: what that OpenBot asked for, against this app.
         let raised = FakeOpenBot::start(Shape::Answers("raised"));
         let problem = check(&raised.address()).expect_err("raised");
@@ -380,10 +399,14 @@ mod tests {
     #[test]
     fn the_launch_check_catches_an_openbot_that_moved_since_the_app_connected() {
         let _version = crate::client_version::as_version("1.1.0");
-        for name in ["raised", "v3-only"] {
+        for (name, kind) in [
+            ("raised", Kind::AppTooOld),
+            ("v3-only", Kind::AppTooOld),
+            ("security", Kind::AppTooOldSecurity),
+        ] {
             let server = FakeOpenBot::start(Shape::Answers(name));
             let problem = probe(&server.address()).expect_err(name);
-            assert_eq!(kind_of(&problem), Some(Kind::AppTooOld), "{name}");
+            assert_eq!(kind_of(&problem), Some(kind), "{name}");
         }
     }
 

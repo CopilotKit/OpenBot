@@ -18,6 +18,9 @@ export const API_VERSIONS: readonly string[] = ["v2"];
 
 /** What a person reads when the app is older than the OpenBot it talks to serves. */
 export const APP_UPDATE_SENTENCE = "Update OpenBot";
+/** What a person reads in its place when the minimum the app is below was raised for a security problem. */
+export const SECURITY_UPDATE_SENTENCE =
+  "This version of OpenBot has a security problem. Update to keep using it.";
 
 /** The apps that name themselves, as the server's minimums list them. */
 type ClientKind = "web" | "desktop" | "mobile" | "recorder";
@@ -77,13 +80,14 @@ function major(version: string): number | undefined {
 
 /**
  * - `ok`: they can. Features the server lacks are hidden by the fields that offer them, never by a version.
- * - `app`: the app is too old. "Update OpenBot".
+ * - `app`: the app is too old. "Update OpenBot". `security` when the minimum it is below was raised for a security
+ *   problem in older releases (the server names the app in `securityMinimumClients` above its version too).
  * - `server`: the server serves only API versions older than any the app speaks. The phone app adds nothing for it:
  *   whoever runs that OpenBot keeps it and their apps matched, and the screens say what failed, as they always have.
  */
 export type Compatibility =
   | { fit: "ok" }
-  | { fit: "app"; minimum?: string }
+  | { fit: "app"; minimum?: string; security?: true }
   | { fit: "server" };
 
 /**
@@ -91,7 +95,11 @@ export type Compatibility =
  * publishes no `api` is from a release before this check, and every such release serves v2.
  */
 export function compatibility(
-  deployment: { api?: unknown; minimumClients?: unknown },
+  deployment: {
+    api?: unknown;
+    minimumClients?: unknown;
+    securityMinimumClients?: unknown;
+  },
   client: { kind: ClientKind; version: string; speaks?: readonly string[] },
 ): Compatibility {
   const speaks = client.speaks ?? API_VERSIONS;
@@ -109,42 +117,59 @@ export function compatibility(
     );
     return newestServed > newestSpoken ? { fit: "app" } : { fit: "server" };
   }
-  const minimums =
-    deployment.minimumClients && typeof deployment.minimumClients === "object"
-      ? (deployment.minimumClients as Record<string, unknown>)
-      : {};
-  const minimum = minimums[client.kind];
-  if (isVersion(minimum)) {
-    const order = compareVersions(client.version, minimum);
-    if (order !== undefined && order < 0) return { fit: "app", minimum };
+  const minimum = minimumFor(deployment.minimumClients, client.kind);
+  if (minimum && below(client.version, minimum)) {
+    const floor = minimumFor(deployment.securityMinimumClients, client.kind);
+    return floor && below(client.version, floor)
+      ? { fit: "app", minimum, security: true }
+      : { fit: "app", minimum };
   }
   return { fit: "ok" };
 }
 
+/** The release `minimums` names for `kind`, when it names one. */
+function minimumFor(minimums: unknown, kind: ClientKind): string | undefined {
+  if (!minimums || typeof minimums !== "object") return undefined;
+  const minimum = (minimums as Record<string, unknown>)[kind];
+  return isVersion(minimum) ? minimum : undefined;
+}
+
+/** Whether `version` is a release before `minimum`. */
+function below(version: string, minimum: string): boolean {
+  const order = compareVersions(version, minimum);
+  return order !== undefined && order < 0;
+}
+
 /**
  * What the update screen says under "Update OpenBot": OpenBot's own sentence for refusing this app (as
- * shared/client-version.ts `clientUpdateDetail` words it for the phone app), with the release it needs when known.
+ * shared/client-version.ts `clientUpdateDetail` words it for the phone app), with the release it needs when known, or
+ * the security sentence when the minimum was raised for a security problem.
  */
-export function phoneUpdateDetail(minimum?: string): string {
+export function phoneUpdateDetail(
+  minimum?: string,
+  security?: boolean,
+): string {
+  if (security) return SECURITY_UPDATE_SENTENCE;
   return isVersion(minimum)
     ? `This OpenBot needs the OpenBot phone app ${minimum.replace(/^v/, "")} or later. Update OpenBot, then try again.`
     : "This OpenBot needs a newer OpenBot phone app. Update OpenBot, then try again.";
 }
 
-/** What the root layout shows: the app, or "Update OpenBot". */
-export type VersionVerdict = { kind: "ok" } | { kind: "app"; detail: string };
+/** What the root layout shows: the app, or "Update OpenBot" (`security` when it is for a security problem). */
+export type VersionVerdict =
+  | { kind: "ok" }
+  | { kind: "app"; detail: string; security?: true };
 
 /**
  * Anything that learns OpenBot refused this app as too old (a request's CLIENT_UPDATE_REQUIRED) says so here, and the
  * root layout, which listens, shows the update screen in place of whatever was open.
  */
-const listeners = new Set<(detail: string) => void>();
-export function reportUpdateRequired(detail: string): void {
-  for (const listener of listeners) listener(detail);
+type UpdateRequired = (detail: string, security: boolean) => void;
+const listeners = new Set<UpdateRequired>();
+export function reportUpdateRequired(detail: string, security = false): void {
+  for (const listener of listeners) listener(detail, security);
 }
-export function onUpdateRequired(
-  listener: (detail: string) => void,
-): () => void {
+export function onUpdateRequired(listener: UpdateRequired): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);

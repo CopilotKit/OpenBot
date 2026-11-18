@@ -15,6 +15,7 @@ import {
   MINIMUM_CLIENTS,
   parseClientHeader,
   RELEASE,
+  SECURITY_UPDATE_SENTENCE,
 } from "../client-version";
 import cases from "../fixtures/client-version/cases.json";
 
@@ -109,6 +110,20 @@ describe("what this release publishes", () => {
       "This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.",
     );
   });
+
+  test("a minimum raised for a security problem says so, for every app", () => {
+    expect(SECURITY_UPDATE_SENTENCE).toBe(
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    );
+    for (const kind of CLIENT_KINDS) {
+      expect(clientUpdateDetail(kind, "1.2.0", true)).toBe(
+        SECURITY_UPDATE_SENTENCE,
+      );
+      expect(clientUpdateDetail(kind, "1.2.0", false)).toBe(
+        clientUpdateDetail(kind, "1.2.0"),
+      );
+    }
+  });
 });
 
 describe("each app's decision from real deployment answers", () => {
@@ -123,8 +138,13 @@ describe("each app's decision from real deployment answers", () => {
         cases.deployments[each.deployment as keyof typeof cases.deployments];
       const fit = compatibility(deployment, client);
       expect(fit.fit).toBe(each.fit as "ok" | "app" | "server");
+      // An app below a minimum raised for security is told so; one below a plain raise is not.
       if ("minimum" in each)
-        expect(fit).toEqual({ fit: "app", minimum: each.minimum as string });
+        expect(fit).toEqual({
+          fit: "app",
+          minimum: each.minimum as string,
+          ...("security" in each && each.security ? { security: true } : {}),
+        });
     });
   }
 });

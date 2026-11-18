@@ -29,6 +29,15 @@ pub const API_VERSIONS: &[&str] = &["v2"];
 /// offers this app's own update for it, wherever it shows.
 pub const APP_TOO_OLD: &str = "app-too-old";
 
+/// The `kind` for the same when the minimum this app is below was raised because of a security
+/// problem in older releases. The window offers the same update and says [`SECURITY_UPDATE`].
+pub const APP_TOO_OLD_SECURITY: &str = "app-too-old-security";
+
+/// What the person reads in place of "Update OpenBot" when the minimum was raised for a security
+/// problem (`shared/client-version.ts` `SECURITY_UPDATE_SENTENCE`).
+pub const SECURITY_UPDATE: &str =
+    "This version of OpenBot has a security problem. Update to keep using it.";
+
 static VERSION: OnceLock<String> = OnceLock::new();
 
 /**
@@ -99,8 +108,13 @@ pub enum Fit {
     /// They can. Features that OpenBot lacks are hidden by the fields that offer them.
     Ok,
     /// The app is too old: that OpenBot serves only newer API versions, or names a minimum for
-    /// this app above its version (`minimum`). "Update OpenBot".
-    App { minimum: Option<String> },
+    /// this app above its version (`minimum`). "Update OpenBot". `security` when it also names this
+    /// app in `securityMinimumClients` above its version: the minimum is there for a security
+    /// problem, and the person reads [`SECURITY_UPDATE`] instead.
+    App {
+        minimum: Option<String>,
+        security: bool,
+    },
     /// That OpenBot is too old: it serves only API versions older than any the app speaks.
     Server,
 }
@@ -209,25 +223,30 @@ pub fn compatibility(deployment: &Deployment, kind: &str, version: &str, speaks:
         let newest_spoken = speaks.iter().filter_map(|v| major(v)).max();
         // Only newer versions than any the app speaks: the app is behind. Otherwise the server is.
         return if newest_served > newest_spoken {
-            Fit::App { minimum: None }
+            Fit::App {
+                minimum: None,
+                security: false,
+            }
         } else {
             Fit::Server
         };
     }
-    let minimum = deployment
-        .get("minimumClients")
-        .and_then(serde_json::Value::as_object)
-        .and_then(|minimums| minimums.get(kind))
-        .and_then(serde_json::Value::as_str)
-        .filter(|minimum| is_version(minimum));
-    if let Some(minimum) = minimum {
-        if compare_versions(version, minimum) == Some(std::cmp::Ordering::Less) {
-            return Fit::App {
-                minimum: Some(minimum.to_owned()),
-            };
-        }
+    let below = |field: &str| {
+        deployment
+            .get(field)
+            .and_then(serde_json::Value::as_object)
+            .and_then(|minimums| minimums.get(kind))
+            .and_then(serde_json::Value::as_str)
+            .filter(|minimum| is_version(minimum))
+            .filter(|minimum| compare_versions(version, minimum) == Some(std::cmp::Ordering::Less))
+    };
+    match below("minimumClients") {
+        Some(minimum) => Fit::App {
+            minimum: Some(minimum.to_owned()),
+            security: below("securityMinimumClients").is_some(),
+        },
+        None => Fit::Ok,
     }
-    Fit::Ok
 }
 
 /// [`compatibility`] for this app.
@@ -248,6 +267,14 @@ pub fn why(deployment: &Deployment, fit: &Fit) -> String {
     match fit {
         Fit::App {
             minimum: Some(minimum),
+            security: true,
+        } => format!(
+            "the deployment's minimumClients.{KIND} is {minimum}, raised for a security problem \
+             (securityMinimumClients); {this}"
+        ),
+        Fit::App {
+            minimum: Some(minimum),
+            ..
         } => format!("the deployment's minimumClients.{KIND} is {minimum}; {this}"),
         _ => format!("the deployment says {served}; {this}"),
     }
@@ -289,11 +316,16 @@ pub fn local_problem(base: &str, install_token: Option<&str>) -> Option<Problem>
         return None;
     };
     let decided = fit(&deployment);
-    let Fit::App { .. } = decided else {
+    let Fit::App { security, .. } = decided else {
         return None;
     };
-    let mut problem = Problem::with(LOCAL_APP_TOO_OLD, why(&deployment, &decided));
-    problem.kind = Some(APP_TOO_OLD);
+    let (said, kind) = if security {
+        (SECURITY_UPDATE, APP_TOO_OLD_SECURITY)
+    } else {
+        (LOCAL_APP_TOO_OLD, APP_TOO_OLD)
+    };
+    let mut problem = Problem::with(said, why(&deployment, &decided));
+    problem.kind = Some(kind);
     Some(problem)
 }
 
@@ -339,7 +371,7 @@ mod tests {
     fn every_case_in_the_shared_fixture_is_decided_as_the_contract_says() {
         let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
         let list = cases["cases"].as_array().unwrap();
-        assert!(list.len() >= 15, "the fixture lost its cases");
+        assert!(list.len() >= 19, "the fixture lost its cases");
         for case in list {
             let name = case["deployment"].as_str().unwrap();
             let client = &case["client"];
@@ -359,6 +391,7 @@ mod tests {
                 "server" => Fit::Server,
                 "app" => Fit::App {
                     minimum: case["minimum"].as_str().map(str::to_owned),
+                    security: case["security"].as_bool().unwrap_or(false),
                 },
                 other => panic!("an unknown fit {other}"),
             };
@@ -407,22 +440,30 @@ mod tests {
     fn the_openbot_on_this_computer_says_update_openbot_only_when_it_needs_a_newer_app() {
         use crate::connected::fake_openbot::{FakeOpenBot, Shape};
         let _version = as_version("1.1.0");
-        for (shape, too_old) in [
-            (Shape::Answers("raised"), true),
-            (Shape::Answers("v3-only"), true),
-            (Shape::Answers("current"), false),
-            (Shape::Answers("v1.1.0"), false),
+        let plain = Some((
+            APP_TOO_OLD,
+            "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+        ));
+        let security = Some((
+            APP_TOO_OLD_SECURITY,
+            "This version of OpenBot has a security problem. Update to keep using it.",
+        ));
+        for (shape, said) in [
+            (Shape::Answers("raised"), plain),
+            (Shape::Answers("v3-only"), plain),
+            (Shape::Answers("security"), security),
+            (Shape::Answers("current"), None),
+            (Shape::Answers("v1.1.0"), None),
         ] {
             let server = FakeOpenBot::start(shape.clone());
             let problem = local_problem(&server.address(), Some("install-token-abc"));
-            assert_eq!(problem.is_some(), too_old, "{shape:?}: {problem:?}");
-            if let Some(problem) = problem {
-                assert_eq!(problem.kind, Some(APP_TOO_OLD));
-                assert_eq!(
-                    problem.said,
-                    "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going."
-                );
-            }
+            assert_eq!(
+                problem
+                    .as_ref()
+                    .map(|problem| (problem.kind.unwrap(), problem.said.as_str())),
+                said,
+                "{shape:?}: {problem:?}"
+            );
             let asked = server.seen_at(crate::connected::address::DEPLOYMENT);
             assert_eq!(asked.len(), 1, "{shape:?}");
             assert_eq!(asked[0].header("openbot-client"), Some("desktop/1.1.0"));

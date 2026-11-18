@@ -21,7 +21,9 @@ export async function checkVersion(): Promise<VersionVerdict> {
     deployment = await getDeployment(DEPLOYMENT_ORGANIZATION_ID);
   } catch (error) {
     if (error instanceof ApiError && error.code === CLIENT_UPDATE_REQUIRED)
-      return { kind: "app", detail: error.message };
+      return error.security
+        ? { kind: "app", detail: error.message, security: true }
+        : { kind: "app", detail: error.message };
     return { kind: "ok" };
   }
   // A build that names no release can still tell an API it doesn't speak; it is never refused for a version.
@@ -30,6 +32,12 @@ export async function checkVersion(): Promise<VersionVerdict> {
     version: RELEASE ?? "0.0.0",
   });
   if (fit.fit === "app")
-    return { kind: "app", detail: phoneUpdateDetail(fit.minimum) };
+    return fit.security
+      ? {
+          kind: "app",
+          detail: phoneUpdateDetail(fit.minimum, true),
+          security: true,
+        }
+      : { kind: "app", detail: phoneUpdateDetail(fit.minimum) };
   return { kind: "ok" };
 }
