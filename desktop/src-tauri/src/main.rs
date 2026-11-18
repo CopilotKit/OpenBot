@@ -138,6 +138,8 @@ struct Shell {
     security_floor: security_floor::Known,
     /// This run already stopped OpenBot here for the security floor and showed its notice.
     security_floor_held: std::sync::atomic::AtomicBool,
+    /// The floor kept in the config folder has been read in this run (`know_kept_security_floor`).
+    security_floor_read: std::sync::atomic::AtomicBool,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -2394,12 +2396,19 @@ fn security_floor_kept<R: tauri::Runtime>(
         .map(|folder| security_floor::Kept::at(&folder))
 }
 
-/// The floor this app verified before, read before the window asks, so a floor kept offline
-/// holds from the first moment of a launch.
+/// The floor this app verified before, read once per run the first time anything asks (the window,
+/// Start, the schedule), so a floor kept offline holds from the first moment of a launch.
 fn know_kept_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let shell = app.state::<Shell>();
+    if shell
+        .security_floor_read
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
     let (_, keys) = security_floor_sources(app);
     if let Some(kept) = security_floor_kept(app) {
-        app.state::<Shell>().security_floor.record(kept.read(&keys));
+        shell.security_floor.record(kept.read(&keys));
     }
 }
 
@@ -2417,6 +2426,7 @@ fn security_floor_place<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> securit
 /// The release this app has to update to before it can be used here, when it is below the
 /// security floor. None otherwise, and always None connected to a company's own OpenBot.
 fn security_floor_block<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<semver::Version> {
+    know_kept_security_floor(app);
     let floor = app.state::<Shell>().security_floor.get();
     let version = app.package_info().version.clone();
     let own = upgrade::own().version;
@@ -2427,6 +2437,7 @@ fn security_floor_block<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<
 
 /// The back end at `root` is below the floor, so it may not start until Start upgrades it.
 fn security_floor_backend_due<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) -> bool {
+    know_kept_security_floor(app);
     let floor = app.state::<Shell>().security_floor.get();
     deployment::installed(root)
         .and_then(|found| {
@@ -13180,8 +13191,6 @@ fn main() {
             _ => {}
         })
         .setup(move |app| {
-            // Before the window can ask: a floor kept offline holds from the first moment.
-            know_kept_security_floor(app.handle());
             build_main_window(app.handle())?;
             log_launch(app.handle(), local_offset);
             // The window is built visible, so this is its first show: a launch the installer
