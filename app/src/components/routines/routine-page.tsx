@@ -19,7 +19,10 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
-import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  routinesBackLabel,
+  routinesOf,
+} from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
   useDeletedHere,
@@ -248,8 +251,9 @@ export function RoutineRoutePage({
     deleteRoutineMutationKey,
     (id) => id === routineId,
   );
-  const back = routinesOf(agentId);
   const routine = routines.data?.routines.find((row) => row.id === routineId);
+  // Back to the Bot it belongs to, once that is known, wherever the page was opened from.
+  const back = routinesOf(agentId ?? routine?.botId);
   if (!routine)
     return (
       <RoutineDetailMissing
@@ -334,7 +338,7 @@ export function RoutinePage({
   ];
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: routinesBackLabel(back), linkProps: back }}
       description={
         routine.enabled
           ? `${routine.schedule} · ${routine.timezone} · Acts`

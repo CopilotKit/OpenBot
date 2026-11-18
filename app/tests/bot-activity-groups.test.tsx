@@ -253,9 +253,9 @@ test("lists the Bot's threads by state: needs you, working, scheduled, done, fai
   expect(rows.Failed).toEqual(["Task failed", "Weekly report run"]);
   expect(rows.Recurring).toEqual([
     "Morning digest",
-    "Routines",
     "Unpaid invoicesCheck-in",
     "Watch OpenBot releases",
+    "When it works",
   ]);
   expect(view.queryByText("Task other")).toBeNull();
   expect(view.queryByText("Which venue?")).toBeNull();

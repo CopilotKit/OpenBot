@@ -8,16 +8,19 @@ import {
 } from "@/components/ui/tooltip";
 
 /**
- * New routine, opening the create screen. `agentId` starts it out for one Bot.
+ * New routine, opening the create screen. `agentId` starts it out for one Bot, where the button says
+ * "Add": on a Bot's "When it works" it adds one more when to that Bot.
  *
  * `outline` where it stands alone in an empty state, `ghost` on a page's title row, as Add
  * credential and New skill are drawn.
  */
 export function NewRoutineButton({
   agentId,
+  label = "New routine",
   variant = "ghost",
 }: {
   agentId?: string;
+  label?: string;
   variant?: "ghost" | "outline";
 }) {
   // A list drawn with no router around it, as a skin's own tests draw it, has nowhere to link to.
@@ -35,7 +38,7 @@ export function NewRoutineButton({
       variant={variant}
     >
       <IconPlus />
-      New routine
+      {label}
     </Button>
   );
 }

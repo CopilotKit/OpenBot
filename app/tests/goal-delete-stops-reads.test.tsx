@@ -109,8 +109,8 @@ function drawAt(path: string) {
       }),
       createRoute({
         getParentRoute: () => root,
-        path: "/routines",
-        component: () => <h1>Routines</h1>,
+        path: "/bots/$agentId/routines",
+        component: () => <h1>When it works</h1>,
       }),
     ]),
   });
@@ -134,7 +134,8 @@ test("a deleted goal's triggers and runs are never asked for again", async () =>
   const dialog = await view.findByRole("dialog");
   await user.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(
-    () => expect(router.state.location.pathname).toBe("/routines"),
+    () =>
+      expect(router.state.location.pathname).toBe("/bots/lead-desk/routines"),
     { timeout: 3_000 },
   );
   // Long enough for a read started by the delete to have gone out.

@@ -96,46 +96,42 @@ function draw() {
   );
 }
 
-/** A line ending in `text`: on the every-Bot list it opens with the Bot's name. */
-const endsWith = (text: string) =>
-  new RegExp(`${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
-
-/** The row's heading, without the small kind label ("Schedule") beside it. */
-function titleOf(element: HTMLElement) {
-  return element.closest('[data-slot="item-title"]')?.firstElementChild
-    ?.textContent;
+/** The row a piece of text is on. */
+function rowOf(element: HTMLElement) {
+  return element.closest('[data-slot="item"]') as HTMLElement;
 }
 
-test("a named routine is headed by its name, with its schedule under it", async () => {
+/** The row's heading: its when. */
+function titleOf(row: HTMLElement) {
+  return row.querySelector('[data-slot="item-title"]')?.textContent;
+}
+
+test("a named routine is headed by its schedule, with its name and what it does under it", async () => {
   const view = draw();
 
-  const named = await view.findByText("Morning briefing");
-  expect(titleOf(named)).toBe("Morning briefing");
-  // The zone is said where it isn't the reader's own; the details always say it.
-  expect(
-    view.getByText(
-      endsWith(
-        `${scheduleWords({ schedule: "Every day at 08:00", timezone: "Europe/Madrid" })} · Acts`,
-      ),
-    ),
-  ).toBeTruthy();
-  expect(
-    view.getByText("Summarise my unread mail and today's meetings."),
-  ).toBeTruthy();
+  const row = rowOf(await view.findByText("Morning briefing"));
+  // The zone is said where it isn't the reader's own.
+  expect(titleOf(row)).toBe(
+    scheduleWords({
+      schedule: "Every day at 08:00",
+      timezone: "Europe/Madrid",
+    }),
+  );
+  expect(row.textContent).toContain(
+    "Summarise my unread mail and today's meetings.",
+  );
+  expect(row.textContent).toContain("Posts in Briefings");
 });
 
-test("a routine with no name is headed by its instruction, with its schedule under it", async () => {
+test("a routine with no name is headed by its schedule, with its instruction under it", async () => {
   const view = draw();
 
-  const unnamed = await view.findByText("Post the day's open pull requests.");
-  expect(titleOf(unnamed)).toBe("Post the day's open pull requests.");
-  expect(
-    view.getByText(
-      endsWith(
-        `${scheduleWords({ schedule: "Weekdays at 18:00", timezone: "UTC" })} · Acts`,
-      ),
-    ),
-  ).toBeTruthy();
+  const row = rowOf(
+    await view.findByText("Post the day's open pull requests."),
+  );
+  expect(titleOf(row)).toBe(
+    scheduleWords({ schedule: "Weekdays at 18:00", timezone: "UTC" }),
+  );
 });
 
 test("a schedule names its time zone only where it isn't the reader's own", () => {

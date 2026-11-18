@@ -22,7 +22,10 @@ import {
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
 import { GoalSchedules } from "@/components/routines/goal-schedules";
-import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  routinesBackLabel,
+  routinesOf,
+} from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
   useDeletedHere,
@@ -147,8 +150,9 @@ export function GoalRoutePage({
     deleteResponsibilityMutationKey,
     (id) => id === goalId,
   );
-  const back = routinesOf(agentId);
   const goal = goals.data?.find((row) => row.id === goalId);
+  // Back to the Bot it belongs to, once that is known, wherever the page was opened from.
+  const back = routinesOf(agentId ?? goal?.botId);
 
   if (goal)
     return (
@@ -249,7 +253,7 @@ export function GoalPage({
 
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: routinesBackLabel(back), linkProps: back }}
       description={summaryFor(goal, triggers.data, routines)}
       title={goal.title}
     >

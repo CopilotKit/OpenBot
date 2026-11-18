@@ -76,7 +76,7 @@ test("a goal that runs only when asked is counted as on demand, never as schedul
   };
   // The Activity page lists both under Recurring, which ends on a row to the Bot's Routines.
   const sections = glance(data, BotActivitySections);
-  const routines = (await sections.findByText("Routines")).closest("a");
+  const routines = (await sections.findByText("When it works")).closest("a");
   expect(routines?.getAttribute("href")).toBe("/bots/scout/routines");
   expect(routines?.textContent).toContain("1 scheduled · 1 on demand");
   expect(sections.queryByRole("heading", { name: "On demand" })).toBeNull();
@@ -159,7 +159,7 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
     .closest("section") as HTMLElement;
   expect(recurring.textContent).toContain("Check releases 1");
   expect(recurring.textContent).toContain("Watch OpenBot releases");
-  const routines = view.getByText("Routines").closest("a");
+  const routines = view.getByText("When it works").closest("a");
   expect(routines?.textContent).toContain("2 scheduled");
   expect(routines?.textContent).not.toContain("4 scheduled");
 

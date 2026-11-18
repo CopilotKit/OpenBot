@@ -99,7 +99,7 @@ test("the goal is found in the goals list and drawn as its page, back to the lis
   const view = await visit("goal-1", "bot-1");
   await view.findByRole("heading", { level: 1, name: "Watch the queue" });
   // The bar's back link: drawn as a button, an anchor underneath.
-  const back = view.getByText("Routines").closest("a");
+  const back = view.getByText("When it works").closest("a");
   expect(back?.getAttribute("href")).toBe("/bots/bot-1/routines");
 });
 

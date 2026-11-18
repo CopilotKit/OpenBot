@@ -3,6 +3,7 @@ import { type MutationKey, useMutationState } from "@tanstack/react-query";
 import { type LinkProps, Navigate } from "@tanstack/react-router";
 import { LoadingRows } from "@/components/layout/loading-rows";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
+import { routinesBackLabel } from "@/components/routines/new-routine-page";
 import { Button } from "@/components/ui/button";
 
 const WORDS = {
@@ -71,7 +72,7 @@ export function RoutineDetailMissing({
   if (deleted) return <Navigate {...back} replace />;
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: routinesBackLabel(back), linkProps: back }}
       title={words.title}
     >
       {read.isPending ? (

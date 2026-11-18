@@ -22,7 +22,8 @@ import {
   scheduleWords,
 } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
-import { mergeRoutines } from "@/lib/routines/merged";
+import { describeEvent } from "@/lib/routines/events";
+import { mergeRoutines, whenItWorksSummary } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
 import { Route as ResponsibilitiesRoute } from "@/routes/_authed/_app/responsibilities";
@@ -224,39 +225,93 @@ function draw(scope: string | null = "expenses") {
   );
 }
 
-test("only this Bot's goals are listed, each as a goal with its outcome", async () => {
+/** The heading of the row that `text` is on: its when. */
+function whenOf(element: HTMLElement) {
+  return element
+    .closest('[data-slot="item"]')
+    ?.querySelector('[data-slot="item-title"]')?.textContent;
+}
+
+test("only this Bot's goals are listed, each with its outcome and no kind's name", async () => {
   serving();
   const view = draw();
-  const title = await view.findByText("Reconcile receipts");
-  const row = title.closest("a, button") as HTMLElement;
-  expect(within(row).getByText("Goal")).toBeTruthy();
+  const title = await view.findAllByText("Reconcile receipts");
+  const row = title[0]?.closest("a, button") as HTMLElement;
+  expect(within(row).queryByText("Goal")).toBeNull();
   expect(
     within(row).getByText("Until: The receipts match the bank."),
   ).toBeTruthy();
   expect(view.queryByText("Keep the wiki fresh")).toBeNull();
 });
 
-test("a routine, a goal and a check-in are one list, each in four parts", async () => {
+test("the Settings summary is the first when and how many more, finished goals left out", () => {
+  const summary = (routines: RoutineRecord[], goals: unknown[]) =>
+    whenItWorksSummary(
+      mergeRoutines({
+        routines,
+        goals: goals as never,
+        checkIns: [],
+        agentId: "expenses",
+      }),
+      describeEvent,
+    );
+  expect(summary([], [])).toBe("Not set");
+  expect(summary([routine("r1", "expenses")], [])).toBe("Weekdays at 09:00");
+  expect(
+    summary(
+      [routine("r1", "expenses")],
+      [
+        goal("g1", "expenses", "Reconcile receipts"),
+        { ...goal("g9", "expenses", "Close the quarter"), status: "completed" },
+      ],
+    ),
+  ).toBe("Weekdays at 09:00, and 1 more");
+  // A goal with no schedule and no event known here is named by what it does.
+  expect(summary([], [goal("g1", "expenses", "Reconcile receipts")])).toBe(
+    "Reconcile receipts",
+  );
+});
+
+test("a finished goal is listed apart, under Done", async () => {
+  serving({
+    goals: [
+      goal("g1", "expenses", "Reconcile receipts"),
+      {
+        ...goal("g9", "expenses", "Close the quarter"),
+        status: "completed" as never,
+      },
+    ],
+  });
+  const view = draw();
+  const heading = await view.findByRole("heading", { name: "Done" });
+  const done = heading.closest("section") as HTMLElement;
+  expect(done.textContent).toContain("Close the quarter");
+  expect(done.textContent).toContain("Completed");
+  expect(done.textContent).not.toContain("Reconcile receipts");
+});
+
+test("a routine, a goal and a check-in are one list, each a when above a what", async () => {
   serving({
     routines: [routine("r1", "expenses")],
     checkIns: [checkIn("c1", "expenses", "The launch brief")],
   });
   const view = draw();
-  // A routine: what it does, when it starts, and that it acts.
-  expect(await view.findByText("Post the standup summary.")).toBeTruthy();
-  expect(
-    view.getByText(
-      `${scheduleWords({ schedule: "Weekdays at 09:00", timezone: "UTC" })} · Acts`,
-    ),
-  ).toBeTruthy();
+  // A routine: its schedule heads the row, what it does is under it, then where it posts.
+  const standup = await view.findByText("Post the standup summary.");
+  expect(whenOf(standup)).toBe(
+    scheduleWords({ schedule: "Weekdays at 09:00", timezone: "UTC" }),
+  );
+  expect(standup.closest('[data-slot="item"]')?.textContent).toContain(
+    "Posts in Standup",
+  );
   // A goal, as above.
-  expect(view.getByText("Reconcile receipts")).toBeTruthy();
-  // A check-in: what it watches, how often, and that it only tells you.
-  const checkInRow = view
-    .getByText("The launch brief")
-    .closest("a, button") as HTMLElement;
-  expect(within(checkInRow).getByText("Check-in")).toBeTruthy();
-  expect(checkInRow.textContent).toContain("Once a day · Tells you");
+  expect(view.getAllByText("Reconcile receipts").length).toBeGreaterThan(0);
+  // A check-in: how often heads the row, what it watches is under it, and it only tells you.
+  const brief = view.getByText("The launch brief");
+  expect(whenOf(brief)).toBe("Once a day");
+  const checkInRow = brief.closest("a, button") as HTMLElement;
+  expect(within(checkInRow).queryByText("Check-in")).toBeNull();
+  expect(checkInRow.textContent).toContain("Only tells you");
   // One list: no heading names a kind.
   expect(view.queryByRole("heading", { name: /Goals|Check-ins/ })).toBeNull();
 });
@@ -316,12 +371,14 @@ test("a routine that runs a goal, on a row of its own, says so and never shows t
     '[data-slot="item"]',
   ) as HTMLElement;
   expect(within(named).getByText("Runs a goal")).toBeTruthy();
-  // Unnamed: what it does heads its own row.
+  // Unnamed: its schedule heads its row, and what it does is under it.
   const unnamed = view
     .getAllByText("Runs a goal")
     .map((words) => words.closest('[data-slot="item"]'))
     .find((item) => item !== named) as HTMLElement;
-  expect(unnamed.textContent).toContain("Schedule");
+  expect(
+    unnamed.querySelector('[data-slot="item-title"]')?.textContent,
+  ).toContain("Every day at 08:00");
   expect(document.body.textContent).not.toContain("run_goal");
   // Its page says the same, in its title and nowhere the instruction.
   fireEvent.click(unnamed.closest("a") as HTMLElement);
@@ -416,16 +473,16 @@ test("New offers no kinds", async () => {
 test("the empty state gives one example and one way in", async () => {
   serving({ goals: [] });
   const view = draw();
-  expect(await view.findByText("No routines for this Bot yet")).toBeTruthy();
+  expect(await view.findByText("Nothing set yet")).toBeTruthy();
   expect(document.body.textContent ?? "").toContain(
     "Like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.",
   );
   expect(document.body.textContent ?? "").not.toContain(
     "Make one with New routine",
   );
-  expect(
-    view.getAllByRole("button", { name: "New routine" }).length,
-  ).toBeGreaterThan(0);
+  expect(view.getAllByRole("button", { name: "Add" }).length).toBeGreaterThan(
+    0,
+  );
 });
 
 function redirectOf(route: { options: { beforeLoad?: unknown } }, input = {}) {
@@ -477,14 +534,14 @@ test("while the list loads it draws the list's shape, never the empty state", as
   }) as typeof fetch;
   const view = draw();
   expect(
-    await view.findByRole("status", { name: "Loading your routines" }),
+    await view.findByRole("status", { name: "Loading when it works" }),
   ).toBeTruthy();
-  expect(view.queryByText("No routines for this Bot yet")).toBeNull();
+  expect(view.queryByText("Nothing set yet")).toBeNull();
 
   release();
-  expect(await view.findByText("No routines for this Bot yet")).toBeTruthy();
+  expect(await view.findByText("Nothing set yet")).toBeTruthy();
   expect(
-    view.queryByRole("status", { name: "Loading your routines" }),
+    view.queryByRole("status", { name: "Loading when it works" }),
   ).toBeNull();
 });
 
@@ -662,7 +719,7 @@ test("a skipped last run is on the row, and a quiet success is not", async () =>
 test("on the every-Bot list a schedule's row names its Bot, and its page leads to that Bot", async () => {
   serving({ goals: [], routines: [routine("r1", "expenses")] });
   const view = draw(null);
-  expect(await view.findByText(/^Expenses · Weekdays at 09:00/)).toBeTruthy();
+  expect(await view.findByText(/^Expenses · Posts in Standup/)).toBeTruthy();
   const details = within(await openSchedule(view));
   expect(
     details.getByRole("link", { name: /Expenses/ }).getAttribute("href"),

@@ -13,7 +13,10 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
-import { routinesOf } from "@/components/routines/new-routine-page";
+import {
+  routinesBackLabel,
+  routinesOf,
+} from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
   useDeletedHere,
@@ -89,8 +92,9 @@ export function CheckInRoutePage({
     ({ setting, change }) =>
       change.kind === "remove" && setting.id === checkInId,
   );
-  const back = routinesOf(agentId);
   const setting = settings.data?.find((row) => row.id === checkInId);
+  // Back to the Bot it belongs to, once that is known, wherever the page was opened from.
+  const back = routinesOf(agentId ?? setting?.botId);
   if (!setting)
     return (
       <RoutineDetailMissing
@@ -156,7 +160,7 @@ export function CheckInPage({
 
   return (
     <PageShell
-      backButton={{ label: "Routines", linkProps: back }}
+      backButton={{ label: routinesBackLabel(back), linkProps: back }}
       description={[setting.subject ? botName : null, setting.focus]
         .filter(Boolean)
         .join(" · ")}

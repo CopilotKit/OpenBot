@@ -745,7 +745,7 @@ test("a refused schedule takes the goal back, says why, and Create works again",
   );
 });
 
-test("the Routines back link waits while the routine is being created", async () => {
+test("the When it works back link waits while the routine is being created", async () => {
   let answer: (response: Response) => void = () => {};
   serving({
     routines: () =>
@@ -756,7 +756,7 @@ test("the Routines back link waits while the routine is being created", async ()
   const view = draw();
   const user = userEvent.setup({ document });
   expect(
-    (await view.findByRole("button", { name: "Routines" })).getAttribute(
+    (await view.findByRole("button", { name: "When it works" })).getAttribute(
       "href",
     ),
   ).toBe("/bots/bot-1/routines");
@@ -774,7 +774,7 @@ test("the Routines back link waits while the routine is being created", async ()
       ),
     ).toBe(true),
   );
-  const back = view.getByRole("button", { name: "Routines" });
+  const back = view.getByRole("button", { name: "When it works" });
   expect(back.hasAttribute("disabled")).toBe(true);
   expect(back.hasAttribute("href")).toBe(false);
   answer(Response.json({ routine: { id: "r1" } }, { status: 201 }));

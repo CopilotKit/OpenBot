@@ -390,7 +390,7 @@ export function BotActivitySections({
                 />
               </Fragment>
             ))}
-            {/* The Bot's routines are changed on one page, its Routines. This row goes there. */}
+            {/* The Bot's routines are changed on one page, its When it works. This row goes there. */}
             {group.id === "recurring" ? (
               <>
                 <Separator />
@@ -404,7 +404,7 @@ export function BotActivitySections({
                     <IconClock />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle>Routines</ItemTitle>
+                    <ItemTitle>When it works</ItemTitle>
                     <ItemDescription>
                       {routinesSummary(activity.data, {
                         goalRoutineIds,

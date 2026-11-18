@@ -119,6 +119,63 @@ export function routineDoes(
   return routine.goalId ? "Runs a goal" : routine.instruction;
 }
 
+/**
+ * A row's "when", in words: a routine's schedule, a goal's starts, a check-in's interval. Null for a
+ * goal whose starts aren't known yet (its triggers or its routines are still being read).
+ */
+export function whenWords(
+  row: MergedRoutine,
+  triggerWords: readonly string[] | undefined,
+  sourceLabel: (
+    source: ResponsibilityRecord["subscriptions"][number],
+  ) => string,
+): string | null {
+  switch (row.kind) {
+    case "routine":
+      return row.routine.schedule;
+    case "goal":
+      return goalStarts(row.goal, triggerWords, row.routines, sourceLabel);
+    case "check-in":
+      return intervalLabel(row.checkIn.intervalMinutes);
+  }
+}
+
+/** A row's "what", in words: what the person called it, else what it does. */
+export function whatWords(row: MergedRoutine): string {
+  switch (row.kind) {
+    case "routine":
+      return row.routine.title ?? routineDoes(row.routine);
+    case "goal":
+      return row.goal.title;
+    case "check-in":
+      return row.checkIn.focus || row.checkIn.subject || "What it reads";
+  }
+}
+
+/** A goal that was completed: it can't be resumed, so it is listed apart, under Done. */
+export function isDone(row: MergedRoutine): boolean {
+  return row.kind === "goal" && row.goal.status === "completed";
+}
+
+/**
+ * The Settings tab's summary of a Bot's "When it works": the first one's "when" and how many more,
+ * "Every weekday at 9, and 2 more". Finished goals don't count. A goal's triggers aren't read for
+ * this, so one that starts only by a trigger is named by its "what" instead.
+ */
+export function whenItWorksSummary(
+  rows: readonly MergedRoutine[],
+  sourceLabel: (
+    source: ResponsibilityRecord["subscriptions"][number],
+  ) => string,
+): string {
+  const listed = rows.filter((row) => !isDone(row));
+  const first = listed[0];
+  if (!first) return "Not set";
+  const words = whenWords(first, undefined, sourceLabel) ?? whatWords(first);
+  const more = listed.length - 1;
+  return more > 0 ? `${words}, and ${more} more` : words;
+}
+
 /** A check-in's interval, in words. */
 export const CHECK_IN_INTERVALS = [
   { minutes: 60, label: "Every hour" },

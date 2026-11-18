@@ -190,7 +190,7 @@ test("someone who neither owns the Bot nor administers the deployment does not s
   expect(view.queryByText("Sharing")).toBeNull();
 });
 
-test("the personal edition shows Routines, Skills, Apps, Computer, Approvals, Setup and Agents, in that order", async () => {
+test("the personal edition shows When it works, Skills, Apps, Computer, Approvals, Setup and Agents, in that order", async () => {
   serving("admin");
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -206,7 +206,7 @@ test("the personal edition shows Routines, Skills, Apps, Computer, Approvals, Se
   ].map((title) => title.textContent);
   // Nothing else: no Memory (not offered), no Sharing (nobody to share with), no Reaching you.
   expect(titles).toEqual([
-    "Routines",
+    "When it works",
     "Skills",
     "Apps",
     "Computer",
@@ -226,7 +226,7 @@ test("the team edition keeps the order, with Memory, then Sharing and Reaching y
   ].map((title) => title.textContent);
   // No Computer row: this Bot has no computer of its own, and folders need OpenBot Desktop.
   expect(titles).toEqual([
-    "Routines",
+    "When it works",
     "Memory",
     "Skills",
     "Apps",
@@ -247,7 +247,12 @@ test("the rows sit under When it works, What it knows, What it uses and This Bot
   ).toEqual(["When it works", "What it knows", "What it uses", "This Bot"]);
   const groupOf = (title: string) =>
     view.getByText(title).closest("section")?.querySelector("h2")?.textContent;
-  expect(groupOf("Routines")).toBe("When it works");
+  expect(
+    view.container
+      .querySelector('a[href$="/routines"]')
+      ?.closest("section")
+      ?.querySelector("h2")?.textContent,
+  ).toBe("When it works");
   expect(groupOf("Skills")).toBe("What it knows");
   expect(groupOf("Approvals")).toBe("What it uses");
   expect(groupOf("Setup")).toBe("This Bot");
@@ -269,13 +274,17 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
 test("the rows for routines, reach, memory, approvals and agents say what this Bot has and open their pages", async () => {
   serving("user");
   const view = draw(BOT);
-  const row = async (title: string, summary: string, path: string) => {
-    expect(await view.findByText(summary)).toBeTruthy();
-    expect(view.getByText(title).closest("a")?.getAttribute("href")).toBe(
-      `/bots/expenses/${path}`,
+  const row = async (title: string, summary: string | RegExp, path: string) => {
+    const said = await view.findByText(summary);
+    // The row the summary is on, titled `title`: "When it works" is also its group's heading.
+    const link = said.closest("a");
+    expect(link?.querySelector('[data-slot="item-title"]')?.textContent).toBe(
+      title,
     );
+    expect(link?.getAttribute("href")).toBe(`/bots/expenses/${path}`);
   };
-  await row("Routines", "3 routines", "routines");
+  // The first of its three by the list's order, the routine that is on, and how many more.
+  await row("When it works", /, and 2 more$/, "routines");
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
   await row("Approvals", "1 rule", "approvals");

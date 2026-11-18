@@ -124,8 +124,10 @@ test("an empty Routines page offers New routine, and a Bot's own page starts it 
   queryClient.clear();
 
   const botPage = draw(<RoutinesList agentId="lead-desk" />, empty);
-  expect(await botPage.findByText("No routines for this Bot yet")).toBeTruthy();
-  expect(await newRoutineHref(botPage)).toBe("/routines/new?agentId=lead-desk");
+  expect(await botPage.findByText("Nothing set yet")).toBeTruthy();
+  expect(
+    (await botPage.findByRole("button", { name: "Add" })).getAttribute("href"),
+  ).toBe("/routines/new?agentId=lead-desk");
 });
 
 test("the Routines page says which Bot each routine belongs to", async () => {

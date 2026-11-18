@@ -111,8 +111,8 @@ function drawAt(path: string) {
       }),
       createRoute({
         getParentRoute: () => root,
-        path: "/routines",
-        component: () => <h1>Routines</h1>,
+        path: "/bots/$agentId/routines",
+        component: () => <h1>When it works</h1>,
       }),
     ]),
   });
@@ -124,7 +124,7 @@ function drawAt(path: string) {
   return { view, router };
 }
 
-test("Delete on a routine's page goes back to Routines", async () => {
+test("Delete on a routine's page goes back to its Bot's When it works", async () => {
   serving();
   const { view, router } = drawAt(`/routines/schedules/${ROUTINE.id}`);
   const user = userEvent.setup({ document });
@@ -140,10 +140,11 @@ test("Delete on a routine's page goes back to Routines", async () => {
   await user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
   await waitFor(
-    () => expect(router.state.location.pathname).toBe("/routines"),
+    () =>
+      expect(router.state.location.pathname).toBe("/bots/lead-desk/routines"),
     { timeout: 3_000 },
   );
-  expect(view.getByRole("heading", { name: "Routines" })).toBeTruthy();
+  expect(view.getByRole("heading", { name: "When it works" })).toBeTruthy();
   expect(view.queryByText("This routine isn't here")).toBeNull();
 });
 
@@ -161,7 +162,8 @@ test("a deleted routine's runs are never asked for again", async () => {
   });
   await user.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(
-    () => expect(router.state.location.pathname).toBe("/routines"),
+    () =>
+      expect(router.state.location.pathname).toBe("/bots/lead-desk/routines"),
     { timeout: 3_000 },
   );
   // Long enough for a read started by the delete to have gone out.

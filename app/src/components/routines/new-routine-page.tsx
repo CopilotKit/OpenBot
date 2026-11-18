@@ -186,11 +186,19 @@ const EVENT_SOURCE_LABEL: Record<RoutineEventSource, string> = {
   connector: "Connected app",
 };
 
-/** The Routines list a page came from: one Bot's, or every Bot's. */
+/**
+ * The list a page goes back to: one Bot's "When it works", or every Bot's Routines. A routine's,
+ * goal's or check-in's own page passes its record's Bot once it is read, so it returns to that Bot.
+ */
 export function routinesOf(agentId: string | undefined) {
   return agentId
     ? linkOptions({ to: "/bots/$agentId/routines", params: { agentId } })
     : linkOptions({ to: "/routines" });
+}
+
+/** What the back link says for `routinesOf`'s answer. */
+export function routinesBackLabel(back: { to?: unknown }) {
+  return back.to === "/bots/$agentId/routines" ? "When it works" : "Routines";
 }
 
 /**
@@ -336,7 +344,7 @@ export function NewRoutinePage({
     <PageShell
       // Not a link while the writes are on their way, as Cancel isn't: leaving would hide their answer.
       backButton={{
-        label: "Routines",
+        label: routinesBackLabel(back),
         linkProps: back,
         disabled: createFromPlan.isPending,
       }}

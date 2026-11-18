@@ -39,7 +39,8 @@ import { memorySourcesQueryOptions } from "@/lib/memory";
 import { primitive, SETUP } from "@/lib/primitives";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
-import { mergeRoutines } from "@/lib/routines/merged";
+import { describeEvent } from "@/lib/routines/events";
+import { mergeRoutines, whenItWorksSummary } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { teamBotsQueryOptions } from "@/lib/team-bots";
 import { connectorCount } from "./access";
@@ -123,25 +124,27 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   });
 
   const rows: Row[] = [
-    row(
-      "routines",
-      "When it works",
-      "/bots/$agentId/routines",
-      // Its routines, goals and check-ins, counted as the Routines list draws them.
-      routines.data && goals.data && checkIns.data
-        ? countLabel(
-            mergeRoutines({
-              routines: routines.data.routines,
-              goals: goals.data,
-              checkIns: checkIns.data,
-              agentId: agent.id,
-            }).length,
-            "routine",
-            "routines",
-            "No routines",
-          )
-        : "",
-    ),
+    {
+      // What it does on its own is a setting on the Bot, named as its group is.
+      ...row(
+        "routines",
+        "When it works",
+        "/bots/$agentId/routines",
+        // The first of its routines, goals and check-ins and how many more, as its list orders them.
+        routines.data && goals.data && checkIns.data
+          ? whenItWorksSummary(
+              mergeRoutines({
+                routines: routines.data.routines,
+                goals: goals.data,
+                checkIns: checkIns.data,
+                agentId: agent.id,
+              }),
+              describeEvent,
+            )
+          : "",
+      ),
+      title: "When it works",
+    },
     ...(memory
       ? [
           row(
