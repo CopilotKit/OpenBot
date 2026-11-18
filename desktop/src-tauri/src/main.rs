@@ -1959,6 +1959,14 @@ impl upgrade::Steps for DesktopSteps {
         );
     }
 
+    fn room(&mut self) -> Result<(), Problem> {
+        let database = installation_database_bytes(&self.root, &self.address);
+        match local_eval::update_room(&self.address, database) {
+            Some(short) => Err(upgrade::short_problem(short)),
+            None => Ok(()),
+        }
+    }
+
     fn stop(&mut self) -> Result<(), Problem> {
         self.own_containers();
         stop_for_update(&self.app, &self.root)
@@ -2065,7 +2073,14 @@ async fn upgrade_and_start(
     desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
-    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    let selected = stack::root_from(&root);
+    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness)
+        .await
+        .map(|mut outcome| {
+            outcome.notice = outcome.notice.map(|notice| explained(notice, &selected));
+            outcome
+        })
+        .map_err(|problem| explained(problem, &selected));
     if let Ok(outcome) = &ran {
         log::info!(
             "[update] {} from {} to {}{}",
@@ -2170,6 +2185,19 @@ async fn upgrade_and_start_now(
         .update_cancelled
         .load(std::sync::atomic::Ordering::SeqCst);
     match ran {
+        // Nothing changed: the version it had is as it was. Retry checks again once there is room.
+        upgrade::Ran::Short(problem) => {
+            report_line(
+                &app,
+                "release",
+                false,
+                engine::StepLine::here(problem.said.clone()).logged(format!(
+                    "{}: not started, short of room",
+                    upgrade::moved_log(&planned)
+                )),
+            );
+            Err(problem)
+        }
         upgrade::Ran::Moved => {
             report_line(
                 &app,
@@ -3230,7 +3258,27 @@ async fn prepare_installation(
             refused_not_failed(problem),
         );
     }
-    prepared
+    prepared.map_err(|problem| explained(problem, &selected))
+}
+
+/// `problem` with the plain line for a disk that ran out above its raw output
+/// (`Problem::explained`), said for this computer and the engine the installation in `root` runs
+/// on.
+fn explained(problem: Problem, root: &Path) -> Problem {
+    let podman = preparation::saved_engine(root) == Some(engine::Engine::Podman);
+    problem.explained(std::env::consts::OS, podman)
+}
+
+/// The size of the database of the installation in `root` on `address`, for the room an update
+/// needs (`stack::database_bytes`). Nothing when it cannot be measured.
+fn installation_database_bytes(root: &Path, address: &engine::Address) -> Option<u64> {
+    let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        root,
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    )
+    .ok()?;
+    stack::database_bytes(address, root, &secrets)
 }
 
 async fn prepare_installation_inner(
@@ -4373,7 +4421,10 @@ async fn start_stack<R: tauri::Runtime>(
     let failures = desktop_telemetry::failures_recorded(&app);
     setup_phase("start");
     let telemetry_app = app.clone();
-    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    let selected = stack::root_from(&root);
+    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness)
+        .await
+        .map_err(|problem| explained(problem, &selected));
     logging::outcome("start", asked, &started);
     // Every way Start can fail sends one `setup_failed`: a row that failed has sent it already,
     // and any other return (a failed `compose up` among them) sends it here.
@@ -9919,6 +9970,13 @@ fn local_eval_answer(
              backend's tool would take Podman's default connection"
         );
         return Ok(local_eval::Report::engine_not_answering());
+    }
+    // The room the back end's update needs counts OpenBot's own database (`update_room`).
+    if action == local_eval::Action::Update {
+        local_eval::installation_database(
+            local_eval::engine_in_use()
+                .and_then(|address| installation_database_bytes(root, &address)),
+        );
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
     if action == local_eval::Action::Status
