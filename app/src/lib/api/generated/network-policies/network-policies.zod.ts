@@ -336,7 +336,7 @@ export const TranslateNetworkPolicyHeader = zod.object({
     ),
 });
 
-export const translateNetworkPolicyBodyTextMax = 1000;
+export const translateNetworkPolicyBodyTextMax = 500;
 
 export const translateNetworkPolicyBodyTextRegExp = new RegExp(
   "^[^\\x00]*\\S[^\\x00]*$",
