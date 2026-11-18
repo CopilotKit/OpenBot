@@ -5173,8 +5173,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // Compose's bind mount of the sign-in folder does not create it. Installation made it;
         // made again here in case it went since. See `stack::make_sign_in_folder`.
         stack::make_sign_in_folder(&root)?;
-        // A refusal an earlier start's server wrote into that folder is not this start's.
-        stack::forget_refusal(&root);
+        // A refusal an earlier start's server wrote into that folder is not this start's, and that
+        // server, still restarting, is removed first so it can't write it again.
+        stack::forget_refusal(&found, &root);
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
