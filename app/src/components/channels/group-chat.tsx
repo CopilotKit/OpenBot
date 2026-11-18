@@ -60,6 +60,13 @@ export function GroupChat({ channelId }: { channelId: string }) {
   );
   const bots = group.data?.bots ?? [];
   const names = new Map(bots.map((bot) => [bot.id, bot.name]));
+  // The people in it, as its members list names them: a person's line is headed with who sent it.
+  const people = new Map(
+    (group.data?.people ?? []).map((person) => [
+      person.userId,
+      person.name || person.email,
+    ]),
+  );
   const messages = group.data?.messages ?? [];
   const working = messages.some(
     (message) => message.status === "running" || message.status === "queued",
@@ -179,7 +186,8 @@ export function GroupChat({ channelId }: { channelId: string }) {
                   ? (names.get(message.agentId) ?? "A Bot no longer here")
                   : message.ownerUserId === me?.id
                     ? "You"
-                    : "Someone else"
+                    : // Only the people still in it are named: someone taken out is no longer the reader's to see.
+                      people.get(message.ownerUserId) || "Someone who left"
               }
               answeredBy={
                 message.answeredBy
