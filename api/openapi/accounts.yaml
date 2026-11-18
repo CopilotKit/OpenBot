@@ -1221,7 +1221,7 @@ components:
           type: [string, 'null']
           description: The picture their identity provider gave, when it gave one.
         role:
-          $ref: './common.yaml#/components/schemas/PersonRole'
+          $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
         needsName:
           type: boolean
           description: >-
@@ -1570,7 +1570,7 @@ components:
           description: Who they are there, such as their GitHub login, when the service said.
         status:
           type: string
-          enum: [active, needs_reconnect]
+          x-extensible-enum: [active, needs_reconnect]
           description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
         createdAt:
           type: string

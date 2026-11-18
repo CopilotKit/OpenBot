@@ -1,0 +1,12 @@
+data: {"type":"RUN_STARTED","threadId":"plan-capture-bad","runId":"run-bad"}
+
+data: {"type":"RAW","event":{"event":"on_chain_start","data":{"input":{"openbot_model_only":true,"openbot_bot_id":"capture-bot","messages":[{"content":"Hello","additional_kwargs":{},"response_metadata":{},"type":"human","name":null,"id":"prompt-1"}],"tools":[]}},"name":"LangGraph","tags":[],"run_id":"01a1eb81-d2a4-7604-aac7-d53958028345","metadata":{"thread_id":"plan-capture-bad","ls_integration":"langgraph"},"parent_ids":[]}}
+
+data: {"type":"STEP_STARTED","stepName":"answer"}
+
+data: {"type":"RAW","event":{"event":"on_chain_start","data":{"input":{"messages":[{"content":"Hello","additional_kwargs":{},"response_metadata":{},"type":"human","name":null,"id":"prompt-1"}]}},"name":"answer","tags":["graph:step:1"],"run_id":"01a1eb81-d2a7-7576-90ae-8d466b29bae4","metadata":{"thread_id":"plan-capture-bad","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"answer","langgraph_triggers":["branch:to:answer"],"langgraph_path":["__pregel_pull","answer"],"langgraph_checkpoint_ns":"answer:4e12f5fd-9fe7-a07d-c24f-9702ba9783bb"},"parent_ids":["01a1eb81-d2a4-7604-aac7-d53958028345"]}}
+
+data: {"type":"RAW","event":{"event":"on_chat_model_start","data":{"input":{"messages":[[{"content":"Built-in Bot instructions\nYou are a terse test Bot.","additional_kwargs":{},"response_metadata":{},"type":"system","name":null,"id":null},{"content":"Hello","additional_kwargs":{},"response_metadata":{},"type":"human","name":null,"id":"prompt-1"}]]}},"name":"ChatOpenAI","tags":["seq:step:1"],"run_id":"01a1eb81-d685-775d-a816-372fa0c9a4af","metadata":{"thread_id":"plan-capture-bad","ls_integration":"langchain_chat_model","langgraph_step":1,"langgraph_node":"answer","langgraph_triggers":["branch:to:answer"],"langgraph_path":["__pregel_pull","answer"],"langgraph_checkpoint_ns":"answer:4e12f5fd-9fe7-a07d-c24f-9702ba9783bb","checkpoint_ns":"answer:4e12f5fd-9fe7-a07d-c24f-9702ba9783bb","ls_provider":"openai","ls_model_name":"gpt-5.5","ls_model_type":"chat","ls_temperature":null,"lc_versions":{"langchain-core":"1.8.1","langchain":"1.5.0","langchain-openai":"1.8.1"}},"parent_ids":["01a1eb81-d2a4-7604-aac7-d53958028345","01a1eb81-d2a7-7576-90ae-8d466b29bae4"]}}
+
+data: {"type":"RUN_ERROR","message":"Sign in to your model provider again.","code":"OPENBOT_MODEL_AUTH_REQUIRED"}
+

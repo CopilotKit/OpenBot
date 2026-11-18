@@ -5,13 +5,4 @@
 /**
  * Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
  */
-export type ApprovalStatus =
-  (typeof ApprovalStatus)[keyof typeof ApprovalStatus];
-
-export const ApprovalStatus = {
-  pending: "pending",
-  approved: "approved",
-  denied: "denied",
-  consumed: "consumed",
-  completed: "completed",
-} as const;
+export type ApprovalStatus = string;

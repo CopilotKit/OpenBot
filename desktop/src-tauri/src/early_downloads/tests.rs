@@ -1085,6 +1085,23 @@ fn live_openbots_own_compose_names_the_images_with_no_engine() {
     let _ = std::fs::remove_dir_all(&cache);
 }
 
+/// The default Bot's image, added to a release manifest laid out in `release`.
+///
+/// v0.3.3's manifest predates the TypeScript LangGraph image that is now the default Bot, so the
+/// default Bot resolves against it only once that image is named, as every release since names it.
+fn with_the_default_bot(release: &Path) {
+    let path = crate::deployment::images_path(release);
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let digest = format!("sha256:{}", "0".repeat(64));
+    manifest["images"]["agent-langgraph-ts"] = serde_json::json!({
+        "repository": "ghcr.io/copilotkit/openbot-agent-langgraph-ts",
+        "digest": digest,
+        "reference": format!("ghcr.io/copilotkit/openbot-agent-langgraph-ts@{digest}"),
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+}
+
 /**
 Windows D: Podman answered with no Compose installed, and the first screen said "Some downloads
 didn't finish" because the image list asked `podman compose`, which had no provider to run. The list
@@ -1109,6 +1126,7 @@ fn the_image_list_waits_for_openbots_own_compose_and_asks_it() {
         crate::deployment::images_path(&release),
     )
     .unwrap();
+    with_the_default_bot(&release);
     let compose = release.join("docker-compose-own");
     let asked = release.join("asked");
     let started = Instant::now();
@@ -1134,13 +1152,13 @@ fn the_image_list_waits_for_openbots_own_compose_and_asks_it() {
         images.contains(&"pgvector/pgvector:pg17".to_string()),
         "{images:?}"
     );
-    // The two sign-in images, from the release's image list.
-    assert!(
-        images
-            .iter()
-            .any(|image| image.contains("openbot-agent-langgraph-agui@")),
-        "{images:?}"
-    );
+    // Neither plan's image: each runs only on its plan, and nobody has signed in yet.
+    for plan in ["openbot-agent-claude-sdk@", "openbot-agent-langgraph-agui@"] {
+        assert!(
+            !images.iter().any(|image| image.contains(plan)),
+            "{images:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&release);
 }
 

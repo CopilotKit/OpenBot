@@ -11,7 +11,11 @@ export type LinkedAccount = {
   provider: "slack" | "github";
   title: string;
   handle: string | null;
-  status: "active" | "needs_reconnect";
+  /**
+   * `active` or `needs_reconnect`. The list can grow: a status this app doesn't know is read as
+   * nothing to fix.
+   */
+  status: string;
   createdAt: string;
 };
 

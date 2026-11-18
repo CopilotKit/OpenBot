@@ -19,8 +19,8 @@ import { authClient } from "../src/auth";
 import { hideItem, ItemCard, startItem } from "../src/check-ins";
 import {
   ADD_ROUTINE_DRAFT,
-  RUN_COLORS,
-  RUN_LABELS,
+  lastRunLine,
+  runColor,
   when,
 } from "../src/routines";
 import {
@@ -231,9 +231,9 @@ export default function BotScreen() {
                     ? `Next run ${when(routine.nextRunAt)}`
                     : "Paused"}
                 </Text>
-                {routine.lastRun?.status ? (
-                  <Text style={{ color: RUN_COLORS[routine.lastRun.status] }}>
-                    Last run: {RUN_LABELS[routine.lastRun.status]}
+                {routine.lastRun && lastRunLine(routine.lastRun.status) ? (
+                  <Text style={{ color: runColor(routine.lastRun.status) }}>
+                    {lastRunLine(routine.lastRun.status)}
                   </Text>
                 ) : null}
               </View>

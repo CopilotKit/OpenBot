@@ -67,7 +67,7 @@ export const ListApprovalsResponse = zod.object({
         .object({
           id: zod.string().min(1),
           status: zod
-            .enum(["pending", "approved", "denied", "consumed", "completed"])
+            .string()
             .describe(
               "Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.",
             ),
@@ -273,7 +273,7 @@ export const DecideApprovalResponse = zod
   .object({
     id: zod.string().min(1),
     status: zod
-      .enum(["pending", "approved", "denied", "consumed", "completed"])
+      .string()
       .describe(
         "Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.",
       ),

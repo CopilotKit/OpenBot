@@ -829,6 +829,14 @@ components:
         admin governs it: its people, its sign-in and its policy. A member
         uses it. The owner is whoever created the organization; `default`
         has admins and no owner.
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum: [owner, admin, member]
+      description: >-
+        The person's role as a member of the organization, as the server
+        answers it. An owner or an admin governs it: its people, its sign-in
+        and its policy. A member uses it. The list can grow: a client reads a
+        role it doesn't know as a member.
     NoticeId:
       type: string
       minLength: 1

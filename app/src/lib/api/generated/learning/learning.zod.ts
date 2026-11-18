@@ -818,7 +818,7 @@ export const ListPersonalLearningProposalsResponse = zod.object({
                 .describe(
                   "Whether it adds a skill, changes one, or removes one.",
                 ),
-              status: zod.enum(["pending_review", "approved", "rejected"]),
+              status: zod.string(),
               title: zod.string().describe("The skill's name."),
               description: zod.string(),
               reason: zod.string().describe("Why Learning proposes it."),
@@ -1283,7 +1283,7 @@ export const GetPersonLearningReviewResponse = zod.object({
                 .describe(
                   "Whether it adds a skill, changes one, or removes one.",
                 ),
-              status: zod.enum(["pending_review", "approved", "rejected"]),
+              status: zod.string(),
               title: zod.string().describe("The skill's name."),
               description: zod.string(),
               reason: zod.string().describe("Why Learning proposes it."),
@@ -1308,15 +1308,7 @@ export const GetPersonLearningReviewResponse = zod.object({
         zod
           .object({
             id: zod.uuid(),
-            status: zod.enum([
-              "queued",
-              "freezing",
-              "batching",
-              "reducing",
-              "finalizing",
-              "succeeded",
-              "failed",
-            ]),
+            status: zod.string(),
             triggerSource: zod.enum(["automatic", "manual"]),
             proposalCount: zod
               .int()
@@ -1451,7 +1443,7 @@ export const ListPersonLearningProposalsResponse = zod.object({
           operation: zod
             .enum(["add", "update", "remove"])
             .describe("Whether it adds a skill, changes one, or removes one."),
-          status: zod.enum(["pending_review", "approved", "rejected"]),
+          status: zod.string(),
           title: zod.string().describe("The skill's name."),
           description: zod.string(),
           reason: zod.string().describe("Why Learning proposes it."),
@@ -1774,7 +1766,7 @@ export const ListLearningProposalsResponse = zod.object({
           operation: zod
             .enum(["add", "update", "remove"])
             .describe("Whether it adds a skill, changes one, or removes one."),
-          status: zod.enum(["pending_review", "approved", "rejected"]),
+          status: zod.string(),
           title: zod.string().describe("The skill's name."),
           description: zod.string(),
           reason: zod.string().describe("Why Learning proposes it."),
@@ -1835,7 +1827,7 @@ export const GetLearningProposalResponse = zod
     operation: zod
       .enum(["add", "update", "remove"])
       .describe("Whether it adds a skill, changes one, or removes one."),
-    status: zod.enum(["pending_review", "approved", "rejected"]),
+    status: zod.string(),
     title: zod.string().describe("The skill's name."),
     description: zod.string(),
     reason: zod.string().describe("Why Learning proposes it."),
@@ -2148,15 +2140,7 @@ export const ListOrganizationLearningRunsResponse = zod.object({
       zod
         .object({
           id: zod.uuid(),
-          status: zod.enum([
-            "queued",
-            "freezing",
-            "batching",
-            "reducing",
-            "finalizing",
-            "succeeded",
-            "failed",
-          ]),
+          status: zod.string(),
           triggerSource: zod.enum(["automatic", "manual"]),
           proposalCount: zod
             .int()
@@ -2237,15 +2221,7 @@ export const startOrganizationLearningRunResponseInsightCountMin = 0;
 export const StartOrganizationLearningRunResponse = zod
   .object({
     id: zod.uuid(),
-    status: zod.enum([
-      "queued",
-      "freezing",
-      "batching",
-      "reducing",
-      "finalizing",
-      "succeeded",
-      "failed",
-    ]),
+    status: zod.string(),
     triggerSource: zod.enum(["automatic", "manual"]),
     proposalCount: zod
       .int()
@@ -2321,7 +2297,7 @@ export const GetPersonLearningProposalResponse = zod
     operation: zod
       .enum(["add", "update", "remove"])
       .describe("Whether it adds a skill, changes one, or removes one."),
-    status: zod.enum(["pending_review", "approved", "rejected"]),
+    status: zod.string(),
     title: zod.string().describe("The skill's name."),
     description: zod.string(),
     reason: zod.string().describe("Why Learning proposes it."),
@@ -2687,15 +2663,7 @@ export const startPersonLearningRunResponseInsightCountMin = 0;
 export const StartPersonLearningRunResponse = zod
   .object({
     id: zod.uuid(),
-    status: zod.enum([
-      "queued",
-      "freezing",
-      "batching",
-      "reducing",
-      "finalizing",
-      "succeeded",
-      "failed",
-    ]),
+    status: zod.string(),
     triggerSource: zod.enum(["automatic", "manual"]),
     proposalCount: zod
       .int()
