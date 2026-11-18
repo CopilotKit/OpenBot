@@ -289,6 +289,13 @@ jobs:
         if: matrix.platform == 'linux'
         run: cargo test --locked --lib update_ready::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
+      # The AI connection changed in the app, on the runner's Docker with this tree's Compose file:
+      # a plan's engine starts alone and stops alone, the picked Bot restarts alone, and the
+      # database never stops.
+      - name: AI connection change regression tests
+        if: matrix.platform == 'linux'
+        run: cargo test --locked --lib ai_connection::tests::real_engine -- --ignored --test-threads=1
+        working-directory: desktop/src-tauri
       # OpenBot's machine on Windows shares one network namespace with every WSL distro, so a
       # stopped machine's port rules outlive it. Reproduced on real netavark, both generations
       # Podman runs on WSL, in a privileged lab on the runner's Docker, then cleared.

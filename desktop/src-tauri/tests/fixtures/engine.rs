@@ -162,13 +162,19 @@ fn main() {
                 );
             }
         }
+        // `up`, with the profiles of whatever it names: the picked Bot's, a plan engine's.
         value
-            if value.starts_with("compose up -d --no-build --pull never ")
-                || value
-                    .starts_with("compose --profile harness up -d --no-build --pull never ")
-                // The same, with the overlay that remaps the Bot's host port.
-                || (SCENARIO == "harness"
-                    && value.starts_with("compose -f docker-compose.yml -f .openbot-harness-port.yml --profile harness up -d --no-build --pull never ")) =>
+            if {
+                let mut rest = value.strip_prefix("compose ").unwrap_or("");
+                // The overlay that remaps the Bot's host port, when one is named.
+                while let Some(after) = rest.strip_prefix("-f ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                while let Some(after) = rest.strip_prefix("--profile ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                rest.starts_with("up -d --no-build --pull never ")
+            } =>
         {
             if SCENARIO == "up-fails" {
                 eprintln!("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
