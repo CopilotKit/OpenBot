@@ -9694,6 +9694,14 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        // It needs its port free again once it lets go: a process another test starts would hold
+        // a copy of the listener until it execs, which waits on the system's check of a new
+        // program for seconds on a busy Mac.
+        if crate::test_support::isolated_process(
+            "stack::tests::an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
@@ -9716,6 +9724,12 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        // It needs its port free again once it lets go, as the test above does.
+        if crate::test_support::isolated_process(
+            "stack::tests::an_ipv6_only_port_is_not_clear_while_its_listener_is_held",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
