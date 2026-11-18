@@ -257,7 +257,7 @@ describe("release policy", () => {
     const to = policy.compatibility.database.to;
     /**
      * By default the chart does what the committed policy declares, as a release's chart must.
-     * `"absent"` is a chart from before `upgrade.requiresDowntime`.
+     * `"absent"` is a chart from before the `openbot.ai/requires-downtime` annotation.
      */
     function published(
       database: string,
@@ -379,7 +379,8 @@ describe("release policy", () => {
      * The policy's downtime is what the release's chart does, not a note beside it. 1.1.0 declared
      * downtime while its chart upgraded the servers one by one, so a plain `helm upgrade` ran old and
      * new servers on a database the old could not read. The chart now stops every old server first
-     * when its `upgrade.requiresDowntime` is true, and the release is held to the two agreeing.
+     * when its Chart.yaml declares `openbot.ai/requires-downtime: "true"`, and the release is held to
+     * the two agreeing.
      */
     describe("downtime", () => {
       const declaring = (requiresDowntime: boolean) => {
@@ -427,7 +428,7 @@ describe("release policy", () => {
         ).toBe(0);
       });
 
-      test("a chart from before the value rolls, so it passes under a policy with no downtime", () => {
+      test("a chart from before the annotation rolls, so it passes under a policy with no downtime", () => {
         const { repo, env } = declaring(false);
         expect(
           validate(repo, {

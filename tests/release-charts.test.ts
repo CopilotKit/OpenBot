@@ -272,7 +272,7 @@ describe("a release's Helm charts", () => {
         version: "0.1.0",
       },
     });
-    // A chart from before the value rolls its servers.
+    // A chart from before the annotation rolls its servers.
     expect(
       readReleaseFiles(
         published({ version: "v0.4.0", database: "0091_last" }),

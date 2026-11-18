@@ -576,8 +576,9 @@ export interface ReleaseFiles {
   /** The last migration the server of this version applies: the database it migrates to. */
   database: string;
   /**
-   * Whether the `openbot` chart stops every old server before a new one starts: its default
-   * `upgrade.requiresDowntime`. A chart from before that value rolls, so its absence is false.
+   * Whether the `openbot` chart stops every old server before a new one starts: the
+   * `openbot.ai/requires-downtime` annotation in its Chart.yaml. A chart from before the annotation
+   * rolls, so its absence is false.
    */
   requiresDowntime: boolean;
   chart: ChartPackage;
@@ -658,23 +659,31 @@ export function readReleaseFiles(
   };
 }
 
-/** The packaged `openbot` chart's default `upgrade.requiresDowntime`, which every install takes. */
+/**
+ * The annotation in the `openbot` chart's Chart.yaml that decides how `helm upgrade` replaces its
+ * servers. In Chart.yaml rather than values.yaml because `--reuse-values` swaps the new chart's
+ * default values for the old chart's, and Chart.yaml always comes from the chart being installed.
+ */
+export const DOWNTIME_ANNOTATION = "openbot.ai/requires-downtime";
+
+/** Whether the packaged `openbot` chart stops every old server before a new one starts. */
 function chartRequiresDowntime(path: string): boolean {
-  const text = archiveFile(path, `${CHARTS.chart}/values.yaml`);
-  const values: unknown = text ? Bun.YAML.parse(text.toString("utf8")) : {};
-  const upgrade =
-    typeof values === "object" && values !== null && "upgrade" in values
-      ? values.upgrade
+  const text = archiveFile(path, `${CHARTS.chart}/Chart.yaml`);
+  const chart: unknown = text ? Bun.YAML.parse(text.toString("utf8")) : {};
+  const annotations =
+    typeof chart === "object" && chart !== null && "annotations" in chart
+      ? chart.annotations
       : undefined;
   const declared =
-    typeof upgrade === "object" && upgrade !== null
-      ? (upgrade as Record<string, unknown>).requiresDowntime
+    typeof annotations === "object" && annotations !== null
+      ? (annotations as Record<string, unknown>)[DOWNTIME_ANNOTATION]
       : undefined;
-  if (declared !== undefined && typeof declared !== "boolean")
+  if (declared === undefined) return false;
+  if (declared !== "true" && declared !== "false")
     throw new Error(
-      `${basename(path)} sets upgrade.requiresDowntime to ${JSON.stringify(declared)}, which is not true or false`,
+      `${basename(path)} declares ${DOWNTIME_ANNOTATION}: ${JSON.stringify(declared)} in its Chart.yaml, which is not "true" or "false"`,
     );
-  return declared ?? false;
+  return declared === "true";
 }
 
 /**
@@ -690,8 +699,8 @@ export function checkDowntime(
   if (declared === files.requiresDowntime) return;
   throw new Error(
     declared
-      ? `${RELEASE_POLICY_FILE} says this release requires downtime, but the openbot chart it attaches upgrades its servers one by one while the old ones keep serving (the chart's upgrade.requiresDowntime is false). If this release's migrations are safe for the previous release, set upgrade.requiresDowntime to false in ${RELEASE_POLICY_FILE}; if they are not, publish OpenBot images whose chart sets upgrade.requiresDowntime to true.`
-      : `${RELEASE_POLICY_FILE} says this release needs no downtime, but the openbot chart it attaches stops every old server before a new one starts (the chart's upgrade.requiresDowntime is true). Set upgrade.requiresDowntime to true in ${RELEASE_POLICY_FILE}, or publish OpenBot images whose chart sets it to false.`,
+      ? `${RELEASE_POLICY_FILE} says this release requires downtime, but the openbot chart it attaches upgrades its servers one by one while the old ones keep serving (its Chart.yaml does not declare ${DOWNTIME_ANNOTATION}: "true"). If this release's migrations are safe for the previous release, set upgrade.requiresDowntime to false in ${RELEASE_POLICY_FILE}; if they are not, publish OpenBot images whose chart declares ${DOWNTIME_ANNOTATION}: "true".`
+      : `${RELEASE_POLICY_FILE} says this release needs no downtime, but the openbot chart it attaches stops every old server before a new one starts (its Chart.yaml declares ${DOWNTIME_ANNOTATION}: "true"). Set upgrade.requiresDowntime to true in ${RELEASE_POLICY_FILE}, or publish OpenBot images whose chart declares "false".`,
   );
 }
 

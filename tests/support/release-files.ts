@@ -22,8 +22,8 @@ export function releaseFiles({
   appVersion?: string;
   charts?: Record<string, string>;
   /**
-   * The `openbot` chart's default `upgrade.requiresDowntime`. Left out, the chart has no such value,
-   * as a chart from before it did not.
+   * The `openbot` chart's `openbot.ai/requires-downtime` annotation. Left out, the chart has none, as
+   * a chart from before it did not.
    */
   requiresDowntime?: boolean;
 }): string {
@@ -34,16 +34,15 @@ export function releaseFiles({
   for (const [name, own] of Object.entries(charts)) {
     const source = join(work, "source", name);
     mkdirSync(join(source, "templates"), { recursive: true });
+    const annotations =
+      name === "openbot" && requiresDowntime !== undefined
+        ? `annotations:\n  openbot.ai/requires-downtime: "${requiresDowntime}"\n`
+        : "";
     writeFileSync(
       join(source, "Chart.yaml"),
-      `apiVersion: v2\nname: ${name}\nversion: ${own}\nappVersion: "${appVersion}"\n`,
+      `apiVersion: v2\nname: ${name}\nversion: ${own}\nappVersion: "${appVersion}"\n${annotations}`,
     );
-    writeFileSync(
-      join(source, "values.yaml"),
-      name === "openbot" && requiresDowntime !== undefined
-        ? `replicas: 1\nupgrade:\n  requiresDowntime: ${requiresDowntime}\n`
-        : "replicas: 1\n",
-    );
+    writeFileSync(join(source, "values.yaml"), "replicas: 1\n");
     writeFileSync(
       join(source, "templates/configmap.yaml"),
       "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}\n",

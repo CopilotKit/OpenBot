@@ -523,8 +523,9 @@ the release PR before merging it. A final may not change the policy beyond its v
 `requiresDowntime` is false for a release whose migrations the previous release still works
 against, which is the rule: old and new servers share the database while a rolling upgrade runs. A
 release that cannot keep to it declares `true`, and the `openbot` chart it attaches must say the
-same in its default `upgrade.requiresDowntime`, which makes `helm upgrade` stop every old server
-before a new one starts. Publishing refuses a policy and a chart that disagree.
+same in its `Chart.yaml` annotation `openbot.ai/requires-downtime`, which makes `helm upgrade`
+stop every old server before a new one starts. Publishing refuses a policy and a chart that
+disagree.
 
 ## Finishing a candidate
 
