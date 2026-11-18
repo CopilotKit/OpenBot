@@ -1,8 +1,9 @@
 @custom-variant dark (&:is(.dark *));
 /*
- * What a primitive keeps for the alternate skins only, where OpenBot's own look (the UI Kit) differs
- * in more than a colour: `skin:disabled:opacity-50`. Colours go through tokens instead, which the
- * skins set in skins/legacy-base.css.
+ * For the alternate skins only, and only inside a primitive where no call site's class can reach,
+ * such as which chevron a select draws. Anything a call site may set itself (a size, a gap, a
+ * colour) goes through a token instead, below, which the skins set in skins/legacy-base.css: a
+ * `skin:` class would outrank the call site's own class under a skin.
  */
 @custom-variant skin (:root[data-skin] &);
 
@@ -206,6 +207,104 @@ body {
   --color-outline-border: transparent;
   --color-outline-hover: var(--color-secondary-hover);
   --color-outline-active: var(--color-secondary-active);
+  /*
+   * A field's edge and words (UI Kit "Dropdown" and "Search"): a hairline of ink at 12%, 18% under
+   * the pointer; focus is a 4px band of `#d8dee9` inside the edge; a placeholder is ink at 40%, and
+   * a disabled field's words are `#9da6ac`. Mixed from the tokens above, like the buttons' states.
+   */
+  --color-field-border: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --color-field-border-hover: color-mix(
+    in oklab,
+    var(--foreground) 18%,
+    transparent
+  );
+  --color-field-focus: color-mix(in oklab, var(--input) 83%, var(--card));
+  --color-field-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 40%,
+    transparent
+  );
+  --color-field-disabled: color-mix(
+    in oklab,
+    var(--foreground) 34%,
+    var(--card)
+  );
+  --color-field-focus-border: var(--color-field-focus);
+  --color-field-disabled-bg: var(--card);
+  --color-field-disabled-bg-dark: color-mix(
+    in oklab,
+    var(--input) 30%,
+    transparent
+  );
+  /*
+   * What else differs between a button's states, OpenBot's look and the skins': the colour a
+   * button takes while its menu is open, a disabled outlined or ghost button's words, and the link.
+   */
+  --color-secondary-expanded: var(--color-secondary-hover);
+  --color-outline-expanded: var(--color-outline-hover);
+  --color-outline-disabled: var(--color-secondary-disabled);
+  --color-ghost-expanded: var(--color-ghost-hover);
+  --color-ghost-disabled: var(--color-secondary-disabled);
+  --color-link-hover: var(--color-primary-hover);
+  --color-link-active: var(--color-primary-active);
+  --color-link-disabled: var(--color-secondary-disabled);
+
+  /*
+   * The primitives' measures from the UI Kit, as tokens rather than numbers in the primitives, for
+   * the same reason as the colours: the skins put back their own (skins/legacy-base.css), and a
+   * call site's own class still replaces the primitive's, as with any other Tailwind class.
+   *
+   * Buttons: an M's icons are 20px and an S's 18px, and the end beside an icon is the same as the
+   * other end. A button is not nudged when pressed, and a disabled one is not faded: its colours
+   * say it.
+   */
+  --spacing-button-icon: 1.25rem;
+  --spacing-button-icon-sm: 1.125rem;
+  --spacing-button-edge: 1rem;
+  --spacing-button-edge-sm: 0.75rem;
+  --button-press-shift: 0px;
+  --button-disabled-opacity: 1;
+  --link-hover-decoration: none;
+  /*
+   * Fields ("Dropdown", "Search"): M is 40px with 12px corners, S a 32px pill, the words 16px in
+   * (12px in an S), 18px icons 12px in with 8px to the words. Focus is the 4px band, drawn as the
+   * border plus a 3px inset ring so nothing moves; an invalid field is only its red edge.
+   */
+  --spacing-field: 2.5rem;
+  --spacing-field-sm: 2rem;
+  --spacing-field-x: 1rem;
+  --spacing-field-x-sm: 0.75rem;
+  --spacing-field-y: 0.625rem;
+  --spacing-field-icon: 1.125rem;
+  --spacing-field-addon: 0.75rem;
+  --spacing-field-addon-gap: 0.5rem;
+  --radius-field: var(--radius-tile);
+  --radius-field-sm: calc(infinity * 1px);
+  --field-focus-band: 3px;
+  --field-focus-ring: 0px;
+  --field-invalid-ring: 0px;
+  --field-disabled-opacity: 1;
+  /*
+   * Menus ("Dropdown menu list"): the card's 20px corners and the composer's shadow, 4px inside;
+   * a row 8px in (12px at the end) and 8px tall, 12px corners, 18px icons 8px from the words, and
+   * the tick 12px from the end.
+   */
+  --spacing-menu-item-x: 0.5rem;
+  --spacing-menu-item-end: 0.75rem;
+  --spacing-menu-item-y: 0.5rem;
+  --spacing-menu-gap: 0.5rem;
+  --spacing-menu-icon: 1.125rem;
+  --spacing-menu-inset: 2.125rem;
+  --spacing-menu-label-y: 0.375rem;
+  --spacing-menu-indicator: 0.75rem;
+  --spacing-menu-check: 1.125rem;
+  --spacing-select-pad: 0.25rem;
+  --radius-menu: var(--radius-card);
+  --radius-menu-item: var(--radius-tile);
+  --menu-shadow:
+    0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
+    0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
+  --menu-shadow-sub: var(--menu-shadow);
 }
 
 @theme inline {

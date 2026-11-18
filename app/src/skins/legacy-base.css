@@ -27,10 +27,13 @@
 }
 
 /*
- * And the colours of the buttons the skins were drawn with, before the UI Kit's
- * (components/ui/button.tsx): a hover is the button tinted, a press looks like the hover, and a
- * disabled button keeps its colours, since the button fades as a whole (`skin:` there). An outlined
- * button keeps its border on the card.
+ * And the buttons, fields and menus the skins were drawn with, before the UI Kit's: the tokens
+ * theme.css gives OpenBot's own look, set back to what the primitives drew (components/ui). A
+ * button is tinted on hover, nudged a pixel when pressed and faded when disabled, with smaller
+ * icons and a tighter end beside one, and its link is underlined under the pointer; an outlined
+ * button keeps its border. A field is shorter, with a `--input` border that stays put under the
+ * pointer, the periwinkle focus ring outside it and a muted placeholder. A menu has the smaller
+ * corners, a hairline and a short shadow, and tighter rows.
  */
 :root[data-skin] {
   --color-primary-hover: color-mix(in oklab, var(--primary) 85%, transparent);
@@ -43,12 +46,67 @@
   );
   --color-secondary-active: var(--color-secondary-hover);
   --color-secondary-disabled: var(--secondary-foreground);
+  --color-secondary-expanded: var(--secondary);
   --color-ghost-hover: var(--muted);
   --color-ghost-active: var(--muted);
+  --color-ghost-expanded: var(--muted);
+  --color-ghost-disabled: currentColor;
   --color-outline: var(--card);
   --color-outline-border: var(--input);
   --color-outline-hover: var(--muted);
   --color-outline-active: var(--muted);
+  --color-outline-expanded: var(--muted);
+  --color-outline-disabled: currentColor;
+  --color-link-hover: var(--primary);
+  --color-link-active: var(--primary);
+  --color-link-disabled: var(--primary);
+  --spacing-button-icon: 1.125rem;
+  --spacing-button-icon-sm: 1rem;
+  --spacing-button-edge: 0.75rem;
+  --spacing-button-edge-sm: 0.625rem;
+  --button-press-shift: 1px;
+  --button-disabled-opacity: 0.5;
+  --link-hover-decoration: underline;
+
+  --color-field-border: var(--input);
+  --color-field-border-hover: var(--input);
+  --color-field-placeholder: var(--muted-foreground);
+  --color-field-disabled: var(--foreground);
+  --color-field-focus-border: var(--ring);
+  --color-field-disabled-bg: color-mix(in oklab, var(--input) 50%, transparent);
+  --spacing-field: 2.25rem;
+  --spacing-field-sm: 1.75rem;
+  --spacing-field-x: 0.625rem;
+  --spacing-field-x-sm: 0.625rem;
+  --spacing-field-y: 0.5rem;
+  --spacing-field-icon: 1rem;
+  --spacing-field-addon: 0.5rem;
+  --spacing-field-addon-gap: 0.375rem;
+  --radius-field: var(--radius);
+  --radius-field-sm: min(calc(var(--radius) * 0.8), 10px);
+  --field-focus-band: 0px;
+  --field-focus-ring: 3px;
+  --field-invalid-ring: 3px;
+  --field-disabled-opacity: 0.5;
+
+  --spacing-menu-item-x: 0.375rem;
+  --spacing-menu-item-end: 0.375rem;
+  --spacing-menu-item-y: 0.25rem;
+  --spacing-menu-gap: 0.375rem;
+  --spacing-menu-icon: 1rem;
+  --spacing-menu-inset: 1.75rem;
+  --spacing-menu-label-y: 0.25rem;
+  --spacing-menu-indicator: 0.5rem;
+  --spacing-menu-check: 1rem;
+  --spacing-select-pad: 0px;
+  --radius-menu: var(--radius);
+  --radius-menu-item: calc(var(--radius) * 0.8);
+  --menu-shadow:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
+    0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --menu-shadow-sub:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
+    0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 }
 :root[data-skin].dark {
   --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);
@@ -56,4 +114,9 @@
   --color-outline: color-mix(in oklab, var(--input) 30%, transparent);
   --color-outline-hover: color-mix(in oklab, var(--input) 50%, transparent);
   --color-outline-active: var(--color-outline-hover);
+  --color-field-disabled-bg-dark: color-mix(
+    in oklab,
+    var(--input) 80%,
+    transparent
+  );
 }
