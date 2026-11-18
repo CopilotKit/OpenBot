@@ -378,9 +378,36 @@ fn availability(language: &str) -> Availability {
     }
 }
 
+/// The most turned-down languages a start's line names.
+const MOST_REFUSED: usize = 10;
+
+/// The diagnostics line a session starts with: the language it listens in and, when the page fell
+/// back to it, the languages this computer turned down first (`app/src/lib/dictation/live.ts`).
+/// Only language tags are written.
+pub fn start_line(language: Option<&str>, refused: &[String]) -> String {
+    let mut line = format!(
+        "start, language {}",
+        language.unwrap_or("(not a language tag)")
+    );
+    let refused: Vec<String> = refused
+        .iter()
+        .filter_map(|tag| language_tag(tag))
+        .take(MOST_REFUSED)
+        .collect();
+    if !refused.is_empty() {
+        line.push_str(&format!(", after {} unavailable", refused.join(" ")));
+    }
+    line
+}
+
 /// Start listening in `language`, telling `send` what is heard. Ends any session listening now.
-/// Returns the session's number, which `control` takes.
-pub fn start(language: &str, send: impl Fn(Event) -> bool + Send + 'static) -> u64 {
+/// `refused` are the languages the page asked about first and this computer turned down, noted in
+/// the diagnostics. Returns the session's number, which `control` takes.
+pub fn start(
+    language: &str,
+    refused: &[String],
+    send: impl Fn(Event) -> bool + Send + 'static,
+) -> u64 {
     let id = NEXT_SESSION.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = mpsc::channel();
     if let Some((_, before)) = CURRENT.lock().unwrap().replace((id, tx)) {
@@ -388,14 +415,12 @@ pub fn start(language: &str, send: impl Fn(Event) -> bool + Send + 'static) -> u
     }
     let mut emitter = Emitter::new(send);
     let language = language_tag(language);
+    let line = start_line(language.as_deref(), refused);
     let spawned = std::thread::Builder::new()
         .name("openbot-speech".into())
         .spawn(move || {
             diagnostics::for_session(id);
-            note(format_args!(
-                "start, language {}",
-                language.as_deref().unwrap_or("(not a language tag)")
-            ));
+            note(line);
             match language {
                 Some(language) => listen(&language, &mut emitter, &rx),
                 None => emitter.fail(Problem::LanguageNotSupported),
@@ -714,7 +739,7 @@ mod tests {
     #[test]
     fn a_session_in_no_language_fails_and_ends() {
         let (tx, rx) = mpsc::channel();
-        let id = start("not a language", move |event| tx.send(event).is_ok());
+        let id = start("not a language", &[], move |event| tx.send(event).is_ok());
         assert!(id > 0);
         let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         let second = rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -726,5 +751,41 @@ mod tests {
         );
         assert_eq!(second, Event::End);
         assert_eq!(available("not a language"), Availability::Unavailable);
+    }
+
+    /// FOUND IN DOGFOODING. A Mac set to English (United Kingdom), with Dictation on for English
+    /// (United Kingdom) and English (United States), logged `available(en-GB) = Unavailable` and
+    /// nothing else: the page gave up on the first language. It now falls back to the next one the
+    /// recognizer has, and the session's first line says which it took and which it was refused, as
+    /// tags and nothing else.
+    #[test]
+    fn a_session_names_the_languages_it_fell_back_from() {
+        assert_eq!(start_line(Some("en-US"), &[]), "start, language en-US");
+        assert_eq!(
+            start_line(
+                Some("en-US"),
+                &["en-GB".into(), "he-IL".into(), "not a tag; rm -rf".into()]
+            ),
+            "start, language en-US, after en-GB he-IL unavailable"
+        );
+
+        // As a session writes it, in a language this test's computer is never asked to listen in.
+        let path = diagnostics::path().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let id = start("not a language", &["en-GB".into()], move |event| {
+            tx.send(event).is_ok()
+        });
+        for _ in 0..4 {
+            if rx.recv_timeout(Duration::from_secs(5)) == Ok(Event::End) {
+                break;
+            }
+        }
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            log.contains(&format!(
+                " session={id} start, language (not a language tag), after en-GB unavailable"
+            )),
+            "{log}"
+        );
     }
 }
