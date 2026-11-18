@@ -7239,10 +7239,16 @@ fn main() {
             eprint!("{}", std::fs::read_to_string(".fixture-server-stderr").unwrap_or_default());
         } else if actual.first().map(String::as_str) == Some("compose") && actual.iter().any(|arg| arg == "rm") {
             // `rm --stop` returns once the container is gone: the old server is told to stop, and
-            // the engine waits for it as an engine does.
+            // the engine waits for it as an engine does, however long it takes. Past two minutes
+            // something is wrong: it says so, fails, and leaves `.fixture-rm-gave-up` for the test.
             std::fs::write(".fixture-stop-server", "").unwrap();
-            for _ in 0..500 {
-                if !std::path::Path::new(".fixture-old-server-alive").exists() { break; }
+            let patience = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while std::path::Path::new(".fixture-old-server-alive").exists() {
+                if std::time::Instant::now() >= patience {
+                    std::fs::write(".fixture-rm-gave-up", "").unwrap();
+                    eprintln!("the old server was still running two minutes after it was told to stop");
+                    std::process::exit(1);
+                }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
@@ -12479,6 +12485,13 @@ fn main() {
                         std::fs::write(&file, format!("{REFUSAL}\n")).ok();
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
+                    // Told to stop, it takes a moment to go, and refuses again meanwhile: only
+                    // waiting for it to be gone, as `rm --stop` does, leaves nothing to read.
+                    let stopping = std::time::Instant::now();
+                    while stopping.elapsed() < std::time::Duration::from_secs(1) {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).ok();
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
                     std::fs::remove_file(root.join(".fixture-old-server-alive")).unwrap();
                 })
             };
@@ -12490,6 +12503,10 @@ fn main() {
 
             std::fs::write(root.join(".fixture-stop-server"), "").unwrap();
             old_server.join().unwrap();
+            assert!(
+                !root.join(".fixture-rm-gave-up").exists(),
+                "{address:?}: the engine gave up waiting for the old server to stop"
+            );
             assert_eq!(read, None, "{address:?}: the old server's refusal was read");
         }
     }
