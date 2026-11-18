@@ -87,7 +87,11 @@ export type GroupMessage = {
   ownerUserId: string;
   agentId: string | null;
   text: string;
-  status: "queued" | "running" | "waiting" | "completed" | "failed";
+  /**
+   * `queued`, `running`, `waiting`, `completed` or `failed`. The list can grow: a status this app
+   * doesn't know draws the line as a plain reply.
+   */
+  status: string;
   createdAt: string;
   /** Why a waiting Bot is waiting, when it is. */
   reason?: string;
