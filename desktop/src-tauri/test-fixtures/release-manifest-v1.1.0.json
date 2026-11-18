@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "distribution": {
+    "id": "CopilotKit/OpenBot",
+    "repository": "CopilotKit/OpenBot",
+    "channel": "stable"
+  },
+  "version": "v1.1.0",
+  "source": {
+    "commit": "e373655cc7d506d11bc99e4165935bf6f8f98fd7",
+    "upstreamRepository": "CopilotKit/openbot",
+    "upstreamCommit": "e373655cc7d506d11bc99e4165935bf6f8f98fd7",
+    "modified": false
+  },
+  "artifacts": {
+    "source": {
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-source.tar.gz",
+      "sha256": "918b0b474247927d6bcc223f723cedb249e087ecb89d57e7a576b0a404e7876b"
+    },
+    "images": {
+      "agent-adk": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-adk@sha256:5f50c88244b5589ae1706fc13548d927fc38bb751bb980819479dbc98a0e12e3"
+      },
+      "agent-ag2": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-ag2@sha256:5099b4b775217429e47b76c7d4b4d2422bc8c36c74ef5b0b7b668081c2b70966"
+      },
+      "agent-agno": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-agno@sha256:3d3ea615ebe955a5b27d4d252386a99c51d3eeb6a821ebfa454477152ac8de46"
+      },
+      "agent-antigravity": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-antigravity@sha256:ca2d525a733b51d93b02de5acdbaf662be8a2a0ff1811e6d1c20a532bce79407"
+      },
+      "agent-claude-sdk": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:0db7da223b3eba7ab8afd3dc3d3ebc2ef96ae9441ce90ae406c76a53465cd9c2"
+      },
+      "agent-crewai": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-crewai@sha256:bfbb629a1e0a4d1959f75c9df7eaac5a67d74024ec8a443417d3a8f9f69fe999"
+      },
+      "agent-langgraph-agui": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:3e9557439f204c131c5c0d52b7b8076e7c46686bbd2ebf2b40f75f3adba5fa7e"
+      },
+      "agent-langroid": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-langroid@sha256:215aa800336d4cf0348823ff703c2a29dbca064819ee2925878180be42f4291e"
+      },
+      "agent-llamaindex": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-llamaindex@sha256:35722d8666b953946ca7adb643791f522c000491b9e979a850c2dd218b18fa04"
+      },
+      "agent-mastra": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-mastra@sha256:fcf42c7ad901f7f06381ecac8c4a76e1a21e3ade388e6bb7a4a9a64fe58f3344"
+      },
+      "agent-microsoft": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-microsoft@sha256:248a0440f5f7cbc2331b1e9040aadf38eeb136a8fb1b2d680559dab45e22d623"
+      },
+      "agent-pydantic-ai": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-pydantic-ai@sha256:e13d1bb218879031f3ac70fd06c31885f6c00ff81a81b26127634e615e0fea93"
+      },
+      "agent-strands": {
+        "reference": "ghcr.io/copilotkit/openbot-agent-strands@sha256:11053b61e961edb2877f0b42912f6c9ed56acca9cd5c48bf166f8ec8703643a8"
+      },
+      "openbot": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:479cccd42fc8942c98c7f326b065ca53cfd58f91d78fd1d5a2680b684e1a5f70"
+      },
+      "supervisor": {
+        "reference": "ghcr.io/copilotkit/openbot-supervisor@sha256:ef25e8829606478a412345f3f63e041f827359c1f9759008e32341ce4f81e0e0"
+      },
+      "server": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:479cccd42fc8942c98c7f326b065ca53cfd58f91d78fd1d5a2680b684e1a5f70"
+      },
+      "agent-computer": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:479cccd42fc8942c98c7f326b065ca53cfd58f91d78fd1d5a2680b684e1a5f70"
+      },
+      "agent-bot": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:479cccd42fc8942c98c7f326b065ca53cfd58f91d78fd1d5a2680b684e1a5f70"
+      },
+      "agent-langgraph": {
+        "reference": "ghcr.io/copilotkit/openbot@sha256:479cccd42fc8942c98c7f326b065ca53cfd58f91d78fd1d5a2680b684e1a5f70"
+      }
+    },
+    "chart": {
+      "version": "0.3.0",
+      "url": "https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-0.3.0.tgz",
+      "sha256": "267fa687d676b8feb191ad1c5ceea229a4872a2dfc2148d2dadee295a8fcda8a"
+    }
+  },
+  "compatibility": {
+    "launcherApi": 1,
+    "configSchema": 1,
+    "extensionApi": 1,
+    "database": {
+      "from": [
+        "0088_approval_reviewer_guidance",
+        "0085_approval_rule_account",
+        "0083_learning_skill_approvals",
+        "0082_routine_goal",
+        "0077_channel_opening"
+      ],
+      "to": "0132_bot_task_runs",
+      "rollbackCompatible": false
+    },
+    "intelligenceCapabilities": []
+  },
+  "upgrade": {
+    "fromVersions": [
+      "v1.0.3",
+      "v1.0.2",
+      "v1.0.1",
+      "v1.0.0",
+      "v0.3.4",
+      "v0.3.3",
+      "v0.3.2",
+      "v0.3.1",
+      "v0.3.0"
+    ],
+    "requiresDowntime": true,
+    "recovery": "restore-backup"
+  }
+}

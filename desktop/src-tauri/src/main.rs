@@ -4534,6 +4534,22 @@ async fn start_stack_inner<R: tauri::Runtime>(
         *shell.leftover_database.lock().unwrap() = None;
     }
     /*
+     * A release that needs a newer app than this one is not started, and nothing is woken or
+     * written for it: the window says "Update OpenBot" with this app's update, and the release stays
+     * as it was laid out (`deployment_release::start_problem`). Off the async thread, because it can
+     * ask the release's manifest over blocking HTTP.
+     */
+    let laid_out = root.clone();
+    if let Some(problem) =
+        tauri::async_runtime::spawn_blocking(move || deployment_release::start_problem(&laid_out))
+            .await
+            .ok()
+            .flatten()
+    {
+        log::warn!("[start] {}", logging::Failure::described(&problem));
+        return Err(problem);
+    }
+    /*
      * Resolved from the catalogue rather than taken from the window.
      *
      * The image, the port and how it is dialled are facts about the harness, and the window

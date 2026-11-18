@@ -1567,6 +1567,14 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             displayedFailure?.shortfall,
             local.stopped ? local.blocked?.shortfall : undefined,
           );
+    /*
+     * The release on this computer needs a newer version of this app, so Start did not start it
+     * (`deployment_release::start_problem`). Nothing failed and nothing is stopped for good: the
+     * heading says what to do, and the card under it says why and offers this app's update. No
+     * failed row, Retry, logs or Repair, which would each say something broke.
+     */
+    const appBehind =
+      !localStarting && !installingAfresh && appTooOld(displayedFailure);
     return (
       <main>
         <div className="sheet connection-sheet">
@@ -1575,20 +1583,24 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               ? UPDATING_SELF_CONTAINED
               : localStarting || installingAfresh
                 ? "Starting OpenBot"
-                : roomShort
-                  ? ROOM_HEADING
-                  : "OpenBot is stopped"}
+                : appBehind
+                  ? "Update OpenBot"
+                  : roomShort
+                    ? ROOM_HEADING
+                    : "OpenBot is stopped"}
           </h1>
-          <p className="lede">
-            {localStarting || installingAfresh
-              ? // No time of its own: the card under it says how long is left, from how long each
-                // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
-                // on Windows G, and the start took four.
-                "OpenBot is getting ready and opens by itself."
-              : roomShort
-                ? resourcesShortSaid(roomShort)
-                : "Your installation and saved connections are ready to reopen."}
-          </p>
+          {!appBehind && (
+            <p className="lede">
+              {localStarting || installingAfresh
+                ? // No time of its own: the card under it says how long is left, from how long each
+                  // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
+                  // on Windows G, and the start took four.
+                  "OpenBot is getting ready and opens by itself."
+                : roomShort
+                  ? resourcesShortSaid(roomShort)
+                  : "Your installation and saved connections are ready to reopen."}
+            </p>
+          )}
           {roomShort && (
             <div className="row room-retry">
               <button type="button" disabled={busy} onClick={local.retry}>
@@ -1596,7 +1608,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               </button>
             </div>
           )}
-          {freshInstall || (
+          {freshInstall || appBehind || (
             <LocalIntelligence
               sequence={local}
               offerStart
@@ -1618,9 +1630,13 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           {updatingLine}
-          {displayedFailure && !roomShort && (
-            <Failure problem={displayedFailure} />
-          )}
+          {displayedFailure &&
+            !roomShort &&
+            (appBehind ? (
+              <AppTooOld problem={displayedFailure} headed={false} />
+            ) : (
+              <Failure problem={displayedFailure} />
+            ))}
           {updatingSelf && <SelfContainedNote />}
           {/* While a local step runs, its Cancel is the only control. */}
           {!localStarting && !installingAfresh && (
@@ -1634,8 +1650,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                 >
                   Change AI connection
                 </button>
-                {/* Room is what is short: a repair installs again, and needs room too. */}
-                {displayedFailure && !roomShort && (
+                {/* Room is what is short: a repair installs again, and needs room too. And a
+                  release that needs a newer app is not broken: a repair lays the same one out. */}
+                {displayedFailure && !roomShort && !appBehind && (
                   <button
                     type="button"
                     className="quiet"

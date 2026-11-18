@@ -3975,6 +3975,66 @@ test("an OpenBot on this computer that needs a newer app says Update OpenBot, no
   expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
 });
 
+/*
+ * The release laid out on this computer needs a launcher contract newer than this app speaks (a
+ * newer app laid it out, and this one is older): Start does not start it
+ * (`deployment_release::start_problem`). The window says "Update OpenBot" with the same sentence and
+ * Update and restart, not that OpenBot stopped or that setup failed, and Update and restart installs
+ * this app's update.
+ */
+test("a release that needs a newer app is not started, and the window says Update OpenBot with its update", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-launcher-ahead",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said,
+        detail:
+          "OpenBot v1.3.0 needs launcherApi 2; this app is v1.1.1 and speaks launcherApi 1",
+        kind: "app-too-old",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.1",
+        installing: null,
+        updatesItself: true,
+      };
+    if (command === "check_app_update")
+      return { found: "available", version: "1.3.0", current: "1.1.1" };
+    if (command === "install_app_update") return new Promise(() => {});
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  const heading = await view.findByRole("heading", {
+    level: 1,
+    name: "Update OpenBot",
+  });
+  expect(view.queryByRole("heading", { name: "OpenBot stopped" })).toBeNull();
+  expect(view.queryByText("That didn’t finish")).toBeNull();
+  expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
+  const card = view.getByRole("alert");
+  expect(card.textContent).toContain(said);
+  expect(within(card).queryByRole("heading")).toBeNull();
+  expect(heading.closest(".sheet")?.contains(card)).toBe(true);
+  // Nothing was shown: the release that needs a newer app is not opened.
+  expect(localSequence()).not.toContain("show_openbot");
+  const update = view.getByRole("button", { name: "Update and restart" });
+  await waitFor(() => expect(update).toHaveProperty("disabled", false));
+  await userEvent.click(update);
+  await waitFor(() =>
+    expect(invokeCalls.map((call) => call.command)).toContain(
+      "install_app_update",
+    ),
+  );
+});
+
 test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
   setupConnectedLocalStack(
     "/tmp/local-eval-docker-never",

@@ -273,6 +273,15 @@ pub fn why(deployment: Deployment, fit: &Fit) -> String {
 pub const LOCAL_APP_TOO_OLD: &str =
     "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.";
 
+/// The OpenBot on this computer needs a newer version of this app, for `why` in the log: whether its
+/// `deployment` said so, or its release needs a launcher contract this app does not speak
+/// (`deployment_release::start_problem`). The window says "Update OpenBot" with this app's update.
+pub fn local_app_too_old(why: String) -> Problem {
+    let mut problem = Problem::with(LOCAL_APP_TOO_OLD, why);
+    problem.kind = Some(APP_TOO_OLD);
+    problem
+}
+
 /**
 Whether the OpenBot on this computer, at `base` (`http://127.0.0.1:<port>` of its server), needs a
 newer version of this app: its `deployment` read the way every app reads it, with the install's
@@ -309,9 +318,7 @@ pub fn local_problem(base: &str, install_token: Option<&str>) -> Option<Problem>
     let Fit::App { .. } = decided else {
         return None;
     };
-    let mut problem = Problem::with(LOCAL_APP_TOO_OLD, why(read, &decided));
-    problem.kind = Some(APP_TOO_OLD);
-    Some(problem)
+    Some(local_app_too_old(why(read, &decided)))
 }
 
 #[cfg(test)]
