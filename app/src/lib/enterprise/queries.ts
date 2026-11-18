@@ -13,6 +13,7 @@ import type {
   EgressRule as EgressRuleEntry,
   NetworkMode as NetworkModeName,
   NetworkPolicyScopeKind,
+  OrganizationSettingsContextComputerMode,
 } from "@/lib/api/generated/model";
 import {
   listNetworkPolicies,
@@ -151,7 +152,27 @@ export const enterpriseKeys = {
   /* Under the root, so saving a policy, which changes the one in force, asks the replay again. */
   networkReplay: (candidate: NetworkCandidate) =>
     ["enterprise", "network-replay", candidate] as const,
+  computerMode: () => ["enterprise", "computer-mode"] as const,
 };
+
+/**
+ * How Bots get computers here: the settings' read-only `computerMode`. Null from a server that
+ * predates it, which the screens read as nothing to say.
+ */
+export type ComputerMode = NonNullable<OrganizationSettingsContextComputerMode>;
+
+export function computerModeQueryOptions() {
+  return queryOptions({
+    queryKey: enterpriseKeys.computerMode(),
+    queryFn: async ({ signal }): Promise<ComputerMode | null> =>
+      (
+        await getOrganizationSettings(organizationId(), {
+          signal,
+          fallback: OVERVIEW_FALLBACK,
+        })
+      ).context.computerMode ?? null,
+  });
+}
 
 /** A network policy as the dialog holds it, not yet saved. */
 export type NetworkCandidate = {
