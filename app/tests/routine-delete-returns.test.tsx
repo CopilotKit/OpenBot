@@ -43,6 +43,7 @@ const ROUTINE: RoutineRecord = {
   id: "routine-1",
   botId: "lead-desk",
   schedule: "Weekdays at 09:00",
+  cron: "0 9 * * 1-5",
   timezone: "Europe/Madrid",
   instruction: "Send me a summary of yesterday's new leads",
   title: "Morning leads",
