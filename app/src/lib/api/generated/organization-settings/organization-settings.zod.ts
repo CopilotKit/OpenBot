@@ -132,7 +132,7 @@ export const GetDeploymentResponse = zod
       })
       .optional()
       .describe(
-        "The oldest release of each OpenBot app this OpenBot serves. An app names itself in the OpenBot-Client header, and one older than its minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but this deployment answer. An app not listed has no minimum. Absent from a release before it was published.",
+        "The oldest release of each OpenBot app this OpenBot serves. An app names itself in the OpenBot-Client header, and one older than its minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but this deployment answer. An app not listed has no minimum. An OpenBot serves every app released in the last 12 months, so it names one only where its administrator raised it. Absent from a release before it was published.",
       ),
     launcherApi: zod
       .int()

@@ -1120,8 +1120,10 @@ components:
         The oldest release of each OpenBot app this OpenBot serves. An app
         names itself in the OpenBot-Client header, and one older than its
         minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but
-        this deployment answer. An app not listed has no minimum. Absent from
-        a release before it was published.
+        this deployment answer. An app not listed has no minimum. An OpenBot
+        serves every app released in the last 12 months, so it names one only
+        where its administrator raised it. Absent from a release before it was
+        published.
       properties:
         web:
           $ref: '#/components/schemas/ClientRelease'
@@ -2225,10 +2227,7 @@ components:
           fileBytes: 104857600
         api: [v2]
         minimumClients:
-          web: 1.1.0
-          desktop: 1.0.2
-          mobile: 1.1.0
-          recorder: 1.1.0
+          desktop: 1.2.0
         launcherApi: 1
         extensionApi: 1
     OrganizationSettingsExample:

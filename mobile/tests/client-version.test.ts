@@ -6,11 +6,7 @@
 import { expect, test } from "bun:test";
 import { clientUpdateDetail } from "../../shared/client-version";
 import fixture from "../../shared/fixtures/client-version/cases.json";
-import {
-  compatibility,
-  isOpenBotCapabilities,
-  phoneUpdateDetail,
-} from "../src/client-version";
+import { compatibility, phoneUpdateDetail } from "../src/client-version";
 
 type Case = {
   deployment: string;
@@ -28,10 +24,7 @@ test("the phone app's rule decides every case in the shared fixture as the other
   const cases = fixture.cases as Case[];
   expect(cases.length).toBeGreaterThan(10);
   for (const one of cases) {
-    const deployment =
-      one.deployment === "before-v2"
-        ? ("before-v2" as const)
-        : deployments[one.deployment];
+    const deployment = deployments[one.deployment];
     if (!deployment) throw new Error(`No deployment ${one.deployment}`);
     const decided = compatibility(deployment, one.client);
     expect({ case: one, decided }).toEqual({
@@ -42,18 +35,6 @@ test("the phone app's rule decides every case in the shared fixture as the other
           : { fit: one.fit },
     });
   }
-});
-
-test("an OpenBot from before the v2 API is told apart by its capabilities answer, and nothing else is taken for one", () => {
-  expect(isOpenBotCapabilities(fixture["before-v2-capabilities"])).toBe(true);
-  for (const other of [
-    null,
-    "OpenBot",
-    { status: "ok" },
-    { edition: "team" },
-    { mode: "intelligence", generativeUi: "yes", edition: "team" },
-  ])
-    expect(isOpenBotCapabilities(other)).toBe(false);
 });
 
 test("the update screen names the release it needs when OpenBot said one, in OpenBot's own words for the phone app", () => {

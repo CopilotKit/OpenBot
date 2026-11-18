@@ -26,14 +26,10 @@ type Seen = {
 const seen: Seen[] = [];
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
-/** What this stand-in answers at `deployment` and `/api/capabilities`: one of the fixture's real answers, or a status. */
+/** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
 let deploymentAnswer: { status: number; body: unknown } = {
   status: 200,
   body: fixture.deployments.current,
-};
-let capabilitiesAnswer: { status: number; body: unknown } = {
-  status: 404,
-  body: null,
 };
 /** The OpenBot release this app is built from: the root package.json's version, read here on its own. */
 const RELEASE = (
@@ -63,10 +59,6 @@ const server = Bun.serve({
     if (url.pathname === "/api/v2/organizations/default/deployment")
       return Response.json(deploymentAnswer.body, {
         status: deploymentAnswer.status,
-      });
-    if (url.pathname === "/api/capabilities")
-      return Response.json(capabilitiesAnswer.body, {
-        status: capabilitiesAnswer.status,
       });
     if (url.pathname === `${ORG}/bots/too-old`)
       return Response.json(
@@ -202,7 +194,6 @@ beforeEach(() => {
   seen.length = 0;
   named.length = 0;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
-  capabilitiesAnswer = { status: 404, body: null };
 });
 afterAll(() => {
   server.stop(true);
@@ -355,21 +346,19 @@ test("before sign-in the app reads the deployment and decides: this release's Op
   });
 });
 
-test("an OpenBot from before the v2 API (no deployment, but an OpenBot's capabilities) is too old: Ask whoever runs your OpenBot to update it", async () => {
+test("anything but an app too old for its OpenBot decides nothing: the app opens and its screens say what failed, as before", async () => {
+  // No deployment answer at all.
   deploymentAnswer = {
     status: 404,
     body: { detail: "Not found.", code: "NOT_FOUND" },
   };
-  capabilitiesAnswer = {
-    status: 200,
-    body: fixture["before-v2-capabilities"],
-  };
-  expect(await checkVersion()).toEqual({ kind: "server" });
-
-  // A 404 from something that is not OpenBot says nothing about versions: the screens say what failed.
-  capabilitiesAnswer = { status: 404, body: { detail: "Not found." } };
   expect(await checkVersion()).toEqual({ kind: "ok" });
-  capabilitiesAnswer = { status: 200, body: { status: "ok" } };
+  // An OpenBot that serves only an API older than any this app speaks: whoever runs it keeps it and their apps
+  // matched, and the app adds nothing of its own for it.
+  deploymentAnswer = {
+    status: 200,
+    body: { ...fixture.deployments.current, api: ["v1"] },
+  };
   expect(await checkVersion()).toEqual({ kind: "ok" });
 });
 

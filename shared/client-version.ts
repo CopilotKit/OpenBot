@@ -27,19 +27,16 @@ export const RELEASE = RELEASE_VERSION;
 export const API_VERSIONS: readonly string[] = ["v2"];
 
 /**
- * The oldest release of each app this release's server still serves. An older one is refused with
- * CLIENT_UPDATE_REQUIRED. Proposal (API versioning design, section 6.3): the previous minor release
- * in full. OpenBot Desktop goes back to 1.0.2, the first release whose window an OpenBot of today
- * still starts; the phone app and the Recorder to 1.1.0, their first release that speaks this API.
- * The web app is served by the server itself, so only a tab left open across an upgrade is older.
- * An app from before this check sends no header and is never refused by it.
+ * The oldest release of each app this release's server still serves, built in. An older one is
+ * refused with CLIENT_UPDATE_REQUIRED. A server serves every app released in the last 12 months
+ * (API versioning design, section 6.3), so a release may set an app's built-in minimum only to a
+ * release published more than 12 months before it. Until such a release exists there is none, and
+ * every app is served. An admin of a server, such as OpenBot Cloud's, raises it for that server
+ * with the server's OPENBOT_MINIMUM_CLIENTS. An app from before this check sends no header and is
+ * never refused by it.
  */
-export const MINIMUM_CLIENTS: Readonly<Record<ClientKind, string>> = {
-  web: "1.1.0",
-  desktop: "1.0.2",
-  mobile: "1.1.0",
-  recorder: "1.1.0",
-};
+export const MINIMUM_CLIENTS: Readonly<Partial<Record<ClientKind, string>>> =
+  {};
 
 /** The contract numbers `release-policy.json` keeps, which `deployment` publishes. */
 export const LAUNCHER_API: number = policy.compatibility.launcherApi;
@@ -178,8 +175,7 @@ function major(version: string): number | undefined {
  *   "Ask whoever runs your OpenBot to update it".
  *
  * A `deployment` that publishes no `api` is from a release before this check, and every such
- * release that answers `deployment` serves v2. `"before-v2"` is an OpenBot that answers no
- * `deployment` at all but still answers as an OpenBot: a release from before the v2 API.
+ * release that answers `deployment` serves v2.
  */
 export type Compatibility =
   | { fit: "ok" }
@@ -187,10 +183,9 @@ export type Compatibility =
   | { fit: "server" };
 
 export function compatibility(
-  deployment: { api?: unknown; minimumClients?: unknown } | "before-v2",
+  deployment: { api?: unknown; minimumClients?: unknown },
   client: { kind: ClientKind; version: string; speaks?: readonly string[] },
 ): Compatibility {
-  if (deployment === "before-v2") return { fit: "server" };
   const speaks = client.speaks ?? API_VERSIONS;
   const served = Array.isArray(deployment.api)
     ? deployment.api.filter(

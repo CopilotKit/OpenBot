@@ -4,8 +4,8 @@ and the OpenBot it talks to can work together.
 
 Every OpenBot app names itself in `OpenBot-Client: <kind>/<version>`, and every OpenBot says on its
 `deployment` which API versions it serves and the oldest release of each app it still serves. When
-the two don't fit, the person reads one sentence: "Update OpenBot" when this app is too old, "Ask
-whoever runs your OpenBot to update it" when that OpenBot is.
+this app is too old for that OpenBot, the person reads "Update OpenBot" and is offered this app's
+update. An OpenBot too old for this app is told as it always was (`connected::Kind::TooOld`).
 
 The rules are `shared/client-version.ts`'s, carried here in Rust. The tests hold them to every case
 in `shared/fixtures/client-version/cases.json`, the same cases the web app, the Recorder and the
@@ -101,20 +101,12 @@ pub enum Fit {
     /// The app is too old: that OpenBot serves only newer API versions, or names a minimum for
     /// this app above its version (`minimum`). "Update OpenBot".
     App { minimum: Option<String> },
-    /// That OpenBot is too old: it serves only API versions older than any the app speaks, or it is
-    /// from before the v2 API. "Ask whoever runs your OpenBot to update it".
+    /// That OpenBot is too old: it serves only API versions older than any the app speaks.
     Server,
 }
 
-/// What an OpenBot answered about itself.
-#[derive(Clone, Copy, Debug)]
-pub enum Deployment<'a> {
-    /// Its `deployment`, as it answered it.
-    Answered(&'a serde_json::Map<String, serde_json::Value>),
-    /// No `deployment` at all, while it still answers as an OpenBot (`/api/capabilities`): a release
-    /// from before the v2 API, such as 1.0.3.
-    BeforeV2,
-}
+/// An OpenBot's `deployment`, as it answered it.
+pub type Deployment = serde_json::Map<String, serde_json::Value>;
 
 /// The major of an API version, `v2` as 2.
 fn major(version: &str) -> Option<u32> {
@@ -204,10 +196,7 @@ Whether an app of `kind` at `version`, speaking `speaks`, and the OpenBot that a
 can work together. A `deployment` that publishes no `api` is from a release before it was
 published, and every such release that answers `deployment` serves v2.
 */
-pub fn compatibility(deployment: Deployment, kind: &str, version: &str, speaks: &[&str]) -> Fit {
-    let Deployment::Answered(deployment) = deployment else {
-        return Fit::Server;
-    };
+pub fn compatibility(deployment: &Deployment, kind: &str, version: &str, speaks: &[&str]) -> Fit {
     let served: Vec<&str> = match deployment.get("api") {
         Some(serde_json::Value::Array(api)) => {
             api.iter().filter_map(serde_json::Value::as_str).collect()
@@ -242,25 +231,20 @@ pub fn compatibility(deployment: Deployment, kind: &str, version: &str, speaks: 
 }
 
 /// [`compatibility`] for this app.
-pub fn fit(deployment: Deployment) -> Fit {
+pub fn fit(deployment: &Deployment) -> Fit {
     compatibility(deployment, KIND, &app_version(), API_VERSIONS)
 }
 
 /// Why it doesn't fit, for the log: what that OpenBot said, against this app.
-pub fn why(deployment: Deployment, fit: &Fit) -> String {
+pub fn why(deployment: &Deployment, fit: &Fit) -> String {
     let this = format!(
         "this app is {} and speaks {}",
         token(),
         API_VERSIONS.join(", ")
     );
-    let served = match deployment {
-        Deployment::BeforeV2 => {
-            return format!("the OpenBot answers no deployment, from before the v2 API; {this}")
-        }
-        Deployment::Answered(deployment) => deployment
-            .get("api")
-            .map_or_else(|| "no api (v2)".to_owned(), |api| format!("api {api}")),
-    };
+    let served = deployment
+        .get("api")
+        .map_or_else(|| "no api (v2)".to_owned(), |api| format!("api {api}"));
     match fit {
         Fit::App {
             minimum: Some(minimum),
@@ -304,12 +288,11 @@ pub fn local_problem(base: &str, install_token: Option<&str>) -> Option<Problem>
     let serde_json::Value::Object(deployment) = answered.json::<serde_json::Value>().ok()? else {
         return None;
     };
-    let read = Deployment::Answered(&deployment);
-    let decided = fit(read);
+    let decided = fit(&deployment);
     let Fit::App { .. } = decided else {
         return None;
     };
-    let mut problem = Problem::with(LOCAL_APP_TOO_OLD, why(read, &decided));
+    let mut problem = Problem::with(LOCAL_APP_TOO_OLD, why(&deployment, &decided));
     problem.kind = Some(APP_TOO_OLD);
     Some(problem)
 }
@@ -342,9 +325,6 @@ pub(crate) const CASES: &str = include_str!("../../../shared/fixtures/client-ver
 #[cfg(test)]
 pub(crate) fn fixture_deployment(name: &str) -> serde_json::Value {
     let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
-    if name == "before-v2-capabilities" {
-        return cases["before-v2-capabilities"].clone();
-    }
     let found = cases["deployments"][name].clone();
     assert!(found.is_object(), "the fixture has no deployment {name}");
     found
@@ -359,7 +339,7 @@ mod tests {
     fn every_case_in_the_shared_fixture_is_decided_as_the_contract_says() {
         let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
         let list = cases["cases"].as_array().unwrap();
-        assert!(list.len() >= 16, "the fixture lost its cases");
+        assert!(list.len() >= 15, "the fixture lost its cases");
         for case in list {
             let name = case["deployment"].as_str().unwrap();
             let client = &case["client"];
@@ -367,11 +347,7 @@ mod tests {
                 .as_array()
                 .map(|speaks| speaks.iter().filter_map(|v| v.as_str()).collect())
                 .unwrap_or_else(|| API_VERSIONS.to_vec());
-            let answered = (name != "before-v2")
-                .then(|| cases["deployments"][name].as_object().unwrap().clone());
-            let deployment = answered
-                .as_ref()
-                .map_or(Deployment::BeforeV2, Deployment::Answered);
+            let deployment = cases["deployments"][name].as_object().unwrap();
             let decided = compatibility(
                 deployment,
                 client["kind"].as_str().unwrap(),
@@ -425,8 +401,8 @@ mod tests {
 
     /// The OpenBot on this computer, read as every app reads it, through the real HTTP path with
     /// the fixture's real answers. Only an OpenBot that needs a newer app is a problem: one of this
-    /// release, one left at 1.1.0 (no version fields), one from before the v2 API and one that is
-    /// not answering all start and open as before, with no sentence.
+    /// release, one left at 1.1.0 (no version fields) and one that is not answering all start and
+    /// open as before, with no sentence.
     #[test]
     fn the_openbot_on_this_computer_says_update_openbot_only_when_it_needs_a_newer_app() {
         use crate::connected::fake_openbot::{FakeOpenBot, Shape};
@@ -436,7 +412,6 @@ mod tests {
             (Shape::Answers("v3-only"), true),
             (Shape::Answers("current"), false),
             (Shape::Answers("v1.1.0"), false),
-            (Shape::BeforeV2, false),
         ] {
             let server = FakeOpenBot::start(shape.clone());
             let problem = local_problem(&server.address(), Some("install-token-abc"));

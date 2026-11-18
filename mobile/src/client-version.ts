@@ -18,9 +18,6 @@ export const API_VERSIONS: readonly string[] = ["v2"];
 
 /** What a person reads when the app is older than the OpenBot it talks to serves. */
 export const APP_UPDATE_SENTENCE = "Update OpenBot";
-/** What a person reads when the OpenBot is older than the app can use. */
-export const SERVER_UPDATE_SENTENCE =
-  "Ask whoever runs your OpenBot to update it";
 
 /** The apps that name themselves, as the server's minimums list them. */
 type ClientKind = "web" | "desktop" | "mobile" | "recorder";
@@ -81,7 +78,8 @@ function major(version: string): number | undefined {
 /**
  * - `ok`: they can. Features the server lacks are hidden by the fields that offer them, never by a version.
  * - `app`: the app is too old. "Update OpenBot".
- * - `server`: the server is too old. "Ask whoever runs your OpenBot to update it".
+ * - `server`: the server serves only API versions older than any the app speaks. The phone app adds nothing for it:
+ *   whoever runs that OpenBot keeps it and their apps matched, and the screens say what failed, as they always have.
  */
 export type Compatibility =
   | { fit: "ok" }
@@ -90,14 +88,12 @@ export type Compatibility =
 
 /**
  * Whether an app and the OpenBot it talks to can work together, from that OpenBot's `deployment`. A `deployment` that
- * publishes no `api` is from a release before this check, and every such release serves v2. `"before-v2"` is an
- * OpenBot that answers no `deployment` but still answers as an OpenBot: a release from before the v2 API.
+ * publishes no `api` is from a release before this check, and every such release serves v2.
  */
 export function compatibility(
-  deployment: { api?: unknown; minimumClients?: unknown } | "before-v2",
+  deployment: { api?: unknown; minimumClients?: unknown },
   client: { kind: ClientKind; version: string; speaks?: readonly string[] },
 ): Compatibility {
-  if (deployment === "before-v2") return { fit: "server" };
   const speaks = client.speaks ?? API_VERSIONS;
   const served = Array.isArray(deployment.api)
     ? deployment.api.filter(
@@ -126,19 +122,6 @@ export function compatibility(
 }
 
 /**
- * Whether an answer at `/api/capabilities` is an OpenBot's: every OpenBot release answers there with its edition and
- * what it offers, and one from before the v2 API answers nowhere else.
- */
-export function isOpenBotCapabilities(body: unknown): boolean {
-  if (!body || typeof body !== "object") return false;
-  const answer = body as Record<string, unknown>;
-  return (
-    typeof answer.edition === "string" &&
-    typeof answer.generativeUi === "boolean"
-  );
-}
-
-/**
  * What the update screen says under "Update OpenBot": OpenBot's own sentence for refusing this app (as
  * shared/client-version.ts `clientUpdateDetail` words it for the phone app), with the release it needs when known.
  */
@@ -148,11 +131,8 @@ export function phoneUpdateDetail(minimum?: string): string {
     : "This OpenBot needs a newer OpenBot phone app. Update OpenBot, then try again.";
 }
 
-/** What the root layout shows: the app, or one of the two sentences. */
-export type VersionVerdict =
-  | { kind: "ok" }
-  | { kind: "app"; detail: string }
-  | { kind: "server" };
+/** What the root layout shows: the app, or "Update OpenBot". */
+export type VersionVerdict = { kind: "ok" } | { kind: "app"; detail: string };
 
 /**
  * Anything that learns OpenBot refused this app as too old (a request's CLIENT_UPDATE_REQUIRED) says so here, and the

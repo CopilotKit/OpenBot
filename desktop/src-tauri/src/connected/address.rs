@@ -4,9 +4,8 @@
 //! Two questions are asked of the address, both public: what it offers
 //! (`/api/v2/organizations/default/deployment`, which every OpenBot answers before sign-in) and
 //! how an app signs in to it (its authorization server metadata, RFC 8414). What it offers says
-//! whether this app and that OpenBot fit (`client_version`). An address with no `deployment` is
-//! asked one more: whether it is an OpenBot from before the v2 API. Each way that can go wrong is
-//! one `Kind`, so the window can say what to do next.
+//! whether this app is new enough for that OpenBot (`client_version`). Each way that can go wrong
+//! is one `Kind`, so the window can say what to do next.
 
 use super::{host_of, http, transport, Kind};
 use crate::client_version;
@@ -15,8 +14,6 @@ use crate::problem::Problem;
 /// What an OpenBot offers, which every OpenBot answers before sign-in. Read here, and of the OpenBot
 /// on this computer (`client_version::local_problem`).
 pub const DEPLOYMENT: &str = "/api/v2/organizations/default/deployment";
-/// What an OpenBot from before the v2 API answers in place of `DEPLOYMENT`, before sign-in.
-const CAPABILITIES: &str = "/api/capabilities";
 const METADATA: &str = "/.well-known/oauth-authorization-server/api/auth";
 /// What keeps a sign-in going after its first hour: a refresh token.
 const OFFLINE_ACCESS: &str = "offline_access";
@@ -98,29 +95,10 @@ pub fn probe(address: &str) -> Result<Metadata, Problem> {
         .and_then(|deployment| deployment.get("edition"))
         .and_then(serde_json::Value::as_str);
     let (Some(deployment), Some(edition)) = (deployment.as_ref(), edition) else {
-        // No `deployment`. An OpenBot from before the v2 API (1.0.3 and older) still answers what
-        // it offers at `/api/capabilities`: that one is too old for this app, not missing.
-        let missing = format!("GET {DEPLOYMENT} answered {status}, not as an OpenBot does");
-        let before_v2 = get(CAPABILITIES).ok().is_some_and(|older| {
-            let answered = older.status().is_success();
-            json_object(older)
-                .filter(|_| answered)
-                .is_some_and(|capabilities| {
-                    capabilities.get("edition").is_some_and(|e| e.is_string())
-                })
-        });
-        return Err(if before_v2 {
-            let fit = client_version::Fit::Server;
-            Kind::TooOld.problem(
-                &host,
-                format!(
-                    "{missing}; GET {CAPABILITIES} answered as an OpenBot does: {}",
-                    client_version::why(client_version::Deployment::BeforeV2, &fit)
-                ),
-            )
-        } else {
-            Kind::NotOpenBot.problem(&host, missing)
-        });
+        return Err(Kind::NotOpenBot.problem(
+            &host,
+            format!("GET {DEPLOYMENT} answered {status}, not as an OpenBot does"),
+        ));
     };
     let on_its_own_computer = deployment
         .get("localEvaluation")
@@ -132,15 +110,15 @@ pub fn probe(address: &str) -> Result<Metadata, Problem> {
 
     // Which API versions it serves and the oldest release of this app it serves, decided as every
     // OpenBot app decides it (`client_version`): asked when the person connects and on every
-    // launch, so an OpenBot upgraded past this app since, or moved back, is caught.
-    let read = client_version::Deployment::Answered(deployment);
-    match client_version::fit(read) {
+    // launch, so an OpenBot that raised its minimum past this app since is caught. One that serves
+    // only an older API is told as an OpenBot this app can't connect to always was.
+    match client_version::fit(deployment) {
         client_version::Fit::Ok => {}
         fit @ client_version::Fit::App { .. } => {
-            return Err(Kind::AppTooOld.problem(&host, client_version::why(read, &fit)));
+            return Err(Kind::AppTooOld.problem(&host, client_version::why(deployment, &fit)));
         }
         fit @ client_version::Fit::Server => {
-            return Err(Kind::TooOld.problem(&host, client_version::why(read, &fit)));
+            return Err(Kind::TooOld.problem(&host, client_version::why(deployment, &fit)));
         }
     }
 
@@ -354,36 +332,6 @@ mod tests {
         assert_eq!(kind(&server.address()), Some(Kind::TooOld));
     }
 
-    /// OpenBot 1.0.3 and older, from before the v2 API: no `deployment` (404), but
-    /// `/api/capabilities` answers as an OpenBot does. That is an OpenBot too old for this app, and
-    /// the person is told so, not that there is no OpenBot at the address they typed.
-    #[test]
-    fn an_openbot_from_before_the_v2_api_is_too_old_not_missing() {
-        let server = FakeOpenBot::start(Shape::BeforeV2);
-        let problem = check(&server.address()).expect_err("too old");
-        assert_eq!(kind_of(&problem), Some(Kind::TooOld));
-        assert_eq!(
-            problem.said,
-            format!(
-                "The OpenBot at {} is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser.",
-                host_of(&server.address())
-            )
-        );
-        // What the log says beside it.
-        assert_eq!(
-            problem.detail,
-            Some(format!(
-                "GET {DEPLOYMENT} answered 404 Not Found, not as an OpenBot does; GET {CAPABILITIES} answered as an OpenBot does: the OpenBot answers no deployment, from before the v2 API; this app is {} and speaks v2",
-                crate::client_version::token()
-            ))
-        );
-        // Not a sign-in it can't do: nothing past the two questions is asked.
-        assert!(server.seen_at(METADATA).is_empty());
-        // Something else that answers JSON at both addresses is still not an OpenBot.
-        let other = FakeOpenBot::start(Shape::OtherJson);
-        assert_eq!(kind(&other.address()), Some(Kind::NotOpenBot));
-    }
-
     /// The fixture's real answers (`shared/fixtures/client-version/cases.json`), as this release's
     /// app reads them through the real HTTP path. An OpenBot of this release, and one of 1.1.0
     /// (which publishes no version fields), connect. One whose admin raised the oldest app it
@@ -427,19 +375,16 @@ mod tests {
     }
 
     /// The check runs on every launch while connected (`probe`, before the saved sign-in is used),
-    /// not only when the person connects: an OpenBot upgraded past the app since, or moved back,
-    /// is caught the next time the app opens.
+    /// not only when the person connects: an OpenBot that raised its minimum past the app since,
+    /// as OpenBot Cloud does, is caught the next time the app opens.
     #[test]
     fn the_launch_check_catches_an_openbot_that_moved_since_the_app_connected() {
         let _version = crate::client_version::as_version("1.1.0");
-        for (name, kind) in [("raised", Kind::AppTooOld), ("v3-only", Kind::AppTooOld)] {
+        for name in ["raised", "v3-only"] {
             let server = FakeOpenBot::start(Shape::Answers(name));
             let problem = probe(&server.address()).expect_err(name);
-            assert_eq!(kind_of(&problem), Some(kind), "{name}");
+            assert_eq!(kind_of(&problem), Some(Kind::AppTooOld), "{name}");
         }
-        let older = FakeOpenBot::start(Shape::BeforeV2);
-        let problem = probe(&older.address()).expect_err("before v2");
-        assert_eq!(kind_of(&problem), Some(Kind::TooOld));
     }
 
     /// The browser is sent to the authorization endpoint and the code is posted to the token

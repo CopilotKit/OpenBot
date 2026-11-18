@@ -87,12 +87,11 @@ fake.emit = emit;
 // the back end's, which the window runs first (a Mac at 8.2 GB).
 const updateShort = location.hash === "#update-short";
 const backEndShort = location.hash === "#backend-short";
-// An OpenBot and this app that don't fit, as the shell says it: connected to a company's OpenBot
-// that needs a newer app, or that is too old for this one; one whose sign-in ended, as it always
-// was; and the OpenBot on this computer needing a newer app once Start has it running.
+// This app too old for its OpenBot, as the shell says it: connected to an OpenBot (such as OpenBot
+// Cloud) that needs a newer app; one whose sign-in ended, as it always was; and the OpenBot on
+// this computer needing a newer app once Start has it running.
 const CONNECTED_PROBLEMS = {
   "#connect-app-too-old": { said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.", kind: "app-too-old" },
-  "#connect-too-old": { said: "The OpenBot at openbot.example.com is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser.", kind: "too-old" },
   "#connect-session-ended": { said: "Your sign-in to openbot.example.com has ended. Sign in again to keep going.", kind: "session-ended" },
 };
 const connectedProblem = CONNECTED_PROBLEMS[location.hash];
@@ -2169,13 +2168,13 @@ describe.skipIf(!asked)(
 );
 
 /*
- * When this app and its OpenBot don't fit (`client_version.rs`), the window says the shell's
- * sentence and offers its one way on, in view and uncovered, without outgrowing the window: Update
- * and restart when this app is too old, Open in browser when that OpenBot is. Beside them a problem
- * the screen always had, a sign-in that ended, for comparison. With `OPENBOT_SHOTS_DIR` set, each is
+ * When this app is too old for its OpenBot (`client_version.rs`), the window says the shell's
+ * sentence and offers its one way on, Update and restart, in view and uncovered, without outgrowing
+ * the window. Beside them problems the screen always had, a sign-in that ended and a found-running
+ * OpenBot that fails to show, for comparison. With `OPENBOT_SHOTS_DIR` set, each is
  * saved there in light and dark, at the window's default size.
  */
-describe.skipIf(!asked)("an OpenBot and this app that don't fit", () => {
+describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
   const shots = process.env.OPENBOT_SHOTS_DIR;
   const states: {
     name: string;
@@ -2194,12 +2193,6 @@ describe.skipIf(!asked)("an OpenBot and this app that don't fit", () => {
       at: "?offer#connect-app-too-old",
       said: "needs a newer version of this app. Update OpenBot, then connect again.",
       way: { role: "button", name: "Update and restart" },
-    },
-    {
-      name: "connected-server-too-old",
-      at: "#connect-too-old",
-      said: "Ask whoever runs your OpenBot to update it, or open it in your browser.",
-      way: { role: "link", name: "Open in browser" },
     },
     {
       name: "local-app-too-old",

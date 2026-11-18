@@ -11,7 +11,7 @@ import { APP_TOO_OLD, UpdateOpenBot } from "./UpdateOpenBot";
  *
  * `field`: the address is what to fix, so the sentence sits under the field and the field has the
  * focus. `sign-in` and `retry`: the screen's one button says Sign in again or Try again. `browser`:
- * that OpenBot is too old for this app, and a link opens it in the browser. `update`: this app is
+ * this app can't connect to that OpenBot, and a link opens it in the browser. `update`: this app is
  * too old for that OpenBot, and the way on is this app's own update. A kind this app does not know
  * is offered Try again.
  */

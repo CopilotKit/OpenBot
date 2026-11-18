@@ -921,7 +921,7 @@ const CONNECT_PROBLEMS: Array<{
     kind: "too-old",
     at: "check",
     offer: "Open in browser",
-    said: "The OpenBot at openbot.example.com is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser.",
+    said: "The OpenBot at openbot.example.com is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser.",
   },
   {
     kind: "app-too-old",

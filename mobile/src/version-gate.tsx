@@ -1,7 +1,6 @@
 /**
- * The screen the root layout shows in place of the app when it and its OpenBot can't work together: the app is too old
- * ("Update OpenBot") or the OpenBot is ("Ask whoever runs your OpenBot to update it"). It covers everything, headers
- * included, so nothing behind it is shown failing.
+ * The screen the root layout shows in place of the app when the app is too old for its OpenBot ("Update OpenBot"). It
+ * covers everything, headers included, so nothing behind it is shown failing.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -16,7 +15,6 @@ import { serverUrl } from "./auth";
 import {
   APP_UPDATE_SENTENCE,
   onUpdateRequired,
-  SERVER_UPDATE_SENTENCE,
   type VersionVerdict,
 } from "./client-version";
 import { heading, muted } from "./ui";
@@ -70,15 +68,9 @@ export function VersionGate({
       ) : (
         <View style={styles.body}>
           <Text accessibilityRole="header" style={heading}>
-            {verdict.kind === "app"
-              ? APP_UPDATE_SENTENCE
-              : SERVER_UPDATE_SENTENCE}
+            {APP_UPDATE_SENTENCE}
           </Text>
-          <Text style={styles.sentence}>
-            {verdict.kind === "app"
-              ? verdict.detail
-              : `The OpenBot at ${new URL(serverUrl).host} is on a release this app can't connect to yet.`}
-          </Text>
+          <Text style={styles.sentence}>{verdict.detail}</Text>
           <Text style={muted}>{serverUrl}</Text>
           <View style={styles.action}>
             <Button title="Try again" onPress={onRetry} />

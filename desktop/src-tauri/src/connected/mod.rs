@@ -40,7 +40,6 @@ pub enum Kind {
     Unreachable,
     NotOpenBot,
     SinglePerson,
-    /// That OpenBot is older than this app can use: the window offers it in the browser.
     TooOld,
     /// This app is older than that OpenBot serves: the window offers this app's own update.
     AppTooOld,
@@ -87,7 +86,7 @@ impl Kind {
             ),
             Kind::TooOld => format!(
                 "The OpenBot at {host} is on a release this app can't connect to yet. Ask whoever \
-                 runs your OpenBot to update it, or open it in your browser."
+                 runs it to update OpenBot, or open it in your browser."
             ),
             Kind::AppTooOld => format!(
                 "The OpenBot at {host} needs a newer version of this app. Update OpenBot, then \
@@ -219,13 +218,11 @@ mod tests {
             Kind::SessionEnded.said("openbot.example.com"),
             "Your sign-in to openbot.example.com has ended. Sign in again to keep going."
         );
-        // The two sentences every OpenBot app says when it and the OpenBot don't fit
-        // (`shared/client-version.ts`): "Ask whoever runs your OpenBot to update it" when that
-        // OpenBot is too old, "Update OpenBot" when this app is.
         assert_eq!(
             Kind::TooOld.said("127.0.0.1:4000"),
-            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser."
+            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser."
         );
+        // This app too old for that OpenBot, as every OpenBot app says it (`shared/client-version.ts`).
         assert_eq!(
             Kind::AppTooOld.said("openbot.example.com"),
             "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again."

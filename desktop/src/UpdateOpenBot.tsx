@@ -7,8 +7,8 @@ import { type AppUpdate, describe } from "./UpdateOffer";
 
 /**
  * The `kind` the shell gives a problem when this app is older than the OpenBot it talks to serves
- * (`client_version::APP_TOO_OLD`): connected to a company's OpenBot whose admin raised the oldest
- * app it serves, or with an OpenBot on this computer that needs a newer app.
+ * (`client_version::APP_TOO_OLD`): connected to an OpenBot, such as OpenBot Cloud, that raised the
+ * oldest app it serves, or with an OpenBot on this computer that needs a newer app.
  */
 export const APP_TOO_OLD = "app-too-old";
 

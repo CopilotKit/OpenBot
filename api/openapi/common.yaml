@@ -1329,14 +1329,14 @@ components:
                 type: https://open.bot/errors/client-update-required
                 title: This app is too old for this OpenBot.
                 status: 400
-                detail: This OpenBot needs OpenBot Desktop 1.0.2 or later. Update OpenBot, then try again.
+                detail: This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.
                 code: CLIENT_UPDATE_REQUIRED
                 category: validation
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
                 client: desktop
-                minimumVersion: 1.0.2
+                minimumVersion: 1.2.0
     ConversationNotFound:
       description: >-
         The conversation does not exist, was removed, or the caller is not in
