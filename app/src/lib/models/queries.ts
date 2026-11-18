@@ -80,6 +80,12 @@ export type AvailableModels = {
 export type ConversationModel = {
   model: string | null;
   effort: string | null;
+  /**
+   * The model the person chose here, set aside because it hasn't been checked to work with this
+   * Bot's harness (shared/model-lock.ts). Runs use the default until it has been. Only ever on a
+   * read from the server.
+   */
+  unverified?: { model: string; label: string };
 };
 
 export const modelKeys = {

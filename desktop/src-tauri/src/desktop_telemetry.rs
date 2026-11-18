@@ -766,6 +766,7 @@ pub fn cli_failure(failure: local_eval::Failure) -> telemetry::CliFailure {
         F::InvalidAcceptance => T::InvalidAcceptance,
         F::RootlessPodman => T::RootlessPodman,
         F::DownloadStalled => T::DownloadStalled,
+        F::BelowSecurityFloor => T::BelowSecurityFloor,
     }
 }
 
@@ -2045,6 +2046,7 @@ mod tests {
                 drive: None,
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: local_eval::EngineMeasure {
                     cpus: 4,
                     memory_bytes: 2 * 1024 * 1024 * 1024,

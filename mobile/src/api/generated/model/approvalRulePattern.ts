@@ -6,6 +6,6 @@
  * An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.
  * @minLength 1
  * @maxLength 300
- * @pattern ^[^\x00]*\S[^\x00]*$
+ * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
  */
 export type ApprovalRulePattern = string;

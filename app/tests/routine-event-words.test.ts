@@ -81,6 +81,7 @@ const schedule = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   id: "r1",
   botId: "bot",
   schedule: "Weekdays at 09:00",
+  cron: "0 9 * * 1-5",
   timezone: "Europe/Madrid",
   instruction: "Check.",
   title: null,

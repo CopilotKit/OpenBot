@@ -1880,7 +1880,7 @@ export const ReportBotDeclineHeader = zod.object({
 export const reportBotDeclineBodyReasonMax = 2000;
 
 export const reportBotDeclineBodyReasonRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const reportBotDeclineBodyRequestMax = 2000;
 

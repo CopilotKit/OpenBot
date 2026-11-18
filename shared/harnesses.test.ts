@@ -174,6 +174,15 @@ test("reads a subtitle OpenBot wrote under earlier names the way it writes it no
   expect(
     withCurrentFrameworkNames("Everyday life. Powered by Claude Agent SDK."),
   ).toBe(starterSubtitle("Claude Agent SDK"));
+  // A name with its own parentheses reads without them, so the subtitle's never nest.
+  const typescript =
+    "Everyday life agent. (powered by a LangGraph TypeScript agent; you can bring your own agent from any stack.)";
+  expect(starterSubtitle("LangGraph (TypeScript)")).toBe(typescript);
+  expect(
+    withCurrentFrameworkNames(
+      "Everyday life. Powered by LangGraph (TypeScript).",
+    ),
+  ).toBe(typescript);
   expect(withCurrentFrameworkNames("Powered by LangChain (LangGraph)")).toBe(
     "Powered by LangChain",
   );

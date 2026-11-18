@@ -1152,13 +1152,13 @@ fn the_image_list_waits_for_openbots_own_compose_and_asks_it() {
         images.contains(&"pgvector/pgvector:pg17".to_string()),
         "{images:?}"
     );
-    // The two sign-in images, from the release's image list.
-    assert!(
-        images
-            .iter()
-            .any(|image| image.contains("openbot-agent-langgraph-agui@")),
-        "{images:?}"
-    );
+    // Neither plan's image: each runs only on its plan, and nobody has signed in yet.
+    for plan in ["openbot-agent-claude-sdk@", "openbot-agent-langgraph-agui@"] {
+        assert!(
+            !images.iter().any(|image| image.contains(plan)),
+            "{images:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&release);
 }
 

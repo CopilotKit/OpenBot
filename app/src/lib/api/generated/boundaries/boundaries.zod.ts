@@ -81,7 +81,7 @@ export const replaceBoundariesBodyAllowDefault = [];
 export const replaceBoundariesBodyLabelsNameMax = 80;
 
 export const replaceBoundariesBodyLabelsNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const replaceBoundariesBodyLabelsDescriptionMax = 300;
 
@@ -91,7 +91,7 @@ export const replaceBoundariesBodyLabelsDescriptionRegExp = new RegExp(
 export const replaceBoundariesBodyAuthoringTextMax = 2000;
 
 export const replaceBoundariesBodyAuthoringTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const ReplaceBoundariesBody = zod.object({
@@ -209,7 +209,7 @@ export const TranslateBoundaryHeader = zod.object({
 export const translateBoundaryBodyTextMax = 1000;
 
 export const translateBoundaryBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const TranslateBoundaryBody = zod.object({
@@ -288,7 +288,7 @@ export const replayBoundariesBodyBoundariesAllowDefault = [];
 export const replayBoundariesBodyBoundariesLabelsNameMax = 80;
 
 export const replayBoundariesBodyBoundariesLabelsNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const replayBoundariesBodyBoundariesLabelsDescriptionMax = 300;
 

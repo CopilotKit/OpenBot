@@ -8,6 +8,57 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** Read these first: they change what a Helm values file has to say.
+
+- **The Helm charts refuse shared computers until you say you mean them.** Shared computers
+  (`computers.mode: shared`, still the default) run every person's Bots on one computer, where a
+  command one Bot runs can read another person's files, so they suit a proof of concept only.
+  Sandbox mode (`computers.mode: sandbox`) gives each person a computer of their own and is the way
+  to run OpenBot for people; it needs the agent-sandbox controller in the cluster. A plain install
+  now stops and names both. A release that runs shared computers today, including one that never
+  set `computers.mode`, has to set `computers.sharedModeAcknowledged: true` before upgrading
+  (`openbot.computers.sharedModeAcknowledged` in the `openbot-bundle` chart), or `helm upgrade`
+  stops with that message and changes nothing. Acknowledged, the install notes say it again, and
+  admins see it in Admin (below). **The same goes for `computers.mode: external`**: every person's
+  Bots share the one computer at `computers.url`, so a release on it sets the same value before
+  upgrading, and its refusal, install notes and Admin notice say the same.
+
+### Admin
+
+- **Admins see when everyone's Bots share one computer.** On an OpenBot whose Bots all run on one
+  computer, Admin's overview and its Computers page say so, say it suits a proof of concept only,
+  and say how to give each person a computer of their own. An OpenBot one person uses, OpenBot
+  Desktop included, says nothing, because that computer is the person's own. Nobody but an admin
+  sees anything new. The organization settings' read-only `context` gains `computerMode`
+  (`per-person`, `shared` or `none`).
+
+### Personal edition
+
+- **OpenBot for one person asks once to be starred on GitHub.** In the personal edition only, once
+  you have used OpenBot on three separate days, a card above the message box asks you to star
+  OpenBot on GitHub, right after something goes well: you copy a Bot's answer, one of your
+  routines finishes a run, or a long task finishes. Never right after an error, never on a team's
+  OpenBot, and never beside the notifications offer. Either answer is saved to your account, so it
+  is never asked again on any device. Settings → General keeps the link in a new OpenBot section.
+  The preferences gain `dismissedNotices` (the notices you answered) and `noticesDue` (the ones
+  OpenBot would show you now), and `POST /api/v2/organizations/{organizationId}/nudge-events`
+  counts how many people were shown a nudge, followed it or dismissed it, with product telemetry
+  on; see [TELEMETRY.md](docs/TELEMETRY.md).
+- **The API says when something you call is deprecated.** An operation, parameter or field the
+  API spec marks deprecated answers with the standard `Deprecation` and `Sunset` headers and a
+  `Link` to this changelog, whose Deprecated list under a release's "Before upgrading" says what
+  replaces it. It keeps working until at least its sunset, 12 months or more after it was
+  deprecated, and is removed only once nothing still uses it. A field in an answer is the
+  exception: the server can't tell whether anything reads it, so it may go once its sunset has
+  passed. Nothing is deprecated yet. See
+  [api/README.md](api/README.md#deprecating).
+- **Statuses, roles and scope kinds in API answers can gain values.** The spec declares them open
+  (`x-extensible-enum`): a task's or a run's status, a person's role, a network policy's scope,
+  what decided a person's permission, and the others listed in
+  `api/accepted-breaking-changes.md`. A script
+  that reads one should treat a value it doesn't know as "other" rather than fail. The values sent
+  today are unchanged.
+
 ## 1.1.0
 
 **Before upgrading.** Read these first: several of them change what a script, a proxy, a Compose

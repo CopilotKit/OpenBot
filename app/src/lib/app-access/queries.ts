@@ -116,7 +116,8 @@ export type AppAccessRequest = {
   appKey: string;
   appTitle: string;
   kind: AppAccessRequestKind;
-  status: "pending" | "approved" | "dismissed" | "cancelled";
+  /** `pending`, `approved`, `dismissed` or `cancelled`. The list can grow. */
+  status: string;
   agentId: string | null;
   botName: string | null;
   requestedBy: string;

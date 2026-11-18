@@ -81,7 +81,7 @@ export const ListLinkedAccountsResponse = zod.object({
               "Who they are there, such as their GitHub login, when the service said.",
             ),
           status: zod
-            .enum(["active", "needs_reconnect"])
+            .string()
             .describe(
               "needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.",
             ),

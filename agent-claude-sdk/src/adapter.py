@@ -469,6 +469,9 @@ class _Turn:
     model: str | None = None
     # The newest run's input: the whole thread, with every result the browser has sent so far.
     latest: object = None
+    # Calls on the model endpoint to a tool the step did not offer, which Claude Code answers
+    # itself. See `_not_held`.
+    not_held: set[str] = field(default_factory=set)
 
     def result(self, tool_id):
         if tool_id not in self.results:
@@ -1233,9 +1236,41 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             }
         )
 
+    def _not_held(self, event, turn):
+        """Whether this event belongs to a call of a tool this step was not offered.
+
+        On the model endpoint the query holds exactly the step's tools (see `run`). The model can
+        still ask for one it does not hold: an app action it knows by name from the conversation, a
+        tool an earlier step was offered, or one it guessed. Claude Code answers such a call itself,
+        with "No such tool available", and the model carries on in the same query. Upstream streams
+        the call as it starts, before Claude Code has looked at it, and the server ends a run that
+        names a tool the step did not offer: FOUND IN DOGFOODING, a Bot asked to add HubSpot deals
+        to a posted Slack update called `SLACK_UPDATES_A_SLACK_MESSAGE`, which it did not hold, and
+        five minutes of work ended on an error. Nothing of such a call is passed on, so the server
+        only ever hears of calls to tools it offered, and the person reads the model's answer.
+        """
+        if not self._model_only:
+            return False
+        if event.type == EventType.TOOL_CALL_START:
+            if event.tool_call_name in turn.tool_names:
+                return False
+            turn.not_held.add(event.tool_call_id)
+            logger.warning(
+                "Claude called a tool this step did not offer; Claude Code answers it: %s",
+                event.tool_call_name,
+            )
+            return True
+        return (
+            event.type
+            in (EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END, EventType.TOOL_CALL_RESULT)
+            and event.tool_call_id in turn.not_held
+        )
+
     async def _pump_query(self, input_data, turn, fit_results=False):
         async for event in self._run_query(input_data, fit_results=fit_results):
             event = self._named_as_offered(event, turn)
+            if self._not_held(event, turn):
+                continue
             if event.type == EventType.RUN_ERROR and turn.authentication_failed:
                 event = event.model_copy(
                     update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}

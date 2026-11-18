@@ -1166,12 +1166,39 @@ pub fn restart() -> Result<(), Problem> {
     Err(Problem::plain("Only Windows restarts from here."))
 }
 
-/// The Windows drive that holds a Podman machine's disk, and how much is free on it.
+/// The drive that holds the engine's disk, and how much is free on it: on Windows the drive a
+/// Podman machine's or Docker Desktop's disk is on, and on a Mac its own disk (`mac`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineDrive {
-    /// `C:`, or None when the disk's folder is not on a lettered drive.
+    /// `C:`, or None when the disk's folder is not on a lettered drive, and on a Mac.
     pub drive: Option<String>,
     pub free: u64,
+    /// The Mac's own disk, where Docker Desktop and Podman keep their machine's disk.
+    pub mac: bool,
+}
+
+/**
+The drive under the engine's disk on a Mac: the volume of the home folder, where Docker Desktop
+(`~/Library/Containers/com.docker.docker`) and Podman (`~/.local/share/containers/podman/machine`)
+keep their machine's disk. That disk is a sparse file of 64 GB to a terabyte, so a container sees it
+free whatever the Mac has: a Mac with 7.5 GB free of 926 GB showed a Docker disk with room, and the
+update that filled it broke Docker's disk ("EXT4-fs error ... Detected aborted journal"). None off a
+Mac, or when it cannot be read.
+*/
+pub fn mac_drive() -> Option<MachineDrive> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(MachineDrive {
+            drive: None,
+            free: crate::early_downloads::free_space(Path::new(&home))?,
+            mac: true,
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 /**
@@ -1262,6 +1289,7 @@ fn machine_drive_in(registry: &str, distribution: &str) -> Option<MachineDrive> 
     Some(MachineDrive {
         drive: drive_of(&folder),
         free,
+        mac: false,
     })
 }
 
@@ -1309,6 +1337,7 @@ pub fn docker_data_drive() -> Option<MachineDrive> {
         Some(MachineDrive {
             drive: drive_of(&folder),
             free,
+            mac: false,
         })
     }
     #[cfg(not(target_os = "windows"))]

@@ -26,9 +26,9 @@ use openbot_desktop_lib::{
     engine_versions, env as openbot_env, harness, host_access, install, local_eval,
     local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
-    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    superseded_images, telemetry, tray, troubleshooting, uninstall, update_ready, upgrade,
-    windows as win,
+    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
+    security_floor, stack, superseded_images, telemetry, tray, troubleshooting, uninstall,
+    update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -134,6 +134,12 @@ struct Shell {
     /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
     /// window shows it. See `desktop_connected`.
     connected: desktop_connected::State,
+    /// The last security floor this app verified (`security_floor`).
+    security_floor: security_floor::Known,
+    /// This run already stopped OpenBot here for the security floor and showed its notice.
+    security_floor_held: std::sync::atomic::AtomicBool,
+    /// The floor kept in the config folder has been read in this run (`know_kept_security_floor`).
+    security_floor_read: std::sync::atomic::AtomicBool,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -1959,6 +1965,14 @@ impl upgrade::Steps for DesktopSteps {
         );
     }
 
+    fn room(&mut self) -> Result<(), Problem> {
+        let database = installation_database_bytes(&self.root, &self.address);
+        match local_eval::update_room(&self.address, database) {
+            Some(short) => Err(upgrade::short_problem(short)),
+            None => Ok(()),
+        }
+    }
+
     fn stop(&mut self) -> Result<(), Problem> {
         self.own_containers();
         stop_for_update(&self.app, &self.root)
@@ -2065,7 +2079,14 @@ async fn upgrade_and_start(
     desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
-    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    let selected = stack::root_from(&root);
+    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness)
+        .await
+        .map(|mut outcome| {
+            outcome.notice = outcome.notice.map(|notice| explained(notice, &selected));
+            outcome
+        })
+        .map_err(|problem| explained(problem, &selected));
     if let Ok(outcome) = &ran {
         log::info!(
             "[update] {} from {} to {}{}",
@@ -2092,6 +2113,10 @@ async fn upgrade_and_start_now(
     harness: Option<harness::HarnessChoice>,
 ) -> Result<upgrade::Outcome, Problem> {
     let selected = stack::root_from(&root);
+    // Below the security floor this app's own release is not safe either: only its update helps.
+    if security_floor_block(&app).is_some() {
+        return Err(Problem::plain(SECURITY_FLOOR_SAID));
+    }
     if app
         .state::<Shell>()
         .updating
@@ -2170,6 +2195,19 @@ async fn upgrade_and_start_now(
         .update_cancelled
         .load(std::sync::atomic::Ordering::SeqCst);
     match ran {
+        // Nothing changed: the version it had is as it was. Retry checks again once there is room.
+        upgrade::Ran::Short(problem) => {
+            report_line(
+                &app,
+                "release",
+                false,
+                engine::StepLine::here(problem.said.clone()).logged(format!(
+                    "{}: not started, short of room",
+                    upgrade::moved_log(&planned)
+                )),
+            );
+            Err(problem)
+        }
         upgrade::Ran::Moved => {
             report_line(
                 &app,
@@ -2328,6 +2366,233 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// Where this build reads the security floor and the keys it trusts: the addresses beside the
+/// update feed and the keys it was built with, or an internal build's test floor and test key.
+fn security_floor_sources<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> (Vec<security_floor::Source>, Vec<[u8; 32]>) {
+    let mut keys = security_floor::keys();
+    let version = &app.package_info().version;
+    if let Some((sources, key)) =
+        security_floor::test_sources(version, |name| std::env::var_os(name))
+    {
+        keys.extend(key);
+        return (sources, keys);
+    }
+    let sources = security_floor::addresses()
+        .into_iter()
+        .map(security_floor::Source::Address)
+        .collect();
+    (sources, keys)
+}
+
+/// The floor this app keeps, in its config directory.
+fn security_floor_kept<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<security_floor::Kept> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|folder| security_floor::Kept::at(&folder))
+}
+
+/// The floor this app verified before, read once per run the first time anything asks (the window,
+/// Start, the schedule), so a floor kept offline holds from the first moment of a launch.
+fn know_kept_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let shell = app.state::<Shell>();
+    if shell
+        .security_floor_read
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    let (_, keys) = security_floor_sources(app);
+    if let Some(kept) = security_floor_kept(app) {
+        shell.security_floor.record(kept.read(&keys));
+    }
+}
+
+/// Where this app is, for the floor: on this computer, or connected to an OpenBot at an address.
+fn security_floor_place<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> security_floor::Place {
+    if !desktop_connected::is_connected(app) {
+        return security_floor::Place::Contained;
+    }
+    let address = desktop_connected::connected_address(app)
+        .or_else(|| desktop_connected::chosen(app).address)
+        .unwrap_or_default();
+    security_floor::Place::Connected(address)
+}
+
+/// The release this app has to update to before it can be used here, when it is below the
+/// security floor. None otherwise, and always None connected to a company's own OpenBot.
+fn security_floor_block<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<semver::Version> {
+    know_kept_security_floor(app);
+    let floor = app.state::<Shell>().security_floor.get();
+    let version = app.package_info().version.clone();
+    let own = upgrade::own().version;
+    let own =
+        semver::Version::parse(own.strip_prefix('v').unwrap_or(&own)).unwrap_or(version.clone());
+    security_floor::blocked(floor.as_ref(), &version, &own, &security_floor_place(app))
+}
+
+/// The back end at `root` is below the floor, so it may not start until Start upgrades it.
+fn security_floor_backend_due<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) -> bool {
+    know_kept_security_floor(app);
+    let floor = app.state::<Shell>().security_floor.get();
+    deployment::installed(root)
+        .and_then(|found| {
+            semver::Version::parse(found.version.strip_prefix('v').unwrap_or(&found.version)).ok()
+        })
+        .is_some_and(|installed| security_floor::backend_due(floor.as_ref(), &installed))
+}
+
+/// What Start says below the security floor, the notice's own words.
+const SECURITY_FLOOR_SAID: &str =
+    "This version of OpenBot has a security problem. Update to keep using it.";
+
+/// Whether this version is below the security floor here. The window shows the notice alone while
+/// it is (`desktop/src/SecurityFloor.tsx`).
+#[tauri::command]
+fn security_floor<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> security_floor::Status {
+    security_floor::Status {
+        blocked: security_floor_block(&app).is_some(),
+    }
+}
+
+/**
+Below the security floor here: stop OpenBot on this computer, as Stop does (no Bot runs, routines
+pause, nothing is deleted), and show the notice alone. Start refuses until the app is updated, and
+the updated app upgrades the back end at its next Start, as every update does. Connected to an
+OpenBot Cloud address the floor lists, only the notice: nothing runs here. Once per run.
+*/
+fn hold_below_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(minimum) = security_floor_block(app) else {
+        return;
+    };
+    if app
+        .state::<Shell>()
+        .security_floor_held
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    log::warn!(
+        "[security floor] {} is below the security floor {minimum}; OpenBot stays stopped here until it is updated",
+        app.package_info().version
+    );
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // The notice first: nothing of OpenBot's page stays in use while the stop runs.
+        show_security_floor_notice(&app);
+        if !desktop_connected::is_connected(&app) {
+            let root = selected_root_or_default(&app);
+            if deployment::installed(&root).is_some() {
+                hold_running_for_security_floor(&app, &root);
+                let asked = std::time::Instant::now();
+                log_stop_asked(&app.state::<Shell>(), &root, AskedFrom::SecurityFloor);
+                let stopped = stop_everything(&app, &root).into_result();
+                logging::outcome("stop", asked, &stopped);
+                refresh_menus(&app);
+            }
+        }
+    });
+}
+
+/**
+A back end this run never started or showed, one an earlier run left up (a crash, a force quit, an
+installer that closed the app), taken as this session's before the floor's Stop, as a shown one is
+(`hold_shown_deployment`): its own `server` container must publish its ports, on the engine found
+answering. Without this, Stop had no engine to take it down on and refused, and the back end kept
+running behind the notice. When none answers, nothing of this installation runs here: Stop then has
+no containers to take down, and says nothing of them.
+*/
+fn hold_running_for_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) {
+    let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
+    if shell.containers.lock().unwrap().is_some() {
+        return;
+    }
+    let found = openbot_env::Ports::read(root)
+        .ok()
+        .and_then(|ports| app_published_by(None, root, &ports));
+    match found {
+        Some((_, address)) => {
+            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.to_path_buf(),
+                address,
+            });
+            let mut held = shell.root.lock().unwrap();
+            if held.is_none() {
+                *held = Some(root.to_path_buf());
+            }
+        }
+        None => *shell.stopped_container_root.lock().unwrap() = Some(root.to_path_buf()),
+    }
+}
+
+/// The window on the notice alone, wherever it was.
+fn show_security_floor_notice<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(mut notice) = setup_destination(app) else {
+        return;
+    };
+    notice.set_fragment(Some("security-floor"));
+    if let Err(error) = window.navigate(notice) {
+        log::error!("[security floor] could not show the notice: {error}");
+    }
+}
+
+/// Read the security floor at launch and every six hours, on a thread of its own, keep a newer one
+/// that verifies, and hold OpenBot here below it. Every build reads it: a build that can't update
+/// itself is told how to get one that can.
+fn watch_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let handle = app.clone();
+    let watching = std::thread::Builder::new()
+        .name("openbot-security-floor".into())
+        .spawn(move || {
+            app_update::watch(
+                app_update::Schedule::new(app_update::EVERY),
+                std::time::SystemTime::now,
+                |tick| {
+                    std::thread::sleep(tick);
+                    true
+                },
+                || read_security_floor(&handle),
+            )
+        });
+    if let Err(error) = watching {
+        log::error!("[security floor] could not start checking the security floor: {error}");
+    }
+}
+
+/// Read the security floor now, keep a newer one that verifies, and hold OpenBot here below it.
+/// Blocking: the schedule's thread, or one of its own when somebody checks for updates.
+fn read_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let (sources, keys) = security_floor_sources(app);
+    // Built with no key, no floor could verify: nothing is read.
+    if keys.is_empty() {
+        return;
+    }
+    if let Some(kept) = security_floor_kept(app) {
+        let (floor, outcome) = security_floor::refresh(&kept, &sources, &keys);
+        match outcome {
+            security_floor::Outcome::Newer(serial) => {
+                log::info!("[security floor] keeping floor {serial}")
+            }
+            security_floor::Outcome::NotNewer(serial) => {
+                log::info!("[security floor] floor {serial}, nothing newer")
+            }
+            security_floor::Outcome::Nothing(why) => {
+                log::info!("[security floor] no floor read: {why}")
+            }
+        }
+        app.state::<Shell>().security_floor.record(floor);
+    }
+    hold_below_security_floor(app);
+}
+
 /**
 Get the newer version the feed names ready while this one runs (`update_ready`), on a thread of its
 own: a try as soon as the feed names one, and every `app_update::TICK` after, until it is ready. A
@@ -2435,7 +2700,7 @@ fn try_getting_own_release_ready<R: tauri::Runtime>(
     let version = update_ready::behind(&root, &upgrade::own())?;
     // The images its last install pulled say which of the release's it runs. Without them there
     // is nothing to go by, and the update pulls what it needs.
-    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let installed = preparation::images_it_runs(&root).unwrap_or_default();
     if installed.is_empty() {
         return None;
     }
@@ -2574,7 +2839,7 @@ fn try_getting_update_ready<R: tauri::Runtime>(
             }
         }
     };
-    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let installed = preparation::images_it_runs(&root).unwrap_or_default();
     let engine = local_eval::node_engine();
     let node = local_eval_state::read(&root, None)
         .map(|state| openbot_desktop_lib::local_images::Node::for_stack(&engine, &state.stack));
@@ -2696,6 +2961,9 @@ fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_u
 async fn check_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, String> {
+    // Somebody asked about updates: the security floor is read again too, beside the feed.
+    let floor = app.clone();
+    std::thread::spawn(move || read_security_floor(&floor));
     let handle = app.clone();
     let asked = tauri::async_runtime::spawn_blocking(move || {
         app_update::ask(
@@ -3230,7 +3498,27 @@ async fn prepare_installation(
             refused_not_failed(problem),
         );
     }
-    prepared
+    prepared.map_err(|problem| explained(problem, &selected))
+}
+
+/// `problem` with the plain line for a disk that ran out above its raw output
+/// (`Problem::explained`), said for this computer and the engine the installation in `root` runs
+/// on.
+fn explained(problem: Problem, root: &Path) -> Problem {
+    let podman = preparation::saved_engine(root) == Some(engine::Engine::Podman);
+    problem.explained(std::env::consts::OS, podman)
+}
+
+/// The size of the database of the installation in `root` on `address`, for the room an update
+/// needs (`stack::database_bytes`). Nothing when it cannot be measured.
+fn installation_database_bytes(root: &Path, address: &engine::Address) -> Option<u64> {
+    let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        root,
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    )
+    .ok()?;
+    stack::database_bytes(address, root, &secrets)
 }
 
 async fn prepare_installation_inner(
@@ -3863,7 +4151,15 @@ async fn deployment_ready<R: tauri::Runtime>(
 /// The reference for an image the shell runs directly, rather than through Compose.
 ///
 /// Require completed local installation before starting an authentication container.
-fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, String), Problem> {
+///
+/// With the sign-in's own image made present by `present`. Install pulls a plan's image only for an
+/// installation already on that plan (`preparation::PLAN_IMAGES`), so a sign-in downloads it when
+/// it is missing (`download_missing`).
+fn prepared_sign_in_with(
+    root: &Path,
+    published: &str,
+    present: impl FnOnce(&engine::Address, &String) -> Result<(), Problem>,
+) -> Result<(engine::Address, String), Problem> {
     let status = engine::detect_saved(preparation::saved_engine(root));
     let address = status
         .address
@@ -3872,8 +4168,67 @@ fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, St
         .pin()?;
     preparation::require(root, None, &address)?;
     let image = sign_in_reference(root, published, deployment::reference)?;
-    preparation::require_images(&address, std::slice::from_ref(&image))?;
+    present(&address, &image)?;
     Ok((address, image))
+}
+
+/**
+Download the images of `images` the engine at `address` does not have, showing the download on the
+`images` row exactly as Install shows it (`report_downloads`), and saying the row done after.
+
+For what Install leaves to the moment it is needed: a plan's image (`preparation::PLAN_IMAGES`),
+when a sign-in to that plan starts, or when a Start runs on a plan the installation was not on when
+it installed. Says nothing when every image is here. `keep_going` is asked before each pull.
+*/
+fn download_missing<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: &engine::Address,
+    images: &[String],
+    keep_going: impl Fn() -> Result<(), Problem> + Sync,
+) -> Result<(), Problem> {
+    let missing: Vec<String> = images
+        .iter()
+        .filter(|image| !preparation::image_present(address, image).unwrap_or(false))
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    log::info!(
+        "[images] downloading {}, which this needs and the engine does not have",
+        missing.join(", ")
+    );
+    report_running_plain(app, "images", "Downloading OpenBot.");
+    let pacer = Mutex::new(pull_metrics::Pacer::default());
+    let sizes = {
+        let address = address.clone();
+        pull_metrics::size_images(&missing, move |image| {
+            preparation::image_present(&address, image).unwrap_or(false)
+        })
+    };
+    pull_metrics::pull_images_limited(
+        &missing,
+        pull_metrics::IMAGE_PULLS_AT_ONCE,
+        sizes,
+        |_, image, on_layer| {
+            keep_going()?;
+            pull_metrics::pull_image(address, image, on_layer, |metrics| {
+                desktop_telemetry::pull_completed(app, metrics)
+            })
+        },
+        &keep_going,
+        |downloads| {
+            let paced = pacer
+                .lock()
+                .unwrap()
+                .offer(std::time::Instant::now(), downloads);
+            if let Some(downloads) = paced {
+                report_downloads(app, downloads);
+            }
+        },
+    )?;
+    report_plain(app, "images", true, "OpenBot is downloaded.");
+    Ok(())
 }
 
 fn sign_in_reference(
@@ -4407,7 +4762,10 @@ async fn start_stack<R: tauri::Runtime>(
     let failures = desktop_telemetry::failures_recorded(&app);
     setup_phase("start");
     let telemetry_app = app.clone();
-    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    let selected = stack::root_from(&root);
+    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness)
+        .await
+        .map_err(|problem| explained(problem, &selected));
     logging::outcome("start", asked, &started);
     // Every way Start can fail sends one `setup_failed`: a row that failed has sent it already,
     // and any other return (a failed `compose up` among them) sends it here.
@@ -4497,6 +4855,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
     harness: Option<harness::HarnessChoice>,
 ) -> Result<(), Problem> {
     let shell = app.state::<Shell>();
+    // Below the security floor, nothing starts here: not this app's back end, and not one older
+    // than the back end's floor, which Start upgrades first (`upgrade_due`).
+    if security_floor_block(&app).is_some() || security_floor_backend_due(&app, &root) {
+        return Err(Problem::plain(SECURITY_FLOOR_SAID));
+    }
     let attempt = StartAttempt::begin(&shell)?;
     install_recorder_host_at_start();
     {
@@ -4717,7 +5080,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * the very ports the `server` container is about to publish. Stopping them here, and waiting
          * for their sockets to close, is what lets that `up` bind them.
          */
-        let previous_ports = openbot_env::Ports::read(&root).map_err(|error| {
+        // The Bot's recorded host port goes with the Bot it was recorded for (`read_for_harness`).
+        let previous_ports = openbot_env::Ports::read_for_harness(
+            &root,
+            picked.as_ref().and_then(|picked| picked.installed_port()),
+        )
+        .map_err(|error| {
             Problem::with("OpenBot could not read its local ports.", error.to_string())
         })?;
         setup_phase("cleanup");
@@ -4845,6 +5213,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // Compose's bind mount of the sign-in folder does not create it. Installation made it;
         // made again here in case it went since. See `stack::make_sign_in_folder`.
         stack::make_sign_in_folder(&root)?;
+        // A refusal an earlier start's server wrote into that folder is not this start's.
+        stack::forget_refusal(&root);
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
@@ -4858,6 +5228,28 @@ async fn start_stack_inner<R: tauri::Runtime>(
             .is_some()
             && openbot_desktop_lib::ai_connection::Plan::serving(&credential, picked.as_ref())
                 .is_none();
+        /*
+         * What this Start runs that Install may not have pulled: a plan's image
+         * (`preparation::PLAN_IMAGES`), as the Bot a plan picks or the plan's own engine
+         * (`stack::plan_engine`). An installation that installed on an API key and now runs on a
+         * plan downloads it here, shown as Install shows it, because `up` never pulls.
+         */
+        let mut runs = Vec::new();
+        if let Some(openbot_env::PickedHarness::Installed { image, .. }) = picked.as_ref() {
+            runs.push(image.clone());
+        }
+        if let Some(engine) = stack::plan_engine(&root) {
+            let image = if engine.service == openbot_desktop_lib::plan::CHATGPT_PLAN_SERVICE {
+                openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE
+            } else {
+                openbot_desktop_lib::plan::SIGN_IN_IMAGE
+            };
+            let reference = deployment::reference(&root, image).map_err(Problem::from)?;
+            if !runs.contains(&reference) {
+                runs.push(reference);
+            }
+        }
+        download_missing(&app, &found, &runs, || attempt.require_current())?;
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
@@ -4935,20 +5327,31 @@ async fn start_stack_inner<R: tauri::Runtime>(
         api: ports.server,
         app: ports.app,
     };
+    let (asked, asked_root) = (found.clone(), root.clone());
     let answered = tauri::async_runtime::spawn_blocking(move || {
-        stack::wait_until_healthy(&ready, std::time::Duration::from_secs(180), || {
-            waiting
-                .state::<Shell>()
-                .start_generation
-                .load(std::sync::atomic::Ordering::SeqCst)
-                == ticket
-        })
+        stack::wait_until_healthy(
+            &ready,
+            std::time::Duration::from_secs(180),
+            || {
+                waiting
+                    .state::<Shell>()
+                    .start_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    == ticket
+            },
+            // A server that refused to start says why at once, not after the full wait.
+            || stack::server_refusal(&asked, &asked_root),
+        )
     })
     .await
-    .unwrap_or_else(|error| Err(format!("the wait did not run: {error}")));
+    .unwrap_or_else(|error| {
+        Err(stack::NotReady::NotAnswering(format!(
+            "the wait did not run: {error}"
+        )))
+    });
     // A Stop during the wait is the reason it ended, whatever the wait itself says.
     attempt.require_current()?;
-    if let Err(error) = answered {
+    if let Err(not_ready) = answered {
         // What the server said while it was not answering, from Compose's log, with every
         // credential this run handed out taken out of it.
         let log = stack::service_log(&found, &root, "server", 40);
@@ -4957,7 +5360,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
         } else {
             format!("Last from the server container (up to 40 lines):\n{log}")
         };
-        let problem = stack::startup_problem(Problem::with(error, detail), &secrets);
+        let problem = match not_ready {
+            stack::NotReady::Refused(said) => stack::startup_refusal(said, detail, &secrets),
+            stack::NotReady::NotAnswering(error) => {
+                stack::startup_problem(Problem::with(error, detail), &secrets)
+            }
+        };
         report_plain(&app, "answering", false, problem.said.clone());
         return Err(problem);
     }
@@ -5139,11 +5547,14 @@ enum AskedFrom {
     /// Stop OpenBot in the tray or the window menu.
     Menu,
     Quit,
+    /// This version is below the security floor (`hold_below_security_floor`).
+    SecurityFloor,
 }
 
 impl AskedFrom {
     fn said(self) -> &'static str {
         match self {
+            AskedFrom::SecurityFloor => "by the security floor",
             AskedFrom::SetupWindow => "from the setup window",
             AskedFrom::Settings => "from Settings",
             AskedFrom::StatusWindow => "from the Status window",
@@ -9562,7 +9973,10 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
 /// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
 /// that on the UI thread is a window that stops repainting mid-setup.
 #[tauri::command]
-async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<String, Problem> {
+async fn begin_claude_sign_in<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+) -> Result<String, Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
     /*
@@ -9573,8 +9987,20 @@ async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<Str
      */
     #[cfg(target_os = "linux")]
     let service_app = app.clone();
+    // The sign-in's image downloads in its task, said to the window as Install says it.
+    let progress_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        let (address, image) = prepared_sign_in(&root, openbot_desktop_lib::plan::SIGN_IN_IMAGE)?;
+        // Install pulls this image only for an installation already on a Claude plan
+        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
+        let (address, image) = prepared_sign_in_with(
+            &root,
+            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
+            |address, image| {
+                download_missing(&progress_app, address, std::slice::from_ref(image), || {
+                    Ok(())
+                })
+            },
+        )?;
         #[cfg(target_os = "linux")]
         {
             let shell = service_app.state::<Shell>();
@@ -9627,17 +10053,28 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
 
 /// Start a ChatGPT plan sign-in and return the address a browser has to open.
 #[tauri::command]
-async fn begin_chatgpt_sign_in(
-    app: tauri::AppHandle,
+async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     root: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
     #[cfg(target_os = "linux")]
     let service_app = app.clone();
+    // The sign-in's image downloads in its task, said to the window as Install says it.
+    let progress_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        let (address, image) =
-            prepared_sign_in(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)?;
+        // Install pulls this image only for an installation already on a ChatGPT plan
+        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
+        let (address, image) = prepared_sign_in_with(
+            &root,
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+            |address, image| {
+                download_missing(&progress_app, address, std::slice::from_ref(image), || {
+                    Ok(())
+                })
+            },
+        )?;
         #[cfg(target_os = "linux")]
         {
             let shell = service_app.state::<Shell>();
@@ -9751,6 +10188,15 @@ async fn run_local_eval<R: tauri::Runtime>(
         window_call_arrived(action, handed_back().as_ref(), std::time::SystemTime::now())
     );
     let stack = local_eval::StackId::parse(&stack)?;
+    // Below the security floor, OpenBot's services start no more than OpenBot does: not from
+    // setup, and not from the Status window's Start.
+    if matches!(
+        action,
+        local_eval::Action::Start | local_eval::Action::Update
+    ) && security_floor_block(&app).is_some()
+    {
+        return Err(local_eval::Failure::BelowSecurityFloor);
+    }
     let root = {
         let shell = app.state::<Shell>();
         let selected = shell.selected_root.lock().unwrap().clone();
@@ -9949,6 +10395,13 @@ fn local_eval_answer(
              backend's tool would take Podman's default connection"
         );
         return Ok(local_eval::Report::engine_not_answering());
+    }
+    // The room the back end's update needs counts OpenBot's own database (`update_room`).
+    if action == local_eval::Action::Update {
+        local_eval::installation_database(
+            local_eval::engine_in_use()
+                .and_then(|address| installation_database_bytes(root, &address)),
+        );
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
     if action == local_eval::Action::Status
@@ -12866,6 +13319,7 @@ fn main() {
             prepare_installation,
             check_app_update,
             app_update_offer,
+            security_floor,
             dismiss_app_update,
             install_app_update,
             upgrade_due,
@@ -13105,6 +13559,8 @@ fn main() {
             );
 
             remember_setup_url(app.handle())?;
+            // After the setup page's address is known, which the notice is shown at.
+            watch_security_floor(app.handle());
             if let Some(main) = app.get_webview_window("main") {
                 match_title_bar(&main.as_ref().window(), WindowPage::Setup);
             }
@@ -14061,6 +14517,7 @@ mod tests {
     include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
     include!("connected_ipc_tests.rs");
+    include!("security_floor_ipc_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]
@@ -21716,6 +22173,18 @@ fn main() {
                 choice = serde_json::json!({"id":"langgraph"});
                 ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
             }
+            // An update from 1.0.3, which ran its `langgraph` Bot on the Python image at 4206 and
+            // published it on the host at 4206. The Bot now runs on the TypeScript image at 4215.
+            "updated-from-langgraph" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
+            }
+            // The same update, where the last run published the Bot on a host port of its own
+            // (moved off one somebody else held, or set by hand): that port is kept.
+            "updated-keeps-own-port" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose -f docker-compose.yml -f .openbot-harness-port.yml --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
+            }
             "none" => {
                 choice = serde_json::Value::Null;
                 (
@@ -21728,15 +22197,32 @@ fn main() {
                 // The TypeScript Bot in its own container, and the plan's own engine beside it.
                 ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
             }
-            "claude-plan" => {
+            "claude-plan" | "claude-plan-switched" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
                 // The plan's own engine is the Claude Agent SDK Bot the plan picked: no container of
                 // the Bot's own, and the plan token in no container but that engine.
                 ("compose --profile claude-plan up -d --no-build --pull never postgres agent-computer server agent-claude-plan", Some("agent-claude-sdk"))
             }
+            "chatgpt-plan-switched" => {
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
+                ("compose --profile harness --profile chatgpt-plan up -d --no-build --pull never postgres agent-computer server agent-harness agent-chatgpt-plan", Some("agent-langgraph-ts"))
+            }
             _ => panic!("unknown test case"),
         };
-        if case.ends_with("-plan") {
+        /*
+         * A person who installed on an API key, whose install pulled neither plan's image, now on
+         * a plan: a saved sign-in returned to, so no sign-in pulled it first. Start downloads it,
+         * showing the download as Install does, and then starts.
+         */
+        let switched_to = match case {
+            "claude-plan-switched" => Some("localhost/agent-claude-sdk@sha256:00"),
+            "chatgpt-plan-switched" => Some("localhost/agent-langgraph-agui@sha256:00"),
+            _ => None,
+        };
+        if let Some(image) = switched_to {
+            std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", image);
+        }
+        if case.ends_with("-plan") || switched_to.is_some() {
             std::fs::write(
                 root.join(".env"),
                 "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/ag-ui\n",
@@ -21750,11 +22236,41 @@ fn main() {
             )
             .unwrap();
         }
+        // What 1.0.3 wrote for its `langgraph` Bot: the Python image, its port inside the
+        // container, and the host port it was published on. 4212 is one the fixture stack
+        // already publishes, so the Start does not probe it against another test's Start.
+        let saved_host_port = match case {
+            "updated-from-langgraph" => Some(4206),
+            "updated-keeps-own-port" => Some(4212),
+            _ => None,
+        };
+        if let Some(host) = saved_host_port {
+            std::fs::write(
+                root.join(".env"),
+                format!(
+                    "PICKED_HARNESS_IMAGE=localhost/agent-langgraph-agui@sha256:00\n\
+                     PICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT={host}\n\
+                     PICKED_HARNESS_URL=http://127.0.0.1:{host}\n"
+                ),
+            )
+            .unwrap();
+        }
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
             .invoke_handler(tauri::generate_handler![start_stack])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
+        // What the window is told while Start runs.
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        {
+            use tauri::Listener;
+            let told = told.clone();
+            app.listen_any("setup:progress", move |event| {
+                told.lock()
+                    .unwrap()
+                    .push(serde_json::from_str(event.payload()).unwrap());
+            });
+        }
         let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
@@ -21793,6 +22309,47 @@ fn main() {
             "model":model, "harness":choice,
         })).expect_err("intentional barrier after up prevents host startup");
         let commands = std::fs::read_to_string(&record).unwrap_or_default();
+        // The Bot's host port follows the image it runs on: an update that moved the Bot from 4206
+        // to 4215 inside its container publishes 4215 on the host, so the Bot answers where it
+        // says it is. A host port the last run chose for itself stays.
+        if let Some(saved) = saved_host_port {
+            let ports = openbot_env::read_already_set(
+                &root.join(".env"),
+                &[
+                    "PICKED_HARNESS_PORT",
+                    "PICKED_HARNESS_HOST_PORT",
+                    "PICKED_HARNESS_URL",
+                ],
+            )
+            .unwrap();
+            let host = if saved == 4206 { 4215 } else { saved };
+            assert_eq!(
+                (
+                    ports.get("PICKED_HARNESS_PORT").map(String::as_str),
+                    ports.get("PICKED_HARNESS_HOST_PORT").map(String::as_str),
+                    ports.get("PICKED_HARNESS_URL").map(String::as_str),
+                ),
+                (
+                    Some("4215"),
+                    Some(host.to_string().as_str()),
+                    Some(format!("http://127.0.0.1:{host}").as_str()),
+                ),
+                "case={case}: {problem:?}"
+            );
+            let overlay = std::fs::read_to_string(root.join(".openbot-harness-port.yml")).ok();
+            if host == 4215 {
+                assert!(
+                    !commands.contains(".openbot-harness-port.yml"),
+                    "case={case}: the Bot is published on its own port, with no remapping: {commands}"
+                );
+            } else {
+                let overlay = overlay.expect("the kept host port is remapped onto the Bot's own");
+                assert!(
+                    overlay.contains(&format!("127.0.0.1:{host}:4215")),
+                    "{overlay}"
+                );
+            }
+        }
         assert!(
             problem["detail"]
                 .as_str()
@@ -21812,6 +22369,40 @@ fn main() {
             vec![expected_up],
             "case={case}, actual Start IPC commands:\n{commands}"
         );
+        // The plan's image, missing, was downloaded before `up`, with the download shown as
+        // Install shows it; an image the engine has is never pulled.
+        let pulls: Vec<_> = commands
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command)
+            .filter(|command| command.starts_with("pull "))
+            .collect();
+        match switched_to {
+            Some(image) => {
+                let pulled_at = commands
+                    .find(&format!("\tpull {image}"))
+                    .unwrap_or_else(|| panic!("case={case}: {image} was not pulled:\n{commands}"));
+                assert!(
+                    pulled_at < commands.find(" up -d ").unwrap(),
+                    "case={case}: pulled after up:\n{commands}"
+                );
+                assert_eq!(pulls, [format!("pull {image}")], "case={case}");
+                let told = told.lock().unwrap();
+                assert!(
+                    told.iter().any(|row| row["step"] == "images"
+                        && row["running"] == true
+                        && row["downloads"].is_object()),
+                    "case={case}: no download was shown: {told:?}"
+                );
+                assert!(
+                    told.iter().any(|row| row["step"] == "images"
+                        && row["running"] == false
+                        && row["ok"] == true),
+                    "case={case}: the download never finished on screen: {told:?}"
+                );
+            }
+            None => assert_eq!(pulls, [""; 0], "case={case}"),
+        }
         // The server applies its migrations as it starts (in a release that has a `migrate`
         // service, as the dependency `up` completes before `server`): never a `compose run migrate`.
         assert!(
@@ -21936,6 +22527,26 @@ fn main() {
     }
 
     #[test]
+    fn update_from_langgraph_start_ipc_publishes_the_new_bots_own_port() {
+        if crate::test_support::isolated_process(
+            "tests::update_from_langgraph_start_ipc_publishes_the_new_bots_own_port",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("updated-from-langgraph");
+    }
+
+    #[test]
+    fn update_from_langgraph_start_ipc_keeps_a_host_port_of_its_own() {
+        if crate::test_support::isolated_process(
+            "tests::update_from_langgraph_start_ipc_keeps_a_host_port_of_its_own",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("updated-keeps-own-port");
+    }
+
+    #[test]
     fn no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services() {
         if crate::test_support::isolated_process(
             "tests::no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services",
@@ -21963,6 +22574,162 @@ fn main() {
             return;
         }
         harness_start_ipc_case("claude-plan");
+    }
+
+    /*
+     * A sign-in to a plan on an installation that installed without that plan's image: the
+     * sign-in runs in that image, so it downloads it first, showing the download as Install shows
+     * it, and then starts the sign-in's container from it. Before, it refused the sign-in as an
+     * unfinished install. The fixture engine refuses the container itself, so the flow stops there,
+     * before any browser would open.
+     */
+    fn plan_sign_in_ipc_case(command: &str, published: &str) {
+        let root = temp_root("openbot-plan-sign-in-ipc");
+        write_installed_deployment(&root);
+        let mut images: deployment::Images =
+            serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
+                .unwrap();
+        images.images.insert(
+            published.into(),
+            deployment::Image {
+                reference: format!("localhost/{published}@sha256:00"),
+            },
+        );
+        std::fs::write(
+            deployment::images_path(&root),
+            serde_json::to_string(&images).unwrap(),
+        )
+        .unwrap();
+        preparation::record(&root, None, vec!["fixture-image".into()]).unwrap();
+        let image = format!("localhost/{published}@sha256:00");
+        let path = SerializedPath::set_only_with("docker", "harness");
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", &image);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .invoke_handler(tauri::generate_handler![
+                begin_claude_sign_in,
+                begin_chatgpt_sign_in
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        {
+            use tauri::Listener;
+            let told = told.clone();
+            app.listen_any("setup:progress", move |event| {
+                told.lock()
+                    .unwrap()
+                    .push(serde_json::from_str(event.payload()).unwrap());
+            });
+        }
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let answer = tauri::test::get_ipc_response(
+            &window,
+            tauri::webview::InvokeRequest {
+                cmd: command.into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: if cfg!(any(windows, target_os = "android")) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "root": root })),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        );
+        let commands = std::fs::read_to_string(&record).unwrap_or_default();
+        let problem = answer.expect_err("the fixture engine refuses the sign-in's container");
+        assert_ne!(
+            problem["said"].as_str(),
+            Some(preparation::REQUIRED),
+            "{command}: refused as an unfinished install: {problem:?}\n{commands}"
+        );
+        let pulled_at = commands
+            .find(&format!("\tpull {image}"))
+            .unwrap_or_else(|| panic!("{command}: {image} was not pulled:\n{commands}"));
+        let ran_at = commands
+            .lines()
+            .position(|line| line.contains("\trun ") && line.contains(&image))
+            .map(|line| {
+                commands
+                    .lines()
+                    .take(line)
+                    .map(|l| l.len() + 1)
+                    .sum::<usize>()
+            })
+            .unwrap_or_else(|| panic!("{command}: the sign-in never ran {image}:\n{commands}"));
+        assert!(
+            pulled_at < ran_at,
+            "{command}: ran before the pull:\n{commands}"
+        );
+        let told = told.lock().unwrap();
+        assert!(
+            told.iter().any(|row| row["step"] == "images"
+                && row["running"] == true
+                && row["downloads"].is_object()),
+            "{command}: no download was shown: {told:?}"
+        );
+        assert!(
+            told.iter()
+                .any(|row| row["step"] == "images" && row["running"] == false && row["ok"] == true),
+            "{command}: the download never finished on screen: {told:?}"
+        );
+        drop(path);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_first_claude_plan_sign_in_downloads_its_image() {
+        if crate::test_support::isolated_process(
+            "tests::a_first_claude_plan_sign_in_downloads_its_image",
+        ) {
+            return;
+        }
+        plan_sign_in_ipc_case(
+            "begin_claude_sign_in",
+            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
+        );
+    }
+
+    #[test]
+    fn a_first_chatgpt_plan_sign_in_downloads_its_image() {
+        if crate::test_support::isolated_process(
+            "tests::a_first_chatgpt_plan_sign_in_downloads_its_image",
+        ) {
+            return;
+        }
+        plan_sign_in_ipc_case(
+            "begin_chatgpt_sign_in",
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+        );
+    }
+
+    #[test]
+    fn a_switch_to_a_claude_plan_downloads_its_bot_before_start() {
+        if crate::test_support::isolated_process(
+            "tests::a_switch_to_a_claude_plan_downloads_its_bot_before_start",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("claude-plan-switched");
+    }
+
+    #[test]
+    fn a_switch_to_a_chatgpt_plan_downloads_its_model_service_before_start() {
+        if crate::test_support::isolated_process(
+            "tests::a_switch_to_a_chatgpt_plan_downloads_its_model_service_before_start",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("chatgpt-plan-switched");
     }
 
     #[test]
@@ -22314,6 +23081,48 @@ fn main() {
     }
 
     /// The CLI's answer to a `local setup` refused for resources, as the 4.34.0 CLI prints it.
+    /// A computer where no container engine answers, for a test that says none does. Returns the
+    /// empty folder PATH is set to.
+    ///
+    /// An empty PATH is not enough. The engine lookup also tries the places installers put Docker
+    /// (`engine::program`), and Windows finds a program in System32 whatever PATH says, where CI's
+    /// Windows runners have `docker.exe`. So Docker's clients are also sent to an address nothing
+    /// serves.
+    fn no_engine_answers(label: &str) -> PathBuf {
+        let empty = temp_root(&format!("{label}-no-engine"));
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        let nowhere = if cfg!(windows) {
+            format!("npipe:////./pipe/openbot-test-{label}-no-engine")
+        } else {
+            format!("unix://{}", empty.join("no-engine.sock").display())
+        };
+        std::env::set_var("DOCKER_HOST", nowhere);
+        std::env::remove_var("DOCKER_CONTEXT");
+        empty
+    }
+
+    /// The tests that say no engine answers stand on exactly that, on every computer that runs
+    /// them. They emptied PATH and nothing more, so they asked the computer's own Docker wherever
+    /// it was installed, and passed or failed by whether its service was running: on a Windows
+    /// runner whose Docker service had stopped, both update tests below failed together, the window
+    /// answering that the engine is not running without asking the CLI.
+    #[test]
+    fn no_engine_answers_where_a_test_says_none_does() {
+        if crate::test_support::isolated_process(
+            "tests::no_engine_answers_where_a_test_says_none_does",
+        ) {
+            return;
+        }
+        no_engine_answers("openbot-no-engine-answers");
+        for found in [
+            engine::detect(),
+            engine::detect_saved(Some(engine::Engine::Docker)),
+        ] {
+            assert!(!found.responding, "{found:?}");
+        }
+    }
+
     const SETUP_REFUSED_FOR_DISK: &str = r#"{"version":1,"command":"local setup","status":"failed","error":{"code":"LOCAL_DOCKER_RESOURCES_SHORT","message":"Docker available resources: 9.871234 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup."},"nextAction":{"reason":"local_command_failed","summary":"The local command did not finish.","instructions":[],"resumeCommand":"npx --yes copilotkit local setup --json","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]},"diagnostics":[]}"#;
 
     /// A failed `local setup` was handed back to the window and recorded nowhere. It is sent now,
@@ -22331,9 +23140,7 @@ fn main() {
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
         // No engine to find: the CLI's own answer is the whole of the failure.
-        let empty = temp_root("openbot-local-setup-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        no_engine_answers("openbot-local-setup");
         let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-local-setup-cli", false);
         cli.answer(SETUP_REFUSED_FOR_DISK, 1);
         let sink = desktop_telemetry::sink::Sink::start();
@@ -22501,11 +23308,26 @@ fn main() {
         .to_string()
     }
 
-    /// `local update` through `run_local_eval`, as the window runs it, against a CLI that answers
-    /// `update` with `refusal` and `status` with `status`: the window's answer, and the
-    /// `setup_failed` events it recorded.
+    /// An installation set up on Docker, in its own folder, for the update tests below.
+    ///
+    /// On Windows the window asks the CLI only once it knows the engine the installation runs on
+    /// (`cli_left_to_pick`): told none, the CLI would take Podman's default connection, which may be
+    /// the person's. These tests stand on a computer where no engine answers
+    /// (`no_engine_answers`), so the installation says which engine is its own, as one set up on
+    /// Docker does, and the CLI is asked whatever the computer's own engines are doing.
+    fn installation_on_docker(label: &str) -> PathBuf {
+        let root = temp_root(&format!("{label}-installation"));
+        std::fs::create_dir_all(&root).unwrap();
+        preparation::save_engine(&root, engine::Engine::Docker).unwrap();
+        root
+    }
+
+    /// `local update` through `run_local_eval`, as the window runs it for the installation in
+    /// `root`, against a CLI that answers `update` with `refusal` and `status` with `status`: the
+    /// window's answer, and the `setup_failed` events it recorded.
     fn update_through_the_command(
         cli: &desktop_telemetry::fake_cli::FakeCli,
+        root: &Path,
         refusal: &str,
         status: &str,
         label: &str,
@@ -22516,22 +23338,59 @@ fn main() {
         cli.forget_calls();
         cli.answer_to("update", refusal, 2);
         cli.answer_to("status", status, 0);
+        let shell = Shell::default();
+        *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
         let app = tauri::test::mock_builder()
-            .manage(Shell::default())
+            .manage(shell)
             .manage(desktop_telemetry::DesktopTelemetry::for_tests(
                 temp_root(&format!("{label}-telemetry")),
                 true,
             ))
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
+        // What the window is told while the update runs.
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        {
+            use tauri::Listener;
+            let told = told.clone();
+            app.listen_any("setup:progress", move |event| {
+                told.lock().unwrap().push(event.payload().to_owned());
+            });
+        }
         let report = tauri::async_runtime::block_on(run_local_eval(
             app.handle().clone(),
             format!("{label}-attempt"),
             local_eval::Action::Update,
             "local-abc123".into(),
         ));
-        assert!(cli.calls().contains("local update"), "{}", cli.calls());
+        assert!(
+            cli.calls().contains("local update"),
+            "{}",
+            update_not_asked(cli, root, &report, &app, &told.lock().unwrap())
+        );
         (report, setup_failures(&app))
+    }
+
+    /// Why `run_local_eval` answered an update without asking the CLI: its answer, everything the
+    /// window was told and recorded, and what decides whether the CLI is asked.
+    fn update_not_asked(
+        cli: &desktop_telemetry::fake_cli::FakeCli,
+        root: &Path,
+        report: &Result<local_eval::Report, local_eval::Failure>,
+        app: &tauri::App<tauri::test::MockRuntime>,
+        told: &[String],
+    ) -> String {
+        format!(
+            "the CLI was not asked for `local update`.\ncalls: {:?}\nreport: {report:#?}\n\
+             setup:progress: {told:#?}\ntelemetry queued: {:#?}\nengine known: {}\n\
+             engine saved at {}: {:?}\nengine found now: {:#?}",
+            cli.calls(),
+            app.state::<desktop_telemetry::DesktopTelemetry>().queued(),
+            local_eval::engine_known(),
+            root.display(),
+            preparation::saved_engine(root),
+            engine::detect_saved(preparation::saved_engine(root)),
+        )
     }
 
     /// Found in production telemetry from 1.0.2 to 1.1.0-rc.1: every upgrader sent
@@ -22551,9 +23410,8 @@ fn main() {
         }
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
-        let empty = temp_root("openbot-update-already-on-it-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        no_engine_answers("openbot-update-already-on-it");
+        let installation = installation_on_docker("openbot-update-already-on-it");
         std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
         let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-already-cli", false);
         let on_record = |to: &str| {
@@ -22572,6 +23430,7 @@ fn main() {
         ] {
             let (report, failures) = update_through_the_command(
                 &cli,
+                &installation,
                 &update_refused(&format!(
                     "This stack already runs {installed}. Local update only moves to a newer release."
                 )),
@@ -22609,9 +23468,8 @@ fn main() {
         }
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
-        let empty = temp_root("openbot-update-incompatible-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        no_engine_answers("openbot-update-incompatible");
+        let installation = installation_on_docker("openbot-update-incompatible");
         std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
         let cli =
             desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-incompatible-cli", false);
@@ -22629,6 +23487,7 @@ fn main() {
         ] {
             let (report, failures) = update_through_the_command(
                 &cli,
+                &installation,
                 &update_refused(refusal),
                 &status,
                 "openbot-update-incompatible",
@@ -23166,9 +24025,7 @@ fn main() {
         }
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
-        let empty = temp_root("openbot-sign-in-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        let empty = no_engine_answers("openbot-sign-in");
         // Each sign-in forgets the CLI's saved code: this one's, not that of whoever runs the test.
         for home in ["HOME", "APPDATA", "XDG_CONFIG_HOME"] {
             std::env::set_var(home, &empty);

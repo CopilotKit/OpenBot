@@ -1,6 +1,7 @@
 import { IconChevronRight } from "@tabler/icons-react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
+import { SharedComputersNotice } from "@/components/admin/shared-computers-notice";
 import {
   PageRows,
   PageSection,
@@ -22,7 +23,8 @@ export const Route = createFileRoute("/_authed/admin/")({
 
 /**
  * Admin's overview: every Admin page, grouped by the thing a Bot has that it sets for everybody, in
- * the order the sidebar lists them (`ADMIN_SECTIONS`).
+ * the order the sidebar lists them (`ADMIN_SECTIONS`). Above them, on an OpenBot whose Bots share one
+ * computer, the notice that says so: the first page an admin opens is where they learn it.
  */
 function RouteComponent() {
   return (
@@ -30,6 +32,7 @@ function RouteComponent() {
       description="Manage settings that apply to everyone and every Bot in this organization."
       title="Admin"
     >
+      <SharedComputersNotice />
       {ADMIN_SECTIONS.map((section) => (
         <PageSection key={section.title} title={section.title}>
           <PageRows>

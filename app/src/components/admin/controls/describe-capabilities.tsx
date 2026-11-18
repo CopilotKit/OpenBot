@@ -1,6 +1,7 @@
 import {
   IconBuilding,
   IconChecklist,
+  IconCircleDashed,
   IconDeviceDesktop,
   IconFolder,
   IconKey,
@@ -58,10 +59,12 @@ function scopeWords(change: CapabilityChange, teams: Teams): string {
     const name = teamName(teams, change.scopeId);
     return name === MISSING_TEAM ? name : `Team: ${name}`;
   }
-  return `Group: ${change.scopeId}`;
+  if (change.scopeKind === "group") return `Group: ${change.scopeId}`;
+  // A kind of scope a newer server names that this app doesn't know: its id alone.
+  return change.scopeId;
 }
 
-const SCOPE_ICONS = {
+const SCOPE_ICONS: Partial<Record<string, typeof IconBuilding>> = {
   organization: IconBuilding,
   role: IconUserShield,
   team: IconUsersGroup,
@@ -112,7 +115,7 @@ export function ChangeRows({
       <PageRows>
         {changes.map((change, index) => {
           const row = index + 1;
-          const Icon = SCOPE_ICONS[change.scopeKind];
+          const Icon = SCOPE_ICONS[change.scopeKind] ?? IconCircleDashed;
           const setting = settingWords(change);
           const title = titles[change.capability] ?? change.capability;
           const wrong = problems.filter((problem) => problem.change === row);
@@ -160,7 +163,7 @@ export function ChangeRows({
 }
 
 /** Why a person has a permission or not, after "Now" or "After this,". */
-function answerWords(answer: CapabilityAnswer, teams: Teams): string {
+export function answerWords(answer: CapabilityAnswer, teams: Teams): string {
   const state = answer.allowed ? "on" : "off";
   switch (answer.decidedBy) {
     case "default":
@@ -175,6 +178,9 @@ function answerWords(answer: CapabilityAnswer, teams: Teams): string {
     }
     case "group":
       return `on through ${answer.scopeId}`;
+    default:
+      // Decided in a way a newer server names that this app doesn't know: on or off alone.
+      return state;
   }
 }
 

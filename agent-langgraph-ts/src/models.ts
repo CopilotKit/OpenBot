@@ -30,8 +30,8 @@ import { ChatOpenAI } from "@langchain/openai";
 // moves to the Responses API moves here in the same change. Node loads it through the JSON hook in
 // json-modules.ts (see there for why and how).
 import { requiresResponsesApi } from "../../shared/model-providers.ts";
-import { PlanHarnessChatModel } from "./plan-model.ts";
 import { HarnessRunError, MODEL_UNREACHABLE } from "./errors.ts";
+import { PlanHarnessChatModel } from "./plan-model.ts";
 
 export type Env = Record<string, string | undefined>;
 

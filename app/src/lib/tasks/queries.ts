@@ -22,12 +22,18 @@ import { organizationId } from "@/lib/api/request";
  * conversation waits on the person; its turn is queued or running; the person marked it done; its
  * turn ran out of runs; its Bot replied.
  */
-export type TaskStatus =
+export type KnownTaskStatus =
   | "needs_input"
   | "working"
   | "resolved"
   | "failed"
   | "ready_for_review";
+
+/**
+ * A task's status as the server answers it: one of `KnownTaskStatus`, or one a newer server added
+ * that this app doesn't know, which every screen reads as other.
+ */
+export type TaskStatus = string;
 
 export type BotTask = {
   id: string;
@@ -239,13 +245,19 @@ export function liveStatus(status: TaskStatus, busy: boolean): TaskStatus {
 }
 
 /** Each status in a word or two, as a row says it. */
-export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+export const TASK_STATUS_LABEL: Record<KnownTaskStatus, string> = {
   ready_for_review: "Ready for review",
   needs_input: "Needs input",
   failed: "Failed",
   working: "Working",
   resolved: "Resolved",
 };
+
+/** A status in a word or two, or nothing for one a newer server sends that this app doesn't know. */
+export function taskStatusLabel(status: TaskStatus): string | null {
+  const known: Partial<Record<string, string>> = TASK_STATUS_LABEL;
+  return known[status] ?? null;
+}
 
 /** What a failed task says after its status: "Couldn't finish: <reason>." */
 export function couldNotFinish(failure: string | null): string {

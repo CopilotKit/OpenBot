@@ -110,7 +110,14 @@ const SENTENCE =
 function readsAsTheCard(scope: HTMLElement) {
   const view = within(scope);
   expect(view.getByText(SENTENCE)).toBeTruthy();
-  expect(view.getByLabelText("What it would send").textContent).toBe(TEXT);
+  // The whole text, each paragraph drawn as the conversation draws it.
+  const said = view.getByLabelText("What it would send");
+  expect(
+    Array.from(
+      said.querySelectorAll("p"),
+      (paragraph) => paragraph.textContent,
+    ),
+  ).toEqual(TEXT.split("\n\n"));
   for (const field of ["Hand off", "Preview", "Audience", "Recipients"])
     expect(view.queryByText(field)).toBeNull();
   expect(scope.textContent).not.toContain("9f2c");

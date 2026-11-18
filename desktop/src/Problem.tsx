@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { ExternalLink } from "./ExternalLink";
+import type { Shortfall } from "./localEvalCli";
+import { resourcesShortSaid } from "./localReadiness";
 
 /**
  * A failure, in both registers, wherever one happens.
@@ -26,7 +28,21 @@ export type Problem = {
    * only to choose what to offer next (`ConnectToOpenBot`); the sentence is still `said`.
    */
   kind?: string | null;
+  /**
+   * What this computer is short of, for an update it did not start (`upgrade::Ran::Short`): said
+   * with the figures, as the back end's own shortfall is (`resourcesShortSaid`).
+   */
+  shortfall?: Shortfall | null;
+  /** A plain line above the raw output, when that output shows the disk ran out. */
+  cause?: string | null;
 };
+
+/** The sentence a failure is shown with: its shortfall's figures when it has one. */
+export function problemSaid(problem: Problem): string {
+  return problem.shortfall
+    ? resourcesShortSaid(problem.shortfall)
+    : problem.said;
+}
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
 export function asProblem(thrown: unknown): Problem {
@@ -174,7 +190,8 @@ export function Failure({
   return (
     <div className="blocker" role="alert">
       <h2>That didn’t finish</h2>
-      <p>{problem.said}</p>
+      <p>{problemSaid(problem)}</p>
+      {problem.cause && <p className="caution">{problem.cause}</p>}
       {onRetry && (
         <div className="row">
           <button type="button" onClick={onRetry}>
@@ -206,7 +223,8 @@ export function Failure({
 export function InlineFailure({ problem }: { problem: Problem }) {
   return (
     <div className="inline-failure" role="alert">
-      <p className="caution">{problem.said}</p>
+      <p className="caution">{problemSaid(problem)}</p>
+      {problem.cause && <p className="caution">{problem.cause}</p>}
       {problem.detail && (
         <details className="detail-of">
           <summary>Technical details</summary>
