@@ -17,6 +17,7 @@ import {
   RELEASE,
   SECURITY_UPDATE_SENTENCE,
   clientTokens,
+  FIRST_ONE_API_RELEASES,
 } from "../client-version";
 import { countedClients } from "../api-deprecations";
 import cases from "../fixtures/client-version/cases.json";
@@ -181,5 +182,14 @@ describe("one reading of the header", () => {
           version: named.version.replace(/^v/, ""),
         });
     }
+  });
+});
+
+test("the first release of each app on /api/v2 is 1.1.0: nothing in 1.0.3 calls it", () => {
+  expect(FIRST_ONE_API_RELEASES).toEqual({
+    web: "1.1.0",
+    desktop: "1.1.0",
+    mobile: "1.1.0",
+    recorder: "1.1.0",
   });
 });
