@@ -325,8 +325,11 @@ test("Create fills in what was left blank, then hands over", async () => {
     visibility: "private",
     endpoint: "",
   });
-  // It runs on OpenBot, which the server knows without being told.
-  expect(creates[0]).not.toHaveProperty("harness");
+  /*
+   * It runs inside OpenBot, on the engine new Bots run on: OpenBot's own LangGraph (TypeScript)
+   * agent, named with no address. The server still picks each run's engine for the sign-in.
+   */
+  expect(creates[0]).toMatchObject({ harness: "langgraph-ts" });
   // For a Bot that runs here this is its system prompt, so it has to be something it can act on.
   expect(String(creates[0]?.roleDescription)).toStartWith(
     "You are Expense Review.",

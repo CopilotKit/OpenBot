@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BOT_ENGINE,
   OPENBOT_HARNESS_NAME,
   reachedThroughMastra,
   summaryFor,
@@ -302,7 +303,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
-    const framework = managed ? declaredFramework(chosen.harness) : undefined;
+    /*
+     * A Bot somebody runs names its framework; one that runs here names the engine new Bots run
+     * on (`DEFAULT_BOT_ENGINE`). The server decides each run's engine from there.
+     */
+    const framework = declaredFramework(
+      managed ? chosen.harness : DEFAULT_BOT_ENGINE,
+    );
     const agent = await createAgent.mutateAsync({
       ...agentInputFrom({
         name: name.trim(),
@@ -317,8 +324,9 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         isolated:
           !personal && isolated && isolationAvailable && isolationAllowed,
       }),
-      // The framework picked from the list, so the Bot is told what runs it. None for an agent
-      // somebody already runs, since nobody said what is behind its address.
+      // The framework picked from the list, so the Bot is told what runs it, or the engine a Bot
+      // that runs here is made on. None for an agent somebody already runs, since nobody said what
+      // is behind its address.
       ...(framework ? { harness: framework } : {}),
     });
     /*

@@ -88,6 +88,12 @@ leftover token with no URL is ignored. The
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
 at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 
+`LANGGRAPH_TS_AG_UI_URL` is where the server finds the TypeScript LangGraph engine,
+`agent-langgraph-ts`, which new Bots run on. It is called with `MANAGED_AGENT_TOKEN`, like the managed
+Bot. Unset, and with no picked harness that is that engine, new Bots run on the server's built-in
+engine. `scripts/start.sh` points it at the engine on 4215 on a laptop, and Compose's `server`
+service reaches it by name. OpenBot Desktop needs neither: its picked harness is that engine.
+
 ## General variables
 
 | Variable             | Default                            | Meaning                                                             |
@@ -106,7 +112,7 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` | unset    | A model plan sign-in in place of a key: the Anthropic token from `claude setup-token`, or the file a signed-in ChatGPT plan writes. Set one, not both. The built-in Bots then run on the plan through the installed harness that holds it (`agent-claude-sdk` for Claude, `agent-langgraph-agui` for ChatGPT), named by `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL`, with `MANAGED_AGENT_TOKEN`. The server refuses to start with both set, or with either set and that harness missing. OpenBot Desktop writes these itself; see below. |
+| `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` | unset    | A model plan sign-in in place of a key: the Anthropic token from `claude setup-token`, or the file a signed-in ChatGPT plan writes. Set one, not both. The built-in Bots then run on the plan through the installed harness that holds it (`agent-claude-sdk` for Claude, `agent-langgraph-agui` for ChatGPT), named by `PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL`, with `MANAGED_AGENT_TOKEN`. A ChatGPT plan can instead name that harness by `CHATGPT_PLAN_HARNESS_URL` (and `CHATGPT_PLAN_HARNESS_TOKEN`, which defaults to `MANAGED_AGENT_TOKEN`), which is how the TypeScript LangGraph engine reaches it too: OpenBot Desktop runs that engine as the Bot on a ChatGPT plan and `agent-langgraph-agui` beside it. The server refuses to start with both set, or with either set and that harness missing. OpenBot Desktop writes these itself; see below. |
 | `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-5-5`, and `gemini-2.5-flash`. Set, it is the default for built-in Bots and the picked harness while the credential lists it; a person can still pick another in the composer. Unset, the [model list](#the-model-list) chooses the default. |
 | `CHATGPT_CODEX_CLIENT_VERSION` | `0.167.0` | The Codex client version the LangGraph harness names when it reads a ChatGPT plan's model list. Change it only if the plan's list comes back empty after a Codex release. |
 | `OPENBOT_MODEL_CAPABILITIES_URL` | `https://models.dev/api.json` | Where the model list reads each model's thinking levels, line and price when the provider's own listing does not say. `off` reads none: providers that publish their own (Anthropic, xAI, a ChatGPT plan) still show thinking levels, and the default falls back to the configured model. See [The model list](#the-model-list). |
@@ -1169,6 +1175,7 @@ stack without a toolchain and without waiting for Chromium to build.
 | `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot`, the same image as the server |
 | `supervisor`      | `SUPERVISOR_IMAGE`  | `ghcr.io/copilotkit/openbot-supervisor`     |
 | `agent-langgraph-agui` | `LANGGRAPH_IMAGE` | `ghcr.io/copilotkit/openbot-agent-langgraph-agui` |
+| `agent-langgraph-ts` | `LANGGRAPH_TS_IMAGE` | `ghcr.io/copilotkit/openbot-agent-langgraph-ts` |
 | `server`          | `SERVER_IMAGE`      | `ghcr.io/copilotkit/openbot` |
 
 The server, the computer and the supervisor are never built from a checkout. Unset, each is pulled
@@ -1176,10 +1183,10 @@ at one tag, `OPENBOT_BACKEND_TAG`, which `backend-images.env` names and `scripts
 Compose; the same name in the environment or in `.env` wins over that file. A Compose run by hand
 names the file itself (`docker compose --env-file backend-images.env --env-file .env up -d`). Set to
 a published reference, pinned by digest, a setting above wins over the tag. One image runs as the
-server and as every computer, each service naming its own command. The managed Bot,
-`agent-langgraph-agui`, is the one image a checkout builds: unset, `LANGGRAPH_IMAGE` names a local
-tag and Compose builds it; set to a published reference together with `IMAGE_PULL_POLICY=missing`,
-Compose pulls instead. Both architectures are in every image, so the same reference works on an
+server and as every computer, each service naming its own command. The two LangGraph engines,
+the managed Bot `agent-langgraph-agui` and the TypeScript `agent-langgraph-ts`, are the images a
+checkout builds: unset, `LANGGRAPH_IMAGE` and `LANGGRAPH_TS_IMAGE` name a local tag and Compose builds
+it; set to a published reference together with `IMAGE_PULL_POLICY=missing`, Compose pulls instead. Both architectures are in every image, so the same reference works on an
 arm64 laptop and an amd64 server.
 
 `docker-compose.yml` still defines `worker` and `migrate` on the server's image, and `agent-bot`
@@ -1225,6 +1232,7 @@ Teams. They are read from `GET /api/v2/organizations/{organizationId}/setup-chec
 | `server`          | 3001                       | `SERVER_PORT`     |
 | `agent-computer`  | 4100                       | `COMPUTER_PORT`   |
 | `agent-langgraph-agui` | 4201 host / 4206 container | `LANGGRAPH_PORT` |
+| `agent-langgraph-ts` | 4215                       | `LANGGRAPH_TS_PORT` |
 | `supervisor`      | 4500 host / 4300 container | `SUPERVISOR_PORT` |
 | PostgreSQL        | 5432                       | `POSTGRES_PORT`   |
 
