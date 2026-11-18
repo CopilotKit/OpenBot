@@ -118,7 +118,13 @@ async fn status(
 #[tauri::command]
 pub async fn restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     crate::desktop_connected::nothing_here(&app)?;
-    crate::restart_openbot_from(app, crate::AskedFrom::Settings).await
+    // The page has always been given a sentence. What lay beneath it follows, as it did.
+    crate::restart_openbot_from(app, crate::AskedFrom::Settings)
+        .await
+        .map_err(|problem| match problem.detail {
+            Some(detail) => format!("{} {detail}", problem.said),
+            None => problem.said,
+        })
 }
 
 /// Stops everything, as the menu's Stop did. The page asking goes with it; the window shows setup.

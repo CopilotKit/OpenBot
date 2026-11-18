@@ -5252,29 +5252,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 linux_server_user(found.engine, owner.uid(), owner.gid()),
             );
         }
-        let (settings, mut secrets) = persist_start_environment(&root, settings, &credential)?;
+        let (settings, credentials) = persist_start_environment(&root, settings, &credential)?;
         // The picked harness as the server reads it per run, from what was just written.
         stack::make_sign_in_folder(&root)?;
         openbot_desktop_lib::ai_connection::write_picked_harness_file(&root, &settings)?;
         report_plain(&app, "env", true, "Your settings are saved.");
-        // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
-        secrets.extend(ports.settings());
-        for key in [
-            "PICKED_HARNESS_PORT",
-            "OPENBOT_TOOL_URL",
-            "COMPUTER_NETWORK",
-            "OPENBOT_SERVER_USER",
-        ] {
-            if let Some(value) = settings.get(key) {
-                secrets.insert(key.into(), value.clone());
-            }
-        }
-        // The identity as it stands: Start never waits for `telemetry link`, which runs after it.
-        // Handed to Compose with the rest; a service receives only what the Compose file names.
-        secrets.extend(desktop_telemetry::runtime_env(&app));
-        // After the credential store has been written, so the token never is. See where it is
-        // minted above.
-        secrets.insert("OPENBOT_DESKTOP_HOST_TOKEN".into(), host_token.clone());
+        let secrets = compose_environment(&app, credentials, &settings, &ports, &host_token);
 
         // Compose's bind mount of the sign-in folder does not create it. Installation made it;
         // made again here in case it went since. See `stack::make_sign_in_folder`.
@@ -6676,6 +6659,126 @@ fn require_no_exited_compose_services(
     ))
 }
 
+/// The settings Start writes to `.env` that it also pins in Compose's environment, which Compose
+/// ranks above `.env`.
+const PINNED_SETTINGS: [&str; 4] = [
+    "PICKED_HARNESS_PORT",
+    "OPENBOT_TOOL_URL",
+    "COMPUTER_NETWORK",
+    "OPENBOT_SERVER_USER",
+];
+
+/**
+What Compose is handed in its environment for the server, beside `.env`, which it reads itself.
+Start and Restart both build it here, so the server Restart makes again is the one Start made.
+
+`credentials` are the ones `persist_start_environment` keeps out of `.env`, with the app broker's
+settings; `settings` the ones it wrote to `.env`. Added to them: the ports, the settings Start pins
+(`PINNED_SETTINGS`), the usage-data identity as it stands, and the host token the desktop's folder
+access answers to. Anything else in `.env`, a server setting a person added by hand among it,
+reaches the server through the Compose file's `env_file` when its container is created.
+*/
+fn compose_environment<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    credentials: stack::Secrets,
+    settings: &std::collections::BTreeMap<String, String>,
+    ports: &openbot_env::Ports,
+    host_token: &str,
+) -> stack::Secrets {
+    let mut secrets = credentials;
+    // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
+    secrets.extend(ports.settings());
+    for key in PINNED_SETTINGS {
+        if let Some(value) = settings.get(key) {
+            secrets.insert(key.into(), value.clone());
+        }
+    }
+    // The identity as it stands: Start never waits for `telemetry link`, which runs after it.
+    // Handed to Compose with the rest; a service receives only what the Compose file names.
+    secrets.extend(desktop_telemetry::runtime_env(app));
+    // After the credential store has been written, so the token never is. See where Start mints it.
+    secrets.insert("OPENBOT_DESKTOP_HOST_TOKEN".into(), host_token.to_owned());
+    secrets
+}
+
+/// What Restart says when it cannot make the server again with the settings it has now.
+const RESTART_NEEDS_START: &str =
+    "OpenBot couldn't restart with your current settings. Choose Stop OpenBot, then Start OpenBot.";
+
+/**
+`compose_environment` for the running deployment at `root`, from where Start left everything: the
+credentials from the credential store, the ports and pinned settings from `.env`, the app broker's
+settings from where the person keeps them, and the host token from the `server` container, which is
+the token the desktop's folder access answers to.
+
+The same whether this session started the deployment or the window took it over after a crash: what
+Start wrote is all on disk. A credential Start named and did not keep is handed empty, as Start
+hands it, so a value left in `.env` cannot stand in for it. A server whose host token cannot be read
+cannot be made again without leaving folder access behind, and only Start mints a new one, so Restart
+says that.
+*/
+fn saved_start_environment<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: &engine::Address,
+    root: &Path,
+) -> Result<stack::Secrets, Problem> {
+    let host_token = match server_host_token(address, root) {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            return Err(Problem::with(
+                RESTART_NEEDS_START,
+                "the server container is not running, or was given no host token",
+            ))
+        }
+        Err(error) => return Err(Problem::with(RESTART_NEEDS_START, error)),
+    };
+    let handed: Vec<&str> = openbot_desktop_lib::vault::SECRETS
+        .into_iter()
+        .filter(|key| *key != openbot_desktop_lib::saved_intent::COMPATIBLE_CREDENTIAL)
+        .collect();
+    let kept = openbot_desktop_lib::vault::recall_all(root, &handed)?;
+    let mut credentials: stack::Secrets = handed
+        .iter()
+        .map(|key| {
+            let value = kept.get(*key).cloned().unwrap_or_default();
+            ((*key).to_owned(), value)
+        })
+        .collect();
+    credentials.extend(broker_runtime(root));
+    let settings =
+        openbot_env::read_already_set(&root.join(".env"), &PINNED_SETTINGS).map_err(|error| {
+            Problem::with("OpenBot could not read its settings.", error.to_string())
+        })?;
+    let ports = openbot_env::Ports::read(root).map_err(|error| {
+        Problem::with("OpenBot could not read its local ports.", error.to_string())
+    })?;
+    Ok(compose_environment(
+        app,
+        credentials,
+        &settings,
+        &ports,
+        &host_token,
+    ))
+}
+
+/**
+The app broker's settings, read where the person keeps them and handed over at runtime only.
+
+None of them is written, moved or purged. A Composio key in `.env` stays in `.env` and wins; a
+provisioned one stays in the protected store. Pinning them also beats a blank value inherited from
+this app's own environment, which Bun would otherwise prefer to `.env`. Never fatal: without them,
+OpenBot starts with apps unavailable.
+*/
+fn broker_runtime(root: &Path) -> stack::Secrets {
+    match openbot_desktop_lib::composio::resolve(root) {
+        Ok(brokers) => brokers.runtime(),
+        Err(problem) => {
+            log::warn!("[apps] {}", problem.said);
+            stack::Secrets::new()
+        }
+    }
+}
+
 /// Write this run's settings, store its credentials, and answer with what the host processes get.
 fn persist_start_environment(
     root: &Path,
@@ -6724,18 +6827,7 @@ fn persist_start_environment(
             log::warn!("[apps] {}", problem.said);
         }
     }
-    /*
-     * The app broker's settings, read where the person keeps them and handed over at runtime only.
-     *
-     * None of them is written, moved or purged. A Composio key in `.env` stays in `.env` and wins;
-     * a provisioned one stays in the protected store. Pinning them here also beats a blank value
-     * inherited from this app's own environment, which Bun would otherwise prefer to `.env`.
-     * Never fatal: without them, OpenBot starts with apps unavailable.
-     */
-    match openbot_desktop_lib::composio::resolve(root) {
-        Ok(brokers) => secrets.extend(brokers.runtime()),
-        Err(problem) => log::warn!("[apps] {}", problem.said),
-    }
+    secrets.extend(broker_runtime(root));
     Ok((settings, secrets))
 }
 
@@ -9365,33 +9457,43 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
 }
 
 /**
-Restart OpenBot itself: the server's container, through Compose, and the worker's in an
-installation whose Compose file still defines one. The other
+Restart OpenBot itself: the server's container, made again through Compose with the settings as they
+are now, and the worker's in an installation whose Compose file still defines one. The other
 containers, its database among them, keep running, so nothing is lost and the restart takes seconds.
-Only an OpenBot this session started, whose engine it knows.
+Only an OpenBot this session holds, whose engine it knows. Its failure says what to do in its
+sentence, which the Status window shows.
 */
 #[tauri::command]
-async fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+async fn restart_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
     restart_openbot_from(app, AskedFrom::StatusWindow).await
 }
 
 async fn restart_openbot_from<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     from: AskedFrom,
-) -> Result<(), String> {
+) -> Result<(), Problem> {
     let asked = std::time::Instant::now();
     log::info!("[restart] asked {}", from.said());
-    // Compose takes seconds to restart a container. Off Tauri's threads, as Stop is.
+    // Compose takes seconds to make a container again. Off Tauri's threads, as Stop is.
     let restarted = tauri::async_runtime::spawn_blocking(move || restart_openbot_now(&app))
         .await
-        .map_err(|error| format!("the restart did not run: {error}"))
+        .map_err(|error| Problem::with("OpenBot could not restart.", error.to_string()))
         .and_then(|restarted| restarted);
     logging::outcome("restart", asked, &restarted);
     restarted
 }
 
-fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+/**
+The server made again with the environment Start hands Compose (`saved_start_environment`), so a
+setting changed in `.env` since Start reaches it, as Start from the main window would apply it.
+
+Compose's own `restart` kept the container as it was made, and Compose documents that a restart
+applies no change to the configuration or environment: a changed `.env` never reached the server.
+Held under `Shell::startup`, as Start and Stop are, so neither runs while the server is made again.
+*/
+fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
     let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
     let root = shell.root.lock().unwrap().clone();
     let address = shell
         .containers
@@ -9401,10 +9503,11 @@ fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(
         .filter(|owned| Some(&owned.root) == root.as_ref())
         .map(|owned| owned.address.clone());
     let (Some(root), Some(address)) = (root, address) else {
-        return Err("OpenBot is not running.".into());
+        return Err(Problem::plain("OpenBot is not running."));
     };
-    stack::restart_openbot(&address, &root)
-        .map_err(|error| format!("OpenBot could not restart: {error}"))
+    let secrets = saved_start_environment(app, &address, &root)?;
+    stack::recreate_openbot(&address, &root, &secrets)
+        .map_err(|error| Problem::with("OpenBot could not restart.", error))
 }
 
 /// Stop, as the menu used to offer it: everything, Intelligence included if OpenBot started it.
@@ -15621,6 +15724,139 @@ mod tests {
         let up = stack::up(&address, &root, false, &secrets);
         std::fs::remove_dir_all(root).unwrap();
         assert!(up.is_ok(), "{up:?}");
+    }
+
+    /// An installation Start raised, as it raises one: its settings saved, its environment handed
+    /// to Compose, its `up`. `.env` holds a server setting a person added by hand. The engine gives
+    /// the server its environment as Compose does (`tests/fixtures/engine.rs`, `server-env`). The
+    /// session then holds the deployment, as one the window took over after a crash is held:
+    /// nothing of Start's run is in memory.
+    fn started_installation(
+        label: &str,
+        host_token: Option<&str>,
+    ) -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
+        let root = temp_root(label);
+        write_installed_deployment(&root);
+        std::fs::write(root.join(".env"), "OPENBOT_LOG_LEVEL=info\n").unwrap();
+        let address = fake_engine(&root.join("engine-record"));
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let settings = std::collections::BTreeMap::from([(
+            "KEY_ENCRYPTION_KEY".to_string(),
+            "synthetic-encryption-key".to_string(),
+        )]);
+        let (settings, credentials) =
+            persist_start_environment(&root, settings, &openbot_env::ModelCredential::None)
+                .unwrap();
+        let ports = openbot_env::Ports::read(&root).unwrap();
+        let secrets = compose_environment(
+            app.handle(),
+            credentials,
+            &settings,
+            &ports,
+            "synthetic-host-token",
+        );
+        stack::up(&address, &root, false, &secrets).unwrap();
+        if let Some(token) = host_token {
+            give_server_host_token(&root, token);
+        }
+        // Held as `hold_shown_deployment` holds one, without the folder access it starts beside.
+        {
+            let shell = app.state::<Shell>();
+            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.clone(),
+                address,
+            });
+            *shell.root.lock().unwrap() = Some(root.clone());
+        }
+        assert!(
+            server_env(&root).contains("OPENBOT_LOG_LEVEL=info\n"),
+            "{}",
+            server_env(&root)
+        );
+        // The person changes the setting by hand.
+        let env = std::fs::read_to_string(root.join(".env")).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            env.replace("OPENBOT_LOG_LEVEL=info", "OPENBOT_LOG_LEVEL=debug"),
+        )
+        .unwrap();
+        (app, root)
+    }
+
+    fn server_env(root: &Path) -> String {
+        std::fs::read_to_string(root.join("server-env")).unwrap()
+    }
+
+    /**
+    THE STATUS WINDOW'S RESTART APPLIES `.env` AS START DOES.
+
+    Restart was Compose's `restart`, which keeps a container exactly as it was made: a setting
+    changed in `.env` after Start never reached the server, however often it was restarted, and
+    only Start from the main window applied it. Restart now makes the server again with the
+    environment Start hands Compose, read back from where Start keeps it, so it works the same for
+    a deployment the window took over after a crash. The server has the new value, the credentials
+    Start kept, and the same host token, so folder access still answers to it.
+    */
+    #[test]
+    fn restart_runs_the_server_with_the_settings_in_env_now() {
+        if test_support::isolated_process(
+            "tests::restart_runs_the_server_with_the_settings_in_env_now",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_with("docker", "server-env");
+        let (app, root) = started_installation("restart-reads-env", Some("synthetic-host-token"));
+
+        let restarted = tauri::async_runtime::block_on(restart_openbot_from(
+            app.handle().clone(),
+            AskedFrom::StatusWindow,
+        ));
+        let after = server_env(&root);
+        std::fs::remove_dir_all(&root).unwrap();
+
+        assert!(restarted.is_ok(), "{:?}", restarted.err().map(|p| p.said));
+        assert!(after.contains("OPENBOT_LOG_LEVEL=debug\n"), "{after}");
+        assert!(!after.contains("OPENBOT_LOG_LEVEL=info"), "{after}");
+        for (credential, given) in [
+            ("host-token-length", "synthetic-host-token"),
+            ("encryption-key-length", "synthetic-encryption-key"),
+        ] {
+            assert!(
+                after.contains(&format!("{credential}={}\n", given.len())),
+                "{after}"
+            );
+        }
+    }
+
+    /// A server whose host token cannot be read back cannot be made again without leaving folder
+    /// access behind, and only Start mints a new one. Restart leaves it running as it is and says
+    /// what to do, in the sentence the Status window shows.
+    #[test]
+    fn restart_says_to_start_again_when_it_cannot_read_the_servers_token() {
+        if test_support::isolated_process(
+            "tests::restart_says_to_start_again_when_it_cannot_read_the_servers_token",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_with("docker", "server-env");
+        let (app, root) = started_installation("restart-needs-start", None);
+        let before = server_env(&root);
+
+        let restarted = tauri::async_runtime::block_on(restart_openbot_from(
+            app.handle().clone(),
+            AskedFrom::StatusWindow,
+        ));
+        let after = server_env(&root);
+        std::fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(
+            restarted.map_err(|problem| problem.said),
+            Err(RESTART_NEEDS_START.to_string())
+        );
+        assert_eq!(after, before, "the server is left as it was");
     }
 
     #[test]

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SECURITY_FLOOR_SENTENCE } from "../../shared/security-floor";
 import { type LocalReadiness, runLocalEval } from "./localEvalCli";
-import { TroubleshootingLogs } from "./Problem";
+import { asProblem, problemSaid, TroubleshootingLogs } from "./Problem";
 import { type PartGroup, partLabel } from "./partNames";
 import { useBelowSecurityFloor } from "./SecurityFloor";
 import { StatusLine } from "./SetupProgress";
@@ -183,13 +183,24 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
   async function act(what: Busy, run: () => Promise<unknown>) {
     setBusy(what);
     setSaid(null);
+    let failed: { thrown: unknown } | null = null;
     try {
       await run();
-    } catch {
-      setSaid(`${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`);
+    } catch (thrown) {
+      failed = { thrown };
     } finally {
       setBusy(null);
       await refresh();
+    }
+    // Said after the refresh, which clears what the window said: said before it, it never showed.
+    // A failure with its own sentence (Restart's) says what to do; a bare one, that it failed.
+    if (failed) {
+      const { thrown } = failed;
+      setSaid(
+        thrown && typeof thrown === "object" && "said" in thrown
+          ? problemSaid(asProblem(thrown))
+          : `${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`,
+      );
     }
   }
 
@@ -238,7 +249,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               />
               {status.openbotRunning && (
                 <div className="row">
-                  {/* Restart is Compose restarting the server's container this session started. */}
+                  {/* Restart makes the server's container again from .env, as Start does. */}
                   {status.openbotHeld && !belowFloor && (
                     <button
                       type="button"

@@ -121,6 +121,27 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
 });
 
 /**
+ * Restart makes the server again from `.env`. One it cannot make again says what to do instead,
+ * and the window shows that sentence, not only "did not finish".
+ */
+test("a Restart that needs Start again says so in the window", async () => {
+  const said =
+    "OpenBot couldn't restart with your current settings. Choose Stop OpenBot, then Start OpenBot.";
+  invokeHandler = async (command) => {
+    if (command === "restart_openbot") throw { said, detail: "no host token" };
+    return answers()(command);
+  };
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  const app = await view.findByRole("region", { name: "App" });
+  await userEvent.click(within(app).getByRole("button", { name: "Restart" }));
+  await view.findByText(said);
+  expect(view.container.textContent).not.toContain("no host token");
+  expect(
+    invokeCalls.filter((call) => call.command === "restart_openbot"),
+  ).toHaveLength(1);
+});
+
+/**
  * Seen on a Windows box below the security floor: Start for OpenBot's services was offered, the
  * shell refused it, and the window said nothing at all. Below the floor nothing starts here, so
  * Start and Restart are not offered, and the window says why.
