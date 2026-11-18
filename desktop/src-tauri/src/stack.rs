@@ -3494,7 +3494,37 @@ pub const REFUSAL_FILE: &str = "refusal";
 
 /// Take away the sentence an earlier start's server wrote, before Compose starts this one, so only a
 /// refusal from this start is read (`server_refusal`).
-pub fn forget_refusal(root: &Path) {
+///
+/// FIRST, THE SERVER THAT WROTE IT. The engine keeps restarting a refusing server until Compose
+/// replaces it, and each restart refuses again and writes the old sentence again. Under Podman that
+/// is every second or so, so a Retry after the setting was put right read the old server's sentence,
+/// written after the file was taken away and before `up` replaced the container, although the new
+/// server was healthy. So a server that refused is stopped and removed first, and nothing is left
+/// that could write the file: it serves nothing, and `up` makes it again from the settings as they
+/// are now.
+///
+/// Removed rather than told apart by when the file was written or by whom: the file's time comes
+/// from the host and the container's start time from the engine's own machine, which under Podman
+/// on Windows or macOS is a virtual machine with a clock of its own, and naming the container in the
+/// file would need every server image to write it.
+pub fn forget_refusal(engine: &Address, root: &Path) {
+    if refusal_written(root).is_some() || engine_reports_refusal(engine, root) {
+        let removed = compose_command(engine, root, &Secrets::new())
+            .args(["rm", "--stop", "--force", "server"])
+            .output();
+        match removed {
+            Ok(out) if out.status.success() => {
+                log::info!("[start] removed the server that refused to start")
+            }
+            Ok(out) => log::warn!(
+                "[start] could not remove the server that refused to start: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(error) => {
+                log::warn!("[start] could not remove the server that refused to start: {error}")
+            }
+        }
+    }
     let file = root.join(".openbot").join(REFUSAL_FILE);
     if let Err(error) = std::fs::remove_file(&file) {
         if error.kind() != std::io::ErrorKind::NotFound {
@@ -3529,12 +3559,7 @@ pub fn server_refusal(engine: &Address, root: &Path) -> Option<String> {
     if let Some(said) = refusal_written(root) {
         return Some(said);
     }
-    let listing = compose_command(engine, root, &Secrets::new())
-        .args(["ps", "-a", "--format", "json", "server"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())?;
-    let container = refused_server_in(&String::from_utf8_lossy(&listing.stdout))?;
+    let container = refused_server(engine, root)?;
     // The container's own log, not Compose's: Compose merges stdout and stderr into one stream, and
     // a server restarted under `unless-stopped` has already written the next attempt's stdout
     // after the sentence. The engine keeps the two apart.
@@ -3554,6 +3579,22 @@ pub fn server_refusal(engine: &Address, root: &Path) -> Option<String> {
         String::new()
     };
     Some(refusal_sentence_in(&stderr, &compose_log))
+}
+
+/// The id of the `server` container whose last exit was [`SERVER_REFUSED_TO_START`], as the engine
+/// reports it now. `None` too when the engine can't be asked.
+fn refused_server(engine: &Address, root: &Path) -> Option<String> {
+    let listing = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "-a", "--format", "json", "server"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    refused_server_in(&String::from_utf8_lossy(&listing.stdout))
+}
+
+/// Whether the engine itself says the server refused, for a server that could not write the file.
+fn engine_reports_refusal(engine: &Address, root: &Path) -> bool {
+    refused_server(engine, root).is_some()
 }
 
 /// The id of the `server` container whose last exit was [`SERVER_REFUSED_TO_START`], from
@@ -7194,6 +7235,14 @@ fn main() {
             if let Some(row) = rows.get(asked).or(rows.last()) { println!("{row}"); }
         } else if actual.first().map(String::as_str) == Some("logs") {
             eprint!("{}", std::fs::read_to_string(".fixture-server-stderr").unwrap_or_default());
+        } else if actual.first().map(String::as_str) == Some("compose") && actual.iter().any(|arg| arg == "rm") {
+            // `rm --stop` returns once the container is gone: the old server is told to stop, and
+            // the engine waits for it as an engine does.
+            std::fs::write(".fixture-stop-server", "").unwrap();
+            for _ in 0..500 {
+                if !std::path::Path::new(".fixture-old-server-alive").exists() { break; }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
         return;
     }
@@ -12366,7 +12415,7 @@ fn main() {
             // The next Start takes the old sentence away before the server runs again. One that
             // crashes instead writes none: the same `running` rows are not a refusal, and the wait
             // runs out as it always did.
-            forget_refusal(&root);
+            forget_refusal(&address, &root);
             assert!(!root.join(".openbot").join(REFUSAL_FILE).exists());
             std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
             std::fs::write(root.join(".fixture-server-asked"), "0").unwrap();
@@ -12395,6 +12444,52 @@ fn main() {
             Some("6c1f0e2a9b3d")
         );
         assert_eq!(refused_server_in(PODMAN_RUNNING), None);
+    }
+
+    /// A Retry after the setting was put right reads no refusal from the server it replaces.
+    ///
+    /// Found on Windows under Podman: SMTP_HOST without MAIL_FROM, Start, the refusal shown; the
+    /// setting taken out, Retry, and the same sentence again although the new server answered
+    /// `/health`. The old server, which the engine kept restarting with the old settings, refused
+    /// again and wrote its sentence after Start took the file away and before Compose replaced it.
+    /// Here that server writes its sentence every 10 ms until the engine stops it.
+    #[test]
+    fn a_retry_reads_no_refusal_from_the_server_it_replaces() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_retry_reads_no_refusal_from_the_server_it_replaces",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("server-refusal");
+        for address in computer_stop_addresses(&path) {
+            let (root, _) =
+                computer_stop_root(&path, &format!("retry-{}", address.engine.binary()), "{}");
+            // The new server is up: the engine reports no refusal of its own.
+            std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            let file = root.join(".openbot").join(REFUSAL_FILE);
+            std::fs::write(&file, format!("{REFUSAL}\n")).unwrap();
+            std::fs::write(root.join(".fixture-old-server-alive"), "").unwrap();
+            let old_server = {
+                let (root, file) = (root.clone(), file.clone());
+                std::thread::spawn(move || {
+                    while !root.join(".fixture-stop-server").exists() {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).ok();
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    std::fs::remove_file(root.join(".fixture-old-server-alive")).unwrap();
+                })
+            };
+
+            forget_refusal(&address, &root);
+            // Many times over the time the old server takes to come round again.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let read = server_refusal(&address, &root);
+
+            std::fs::write(root.join(".fixture-stop-server"), "").unwrap();
+            old_server.join().unwrap();
+            assert_eq!(read, None, "{address:?}: the old server's refusal was read");
+        }
     }
 
     /// The folder-derived name is now only the name an earlier app's installation ran as, which
