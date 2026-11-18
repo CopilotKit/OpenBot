@@ -11433,6 +11433,131 @@ fn main() {
         }
     }
 
+    /// The first Start straight after Install, while the engine is not answering for a moment (a
+    /// Podman machine busy as the back end's cluster comes up in it, or just restarted under it),
+    /// waits for the engine and goes on: the images Install pulled are there. An engine that did not
+    /// answer `image inspect` was read as one without the images, and Start refused with "Finish
+    /// installing OpenBot's local software" until the person went round Install again. An engine
+    /// that answers and does not have an image still sends Start back to Install, without a wait.
+    #[test]
+    fn start_straight_after_install_waits_for_an_engine_that_is_not_answering_yet() {
+        if crate::test_support::isolated_process(
+            "stack::tests::start_straight_after_install_waits_for_an_engine_that_is_not_answering_yet",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let release = release_with_this_file("v1.0.4", 'b');
+            let (root, _record) = installed_services_root(
+                &path,
+                &format!("first-start-{name}"),
+                &release.compose,
+                "",
+            );
+            std::fs::write(root.join(".fixture-images"), "").unwrap();
+            lay_out_release(&root, &release);
+            install_release(&engine, &root).unwrap();
+
+            // Not answering when Start asks, and answering again a moment later.
+            let not_answering = root.join(".fixture-engine-not-answering");
+            std::fs::write(&not_answering, "").unwrap();
+            let back = {
+                let not_answering = not_answering.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    std::fs::remove_file(not_answering).unwrap();
+                })
+            };
+            let started = crate::preparation::require(&root, Some(&None), &engine);
+            back.join().unwrap();
+            if let Err(problem) = started {
+                panic!("{name}: Start refused an installation that had just finished: {problem:?}");
+            }
+
+            // One image gone from an engine that answers: Install again, at once.
+            let store = std::fs::read_to_string(root.join(".fixture-images")).unwrap();
+            let gone = store.lines().next().unwrap().split('\t').next().unwrap();
+            let kept: String = store
+                .lines()
+                .skip(1)
+                .map(|line| format!("{line}\n"))
+                .collect();
+            std::fs::write(root.join(".fixture-images"), kept).unwrap();
+            let asked = std::time::Instant::now();
+            let refused = crate::preparation::require(&root, Some(&None), &engine).unwrap_err();
+            assert!(
+                asked.elapsed() < std::time::Duration::from_secs(1),
+                "{name}: waited"
+            );
+            assert_eq!(refused.said, crate::preparation::REQUIRED, "{name}");
+            assert_eq!(
+                refused.connection,
+                Some(crate::problem::Connection::Installation),
+                "{name}"
+            );
+            assert!(
+                refused
+                    .detail
+                    .as_deref()
+                    .is_some_and(|said| said.contains(gone)),
+                "{name}: {refused:?}"
+            );
+        }
+    }
+
+    /// An engine that does not answer for the whole wait is said as that, not as an installation
+    /// to finish: installing again would not reach it either.
+    #[test]
+    fn an_engine_that_never_answers_is_not_an_installation_to_finish() {
+        if crate::test_support::isolated_process(
+            "stack::tests::an_engine_that_never_answers_is_not_an_installation_to_finish",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("installed-services");
+        for (name, engine) in ["docker", "podman"]
+            .into_iter()
+            .zip(computer_stop_addresses(&path))
+        {
+            let release = release_with_this_file("v1.0.4", 'b');
+            let (root, _record) = installed_services_root(
+                &path,
+                &format!("never-answers-{name}"),
+                &release.compose,
+                "",
+            );
+            std::fs::write(root.join(".fixture-images"), "").unwrap();
+            lay_out_release(&root, &release);
+            install_release(&engine, &root).unwrap();
+            let images = crate::preparation::installed_images(&root).unwrap();
+            std::fs::write(root.join(".fixture-engine-not-answering"), "").unwrap();
+            let problem = crate::preparation::require_images_within(
+                &engine,
+                &images,
+                std::time::Duration::from_millis(300),
+                std::time::Duration::from_millis(50),
+            )
+            .unwrap_err();
+            assert_ne!(problem.said, crate::preparation::REQUIRED, "{name}");
+            assert_eq!(problem.connection, None, "{name}");
+            assert!(
+                problem.said.contains("not answering"),
+                "{name}: {problem:?}"
+            );
+            assert!(
+                problem
+                    .detail
+                    .as_deref()
+                    .is_some_and(|said| said.contains("Cannot connect")),
+                "{name}: {problem:?}"
+            );
+        }
+    }
+
     /// An image a container was made from cannot go yet: the earlier computer image, which a
     /// stopped Bot computer of this installation still uses, and the earlier server image, which
     /// a container of another Compose project uses. The engine refuses each, in its own words and
