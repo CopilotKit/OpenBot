@@ -149,7 +149,7 @@ import {
 } from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
-import { CheckInItems, CheckInRan } from "./check-in-message";
+import { CheckInAppCard, CheckInItems, CheckInRan } from "./check-in-message";
 import { FileTypeIcon } from "./file-icon";
 import {
   attachmentModality,
@@ -776,16 +776,18 @@ function RoutineFiring({ instruction }: { instruction: string }) {
  * - that the check-in ran, quiet and start-aligned like a routine's firing, because it is an event
  *   and nobody typed it;
  * - the Bot's sentence, as its own reply;
- * - a card for each thing it raised, answered here with the board's own Work on it and dismiss.
+ * - what the sentence is about. A card for each thing it raised, answered here with the board's own
+ *   Work on it and dismiss. Or, where it could not look because the app it reads is not connected,
+ *   the card that connects that app.
  *
  * The board, its dot and the hourly notice are unchanged. This is one more place the same items are
- * read from, not a second copy of them. See `CheckInItems`.
+ * read from, not a second copy of them. See `CheckInItems` and `CheckInAppCard`.
  */
 function CheckInSpoke({
   said,
   sentence,
 }: {
-  said: Pick<CheckInMessage, "checkInId" | "ranAt" | "itemIds">;
+  said: CheckInMessage;
   /** The Bot's words, already drawn as its reply. Null when it said nothing beside the cards. */
   sentence: React.ReactNode;
 }) {
@@ -796,7 +798,11 @@ function CheckInSpoke({
     >
       <CheckInRan checkInId={said.checkInId} ranAt={said.ranAt} />
       {sentence}
-      <CheckInItems itemIds={said.itemIds} />
+      {said.app ? (
+        <CheckInAppCard app={said.app} message={said.message} />
+      ) : (
+        <CheckInItems itemIds={said.itemIds} />
+      )}
     </div>
   );
 }

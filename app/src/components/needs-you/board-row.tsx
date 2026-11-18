@@ -49,6 +49,7 @@ export function BoardRow({
   waiting = false,
   title,
   detail,
+  wouldDo,
   meta = [],
   actions,
   secondary = [],
@@ -65,6 +66,12 @@ export function BoardRow({
   waiting?: boolean;
   title: ReactNode;
   detail?: string | null;
+  /**
+   * What the Bot would do about it, in its own words, on a line of its own under the detail and in
+   * the foreground colour: the detail says why, and this is what is being offered. Only something
+   * a check-in found has one, and only where it is read as part of what the Bot is saying.
+   */
+  wouldDo?: string | null;
   /** Small pieces of where and when, joined with a dot. */
   meta?: ReactNode[];
   /**
@@ -129,6 +136,7 @@ export function BoardRow({
                 open={open || wholeDetail || readDetail}
                 title={title}
                 whole={wholeDetail}
+                wouldDo={wouldDo}
               />
             </button>
           ) : (
@@ -137,6 +145,7 @@ export function BoardRow({
               open={open || wholeDetail || readDetail}
               title={title}
               whole={wholeDetail}
+              wouldDo={wouldDo}
             />
           )}
           {shownMeta.length ? (
@@ -269,11 +278,13 @@ function useFolding(enabled: boolean) {
 function RowText({
   title,
   detail,
+  wouldDo,
   open,
   whole,
 }: {
   title: ReactNode;
   detail?: string | null;
+  wouldDo?: string | null;
   open: boolean;
   whole: boolean;
 }) {
@@ -303,6 +314,14 @@ function RowText({
           )}
         >
           {detail}
+        </span>
+      ) : null}
+      {wouldDo ? (
+        <span
+          className="mt-0.5 block whitespace-pre-wrap text-[13px] text-foreground"
+          data-slot="item-would-do"
+        >
+          {wouldDo}
         </span>
       ) : null}
     </>

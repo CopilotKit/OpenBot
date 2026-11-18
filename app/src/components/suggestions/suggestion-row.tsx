@@ -1,3 +1,4 @@
+import { readItemDetail } from "@openbot/shared/check-in-message";
 import {
   IconArrowUpRight,
   IconDots,
@@ -57,7 +58,9 @@ export function SuggestionRow({
   inGroup?: boolean;
   /**
    * Drawn under the Bot's own message about it. Why it was raised is read in full, as part of what
-   * the Bot is saying, and the Bot and the time are left to the message above, which says both.
+   * the Bot is saying, and what the Bot would do about it has a line of its own under that, where
+   * the item's detail says so (its second paragraph: see `readItemDetail`). The Bot and the time
+   * are left to the message above, which says both. On the board the detail stays one line.
    */
   inConversation?: boolean;
 }) {
@@ -67,6 +70,7 @@ export function SuggestionRow({
   const site = suggestion.sourceLink ? sourceSite(suggestion.sourceLink) : null;
   const initial = (suggestion.sourceApp ?? "").trim().charAt(0).toUpperCase();
   const error = act.error ?? stop.error;
+  const said = inConversation ? readItemDetail(suggestion.detail) : null;
   return (
     <BoardRow
       actions={
@@ -120,7 +124,7 @@ export function SuggestionRow({
           ) : null}
         </>
       }
-      detail={suggestion.detail}
+      detail={said ? said.why : suggestion.detail}
       icon={
         initial ? (
           <span aria-hidden className="font-medium">
@@ -131,6 +135,7 @@ export function SuggestionRow({
         )
       }
       readDetail={inConversation}
+      wouldDo={said?.wouldDo}
       meta={[
         suggestion.sourceApp ? (
           <MetaTag key="app">{suggestion.sourceApp}</MetaTag>

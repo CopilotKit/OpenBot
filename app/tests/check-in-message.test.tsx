@@ -21,13 +21,17 @@ import {
 import type { ReactNode } from "react";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import {
+  CheckInAppCard,
   CheckInItems,
   CheckInRan,
   clockTime,
 } from "@/components/channels/check-in-message";
 import { BotNeedsYou } from "@/components/needs-you/board";
+import type { AppAccess } from "@/lib/app-access/queries";
 import { queryClient } from "@/query-client";
+import { appAccess } from "./app-access-fixture";
 import { approvalInboxResponse } from "./approvals-api";
+import { botAppPath, botAppResponse } from "./bot-grants-api";
 import { answerBotsList } from "./bots-api";
 import { CONVERSATIONS_PATH, TASKS_PATH, taskPath } from "./conversations-api";
 import { CHECK_IN_ITEMS_PATH, CHECK_INS_PATH, pathOf } from "./schedules-api";
@@ -115,6 +119,8 @@ let checkIns: object[] = [];
 let tasksGate: Promise<void> | null = null;
 /** While true, the task list is answered with a failure. */
 let tasksDown = false;
+/** What an app is for this person on the Bot asked about, as the server answers it now. */
+let appNow: AppAccess = appAccess({ state: "not_connected" });
 /** Every write, with the key it was sent with. */
 const sent: { method: string; path: string; key: string | null }[] = [];
 /** Every read, by the address it asked. */
@@ -127,6 +133,7 @@ afterEach(() => {
   checkIns = [];
   tasksGate = null;
   tasksDown = false;
+  appNow = appAccess({ state: "not_connected" });
   sent.length = 0;
   read.length = 0;
 });
@@ -171,6 +178,9 @@ function serving() {
     if (one) return Response.json({ task: one });
     if (path === CONVERSATIONS_PATH)
       return Response.json({ conversations: [], nextCursor: null });
+    if (path.includes("/apps/")) return botAppResponse(appNow);
+    if (path.includes("/api/plugins/connections"))
+      return Response.json({ connections: [], redirectUri: null });
     return (
       approvalInboxResponse(input, {}) ??
       answerBotsList(input, init, {
@@ -194,6 +204,11 @@ function mount(children: ReactNode) {
       createRoute({
         getParentRoute: () => root,
         path: "/channel/$channelId",
+        component: () => null,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/connections/$key",
         component: () => null,
       }),
     ]),
@@ -241,6 +256,55 @@ test("an open item is the board's row on a card: what it is, why, where from, an
   // The Bot and the time are the message's to say, above the cards.
   expect(card.textContent).not.toContain("General Assistant");
   expect(card.querySelector("time")).toBeNull();
+});
+
+const WHY =
+  "She asked if 2:00 PM still works and is holding the room until noon.";
+const WOULD_DO =
+  "I'd draft a reply accepting 2:00 PM for you to read before it's sent.";
+
+test("what the Bot would do has a line of its own under the why, in the foreground colour", async () => {
+  open = [item("itm_rosa", ROSA, { detail: `${WHY}\n\n${WOULD_DO}` })];
+  serving();
+  const view = mount(<CheckInItems itemIds={["itm_rosa"]} />);
+  const card = await drawnAs(view, "itm_rosa", "open");
+  const why = within(card).getByText(WHY);
+  expect(why.className).toContain("text-muted-foreground");
+  const wouldDo = within(card).getByText(WOULD_DO);
+  expect(wouldDo.getAttribute("data-slot")).toBe("item-would-do");
+  expect(wouldDo.className).toContain("text-foreground");
+  expect(wouldDo.className).not.toContain("text-muted-foreground");
+  // Under the why, and above where it came from.
+  const text = card.textContent ?? "";
+  expect(text.indexOf(WHY)).toBeLessThan(text.indexOf(WOULD_DO));
+  expect(text.indexOf(WOULD_DO)).toBeLessThan(text.indexOf("Gmail"));
+});
+
+test("an item that says only why draws no line for what the Bot would do", async () => {
+  open = [item("itm_rosa", ROSA, { detail: WHY })];
+  serving();
+  const view = mount(<CheckInItems itemIds={["itm_rosa"]} />);
+  const card = await drawnAs(view, "itm_rosa", "open");
+  expect(within(card).getByText(WHY)).toBeTruthy();
+  expect(card.querySelector('[data-slot="item-would-do"]')).toBeNull();
+});
+
+test("the board keeps the same item's detail to its one line", async () => {
+  open = [item("itm_rosa", ROSA, { detail: `${WHY}\n\n${WOULD_DO}` })];
+  serving();
+  const view = mount(<BotNeedsYou agentId="general-assistant" />);
+  await view.findByText(ROSA);
+  expect(
+    view.container.querySelector('[data-slot="item-would-do"]'),
+  ).toBeNull();
+  // One element holding the whole detail, clamped to a line until the row is opened.
+  const detail = view.getByText((_content, element) =>
+    Boolean(
+      element?.tagName === "SPAN" &&
+        element.textContent === `${WHY}\n\n${WOULD_DO}`,
+    ),
+  );
+  expect(detail.className).toContain("line-clamp-1");
 });
 
 test("a started item is the task it became, with no Work on it left to press", async () => {
@@ -478,6 +542,57 @@ test("a check-in removed since still says when it ran", async () => {
   );
 });
 
+const GMAIL = { serverId: "composio-gmail", title: "Gmail" };
+const NOT_CONNECTED =
+  "Good morning. I noticed you haven't connected your Gmail yet. Connect it and I'll brief you each morning.";
+
+/** The app's card, once it has read the app's state and drawn it. */
+const appCard = (view: ReturnType<typeof mount>) =>
+  waitFor(() => {
+    const found = view.container.querySelector(
+      "[data-check-in-app] [data-app-access]",
+    );
+    if (!found?.getAttribute("data-state")) throw new Error("not drawn yet");
+    return found as HTMLElement;
+  });
+
+test("a check-in that could not look draws the card that connects its app", async () => {
+  serving();
+  const view = mount(
+    <CheckInAppCard
+      app={{ ...GMAIL, agentId: "general-assistant" }}
+      message={NOT_CONNECTED}
+    />,
+  );
+  const card = await appCard(view);
+  expect(card.getAttribute("data-app-access")).toBe("composio-gmail");
+  expect(card.getAttribute("data-state")).toBe("not_connected");
+  expect(card.textContent).toContain("Gmail");
+  expect(card.textContent).toContain(
+    "You haven't connected your Gmail account yet.",
+  );
+  expect(view.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
+  // Asked of the server about that app on the Bot whose check-in it was, not taken from the message.
+  expect(read).toContain(botAppPath("general-assistant", "composio-gmail"));
+});
+
+test("connected since: the card says it is ready, and offers nothing", async () => {
+  appNow = appAccess({ state: "ready" });
+  serving();
+  const view = mount(
+    <CheckInAppCard
+      app={{ ...GMAIL, agentId: "general-assistant" }}
+      message={NOT_CONNECTED}
+    />,
+  );
+  const card = await appCard(view);
+  expect(card.getAttribute("data-state")).toBe("ready");
+  expect(card.textContent).toContain("Ready to use.");
+  // Nothing was refused, so nothing is carried on: no Connect, no Continue, no "ask again".
+  expect(view.queryByRole("button")).toBeNull();
+  expect(card.textContent).not.toContain("Ask again");
+});
+
 test("the time is the clock's alone for today, and carries its day once it is not", () => {
   const now = new Date(2026, 10, 17, 9, 30);
   const today = new Date(2026, 10, 17, 8, 0);
@@ -561,4 +676,44 @@ test("in a transcript: one still being written is held back until its marker is 
   );
   expect(view.container.textContent).toContain(said.message);
   expect(view.container.textContent).not.toContain("[check-in]");
+});
+
+test("in a transcript: a check-in that could not look is its line, its sentence and the Connect card", async () => {
+  checkIns = [{ id: "chk_brief", subject: "Morning brief" }];
+  serving();
+  const view = mount(
+    <ChatTranscript
+      messages={[
+        assistant(
+          "a1",
+          checkInMessage({
+            checkInId: "chk_brief",
+            ranAt: "2026-11-17T16:00:00.000Z",
+            app: { ...GMAIL, agentId: "general-assistant" },
+            message: NOT_CONNECTED,
+          }),
+        ),
+      ]}
+      restoring={false}
+    />,
+  );
+  const card = await appCard(view);
+  expect(card.getAttribute("data-state")).toBe("not_connected");
+  await view.findByText(/Morning brief,/);
+  const text =
+    view.container.querySelector("[data-check-in]")?.textContent ?? "";
+  // In the order a person would say it.
+  expect(text.indexOf("Check-in ran. Morning brief, ")).toBe(0);
+  expect(text.indexOf(NOT_CONNECTED)).toBeGreaterThan(0);
+  expect(
+    view.getByText(NOT_CONNECTED).compareDocumentPosition(card) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Connect Gmail" })).toBeTruthy();
+  // An app to connect, so no items: nothing is read about any, and none is called closed.
+  expect(view.container.querySelector("[data-check-in-items]")).toBeNull();
+  expect(view.container.textContent).not.toContain("no longer need");
+  expect(view.container.textContent).not.toContain("[check-in]");
+  expect(view.container.textContent).not.toContain("composio-gmail");
+  expect(view.container.textContent).not.toContain("chk_brief");
 });

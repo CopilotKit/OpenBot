@@ -1,4 +1,7 @@
-import type { CheckInMessage } from "@openbot/shared/check-in-message";
+import type {
+  CheckInApp,
+  CheckInMessage,
+} from "@openbot/shared/check-in-message";
 import { IconRadar } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
@@ -10,13 +13,16 @@ import {
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
 import { type BotTask, taskListQueryOptions } from "@/lib/tasks/queries";
+import { AppAccessCard } from "./app-access-card";
 
 /**
  * A check-in that found something, saying so in its own conversation: what the transcript draws
  * around the Bot's sentence for a message carrying `@openbot/shared/check-in-message`.
  *
- * {@link CheckInRan} goes above the sentence and {@link CheckInItems} under it. The sentence itself
- * is the Bot's and is drawn by the transcript as any reply of its is.
+ * {@link CheckInRan} goes above the sentence. Under it goes what the sentence is about: the items
+ * the check-in raised ({@link CheckInItems}), or the app it could not read
+ * ({@link CheckInAppCard}). The sentence itself is the Bot's and is drawn by the transcript as any
+ * reply of its is.
  */
 
 /**
@@ -106,7 +112,7 @@ type Drawn =
  * instead of waited for. An item that was already gone when the card was first drawn has no such
  * moment to guard, and is closed on the first answer.
  */
-export function CheckInItems({ itemIds }: Pick<CheckInMessage, "itemIds">) {
+export function CheckInItems({ itemIds }: { itemIds: readonly string[] }) {
   const open = useQuery(proactiveSuggestionsQueryOptions());
   const tasks = useQuery(taskListQueryOptions());
   /*
@@ -202,6 +208,45 @@ export function CheckInItems({ itemIds }: Pick<CheckInMessage, "itemIds">) {
           </p>
         ),
       )}
+    </div>
+  );
+}
+
+/**
+ * The app a check-in could not read because it is not connected, as the card that connects it.
+ *
+ * A check-in on somebody's mail with no mail connected has nothing to find and, said nowhere, looks
+ * exactly like a check-in that found nothing. So it says so once, and the thing that fixes it is put
+ * where the person is reading: the same card a conversation draws when a Bot needed an app it could
+ * not use, asked about the same app on the same Bot.
+ *
+ * LIVE, AS THE ITEMS ARE. `AppAccessCard` asks the server what the app is for this person now, so a
+ * message scrolled back to after they connected says it is ready and offers nothing.
+ *
+ * NOTHING WAS REFUSED, AND NOTHING IS CARRIED ON. The card is told what it is told when a Bot asks
+ * what an app is for somebody (`access`), not that a call failed: no turn is waiting on this app, so
+ * connecting it sends no message into the conversation and offers no Continue. The check-in looks
+ * again when it next runs.
+ */
+export function CheckInAppCard({
+  app,
+  message,
+}: {
+  app: CheckInApp;
+  /** The Bot's sentence, which is the card's too where it has to fall back to words. */
+  message: string;
+}) {
+  return (
+    <div className="contents" data-check-in-app={app.serverId}>
+      <AppAccessCard
+        prompt={{
+          serverId: app.serverId,
+          title: app.title,
+          message,
+          reason: "access",
+          ...(app.agentId ? { agentId: app.agentId } : {}),
+        }}
+      />
     </div>
   );
 }
