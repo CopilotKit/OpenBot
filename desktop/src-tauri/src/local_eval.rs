@@ -8582,10 +8582,9 @@ printf '%s' '{completed}'
             }
         };
 
-        // Before Helm: stopped.
-        world.set("quiesce-seconds", "30");
+        // Before Helm: stopped, in the pause before `update-quiesce`, which it never ends.
+        world.set("quiesce-seconds", "120");
         let early = Attempt::register("update-before-helm");
-        let started = Instant::now();
         let stopped = std::thread::scope(|scope| {
             let call = scope.spawn(|| world.update("update-before-helm", &early.0));
             wait_for("secrets-apply", &|| world.cli_log_has("secrets-apply"));
@@ -8594,7 +8593,14 @@ printf '%s' '{completed}'
             call.join().unwrap()
         });
         assert_eq!(stopped, Err(Failure::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(20));
+        // Stopped in the pause, not after it: the step that follows it never ran.
+        let calls = world.calls();
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("kubectl scale deployment/cpki-app-api")),
+            "the update ran past its pause before it was stopped: {calls:?}"
+        );
         assert!(!world.finished());
         drop(early);
 
