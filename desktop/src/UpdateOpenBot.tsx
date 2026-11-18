@@ -64,8 +64,11 @@ export function useUpdateOpenBotShowing(): boolean {
  *
  * A build that never updates itself (internal, candidate, or without the updater) says so, with
  * nothing to press. When the feed has nothing newer, it says so and the button stays to try later.
+ *
+ * `said`: the sentence about the OpenBot, for a screen whose notice for it this draws (the connect
+ * screen): the notice, then Update and restart under it.
  */
-export function UpdateOpenBot() {
+export function UpdateOpenBot({ said }: { said?: string } = {}) {
   const [updatesItself, setUpdatesItself] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<"idle" | "checking" | "installing">(
     "idle",
@@ -145,11 +148,20 @@ export function UpdateOpenBot() {
     }
   }
 
-  if (updatesItself === false || found?.found === "notOffered") {
-    return <p role="status">{DOESNT_UPDATE_ITSELF}</p>;
-  }
+  const doesntUpdate = updatesItself === false || found?.found === "notOffered";
+  const line = doesntUpdate && <p role="status">{DOESNT_UPDATE_ITSELF}</p>;
+  // Given the sentence, the calm notice is drawn here, so a build that never updates itself says
+  // so in it, in its type, as the card for the OpenBot on this computer does (`AppTooOld`).
+  const notice = said !== undefined && (
+    <div className="local-alert needs" role="alert">
+      <p>{said}</p>
+      {line}
+    </div>
+  );
+  if (doesntUpdate) return notice || line;
   return (
     <>
+      {notice}
       <div className="row">
         <button
           type="button"

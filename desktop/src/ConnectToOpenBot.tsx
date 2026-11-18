@@ -265,11 +265,14 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
             You'll sign in to it in your browser. Nothing is installed on this
             computer.
           </p>
-          {trouble && !underField && <Trouble trouble={trouble} />}
+          {trouble && !underField && trouble.offer !== "update" && (
+            <Trouble trouble={trouble} />
+          )}
           {/* This app is too old for that OpenBot: its own update is the way on, and Connect
-              comes back once the address is another. */}
+              comes back once the address is another. The update draws the notice, so a build
+              that never updates itself says so in it. */}
           {trouble?.offer === "update" ? (
-            <UpdateOpenBot />
+            <UpdateOpenBot said={trouble.problem.said} />
           ) : (
             <div className="row">
               <button

@@ -7186,13 +7186,15 @@ fn show_openbot_on<R: tauri::Runtime>(
     let (url, address) = owned_app(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
+    // Held either way: it is running, and this session's from now on, as one Start raised is. A
+    // launch that found it running and needs a newer app said "Not running" in the tray otherwise.
+    hold_shown_deployment(&app, &shell, &root, address.clone(), ports.server);
+    refresh_menus(&app);
     // An OpenBot that needs a newer app is not shown: the window says "Update OpenBot" instead.
     if let Some(problem) = local_app_too_old(&shell, &root, &address, ports) {
         log::warn!("[show] {}", logging::Failure::described(&problem));
         return Err(problem);
     }
-    hold_shown_deployment(&app, &shell, &root, address.clone(), ports.server);
-    refresh_menus(&app);
     // Only the owned app itself.
     trust_owned_app(&app, &url);
     // A debug build may show a developer's own app in its place, on this installation's back end.
@@ -25177,6 +25179,14 @@ fn main() {
             assert_eq!(problem.kind, Some(kind), "{too_new}");
             assert_eq!(problem.said, said);
             assert_eq!(window_url(&app), "http://127.0.0.1:9/stale-page");
+            // Found running by a launch that did not start it, it is still running: held as this
+            // session's, as Start holds the one it raised, so the tray says "Running" and Stop and
+            // Quit act on it. Not held, the tray said "Not running" while the server answered.
+            assert_eq!(
+                app.state::<Shell>().root.lock().unwrap().as_deref(),
+                Some(f.owned.as_path()),
+                "{too_new}"
+            );
             restore_window_on(app.handle(), &f.ports);
             assert_eq!(window_url(&app), "tauri://localhost/");
         }
