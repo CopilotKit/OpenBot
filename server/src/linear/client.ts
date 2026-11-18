@@ -49,9 +49,7 @@ async function linearGraphql<T>(
   return body.data as T;
 }
 
-export async function fetchLinearViewer(
-  apiKey: string,
-): Promise<LinearViewer> {
+export async function fetchLinearViewer(apiKey: string): Promise<LinearViewer> {
   const data = await linearGraphql<{
     viewer: { id: string; name: string; email: string };
   }>(
@@ -126,7 +124,9 @@ export async function listLinearIssues(
     filter = { assignee: { email: { eq: options.assigneeEmail.trim() } } };
   } else if (options.assigneeNameContains?.trim()) {
     filter = {
-      assignee: { name: { containsIgnoreCase: options.assigneeNameContains.trim() } },
+      assignee: {
+        name: { containsIgnoreCase: options.assigneeNameContains.trim() },
+      },
     };
   }
 
@@ -274,7 +274,6 @@ export async function assignLinearIssue(
 }
 
 export function formatIssueSummary(issue: LinearIssueSummary): string {
-  const assignee =
-    issue.assigneeName ?? issue.assigneeEmail ?? "Unassigned";
+  const assignee = issue.assigneeName ?? issue.assigneeEmail ?? "Unassigned";
   return `${issue.identifier} — ${issue.title}\nStatus: ${issue.state}\nAssignee: ${assignee}\n${issue.url}`;
 }

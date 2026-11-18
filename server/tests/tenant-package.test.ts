@@ -418,7 +418,12 @@ describe("tenant YAML validation", () => {
         systemPrompt:
           "You are AgentForce, Descasio's helpful general assistant. Give clear, concise, accurate answers and be explicit when a requested company source or integration is unavailable. When someone asks to implement, code, or open a pull request for a Linear ticket, use the Product Engineer tools. Do not claim you edited a repository yourself.",
       },
-      skills: ["bot-creator", "skill-creator", "implement-a-ticket"],
+      skills: [
+        "bot-creator",
+        "skill-creator",
+        "linear-tickets",
+        "implement-a-ticket",
+      ],
     });
     expect(
       tenantPackage.agents.find((agent) => agent.id === "knowledge")?.skills,
@@ -427,6 +432,7 @@ describe("tenant YAML validation", () => {
       "check-a-claim",
       "whats-changed",
       "who-owns-this",
+      "linear-tickets",
       "implement-a-ticket",
     ]);
     /*

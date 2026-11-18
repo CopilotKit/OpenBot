@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  createDatabase,
-  databaseOptionsFromUrl,
-} from "../src/db/client";
+import { createDatabase, databaseOptionsFromUrl } from "../src/db/client";
 import { testDatabaseUrl } from "./support/database";
 
 /**

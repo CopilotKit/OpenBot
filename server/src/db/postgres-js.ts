@@ -7,7 +7,9 @@ import postgres, { type Options } from "postgres";
  * too, so both clients derive it from `sslmode=require` on DATABASE_URL. DATABASE_SSL=require can
  * explicitly force TLS for both paths.
  */
-function sslFromDatabaseUrl(databaseUrl: string): Options<Record<string, never>>["ssl"] {
+function sslFromDatabaseUrl(
+  databaseUrl: string,
+): Options<Record<string, never>>["ssl"] {
   if (process.env.DATABASE_SSL?.trim() === "require") {
     return "require";
   }
