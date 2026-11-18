@@ -154,10 +154,7 @@ Every other sign-in names neither, and an installation nobody has signed in to h
 pub fn plan_images(root: &Path) -> Vec<&'static str> {
     let set = crate::env::already_set(
         &root.join(".env"),
-        &[
-            "PICKED_HARNESS_IMAGE",
-            "CHATGPT_AUTH_FILE",
-        ],
+        &["PICKED_HARNESS_IMAGE", "CHATGPT_AUTH_FILE"],
     );
     let named = |key: &str| set.get(key).is_some_and(|value| !value.trim().is_empty());
     let mut images = Vec::new();
