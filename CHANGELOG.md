@@ -19,7 +19,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   set `computers.mode`, has to set `computers.sharedModeAcknowledged: true` before upgrading
   (`openbot.computers.sharedModeAcknowledged` in the `openbot-bundle` chart), or `helm upgrade`
   stops with that message and changes nothing. Acknowledged, the install notes say it again, and
-  admins see it in Admin (below).
+  admins see it in Admin (below). **The same goes for `computers.mode: external`**: every person's
+  Bots share the one computer at `computers.url`, so a release on it sets the same value before
+  upgrading, and its refusal, install notes and Admin notice say the same.
 
 ### Admin
 
