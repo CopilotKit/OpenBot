@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ACCEPTED_DOCUMENT_MIME,
+  ACCEPTED_FILE_TYPES,
+  ACCEPTED_IMAGE_MIME,
+  ACCEPTED_TEXT_MIME,
+  acceptedFilesInWords,
+  claimedTypeOfName,
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_EXTRACTED_CHARACTERS,
@@ -9,6 +15,92 @@ import {
   namesNoFormat,
   shouldClaimPaste,
 } from "./attachments";
+import { SEND_FILE_TOOL_DESCRIPTION, sendFileUnsupported } from "./send-file";
+
+/**
+ * TODAY'S SET OF FILES, PINNED. A person attaches and a Bot sends from this one list, so a change to
+ * it changes both. A kind added or removed fails here first, where the change is a decision somebody
+ * makes on purpose (Office files from Bots are not decided yet), not a side effect of another edit.
+ */
+describe("the one list of files OpenBot takes", () => {
+  test("is images, PDF, and four kinds of text, and nothing else", () => {
+    expect(
+      ACCEPTED_FILE_TYPES.map(({ mimeType, kind, extensions }) => [
+        mimeType,
+        kind,
+        [...extensions],
+      ]),
+    ).toEqual([
+      ["image/png", "image", ["png"]],
+      ["image/jpeg", "image", ["jpg", "jpeg"]],
+      ["image/gif", "image", ["gif"]],
+      ["image/webp", "image", ["webp"]],
+      ["application/pdf", "document", ["pdf"]],
+      ["text/plain", "text", ["txt", "text", "log"]],
+      ["text/markdown", "text", ["md", "markdown"]],
+      ["text/csv", "text", ["csv"]],
+      ["application/json", "text", ["json"]],
+    ]);
+  });
+
+  test("Office files are not on it yet, by their type or their name", () => {
+    for (const [name, mimeType] of [
+      [
+        "budget.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ],
+      [
+        "memo.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ],
+      [
+        "deck.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      ],
+    ] as const) {
+      expect(classifyAttachment(mimeType)).toBe("unsupported");
+      expect(claimedTypeOfName(name)).toBe("");
+    }
+  });
+
+  test("each kind's types come from the list, so uploads and Bot files cannot drift", () => {
+    expect([...ACCEPTED_IMAGE_MIME]).toEqual([
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/webp",
+    ]);
+    expect([...ACCEPTED_DOCUMENT_MIME]).toEqual(["application/pdf"]);
+    expect([...ACCEPTED_TEXT_MIME]).toEqual([
+      "text/plain",
+      "text/markdown",
+      "text/csv",
+      "application/json",
+    ]);
+    for (const { mimeType, kind } of ACCEPTED_FILE_TYPES)
+      expect(classifyAttachment(mimeType)).toBe(kind);
+  });
+
+  test("a Bot's file name claims its type by extension, in any case", () => {
+    expect(claimedTypeOfName("reports/q3.CSV")).toBe("text/csv");
+    expect(claimedTypeOfName("chart.jpeg")).toBe("image/jpeg");
+    expect(claimedTypeOfName("notes.md")).toBe("text/markdown");
+    expect(claimedTypeOfName("run.log")).toBe("text/plain");
+    expect(claimedTypeOfName("README")).toBe("");
+    expect(claimedTypeOfName(".env")).toBe("");
+    expect(claimedTypeOfName("tool.bin")).toBe("");
+  });
+
+  test("is said the same way to the Bot and to the person", () => {
+    const words =
+      "images (PNG, JPEG, GIF, WebP), PDFs, and text, Markdown, CSV or JSON files";
+    expect(acceptedFilesInWords()).toBe(words);
+    expect(SEND_FILE_TOOL_DESCRIPTION).toContain(`You can send ${words};`);
+    expect(sendFileUnsupported("tool.bin")).toBe(
+      `tool.bin can't be sent. Bots can send ${words}.`,
+    );
+  });
+});
 
 describe("classifyAttachment", () => {
   test("names the four accepted image types", () => {

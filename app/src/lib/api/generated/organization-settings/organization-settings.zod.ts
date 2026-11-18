@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
  * @summary Read what this OpenBot offers
  */
 
@@ -69,6 +69,19 @@ export const GetDeploymentResponse = zod
       .boolean()
       .describe(
         "Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).",
+      ),
+    attachmentLimits: zod
+      .object({
+        imageBytes: zod.int().min(1).describe("The largest image."),
+        documentBytes: zod.int().min(1).describe("The largest PDF."),
+        fileBytes: zod
+          .int()
+          .min(1)
+          .describe("The largest text file, or a file of any other kind."),
+      })
+      .optional()
+      .describe(
+        "How large a file attached to a message may be, by kind, in bytes. An upload over its kind's limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot's model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.",
       ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");

@@ -1,9 +1,9 @@
 import {
+  type AttachmentLimits,
   classifyAttachment,
+  formatAttachmentLimit,
+  largestAttachmentBytes,
   MAX_ATTACHMENTS_PER_MESSAGE,
-  MAX_DOCUMENT_BYTES,
-  MAX_FILE_BYTES,
-  MAX_IMAGE_BYTES,
   mediaTypeOf,
   namesNoFormat,
 } from "@/lib/channels/attachments";
@@ -30,8 +30,17 @@ export type ScreenedFiles = {
  */
 export function screenPickedFiles(
   files: readonly File[],
-  options: { alreadyStaged: number },
+  options: {
+    alreadyStaged: number;
+    /**
+     * The server's limits (`attachmentLimitsQueryOptions`), or the defaults until it has said. Asked
+     * for rather than read from `shared/attachments.ts`: a server may take larger files than those
+     * constants, and a refusal here has to name the number the server will enforce.
+     */
+    limits: AttachmentLimits;
+  },
 ): ScreenedFiles {
+  const { limits } = options;
   const accepted: File[] = [];
   const rejected: RejectedFile[] = [];
 
@@ -82,44 +91,45 @@ export function screenPickedFiles(
       continue;
     }
 
-    if (kind === "image" && file.size > MAX_IMAGE_BYTES) {
+    if (kind === "image" && file.size > limits.imageBytes) {
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for an image. The limit is ${formatBytes(MAX_IMAGE_BYTES)}.`,
+          `'${file.name}' is too large for an image. The limit is ${formatAttachmentLimit(limits.imageBytes)}.`,
         ),
       );
       continue;
     }
 
-    if (kind === "text" && file.size > MAX_FILE_BYTES) {
+    if (kind === "text" && file.size > limits.fileBytes) {
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for a text file. The limit is ${formatBytes(MAX_FILE_BYTES)}.`,
+          `'${file.name}' is too large for a text file. The limit is ${formatAttachmentLimit(limits.fileBytes)}.`,
         ),
       );
       continue;
     }
 
-    if (kind === "document" && file.size > MAX_DOCUMENT_BYTES) {
+    if (kind === "document" && file.size > limits.documentBytes) {
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for a PDF. The limit is ${formatBytes(MAX_DOCUMENT_BYTES)}.`,
+          `'${file.name}' is too large for a PDF. The limit is ${formatAttachmentLimit(limits.documentBytes)}.`,
         ),
       );
       continue;
     }
 
     // The LOOSE ceiling for a file nobody has named yet, because this screen does not know which
-    // of the two limits applies to it. Guessing the tight one would put back exactly the refusal
-    // this branch exists to remove; the server applies the right limit once it has the bytes.
-    if (unnamed && file.size > MAX_IMAGE_BYTES) {
+    // of the limits applies to it. Guessing the tight one would put back exactly the refusal this
+    // branch exists to remove; the server applies the right limit once it has the bytes.
+    const loosest = largestAttachmentBytes(limits);
+    if (unnamed && file.size > loosest) {
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large. The limit is ${formatBytes(MAX_IMAGE_BYTES)}.`,
+          `'${file.name}' is too large. The limit is ${formatAttachmentLimit(loosest)}.`,
         ),
       );
       continue;
@@ -157,8 +167,4 @@ export function screenPickedFiles(
  */
 function reject(file: File, reason: string): RejectedFile {
   return { id: newId(), name: file.name, reason };
-}
-
-function formatBytes(bytes: number): string {
-  return `${Math.round(bytes / (1024 * 1024))}MB`;
 }

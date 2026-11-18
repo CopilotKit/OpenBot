@@ -1690,7 +1690,7 @@ paths:
         - Organization settings
       operationId: getDeployment
       summary: Read what this OpenBot offers
-      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
+      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
       x-openbot-singleton: true
       security:
         - {}
@@ -22208,6 +22208,8 @@ components:
         botComputers:
           type: boolean
           description: 'Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).'
+        attachmentLimits:
+          $ref: '#/components/schemas/AttachmentLimits'
     AllowlistEntry:
       type: string
       minLength: 1
@@ -23722,6 +23724,26 @@ components:
       minLength: 1
       maxLength: 1000
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+    AttachmentLimits:
+      type: object
+      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
+      required:
+        - imageBytes
+        - documentBytes
+        - fileBytes
+      properties:
+        imageBytes:
+          type: integer
+          minimum: 1
+          description: The largest image.
+        documentBytes:
+          type: integer
+          minimum: 1
+          description: The largest PDF.
+        fileBytes:
+          type: integer
+          minimum: 1
+          description: The largest text file, or a file of any other kind.
     ConversationWork:
       type: object
       description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
@@ -24108,6 +24130,27 @@ components:
         personId:
           type: string
           description: The person who is now in the conversation.
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
     ConversationMessage:
       type: object
       description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
@@ -24180,6 +24223,12 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:
@@ -24246,27 +24295,6 @@ components:
           type: string
           description: Names the message being written, so the files of two windows are counted apart.
           maxLength: 200
-    Attachment:
-      type: object
-      description: A file held for a message, or sent with one.
-      required:
-        - id
-        - name
-        - mimeType
-        - sizeBytes
-      properties:
-        id:
-          type: string
-          description: The attachment's id.
-        name:
-          type: string
-          description: The file's name.
-        mimeType:
-          type: string
-          description: The type OpenBot recognised it as.
-        sizeBytes:
-          type: integer
-          minimum: 0
     VoiceCallRequest:
       type: object
       additionalProperties: false
@@ -41730,6 +41758,10 @@ components:
         builtInBots: true
         isolatedBots: false
         botComputers: true
+        attachmentLimits:
+          imageBytes: 104857600
+          documentBytes: 104857600
+          fileBytes: 104857600
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
