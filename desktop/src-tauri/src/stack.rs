@@ -3427,6 +3427,145 @@ pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> 
         .unwrap_or_default()
 }
 
+/// The exit code the OpenBot server uses for every refusal to start: 78, `EX_CONFIG` from
+/// sysexits.h, "configuration error".
+///
+/// The server refuses when it has no licence or an invalid one, when a single-user server runs in a
+/// container without `OPENBOT_INSTALL_TOKEN`, when it can't use its object store, when it rejects a
+/// setting, or when it must not migrate the database. Each time it prints one sentence to stderr and
+/// exits 78. It won't start until somebody changes its configuration, so waiting longer can't help.
+/// Docker still restarts it under `unless-stopped`, but Desktop stops waiting for `/health` as soon
+/// as the server's last exit was this code, and shows that sentence as the reason (`server_refusal`).
+/// Any other non-zero exit is a crash: Docker restarts it and Desktop keeps waiting.
+pub const SERVER_REFUSED_TO_START: i64 = 78;
+
+/// The file a refusing server writes its sentence to, in the sign-in folder Compose bind-mounts into
+/// it: `.openbot/refusal` here, `/openbot/refusal` in the container (`OPENBOT_REFUSAL_FILE` in
+/// docker-compose.yml).
+pub const REFUSAL_FILE: &str = "refusal";
+
+/// Take away the sentence an earlier start's server wrote, before Compose starts this one, so only a
+/// refusal from this start is read (`server_refusal`).
+pub fn forget_refusal(root: &Path) {
+    let file = root.join(".openbot").join(REFUSAL_FILE);
+    if let Err(error) = std::fs::remove_file(&file) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("[start] could not remove {}: {error}", file.display());
+        }
+    }
+}
+
+/// The sentence the server wrote to [`REFUSAL_FILE`] when it refused to start, if it did.
+fn refusal_written(root: &Path) -> Option<String> {
+    let said = std::fs::read_to_string(root.join(".openbot").join(REFUSAL_FILE)).ok()?;
+    let said = said.trim();
+    (!said.is_empty()).then(|| said.to_owned())
+}
+
+/// Why the server refused to start, or `None` while it has not.
+///
+/// FIRST, THE FILE. A refusing server writes its sentence to [`REFUSAL_FILE`] as it exits 78, and the
+/// file stays there however the engine restarts it. The engine's own view of the container does
+/// not: Podman starts a refusing server again at once, so `compose ps` reports it `running`, exit
+/// 0, "Up 1 second" nearly all the time, and `exited` with 78 only for a moment. Sampled every 0.3 s
+/// for 60 s against Podman on Windows it said `running` 132 times and `exited` (78) 13, and asked
+/// every few seconds, as this is, it missed the refusal for the whole three-minute wait. The file
+/// does not depend on when it is asked, on either engine.
+///
+/// Then the container's state, for a server that could not write the file: Docker restarts a
+/// refusing server with a growing delay and reports it `restarting` with "(78)" between tries.
+///
+/// Asked between health checks. `None` too when the engine can't be asked: the wait carries on as
+/// it did before, and its own timeout still ends it.
+pub fn server_refusal(engine: &Address, root: &Path) -> Option<String> {
+    if let Some(said) = refusal_written(root) {
+        return Some(said);
+    }
+    let listing = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "-a", "--format", "json", "server"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let container = refused_server_in(&String::from_utf8_lossy(&listing.stdout))?;
+    // The container's own log, not Compose's: Compose merges stdout and stderr into one stream, and
+    // a server restarted under `unless-stopped` has already written the next attempt's stdout
+    // after the sentence. The engine keeps the two apart.
+    let log = engine
+        .command()
+        .current_dir(root)
+        .args(["logs", "--tail", "40", &container])
+        .output()
+        .ok();
+    let stderr = log
+        .as_ref()
+        .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
+        .unwrap_or_default();
+    let compose_log = if stderr.trim().is_empty() {
+        service_log(engine, root, "server", 40)
+    } else {
+        String::new()
+    };
+    Some(refusal_sentence_in(&stderr, &compose_log))
+}
+
+/// The id of the `server` container whose last exit was [`SERVER_REFUSED_TO_START`], from
+/// `compose ps -a --format json server`: one object a line, or one array from an older Compose.
+///
+/// MEASURED: while Docker restarts a container, Compose reports its `ExitCode` as 0 and the real
+/// code only in `Status` ("Restarting (78) 1 second ago"). An exited container has both.
+fn refused_server_in(listing: &str) -> Option<String> {
+    let rows: Vec<serde_json::Value> = if listing.trim_start().starts_with('[') {
+        serde_json::from_str(listing).ok()?
+    } else {
+        listing
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    };
+    rows.into_iter().find_map(|row| {
+        if row["Service"].as_str() != Some("server") {
+            return None;
+        }
+        let state = row["State"].as_str()?.to_ascii_lowercase();
+        if state != "restarting" && state != "exited" {
+            return None;
+        }
+        let reported = row["ExitCode"].as_i64().filter(|code| *code != 0);
+        let in_status = row["Status"]
+            .as_str()
+            .and_then(|status| status.split_once('('))
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .and_then(|(code, _)| code.trim().parse::<i64>().ok());
+        (reported.or(in_status) == Some(SERVER_REFUSED_TO_START))
+            .then(|| row["ID"].as_str().map(str::to_owned))
+            .flatten()
+    })
+}
+
+/// The sentence a refusing server printed: the last line of its stderr, or, from an engine that
+/// gave no stderr apart, the last line of Compose's log with its `server-1  | ` prefix taken off.
+fn refusal_sentence_in(stderr: &str, compose_log: &str) -> String {
+    let last = |text: &str| {
+        text.lines()
+            .rfind(|line| !line.trim().is_empty())
+            .map(|line| line.trim().to_owned())
+    };
+    last(stderr)
+        .or_else(|| {
+            last(compose_log).map(|line| match line.split_once(" | ") {
+                Some((prefix, said)) if !prefix.trim().contains(char::is_whitespace) => {
+                    said.trim().to_owned()
+                }
+                _ => line,
+            })
+        })
+        .unwrap_or_else(|| {
+            "OpenBot can't start until its settings are changed. The details below say why."
+                .to_owned()
+        })
+}
+
 /// Which Compose services are not running, and the last thing each said.
 ///
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its
@@ -4244,14 +4383,35 @@ pub fn app_url(port: u16) -> Option<String> {
 /// `keep_going` is asked between polls, so a Stop pressed during the wait ends it there rather than
 /// after the full patience. What a stopped wait returns does not matter: the caller asks its own
 /// ticket first, and the cancellation is what it reports.
+///
+/// `refused` is asked whenever the API is not answering (`server_refusal`). A server that refused
+/// to start won't answer however long this waits, so its sentence ends the wait at once.
 pub fn wait_until_healthy(
     ready: &Ready,
     patience: std::time::Duration,
     keep_going: impl Fn() -> bool,
-) -> Result<(), String> {
-    wait_until_healthy_saying(ready, patience, keep_going, &mut |line| {
+    mut refused: impl FnMut() -> Option<String>,
+) -> Result<(), NotReady> {
+    wait_until_healthy_saying(ready, patience, keep_going, &mut refused, &mut |line| {
         log::info!("{line}")
     })
+}
+
+/// Why the server is not ready.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NotReady {
+    /// It refused to start (`SERVER_REFUSED_TO_START`), and this is the sentence it said.
+    Refused(String),
+    /// It did not answer before the wait ended: which port was not answering.
+    NotAnswering(String),
+}
+
+impl std::fmt::Display for NotReady {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotReady::Refused(said) | NotReady::NotAnswering(said) => f.write_str(said),
+        }
+    }
 }
 
 /// [`wait_until_healthy`], with what it waited on and why it stopped said to `say`: each poll's
@@ -4261,8 +4421,9 @@ pub fn wait_until_healthy_saying(
     ready: &Ready,
     patience: std::time::Duration,
     keep_going: impl Fn() -> bool,
+    refused: &mut dyn FnMut() -> Option<String>,
     say: &mut dyn FnMut(String),
-) -> Result<(), String> {
+) -> Result<(), NotReady> {
     let started = std::time::Instant::now();
     let deadline = started + patience;
     let mut waited = crate::logging::WaitLog::new(
@@ -4275,7 +4436,9 @@ pub fn wait_until_healthy_saying(
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
-        .map_err(|error| format!("could not ask OpenBot's services: {error}"))?;
+        .map_err(|error| {
+            NotReady::NotAnswering(format!("could not ask OpenBot's services: {error}"))
+        })?;
     let mut api_up = false;
 
     while std::time::Instant::now() < deadline && keep_going() {
@@ -4296,6 +4459,17 @@ pub fn wait_until_healthy_saying(
             say(waited.ended(std::time::Instant::now(), "both answered"));
             return Ok(());
         }
+        if !api_up {
+            if let Some(said) = refused() {
+                say(waited.ended(
+                    std::time::Instant::now(),
+                    &format!(
+                        "the server refused to start (exit {SERVER_REFUSED_TO_START}): {said}"
+                    ),
+                ));
+                return Err(NotReady::Refused(said));
+            }
+        }
 
         std::thread::sleep(std::time::Duration::from_millis(750));
     }
@@ -4314,7 +4488,7 @@ pub fn wait_until_healthy_saying(
         "stopped by Stop or Quit".to_string()
     };
     say(waited.ended(std::time::Instant::now(), &why));
-    Err(failed)
+    Err(NotReady::NotAnswering(failed))
 }
 
 /// What `port` answered at `path` on either loopback: the address that answered, or what each
@@ -4363,6 +4537,26 @@ pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
         detail.push('\n');
         detail.push_str(&cleanup);
     }
+    let mut problem = Problem::with(
+        "OpenBot could not finish starting. Try Start again, or share the details below for help.",
+        without_credentials(detail, secrets),
+    );
+    problem.database_reset = database_reset;
+    problem
+}
+
+/// A server that refused to start (`SERVER_REFUSED_TO_START`): its own sentence is the headline,
+/// because it already says why OpenBot can't start and what to change. Start again won't help
+/// until that changes. The log stays in the details, with credentials removed.
+pub fn startup_refusal(said: String, detail: String, secrets: &Secrets) -> Problem {
+    Problem::with(
+        without_credentials(said, secrets),
+        without_credentials(detail, secrets),
+    )
+}
+
+/// `text` with every credential this run handed out replaced by its name.
+fn without_credentials(mut text: String, secrets: &Secrets) -> String {
     let mut credentials: Vec<_> = secrets
         .iter()
         .filter(|(key, value)| {
@@ -4372,14 +4566,9 @@ pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
         .collect();
     credentials.sort_by_key(|(_, value)| std::cmp::Reverse(value.len()));
     for (key, value) in credentials {
-        detail = detail.replace(value, &format!("<{key}>"));
+        text = text.replace(value, &format!("<{key}>"));
     }
-    let mut problem = Problem::with(
-        "OpenBot could not finish starting. Try Start again, or share the details below for help.",
-        detail,
-    );
-    problem.database_reset = database_reset;
-    problem
+    text
 }
 
 /// What a directory has to contain before it can be raised.
@@ -6944,6 +7133,22 @@ fn main() {
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    // A `server` the engine keeps restarting. `compose ps` answers each ask with the next row of
+    // `.fixture-server-rows` (the last again once they run out), as an engine sampled at that moment
+    // would, and `logs` writes `.fixture-server-stderr` to stderr.
+    if scenario == "server-refusal" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual.first().map(String::as_str) == Some("compose") && actual.iter().any(|arg| arg == "ps") {
+            let rows = std::fs::read_to_string(".fixture-server-rows").unwrap_or_default();
+            let rows: Vec<&str> = rows.lines().filter(|row| !row.is_empty()).collect();
+            let asked: usize = std::fs::read_to_string(".fixture-server-asked").ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+            std::fs::write(".fixture-server-asked", (asked + 1).to_string()).unwrap();
+            if let Some(row) = rows.get(asked).or(rows.last()) { println!("{row}"); }
+        } else if actual.first().map(String::as_str) == Some("logs") {
+            eprint!("{}", std::fs::read_to_string(".fixture-server-stderr").unwrap_or_default());
+        }
+        return;
+    }
     // An engine with the containers `.fixture-containers` lists, one `id<TAB>project<TAB>service`
     // a line. `ps` filters by label as an engine does, `rm` removes, and Compose answers whatever
     // it is asked. Every command is in the record above.
@@ -11720,7 +11925,8 @@ fn main() {
         }
 
         fn wait(&mut self, patience: std::time::Duration) -> Result<(), String> {
-            wait_until_healthy(&self.ready, patience, || true)
+            wait_until_healthy(&self.ready, patience, || true, || None)
+                .map_err(|not_ready| not_ready.to_string())
         }
 
         fn requests(&self, name: &str) -> String {
@@ -11826,11 +12032,12 @@ fn main() {
             &ready,
             std::time::Duration::from_secs(2),
             || true,
+            &mut || None,
             &mut |line| lines.push(line),
         );
         assert_eq!(
             result.unwrap_err(),
-            format!("the API is not answering on port {port}.")
+            NotReady::NotAnswering(format!("the API is not answering on port {port}."))
         );
         let what = format!("[wait] OpenBot's services, GET /health on port {port} (API)");
         let first = &lines[0];
@@ -11865,6 +12072,7 @@ fn main() {
             &ready,
             std::time::Duration::from_secs(30),
             || false,
+            &mut || None,
             &mut |line| lines.push(line),
         );
         assert!(result.is_err());
@@ -11879,6 +12087,225 @@ fn main() {
             started.elapsed() < std::time::Duration::from_secs(5),
             "a stopped Start sat out the readiness wait"
         );
+    }
+
+    /// `compose ps -a --format json server` from Docker Compose 5.1.4, captured from a busybox
+    /// `server` that prints a refusal to stderr and exits 78 under `restart: unless-stopped`. Only
+    /// the project's name and folder are changed. Note `"ExitCode":0` beside
+    /// `"Status":"Restarting (78) 1 second ago"`: Compose reports the code only in `Status` while
+    /// Docker restarts the container.
+    const SERVER_RESTARTING_78: &str = r#"{"Command":"\"sh -c 'echo 'Listen…\"","CreatedAt":"2026-11-17 17:25:48 -0800 PST","ExitCode":0,"Health":"","ID":"44290d7f2426","Image":"busybox:1.37","Labels":"com.docker.compose.config-hash=c5d01b65d579431b261b014ba30e985f0166b2261c560d3312537e754d51b10e,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=/Users/someone/OpenBot/docker-compose.yml,com.docker.compose.project.working_dir=/Users/someone/OpenBot,com.docker.compose.version=5.1.4,desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec,com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"3 seconds ago","Service":"server","Size":"0B","State":"restarting","Status":"Restarting (78) 1 second ago"}
+"#;
+
+    /// The same server under `restart: "no"`, captured the same way: exited, with the code in both.
+    const SERVER_EXITED_78: &str = r#"{"Command":"\"sh -c 'echo \\\"OpenBo…\"","CreatedAt":"2026-11-17 17:25:48 -0800 PST","ExitCode":78,"Health":"","ID":"25e12f3681a6","Image":"busybox:1.37","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.project.config_files=/Users/someone/OpenBot/docker-compose.yml,com.docker.compose.project.working_dir=/Users/someone/OpenBot,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec,com.docker.compose.oneoff=False,com.docker.compose.service=server,com.docker.compose.version=5.1.4,desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=57b53b5d6e3830623627023b2104496ce3a597f9875f882936ebecf8476a7570","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"3 seconds ago","Service":"server","Size":"0B","State":"exited","Status":"Exited (78) 3 seconds ago"}
+"#;
+
+    /// A server that crashes, exit 1, under `restart: unless-stopped`, captured the same way.
+    const SERVER_RESTARTING_1: &str = r#"{"Command":"\"sh -c 'echo 'someth…\"","CreatedAt":"2026-11-17 17:25:48 -0800 PST","ExitCode":0,"Health":"","ID":"1cb05c9d99ab","Image":"busybox:1.37","Labels":"desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.image=sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec,com.docker.compose.project.config_files=/Users/someone/OpenBot/docker-compose.yml,com.docker.compose.project.working_dir=/Users/someone/OpenBot,com.docker.compose.service=server,com.docker.compose.config-hash=1ae19c6d833db14ce3249c6af143773e31a5e7f8f6b73debbbba18b003075802,com.docker.compose.depends_on=,com.docker.compose.oneoff=False,com.docker.compose.project=openbot-desktop,com.docker.compose.version=5.1.4","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"3 seconds ago","Service":"server","Size":"0B","State":"restarting","Status":"Restarting (1) 1 second ago"}
+"#;
+
+    /// The refusing server's own log, as the engine gives it: `docker logs --tail 40`'s stderr.
+    const REFUSAL_STDERR: &str = "OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nOpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nOpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\n";
+
+    /// `compose logs --tail 40 server` for the same server. Compose merges both streams, so the
+    /// next attempt's stdout already follows the sentence.
+    const REFUSAL_COMPOSE_LOG: &str = "server-1  | Listening soon.\nserver-1  | OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nserver-1  | Listening soon.\nserver-1  | OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.\nserver-1  | Listening soon.";
+
+    const REFUSAL: &str =
+        "OpenBot can't start without a licence. Set OPENBOT_LICENSE and start it again.";
+
+    /// A server that exits 78 is recognised as refusing to start, whether Docker is restarting it
+    /// or it has stopped, from the rows Compose really prints. A crash (exit 1) is not.
+    #[test]
+    fn a_server_that_exits_78_is_a_refusal_and_exit_1_is_not() {
+        assert_eq!(
+            refused_server_in(SERVER_RESTARTING_78).as_deref(),
+            Some("44290d7f2426")
+        );
+        assert_eq!(
+            refused_server_in(SERVER_EXITED_78).as_deref(),
+            Some("25e12f3681a6")
+        );
+        // An older Compose prints one JSON array.
+        assert_eq!(
+            refused_server_in(&format!("[{}]", SERVER_RESTARTING_78.trim())).as_deref(),
+            Some("44290d7f2426")
+        );
+        assert_eq!(refused_server_in(SERVER_RESTARTING_1), None);
+        assert_eq!(refused_server_in(""), None);
+
+        // The sentence is the last line the server wrote to stderr, not the stdout after it.
+        assert_eq!(
+            refusal_sentence_in(REFUSAL_STDERR, REFUSAL_COMPOSE_LOG),
+            REFUSAL
+        );
+        // From an engine that keeps no stderr apart: Compose's last line, without its prefix.
+        let ending_in_the_sentence = REFUSAL_COMPOSE_LOG
+            .rsplit_once('\n')
+            .map(|(before, _)| before)
+            .unwrap();
+        assert_eq!(refusal_sentence_in("", ending_in_the_sentence), REFUSAL);
+    }
+
+    /// The wait ends at once with the server's own sentence when the server refused to start, and
+    /// sits out its patience as before when the server crashed. Nothing answers port 1, so only the
+    /// refusal can end the first wait early.
+    #[test]
+    fn readiness_ends_at_once_with_the_sentence_when_the_server_refuses() {
+        let ready = Ready { api: 1, app: 1 };
+        let refusal = |listing: &'static str| {
+            move || {
+                refused_server_in(listing)
+                    .map(|_| refusal_sentence_in(REFUSAL_STDERR, REFUSAL_COMPOSE_LOG))
+            }
+        };
+
+        let started = std::time::Instant::now();
+        let mut lines = Vec::new();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(180),
+            || true,
+            &mut refusal(SERVER_RESTARTING_78),
+            &mut |line| lines.push(line),
+        );
+        assert_eq!(result, Err(NotReady::Refused(REFUSAL.to_owned())));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "a refusing server sat out the readiness wait"
+        );
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .contains(&format!("the server refused to start (exit 78): {REFUSAL}")),
+            "{lines:#?}"
+        );
+
+        let started = std::time::Instant::now();
+        let result = wait_until_healthy_saying(
+            &ready,
+            std::time::Duration::from_secs(2),
+            || true,
+            &mut refusal(SERVER_RESTARTING_1),
+            &mut |_| {},
+        );
+        assert_eq!(
+            result,
+            Err(NotReady::NotAnswering(
+                "the API is not answering on port 1.".to_owned()
+            ))
+        );
+        assert!(started.elapsed() >= std::time::Duration::from_secs(2));
+
+        // The person reads the sentence itself, with the log kept behind it.
+        let problem = startup_refusal(
+            REFUSAL.to_owned(),
+            format!("Last from the server container (up to 40 lines):\n{REFUSAL_COMPOSE_LOG}"),
+            &Secrets::new(),
+        );
+        assert_eq!(problem.said, REFUSAL);
+        assert!(problem
+            .detail
+            .unwrap()
+            .contains("server-1  | Listening soon."));
+    }
+
+    /// What `compose ps -a --format json server` reports for a refusing server under Podman, which
+    /// starts it again at once. Built from Desktop's own docker-compose.exe sampled against the
+    /// Podman pipe every 0.3 s for 60 s on Windows: 132 rows `running` with exit 0 and "Up 1 second",
+    /// 12 `exited` with 78, and one `exited` with exit 0 and "Exited (78)" in its status.
+    const PODMAN_RUNNING: &str = r#"{"Command":"/app/bin/openbot server","CreatedAt":"2026-11-18 03:02:11 +0000 UTC","ExitCode":0,"Health":"starting","ID":"6c1f0e2a9b3d","Image":"ghcr.io/copilotkit/openbot:test","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"127.0.0.1:3001->3001/tcp","Project":"openbot-desktop","Publishers":[],"RunningFor":"2 minutes ago","Service":"server","Size":"0B","State":"running","Status":"Up 1 second"}"#;
+    const PODMAN_EXITED_78: &str = r#"{"Command":"/app/bin/openbot server","CreatedAt":"2026-11-18 03:02:11 +0000 UTC","ExitCode":78,"Health":"","ID":"6c1f0e2a9b3d","Image":"ghcr.io/copilotkit/openbot:test","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"2 minutes ago","Service":"server","Size":"0B","State":"exited","Status":"Exited (78) Less than a second ago"}"#;
+    const PODMAN_EXITED_0_STATUS_78: &str = r#"{"Command":"/app/bin/openbot server","CreatedAt":"2026-11-18 03:02:11 +0000 UTC","ExitCode":0,"Health":"","ID":"6c1f0e2a9b3d","Image":"ghcr.io/copilotkit/openbot:test","Labels":"com.docker.compose.project=openbot-desktop,com.docker.compose.service=server","LocalVolumes":"0","Mounts":"","Name":"openbot-desktop-server-1","Names":"openbot-desktop-server-1","Networks":"openbot-desktop_default","Ports":"","Project":"openbot-desktop","Publishers":[],"RunningFor":"2 minutes ago","Service":"server","Size":"0B","State":"exited","Status":"Exited (78) Less than a second ago"}"#;
+
+    /// Under Podman, a refusing server is caught on Desktop's first look, through the real
+    /// `server_refusal` and the engine command it runs. Podman restarts it so fast that `compose
+    /// ps` says `running`, exit 0, at nearly every ask, so the rows here are the ones Desktop's
+    /// own asks landed on in a three-minute wait on Windows, a `running` row each time, with the
+    /// sampled `exited` rows after them. The server wrote its sentence as it exited
+    /// (`OPENBOT_REFUSAL_FILE`). A server that crashed wrote none, and the wait runs out as before.
+    #[test]
+    fn a_refusal_under_podman_is_caught_at_once_though_the_engine_says_running() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_refusal_under_podman_is_caught_at_once_though_the_engine_says_running",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("server-refusal");
+        let ready = Ready { api: 1, app: 1 };
+        // Desktop asked about 60 times in its wait and never landed on an exited row.
+        let mut rows = vec![PODMAN_RUNNING; 60];
+        rows.extend([
+            PODMAN_EXITED_78,
+            PODMAN_RUNNING,
+            PODMAN_EXITED_0_STATUS_78,
+            PODMAN_RUNNING,
+        ]);
+        for address in computer_stop_addresses(&path) {
+            let (root, _) =
+                computer_stop_root(&path, &format!("refusal-{}", address.engine.binary()), "{}");
+            std::fs::write(root.join(".fixture-server-rows"), rows.join("\n")).unwrap();
+            std::fs::write(root.join(".fixture-server-stderr"), REFUSAL_STDERR).unwrap();
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            std::fs::write(
+                root.join(".openbot").join(REFUSAL_FILE),
+                format!("{REFUSAL}\n"),
+            )
+            .unwrap();
+
+            let started = std::time::Instant::now();
+            let result = wait_until_healthy_saying(
+                &ready,
+                std::time::Duration::from_secs(20),
+                || true,
+                &mut || server_refusal(&address, &root),
+                &mut |_| {},
+            );
+            assert_eq!(
+                result,
+                Err(NotReady::Refused(REFUSAL.to_owned())),
+                "{address:?}"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "{address:?}: the refusal took {:?}",
+                started.elapsed()
+            );
+
+            // The next Start takes the old sentence away before the server runs again. One that
+            // crashes instead writes none: the same `running` rows are not a refusal, and the wait
+            // runs out as it always did.
+            forget_refusal(&root);
+            assert!(!root.join(".openbot").join(REFUSAL_FILE).exists());
+            std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
+            std::fs::write(root.join(".fixture-server-asked"), "0").unwrap();
+            let result = wait_until_healthy_saying(
+                &ready,
+                std::time::Duration::from_secs(2),
+                || true,
+                &mut || server_refusal(&address, &root),
+                &mut |_| {},
+            );
+            assert_eq!(
+                result,
+                Err(NotReady::NotAnswering(
+                    "the API is not answering on port 1.".to_owned()
+                )),
+                "{address:?}"
+            );
+        }
+        // The rows that do carry 78 are each a refusal by themselves, and `running` is not.
+        assert_eq!(
+            refused_server_in(PODMAN_EXITED_78).as_deref(),
+            Some("6c1f0e2a9b3d")
+        );
+        assert_eq!(
+            refused_server_in(PODMAN_EXITED_0_STATUS_78).as_deref(),
+            Some("6c1f0e2a9b3d")
+        );
+        assert_eq!(refused_server_in(PODMAN_RUNNING), None);
     }
 
     /// The folder-derived name is now only the name an earlier app's installation ran as, which
