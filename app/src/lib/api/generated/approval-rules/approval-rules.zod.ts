@@ -350,24 +350,24 @@ export const CreateApprovalRuleHeader = zod.object({
 export const createApprovalRuleBodyBotIdOneMax = 300;
 
 export const createApprovalRuleBodyBotIdOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createApprovalRuleBodyBotIdDefault = `*`;
 export const createApprovalRuleBodyToolRefOneMax = 300;
 
 export const createApprovalRuleBodyToolRefOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createApprovalRuleBodyEffectOneMax = 300;
 
 export const createApprovalRuleBodyEffectOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createApprovalRuleBodyEffectDefault = `*`;
 export const createApprovalRuleBodyScopeOneMax = 300;
 
 export const createApprovalRuleBodyScopeOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createApprovalRuleBodyScopeDefault = `*`;
 
@@ -479,22 +479,22 @@ export const UpdateApprovalRuleHeader = zod.object({
 export const updateApprovalRuleBodyBotIdMax = 300;
 
 export const updateApprovalRuleBodyBotIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const updateApprovalRuleBodyToolRefMax = 300;
 
 export const updateApprovalRuleBodyToolRefRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const updateApprovalRuleBodyEffectMax = 300;
 
 export const updateApprovalRuleBodyEffectRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const updateApprovalRuleBodyScopeMax = 300;
 
 export const updateApprovalRuleBodyScopeRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const UpdateApprovalRuleBody = zod.object({
@@ -631,7 +631,7 @@ export const TranslateApprovalRulesHeader = zod.object({
 export const translateApprovalRulesBodyTextMax = 1000;
 
 export const translateApprovalRulesBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const TranslateApprovalRulesBody = zod.object({
@@ -970,7 +970,7 @@ export const batchCreateApprovalRulesBodyRulesMax = 8;
 export const batchCreateApprovalRulesBodyAuthoringTextMax = 2000;
 
 export const batchCreateApprovalRulesBodyAuthoringTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const BatchCreateApprovalRulesBody = zod.object({

@@ -556,7 +556,7 @@ export const RespondToQuestionHeader = zod.object({
 export const respondToQuestionBodyResponseMax = 6000;
 
 export const respondToQuestionBodyResponseRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const RespondToQuestionBody = zod.object({
@@ -907,24 +907,24 @@ export const CreatePersonApprovalRuleHeader = zod.object({
 export const createPersonApprovalRuleBodyBotIdOneMax = 300;
 
 export const createPersonApprovalRuleBodyBotIdOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createPersonApprovalRuleBodyBotIdDefault = `*`;
 export const createPersonApprovalRuleBodyToolRefOneMax = 300;
 
 export const createPersonApprovalRuleBodyToolRefOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createPersonApprovalRuleBodyEffectOneMax = 300;
 
 export const createPersonApprovalRuleBodyEffectOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createPersonApprovalRuleBodyEffectDefault = `*`;
 export const createPersonApprovalRuleBodyScopeOneMax = 300;
 
 export const createPersonApprovalRuleBodyScopeOneRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createPersonApprovalRuleBodyScopeDefault = `*`;
 
@@ -1069,22 +1069,22 @@ export const UpdatePersonApprovalRuleHeader = zod.object({
 export const updatePersonApprovalRuleBodyBotIdMax = 300;
 
 export const updatePersonApprovalRuleBodyBotIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const updatePersonApprovalRuleBodyToolRefMax = 300;
 
 export const updatePersonApprovalRuleBodyToolRefRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const updatePersonApprovalRuleBodyEffectMax = 300;
 
 export const updatePersonApprovalRuleBodyEffectRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const updatePersonApprovalRuleBodyScopeMax = 300;
 
 export const updatePersonApprovalRuleBodyScopeRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const UpdatePersonApprovalRuleBody = zod.object({

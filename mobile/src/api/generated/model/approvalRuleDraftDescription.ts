@@ -7,7 +7,7 @@ export interface ApprovalRuleDraftDescription {
    * The rule in a sentence or two, at most 1,000 characters once trimmed.
    * @minLength 1
    * @maxLength 1000
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   text: string;
 }
