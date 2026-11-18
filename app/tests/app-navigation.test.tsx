@@ -121,6 +121,7 @@ function renderSidebar(
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
