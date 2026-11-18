@@ -1,0 +1,480 @@
+{
+  "about": "Every CopilotKit/OpenBot release and its asset names on 2026-11-17, from `gh api --paginate repos/CopilotKit/OpenBot/releases`, after the installers of every release older than v1.1.0 were removed by hand. `removed` lists those 134 assets, as the removal recorded them, so `releases` plus `removed` is the list as it stood before.",
+  "latest": "v1.1.0",
+  "releases": [
+    {
+      "tag": "v1.1.0",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "latest.json",
+        "openbot-0.3.0.tgz",
+        "openbot-bundle-0.1.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "OpenBot-mac-arm64.dmg",
+        "OpenBot-mac-x64.dmg",
+        "openbot-source.tar.gz",
+        "OpenBot-windows-x64-setup.exe",
+        "OpenBot_1.1.0_aarch64.dmg",
+        "OpenBot_1.1.0_x64-setup.exe",
+        "OpenBot_1.1.0_x64-setup.exe.sig",
+        "OpenBot_1.1.0_x64.dmg",
+        "release-charts.json",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.1.0-rc.2",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.3.0.tgz",
+        "openbot-bundle-0.1.0.tgz",
+        "openbot-source.tar.gz",
+        "release-charts.json",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.1.0-rc.1",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.3.0.tgz",
+        "openbot-bundle-0.1.0.tgz",
+        "openbot-source.tar.gz",
+        "release-charts.json",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.3",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.3-rc.1",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.2",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.2-rc.3",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.2-rc.2",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.2-rc.1",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.1",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.1-rc.2",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.1-rc.1",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.0",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.0-rc.5",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.0-rc.4",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.0-rc.3",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.0-rc.2",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v1.0.0-rc.1",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "openbot-0.2.0.tgz",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v0.3.4",
+      "assets": [
+        "container-images.json",
+        "desktop-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v0.3.3",
+      "assets": [
+        "container-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v0.3.2",
+      "assets": [
+        "container-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v0.3.1",
+      "assets": [
+        "container-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    {
+      "tag": "v0.3.0",
+      "assets": [
+        "container-images.json",
+        "latest.json",
+        "openbot-0.2.0.tgz",
+        "OpenBot-darwin-aarch64.app.tar.gz",
+        "OpenBot-darwin-aarch64.app.tar.gz.sig",
+        "OpenBot-darwin-x86_64.app.tar.gz",
+        "OpenBot-darwin-x86_64.app.tar.gz.sig",
+        "openbot-source.tar.gz",
+        "release-manifest.json",
+        "release-provenance.sigstore.json"
+      ]
+    },
+    { "tag": "v0.2.0", "assets": ["container-images.json"] },
+    { "tag": "v0.1.2", "assets": ["container-images.json"] },
+    { "tag": "v0.1.1", "assets": ["container-images.json"] },
+    { "tag": "v0.1.0", "assets": ["container-images.json"] },
+    { "tag": "v0.0.15", "assets": ["container-images.json"] },
+    { "tag": "v0.0.14", "assets": ["container-images.json"] },
+    {
+      "tag": "v0.0.13",
+      "assets": [
+        "container-images.json",
+        "desktop-builds.json",
+        "SHA256SUMS-desktop.txt"
+      ]
+    },
+    { "tag": "v0.0.12", "assets": ["container-images.json"] },
+    { "tag": "v0.0.11", "assets": ["container-images.json"] },
+    { "tag": "v0.0.10", "assets": ["container-images.json"] },
+    { "tag": "v0.0.9", "assets": ["container-images.json"] },
+    { "tag": "v0.0.8", "assets": ["container-images.json"] },
+    { "tag": "v0.0.7", "assets": ["container-images.json"] },
+    { "tag": "v0.0.6", "assets": ["container-images.json"] },
+    { "tag": "v0.0.5", "assets": ["container-images.json"] },
+    { "tag": "v0.0.4", "assets": ["container-images.json"] },
+    { "tag": "v0.0.3", "assets": ["container-images.json"] },
+    { "tag": "v0.0.2", "assets": ["container-images.json"] },
+    { "tag": "v0.0.1", "assets": [] }
+  ],
+  "removed": [
+    "v1.1.0-rc.2 OpenBot-mac-arm64.dmg",
+    "v1.1.0-rc.2 OpenBot-mac-x64.dmg",
+    "v1.1.0-rc.2 OpenBot-windows-x64-setup.exe",
+    "v1.1.0-rc.2 OpenBot_1.1.0-rc.2_aarch64.dmg",
+    "v1.1.0-rc.2 OpenBot_1.1.0-rc.2_x64-setup.exe",
+    "v1.1.0-rc.2 OpenBot_1.1.0-rc.2_x64.dmg",
+    "v1.1.0-rc.1 OpenBot-mac-arm64.dmg",
+    "v1.1.0-rc.1 OpenBot-mac-x64.dmg",
+    "v1.1.0-rc.1 OpenBot-windows-x64-setup.exe",
+    "v1.1.0-rc.1 OpenBot_1.1.0-rc.1_aarch64.dmg",
+    "v1.1.0-rc.1 OpenBot_1.1.0-rc.1_x64-setup.exe",
+    "v1.1.0-rc.1 OpenBot_1.1.0-rc.1_x64.dmg",
+    "v1.0.3-rc.1 OpenBot-mac-arm64.dmg",
+    "v1.0.3-rc.1 OpenBot-mac-x64.dmg",
+    "v1.0.3-rc.1 OpenBot-windows-x64-setup.exe",
+    "v1.0.3-rc.1 OpenBot_1.0.3-rc.1_aarch64.dmg",
+    "v1.0.3-rc.1 OpenBot_1.0.3-rc.1_x64-setup.exe",
+    "v1.0.3-rc.1 OpenBot_1.0.3-rc.1_x64.dmg",
+    "v1.0.2 OpenBot-mac-arm64.dmg",
+    "v1.0.2 OpenBot-mac-x64.dmg",
+    "v1.0.2 OpenBot-windows-x64-setup.exe",
+    "v1.0.2 OpenBot_1.0.2_aarch64.dmg",
+    "v1.0.2 OpenBot_1.0.2_x64-setup.exe",
+    "v1.0.2 OpenBot_1.0.2_x64-setup.exe.sig",
+    "v1.0.2 OpenBot_1.0.2_x64.dmg",
+    "v1.0.2-rc.3 OpenBot-mac-arm64.dmg",
+    "v1.0.2-rc.3 OpenBot-mac-x64.dmg",
+    "v1.0.2-rc.3 OpenBot-windows-x64-setup.exe",
+    "v1.0.2-rc.3 OpenBot_1.0.2-rc.3_aarch64.dmg",
+    "v1.0.2-rc.3 OpenBot_1.0.2-rc.3_x64-setup.exe",
+    "v1.0.2-rc.3 OpenBot_1.0.2-rc.3_x64.dmg",
+    "v1.0.2-rc.2 OpenBot-mac-arm64.dmg",
+    "v1.0.2-rc.2 OpenBot-mac-x64.dmg",
+    "v1.0.2-rc.2 OpenBot-windows-x64-setup.exe",
+    "v1.0.2-rc.2 OpenBot_1.0.2-rc.2_aarch64.dmg",
+    "v1.0.2-rc.2 OpenBot_1.0.2-rc.2_x64-setup.exe",
+    "v1.0.2-rc.2 OpenBot_1.0.2-rc.2_x64.dmg",
+    "v1.0.2-rc.1 OpenBot-mac-arm64.dmg",
+    "v1.0.2-rc.1 OpenBot-mac-x64.dmg",
+    "v1.0.2-rc.1 OpenBot-windows-x64-setup.exe",
+    "v1.0.2-rc.1 OpenBot_1.0.2-rc.1_aarch64.dmg",
+    "v1.0.2-rc.1 OpenBot_1.0.2-rc.1_x64-setup.exe",
+    "v1.0.2-rc.1 OpenBot_1.0.2-rc.1_x64.dmg",
+    "v1.0.1 OpenBot-mac-arm64.dmg",
+    "v1.0.1 OpenBot-mac-x64.dmg",
+    "v1.0.1 OpenBot-windows-x64-setup.exe",
+    "v1.0.1 OpenBot_1.0.1_aarch64.dmg",
+    "v1.0.1 OpenBot_1.0.1_x64-setup.exe",
+    "v1.0.1 OpenBot_1.0.1_x64-setup.exe.sig",
+    "v1.0.1 OpenBot_1.0.1_x64.dmg",
+    "v1.0.1-rc.2 OpenBot-mac-arm64.dmg",
+    "v1.0.1-rc.2 OpenBot-mac-x64.dmg",
+    "v1.0.1-rc.2 OpenBot-windows-x64-setup.exe",
+    "v1.0.1-rc.2 OpenBot_1.0.1-rc.2_aarch64.dmg",
+    "v1.0.1-rc.2 OpenBot_1.0.1-rc.2_x64-setup.exe",
+    "v1.0.1-rc.2 OpenBot_1.0.1-rc.2_x64.dmg",
+    "v1.0.1-rc.1 OpenBot-mac-arm64.dmg",
+    "v1.0.1-rc.1 OpenBot-mac-x64.dmg",
+    "v1.0.1-rc.1 OpenBot-windows-x64-setup.exe",
+    "v1.0.1-rc.1 OpenBot_1.0.1-rc.1_aarch64.dmg",
+    "v1.0.1-rc.1 OpenBot_1.0.1-rc.1_x64-setup.exe",
+    "v1.0.1-rc.1 OpenBot_1.0.1-rc.1_x64.dmg",
+    "v1.0.0 OpenBot-mac-arm64.dmg",
+    "v1.0.0 OpenBot-mac-x64.dmg",
+    "v1.0.0 OpenBot-windows-x64-setup.exe",
+    "v1.0.0 OpenBot_1.0.0_aarch64.dmg",
+    "v1.0.0 OpenBot_1.0.0_x64-setup.exe",
+    "v1.0.0 OpenBot_1.0.0_x64-setup.exe.sig",
+    "v1.0.0 OpenBot_1.0.0_x64.dmg",
+    "v1.0.0-rc.5 OpenBot-mac-arm64.dmg",
+    "v1.0.0-rc.5 OpenBot-mac-x64.dmg",
+    "v1.0.0-rc.5 OpenBot-windows-x64-setup.exe",
+    "v1.0.0-rc.5 OpenBot_1.0.0-rc.5_aarch64.dmg",
+    "v1.0.0-rc.5 OpenBot_1.0.0-rc.5_x64-setup.exe",
+    "v1.0.0-rc.5 OpenBot_1.0.0-rc.5_x64.dmg",
+    "v1.0.0-rc.4 OpenBot-mac-arm64.dmg",
+    "v1.0.0-rc.4 OpenBot-mac-x64.dmg",
+    "v1.0.0-rc.4 OpenBot-windows-x64-setup.exe",
+    "v1.0.0-rc.4 OpenBot_1.0.0-rc.4_aarch64.dmg",
+    "v1.0.0-rc.4 OpenBot_1.0.0-rc.4_x64-setup.exe",
+    "v1.0.0-rc.4 OpenBot_1.0.0-rc.4_x64.dmg",
+    "v1.0.0-rc.3 OpenBot-mac-arm64.dmg",
+    "v1.0.0-rc.3 OpenBot-mac-x64.dmg",
+    "v1.0.0-rc.3 OpenBot-windows-x64-setup.exe",
+    "v1.0.0-rc.3 OpenBot_1.0.0-rc.3_aarch64.dmg",
+    "v1.0.0-rc.3 OpenBot_1.0.0-rc.3_x64-setup.exe",
+    "v1.0.0-rc.3 OpenBot_1.0.0-rc.3_x64.dmg",
+    "v1.0.0-rc.2 OpenBot-mac-arm64.dmg",
+    "v1.0.0-rc.2 OpenBot-mac-x64.dmg",
+    "v1.0.0-rc.2 OpenBot-windows-x64-setup.exe",
+    "v1.0.0-rc.2 OpenBot_1.0.0-rc.2_aarch64.dmg",
+    "v1.0.0-rc.2 OpenBot_1.0.0-rc.2_x64-setup.exe",
+    "v1.0.0-rc.2 OpenBot_1.0.0-rc.2_x64.dmg",
+    "v1.0.0-rc.1 OpenBot-mac-arm64.dmg",
+    "v1.0.0-rc.1 OpenBot-mac-x64.dmg",
+    "v1.0.0-rc.1 OpenBot-windows-x64-setup.exe",
+    "v1.0.0-rc.1 OpenBot_1.0.0-rc.1_aarch64.dmg",
+    "v1.0.0-rc.1 OpenBot_1.0.0-rc.1_x64-setup.exe",
+    "v1.0.0-rc.1 OpenBot_1.0.0-rc.1_x64.dmg",
+    "v0.3.4 OpenBot-mac-arm64.dmg",
+    "v0.3.4 OpenBot-mac-x64.dmg",
+    "v0.3.4 OpenBot-windows-x64-setup.exe",
+    "v0.3.4 OpenBot_0.3.4_aarch64.dmg",
+    "v0.3.4 OpenBot_0.3.4_x64-setup.exe",
+    "v0.3.4 OpenBot_0.3.4_x64-setup.exe.sig",
+    "v0.3.4 OpenBot_0.3.4_x64.dmg",
+    "v0.3.3 OpenBot-mac-arm64.dmg",
+    "v0.3.3 OpenBot-mac-x64.dmg",
+    "v0.3.3 OpenBot-windows-x64-setup.exe",
+    "v0.3.3 OpenBot_0.3.3_aarch64.dmg",
+    "v0.3.3 OpenBot_0.3.3_x64-setup.exe",
+    "v0.3.3 OpenBot_0.3.3_x64-setup.exe.sig",
+    "v0.3.3 OpenBot_0.3.3_x64.dmg",
+    "v0.3.2 OpenBot-mac-arm64.dmg",
+    "v0.3.2 OpenBot-mac-x64.dmg",
+    "v0.3.2 OpenBot-windows-x64-setup.exe",
+    "v0.3.2 OpenBot_0.3.2_aarch64.dmg",
+    "v0.3.2 OpenBot_0.3.2_x64-setup.exe",
+    "v0.3.2 OpenBot_0.3.2_x64-setup.exe.sig",
+    "v0.3.2 OpenBot_0.3.2_x64.dmg",
+    "v0.3.1 OpenBot-mac-arm64.dmg",
+    "v0.3.1 OpenBot-mac-x64.dmg",
+    "v0.3.1 OpenBot-windows-x64-setup.exe",
+    "v0.3.1 OpenBot_0.3.1_aarch64.dmg",
+    "v0.3.1 OpenBot_0.3.1_x64-setup.exe",
+    "v0.3.1 OpenBot_0.3.1_x64.dmg",
+    "v0.3.0 OpenBot-mac-arm64.dmg",
+    "v0.3.0 OpenBot-mac-x64.dmg",
+    "v0.3.0 OpenBot-windows-x64-setup.exe",
+    "v0.3.0 OpenBot_0.3.0_aarch64.dmg",
+    "v0.3.0 OpenBot_0.3.0_x64-setup.exe",
+    "v0.3.0 OpenBot_0.3.0_x64.dmg",
+    "v0.0.13 OpenBot_0.0.13-internal.g35ad699f6f76_aarch64.dmg",
+    "v0.0.13 OpenBot_0.0.13-internal.g35ad699f6f76_x64-setup.exe"
+  ]
+}

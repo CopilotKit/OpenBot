@@ -7,15 +7,9 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
+import { colors } from "./colors";
 
-export const colors = {
-  link: "#2563eb",
-  error: "#b42318",
-  muted: "#6b7280",
-  border: "#d1d5db",
-  success: "#067647",
-  warning: "#b54708",
-};
+export { colors };
 
 export const card: ViewStyle = {
   gap: 10,

@@ -80,6 +80,16 @@ pub const IMAGE_VARIABLES: [(&str, &str); 3] = [
     ("agent-computer", "COMPUTER_IMAGE"),
 ];
 
+/// Images pinned when the manifest names them, and left out when it does not.
+///
+/// The ChatGPT plan's model service (`crate::plan::CHATGPT_PLAN_SERVICE`), which only a ChatGPT-plan
+/// installation starts. Pinned whenever the release publishes it, because unpinned its Compose
+/// default is a name built on this machine, and a start that raised it would have nothing to run.
+/// Not required: a release laid out by an older app, or a test manifest, need not name it, and an
+/// installation that never starts the service never reads the variable.
+pub const OPTIONAL_IMAGE_VARIABLES: [(&str, &str); 1] =
+    [("agent-langgraph-agui", "LANGGRAPH_IMAGE")];
+
 /// Read the manifest laid down beside the deployment and turn it into Compose variables.
 ///
 /// Digests, not tags. A tag can be moved to point at a different image after the version that was
@@ -130,6 +140,11 @@ pub fn pin(manifest: &Images) -> Result<Vec<(String, String)>, String> {
             )
         })?;
         pinned.push((variable.to_string(), image.reference.clone()));
+    }
+    for (published, variable) in OPTIONAL_IMAGE_VARIABLES {
+        if let Some(image) = manifest.images.get(published) {
+            pinned.push((variable.to_string(), image.reference.clone()));
+        }
     }
     Ok(pinned)
 }

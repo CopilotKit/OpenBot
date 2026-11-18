@@ -31,6 +31,7 @@ import { OrganizationSettingsPage } from "@/components/organizations/organizatio
 import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/toast";
+import type { PersonRole } from "@/lib/api/generated/model";
 import { signedInUser } from "@/lib/auth/queries";
 import {
   currentOrganizationId,
@@ -373,7 +374,7 @@ async function answer(
       const no = refused();
       if (no) return no;
       if (!manages) return adminOnly();
-      const { role } = body as { role: OrganizationMemberSummary["role"] };
+      const { role } = body as { role: PersonRole };
       const changed = server.members.find((one) => one.id === removed[1]);
       if (!changed)
         return problem(404, "PERSON_NOT_FOUND", "Couldn't find that person.");

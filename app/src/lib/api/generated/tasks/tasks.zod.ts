@@ -100,13 +100,7 @@ export const ListTasksResponse = zod.object({
             "The conversation a delegated task was asked for in, where its result is said.",
           ),
         status: zod
-          .enum([
-            "needs_input",
-            "working",
-            "resolved",
-            "failed",
-            "ready_for_review",
-          ])
+          .string()
           .describe(
             "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
           ),
@@ -273,13 +267,7 @@ export const GetTaskResponse = zod.object({
           "The conversation a delegated task was asked for in, where its result is said.",
         ),
       status: zod
-        .enum([
-          "needs_input",
-          "working",
-          "resolved",
-          "failed",
-          "ready_for_review",
-        ])
+        .string()
         .describe(
           "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
         ),
@@ -554,13 +542,7 @@ export const ResolveTaskResponse = zod.object({
           "The conversation a delegated task was asked for in, where its result is said.",
         ),
       status: zod
-        .enum([
-          "needs_input",
-          "working",
-          "resolved",
-          "failed",
-          "ready_for_review",
-        ])
+        .string()
         .describe(
           "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
         ),
@@ -730,13 +712,7 @@ export const ReopenTaskResponse = zod.object({
           "The conversation a delegated task was asked for in, where its result is said.",
         ),
       status: zod
-        .enum([
-          "needs_input",
-          "working",
-          "resolved",
-          "failed",
-          "ready_for_review",
-        ])
+        .string()
         .describe(
           "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
         ),
@@ -906,13 +882,7 @@ export const RetryTaskResponse = zod.object({
           "The conversation a delegated task was asked for in, where its result is said.",
         ),
       status: zod
-        .enum([
-          "needs_input",
-          "working",
-          "resolved",
-          "failed",
-          "ready_for_review",
-        ])
+        .string()
         .describe(
           "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
         ),
@@ -1082,13 +1052,7 @@ export const StopTaskResponse = zod.object({
           "The conversation a delegated task was asked for in, where its result is said.",
         ),
       status: zod
-        .enum([
-          "needs_input",
-          "working",
-          "resolved",
-          "failed",
-          "ready_for_review",
-        ])
+        .string()
         .describe(
           "Where a task stands: waiting on the person, being worked on, marked done, failed, or finished and ready to read.",
         ),

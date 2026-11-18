@@ -134,6 +134,15 @@ export const GetModelChoiceResponse = zod
   .object({
     model: zod.string().nullable(),
     effort: zod.string().nullable(),
+    unverified: zod
+      .object({
+        model: zod.string().describe("The chosen model's id."),
+        label: zod.string().describe("Its name, as a model picker shows it."),
+      })
+      .optional()
+      .describe(
+        "The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.",
+      ),
   })
   .describe(
     "The model and thinking effort a person chose for one conversation. Null model: the default model. Null effort: none is sent, so the model thinks on its own default.",
@@ -216,6 +225,15 @@ export const ReplaceModelChoiceResponse = zod
   .object({
     model: zod.string().nullable(),
     effort: zod.string().nullable(),
+    unverified: zod
+      .object({
+        model: zod.string().describe("The chosen model's id."),
+        label: zod.string().describe("Its name, as a model picker shows it."),
+      })
+      .optional()
+      .describe(
+        "The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.",
+      ),
   })
   .describe(
     "The model and thinking effort a person chose for one conversation. Null model: the default model. Null effort: none is sent, so the model thinks on its own default.",

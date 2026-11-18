@@ -5,6 +5,7 @@ import {
   IconHistory,
   IconMessage,
   IconMessageOff,
+  IconPencil,
   IconPlayerPlay,
   IconRobot,
   IconWorld,
@@ -19,6 +20,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { DeleteRow } from "@/components/routines/delete-row";
+import { EditRoutineDialog } from "@/components/routines/edit-routine-dialog";
 import { routinesOf } from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
@@ -147,6 +149,13 @@ const RUN_STATUS: Record<
   waiting: { text: "Waiting for you", className: "" },
 };
 
+/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
+export function runStatusOf(status: string) {
+  const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
+    RUN_STATUS;
+  return known[status] ?? null;
+}
+
 const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
   run_now: "Run now",
   trigger: "Triggered",
@@ -182,7 +191,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.data.length ? (
         <PageRows>
           {runs.data.map((run, index) => {
-            const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
+            const status = runStatusOf(run.status);
             return (
               <Fragment key={run.id}>
                 {index > 0 ? <Separator /> : null}
@@ -191,9 +200,11 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                     <IconHistory />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle className={status.className}>
-                      {status.text}
-                    </ItemTitle>
+                    {status ? (
+                      <ItemTitle className={status.className}>
+                        {status.text}
+                      </ItemTitle>
+                    ) : null}
                     <ItemDescription>
                       {RUN_SOURCE[run.source] ?? "Scheduled"} ·{" "}
                       {relativeTime(run.startedAt)}
@@ -279,9 +290,10 @@ export function RoutineRoutePage({
 }
 
 /**
- * Everything about one scheduled routine: switched, run, read back and deleted, each the same write
- * it always was. The switch takes effect when switched, Run now does real work, and Delete, the last
- * row of the actions, asks first, then returns to the list.
+ * Everything about one scheduled routine: switched, run, changed, read back and deleted, each the
+ * same write it always was. The switch takes effect when switched, Run now does real work, Edit
+ * routine opens the fields New routine asks for, and Delete, the last row of the actions, asks first,
+ * then returns to the list.
  */
 export function RoutinePage({
   routine,
@@ -299,6 +311,7 @@ export function RoutinePage({
   const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
   const remove = useMutation(deleteRoutineMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const lastRun = lastRunLabel(routine.lastRun);
   const next = nextRunWords(routine);
   const does = routineDoes(routine);
@@ -392,6 +405,25 @@ export function RoutinePage({
                   : "This routine is paused. Turn it on first."}
               </ItemDescription>
             </ItemContent>
+          </Item>
+          <Separator />
+          {/* More than one value, so a dialog: the same fields New routine asks for. */}
+          <Item
+            render={<button onClick={() => setEditing(true)} type="button" />}
+            size="sm"
+          >
+            <ItemMedia variant="icon">
+              <IconPencil />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Edit routine</ItemTitle>
+              <ItemDescription>
+                Change its name, what it does, or when it runs.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
           </Item>
           <Separator />
           {routine.conversation.gone ? (
@@ -513,6 +545,12 @@ export function RoutinePage({
       </PageSection>
 
       <RoutineRuns routine={routine} />
+
+      <EditRoutineDialog
+        onOpenChange={setEditing}
+        open={editing}
+        routine={routine}
+      />
 
       {/* It names the routine as its heading and its row do, never its schedule, which two can share. */}
       <Dialog onOpenChange={setConfirming} open={confirming}>

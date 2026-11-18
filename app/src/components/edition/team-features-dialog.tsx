@@ -37,65 +37,48 @@ import {
 import type { NavigationItem } from "@/lib/navigation";
 import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { cn } from "@/lib/utils";
+import {
+  BOOK_A_DEMO_LINE,
+  BUSINESS_FEATURE_GROUPS,
+  BUSINESS_FEATURES_MORE,
+  type BusinessFeatureIcon,
+  DEPLOY_LINE,
+} from "@openbot/shared/openbot-for-business";
 
 /** The dialog's first line, in big letters: where OpenBot for Business runs. */
-export const DEPLOY_LINE =
-  "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.";
+export { DEPLOY_LINE };
+
+/** Each feature's icon. Desktop's first screen draws the same features with the same icons. */
+const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
+  "sign-in": IconLogin2,
+  people: IconUsers,
+  "shared-bots": IconUsersGroup,
+  learning: IconSchool,
+  chat: IconMessages,
+  computer: IconDeviceDesktop,
+  controls: IconAdjustments,
+  rules: IconListCheck,
+  policies: IconSparkles,
+  governance: IconChecks,
+  audit: IconHistory,
+};
 
 /**
- * What the team edition has and the personal edition does not, one short line each, in the three
- * things a team gets: its people, where its Bots work, and control over both.
+ * What the team edition has and the personal edition does not (`BUSINESS_FEATURE_GROUPS`), with
+ * the app's icons.
  *
  * Shown where Admin would be: the list, beside the calendar to book a demo.
  */
 export const TEAM_FEATURE_GROUPS: readonly {
   title: string;
   features: readonly { title: string; icon: Icon }[];
-}[] = [
-  {
-    title: "For your whole organization",
-    features: [
-      {
-        title: "Sign-in with Google, Microsoft or custom SSO",
-        icon: IconLogin2,
-      },
-      { title: "People, roles and admins", icon: IconUsers },
-      {
-        title: "Bots shared with your whole organization",
-        icon: IconUsersGroup,
-      },
-      { title: "Learning shared across your organization", icon: IconSchool },
-    ],
-  },
-  {
-    title: "Where your Bots work",
-    features: [
-      { title: "Bots in Slack and Microsoft Teams", icon: IconMessages },
-      { title: "A computer for each Bot", icon: IconDeviceDesktop },
-    ],
-  },
-  {
-    title: "In control",
-    features: [
-      {
-        title: "Controls over models, apps and networks",
-        icon: IconAdjustments,
-      },
-      { title: "Rules every Bot follows", icon: IconListCheck },
-      /*
-       * Boundaries, team approval rules, auto-review guidance, permissions, the network allowlist
-       * and one Bot's app actions are each described in words on their Admin screen, and each
-       * replays the result over recorded activity before it is saved.
-       */
-      {
-        title: "Policies in plain English, tested on past activity",
-        icon: IconSparkles,
-      },
-      { title: "Governance for everyone", icon: IconChecks },
-      { title: "A full audit trail, with export", icon: IconHistory },
-    ],
-  },
-];
+}[] = BUSINESS_FEATURE_GROUPS.map((group) => ({
+  title: group.title,
+  features: group.features.map((feature) => ({
+    title: feature.title,
+    icon: FEATURE_ICONS[feature.icon],
+  })),
+}));
 
 export const TEAM_FEATURES = TEAM_FEATURE_GROUPS.flatMap(
   (group) => group.features,
@@ -178,7 +161,9 @@ export function TeamFeaturesDialog() {
                 </ul>
               </section>
             ))}
-            <p className="text-muted-foreground text-sm">And tons more…</p>
+            <p className="text-muted-foreground text-sm">
+              {BUSINESS_FEATURES_MORE}
+            </p>
           </div>
           <BookDemo />
         </div>
@@ -210,7 +195,7 @@ function BookDemo() {
           Book a demo
         </h3>
         <p className="text-muted-foreground text-sm text-pretty">
-          Pick a time to see a demo or scope a proof of concept with us.
+          {BOOK_A_DEMO_LINE}
         </p>
       </div>
       <div className="relative">

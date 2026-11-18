@@ -417,7 +417,8 @@ test.each([
       async () => new NativeResponse("failed", { status: 500 }),
       snapshot,
     );
-    await view.findByText(unavailable);
+    // Said once the retries a failed read on opening gets have failed too.
+    await view.findByText(unavailable, {}, { timeout: 6000 });
     if (snapshot.length > 0)
       expect(view.getByText(initial.content)).toBeTruthy();
     const user = userEvent.setup({ document: view.container.ownerDocument });
@@ -919,7 +920,14 @@ test.each([false, true])(
   },
 );
 
-test("a stalled mount history read releases the send gate and shows unavailable history", async () => {
+/*
+ * A STALL RELEASES THE SEND GATE AT ONCE, AND IS SAID ONLY ONCE ASKING AGAIN HAS FAILED TOO. The
+ * read on opening gives up after its deadline, and the message waiting behind it goes then, as it
+ * always has. What changed is the notice: a read that was only slow (seen on a link busy with a
+ * 95MB picture) used to say "Couldn't load earlier messages" on its first deadline. It is asked
+ * again the way a refresh is, and the notice comes only when every try has failed.
+ */
+test("a stalled mount history read releases the send gate at once, and says so only after its retries fail", async () => {
   const pending = delayedResponse();
   const view = mounting((_threadId) => pending.promise, [initial]);
   await waitFor(() => expect(historyReads).toHaveLength(1));
@@ -930,8 +938,12 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   );
   await user.click(view.getByRole("button", { name: "Send message" }));
 
-  await view.findByText(unavailable, {}, { timeout: 4000 });
+  // Released by the first read's deadline, as before, and no notice yet: it is being asked again.
   await waitFor(() => expect(runRequests).toHaveLength(1), { timeout: 4000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+
+  await view.findByText(unavailable, {}, { timeout: 12_000 });
+  expect(historyReads.length).toBeGreaterThanOrEqual(4);
   expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
   expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
   expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([initial]);
@@ -945,7 +957,21 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   expect(currentAgent().messages.map((message) => message.id)).not.toContain(
     fresh.id,
   );
-});
+}, 20_000);
+
+test("a mount history read that succeeds on a retry shows its messages and no notice", async () => {
+  let reads = 0;
+  const view = mounting(async () => {
+    reads += 1;
+    return reads === 1
+      ? new NativeResponse("failed", { status: 500 })
+      : stored([initial, fresh]);
+  });
+
+  await view.findByText(fresh.content, {}, { timeout: 6000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(historyReads.length).toBeGreaterThanOrEqual(2);
+}, 10_000);
 
 test("a UI send waits for mount history before adding its message", async () => {
   const pending = delayedResponse();
@@ -1208,7 +1234,12 @@ test.each([false, true])(
         ? stored([initial])
         : new NativeResponse("failed", { status: 500 }),
     );
-    await view.findByText(prefixPresent ? initial.content : unavailable);
+    // A failed read on opening is said once its retries have failed too.
+    await view.findByText(
+      prefixPresent ? initial.content : unavailable,
+      {},
+      { timeout: 6000 },
+    );
     const user = userEvent.setup({ document: view.container.ownerDocument });
     const editor = view.getByRole("textbox", { name: "Message" });
     await user.type(editor, "Local turn after mount completed");

@@ -582,9 +582,11 @@ export function ComputerView({
     refetchInterval: STATUS_POLL_MS,
     retry: false,
   });
-  /** The fresher of the two answers: the poll that just ran, else the status read. */
-  const computerState: ComputerState | undefined =
-    polledState ?? status.data?.state;
+  /**
+   * The fresher of the two answers: the poll that just ran, else the status read. A state a newer
+   * server sends that this app doesn't know is none of the ones below: the screen waits for a frame.
+   */
+  const computerState: string | undefined = polledState ?? status.data?.state;
   /*
    * OPENING THE SCREEN STARTS A COMPUTER THAT IS OFF. Once, for the state the screen was opened on.
    *

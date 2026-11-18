@@ -170,14 +170,16 @@ describe("which model this Bot was told to use", () => {
 /**
  * The models that cannot be driven through chat completions, and the ones that can.
  *
- * `gpt-5.6-*` rejects function tools on `/v1/chat/completions`; which question a Bot asks of
+ * `gpt-5.6-*` rejects function tools on `/v1/chat/completions`, and `gpt-5.4*` and `gpt-5.5*` reject
+ * them there with a reasoning effort; which question a Bot asks of
  * this predicate — refuse the model, or turn on the Responses API — belongs to the Bot.
  */
 describe("whether a model has to be driven through the Responses API", () => {
   test("the models that reject tools on chat completions are flagged", () => {
     expect(requiresResponsesApi("gpt-5.6-terra")).toBe(true);
     expect(requiresResponsesApi("gpt-6")).toBe(true);
-    expect(requiresResponsesApi("gpt-5.5")).toBe(false);
+    // With a reasoning effort, OpenAI refuses gpt-5.5's tools on chat completions (2026-11-17).
+    expect(requiresResponsesApi("gpt-5.5")).toBe(true);
   });
 
   test("padding does not get one past the guard", () => {
@@ -198,7 +200,34 @@ describe("whether a model has to be driven through the Responses API", () => {
    * OpenAI's own catalogue on 2026-10-28, each model asked for a tool on both APIs. The `-pro` models
    * and `gpt-5.3-codex` answer 404 on chat completions; the 5.6 and 6 families answer 400 with
    * function tools; the rest take tools on either.
+   *
+   * Asked again on 2026-11-17 with a reasoning effort as well: the 5.4 and 5.5 families, snapshots,
+   * `-mini` and `-nano` included, answer 400 on chat completions ("Function tools with
+   * reasoning_effort are not supported for gpt-5.5 in /v1/chat/completions") and 200 on the
+   * Responses API with or without one. `gpt-5`, `gpt-5.1` and `gpt-5.2` take both on either.
    */
+  test("the models that refuse tools with a reasoning effort on chat completions are flagged", () => {
+    for (const model of [
+      "gpt-5.5",
+      "gpt-5.5-2026-04-23",
+      "gpt-5.4",
+      "gpt-5.4-2026-03-05",
+      "gpt-5.4-mini",
+      "gpt-5.4-mini-2026-03-17",
+      "gpt-5.4-nano",
+    ])
+      expect(requiresResponsesApi(model)).toBe(true);
+    for (const model of [
+      "gpt-5-mini",
+      "gpt-5-nano",
+      "gpt-5.1",
+      "gpt-5.1-2025-11-13",
+      "gpt-5.2",
+      "gpt-5.2-2025-12-11",
+    ])
+      expect(requiresResponsesApi(model)).toBe(false);
+  });
+
   test("the models OpenAI serves tools for only on the Responses API are flagged", () => {
     for (const model of [
       "gpt-5.6-luna",
@@ -211,13 +240,14 @@ describe("whether a model has to be driven through the Responses API", () => {
       "gpt-5.3-codex",
     ])
       expect(requiresResponsesApi(model)).toBe(true);
-    for (const model of ["gpt-5", "gpt-5.4-mini", "gpt-5.5-2026-04-23", "o3"])
+    for (const model of ["gpt-5", "gpt-5.2", "o3"])
       expect(requiresResponsesApi(model)).toBe(false);
   });
 
   test("a gateway's namespaced name is the model it names", () => {
     expect(requiresResponsesApi("openai/gpt-5.6-terra")).toBe(true);
-    expect(requiresResponsesApi("openai/gpt-5.5")).toBe(false);
+    expect(requiresResponsesApi("openai/gpt-5.5")).toBe(true);
+    expect(requiresResponsesApi("openai/gpt-5.2")).toBe(false);
     // An open-weights model a gateway files under `openai/` is not one of OpenAI's own.
     expect(requiresResponsesApi("openai/gpt-oss-20b")).toBe(false);
     expect(requiresResponsesApi("qwen/qwen3-8b")).toBe(false);
@@ -238,6 +268,12 @@ describe("what a Bot runs from the spec file", () => {
     expect(botSettings("agent-langgraph-agui", {})).toEqual({
       provider: "openai",
       model: "gpt-4o-mini",
+    });
+    // The engine new Bots run on replaces the built-in agent, which runs the provider's current
+    // default, so it starts there too rather than on an older model.
+    expect(botSettings("agent-langgraph-ts", {})).toEqual({
+      provider: "openai",
+      model: "gpt-5.5",
     });
     expect(botSettings("agent-agno", {})).toEqual({
       provider: "openai",

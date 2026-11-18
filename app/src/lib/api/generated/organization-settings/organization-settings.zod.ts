@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
  * @summary Read what this OpenBot offers
  */
 
@@ -70,6 +70,24 @@ export const GetDeploymentResponse = zod
       .describe(
         "Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).",
       ),
+    attachmentLimits: zod
+      .object({
+        imageBytes: zod.int().min(1).describe("The largest image."),
+        documentBytes: zod
+          .int()
+          .min(1)
+          .describe(
+            "The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).",
+          ),
+        fileBytes: zod
+          .int()
+          .min(1)
+          .describe("The largest text file, or a file of any other kind."),
+      })
+      .optional()
+      .describe(
+        "How large a file attached to a message may be, by kind, in bytes. An upload over its kind's limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot's model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.",
+      ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");
 
@@ -93,13 +111,13 @@ export const getOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const getOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -147,6 +165,12 @@ export const GetOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
@@ -257,13 +281,13 @@ export const updateOrganizationSettingsBodyOneInactiveComputerDaysMax = 3650;
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsBodyOneProactiveDailyRunsMax = 1440;
@@ -311,6 +335,12 @@ export const UpdateOrganizationSettingsBody = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .optional()
       .describe("What an administrator needs to set the settings. Read only."),
@@ -406,13 +436,13 @@ export const updateOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -460,6 +490,12 @@ export const UpdateOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod

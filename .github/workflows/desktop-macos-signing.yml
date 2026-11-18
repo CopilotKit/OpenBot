@@ -122,7 +122,8 @@ jobs:
           scripts/publish-signed-windows.test.ts scripts/signing-workflows.test.ts
           scripts/sign-windows-update.test.ts
           ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
-          ../scripts/downloads-sync.test.ts scripts/release-cli-bundle.test.ts
+          ../scripts/downloads-sync.test.ts ../scripts/release-older-installers.test.ts
+          scripts/release-cli-bundle.test.ts
           scripts/verify-mac-arch.test.ts scripts/staple-with-retry.test.ts
         working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds

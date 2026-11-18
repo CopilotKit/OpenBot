@@ -575,6 +575,12 @@ export const RELEASE_FILES = "openbot-release.json";
 export interface ReleaseFiles {
   /** The last migration the server of this version applies: the database it migrates to. */
   database: string;
+  /**
+   * Whether the `openbot` chart stops every old server before a new one starts: the
+   * `openbot.ai/requires-downtime` annotation in its Chart.yaml. A chart from before the annotation
+   * rolls, so its absence is false.
+   */
+  requiresDowntime: boolean;
   chart: ChartPackage;
   bundleChart: ChartPackage;
 }
@@ -644,11 +650,58 @@ export function readReleaseFiles(
       );
     return { path, version: own };
   };
+  const chart = packaged("chart");
   return {
     database: record.database,
-    chart: packaged("chart"),
+    requiresDowntime: chartRequiresDowntime(chart.path),
+    chart,
     bundleChart: packaged("bundleChart"),
   };
+}
+
+/**
+ * The annotation in the `openbot` chart's Chart.yaml that decides how `helm upgrade` replaces its
+ * servers. In Chart.yaml rather than values.yaml because `--reuse-values` swaps the new chart's
+ * default values for the old chart's, and Chart.yaml always comes from the chart being installed.
+ */
+export const DOWNTIME_ANNOTATION = "openbot.ai/requires-downtime";
+
+/** Whether the packaged `openbot` chart stops every old server before a new one starts. */
+function chartRequiresDowntime(path: string): boolean {
+  const text = archiveFile(path, `${CHARTS.chart}/Chart.yaml`);
+  const chart: unknown = text ? Bun.YAML.parse(text.toString("utf8")) : {};
+  const annotations =
+    typeof chart === "object" && chart !== null && "annotations" in chart
+      ? chart.annotations
+      : undefined;
+  const declared =
+    typeof annotations === "object" && annotations !== null
+      ? (annotations as Record<string, unknown>)[DOWNTIME_ANNOTATION]
+      : undefined;
+  if (declared === undefined) return false;
+  if (declared !== "true" && declared !== "false")
+    throw new Error(
+      `${basename(path)} declares ${DOWNTIME_ANNOTATION}: ${JSON.stringify(declared)} in its Chart.yaml, which is not "true" or "false"`,
+    );
+  return declared === "true";
+}
+
+/**
+ * The policy's downtime, held to what the release's chart does. A policy that declares downtime
+ * beside a chart that rolls would let old and new servers share a database the old cannot read; a
+ * chart that stops every server beside a policy that declares none takes OpenBot down for nothing.
+ */
+export function checkDowntime(
+  policy: ReleasePolicy,
+  files: Pick<ReleaseFiles, "requiresDowntime">,
+): void {
+  const declared = policy.upgrade.requiresDowntime;
+  if (declared === files.requiresDowntime) return;
+  throw new Error(
+    declared
+      ? `${RELEASE_POLICY_FILE} says this release requires downtime, but the openbot chart it attaches upgrades its servers one by one while the old ones keep serving (its Chart.yaml does not declare ${DOWNTIME_ANNOTATION}: "true"). If this release's migrations are safe for the previous release, set upgrade.requiresDowntime to false in ${RELEASE_POLICY_FILE}; if they are not, publish OpenBot images whose chart declares ${DOWNTIME_ANNOTATION}: "true".`
+      : `${RELEASE_POLICY_FILE} says this release needs no downtime, but the openbot chart it attaches stops every old server before a new one starts (its Chart.yaml declares ${DOWNTIME_ANNOTATION}: "true"). Set upgrade.requiresDowntime to true in ${RELEASE_POLICY_FILE}, or publish OpenBot images whose chart declares "false".`,
+  );
 }
 
 /**
@@ -913,6 +966,7 @@ if (import.meta.main) {
             : {}),
         },
       );
+      if (files) checkDowntime(policy, files);
       console.log(
         `${RELEASE_POLICY_FILE} at ${configuration.commit} describes ${configuration.version}.`,
       );

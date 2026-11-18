@@ -5,15 +5,4 @@
 /**
  * Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.
  */
-export type SignInStatus = (typeof SignInStatus)[keyof typeof SignInStatus];
-
-export const SignInStatus = {
-  pending: "pending",
-  filling: "filling",
-  code_required: "code_required",
-  taken_over: "taken_over",
-  signed_in: "signed_in",
-  failed: "failed",
-  cancelled: "cancelled",
-  expired: "expired",
-} as const;
+export type SignInStatus = string;

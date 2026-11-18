@@ -4,6 +4,7 @@ import {
   useFrontendTool as useSDKFrontendTool,
 } from "@copilotkit/react-core/v2";
 import { withFinishedAt } from "@openbot/shared/computer-control";
+import { SEND_FILE_TOOL } from "@openbot/shared/send-file";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
@@ -37,6 +38,8 @@ const writes = new Set([
   "computer_key",
   "computer_run_command",
   "computer_write_file",
+  // Not a change, and still through the gate: the server needs the conversation to put the file in.
+  SEND_FILE_TOOL,
 ]);
 
 /**

@@ -149,7 +149,9 @@ export function InlineApproval({
               submitting={decision.isPending}
               title={title.charAt(0).toUpperCase() + title.slice(1)}
             >
-              {share?.text ? <ShareText text={share.text} /> : null}
+              {share?.text || share?.files.length ? (
+                <ShareText files={share.files} text={share.text} />
+              ) : null}
             </DecisionCard>
           </motion.section>
         ) : null}

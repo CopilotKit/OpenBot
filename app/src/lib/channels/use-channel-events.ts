@@ -5,7 +5,11 @@ import {
 } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { noticeChannelEvent } from "@/lib/notifications/reply-notice";
+import { nudgeMoment } from "@/lib/notices";
+import {
+  isBotReply,
+  noticeChannelEvent,
+} from "@/lib/notifications/reply-notice";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import { type BotTask, taskKeys } from "@/lib/tasks/queries";
 import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
@@ -522,6 +526,15 @@ export function useChannelEvents() {
         });
 
         refreshTaskCards(queryClient, activity);
+
+        /*
+         * A turn ended, or a Bot said something: a routine's run or a long task may just have
+         * finished, which is a win a nudge may follow. The preferences are read again a moment
+         * later, once the server has written the run's outcome (`lib/notices.ts`). Nothing is read
+         * where no nudge could come of it.
+         */
+        if (activity.busy === false || isBotReply(activity))
+          nudgeMoment(queryClient, { afterMs: 1500 });
 
         if (activity.work !== undefined) {
           queryClient.setQueryData(

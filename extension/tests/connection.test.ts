@@ -939,8 +939,12 @@ test("a fresh install creates its secret and connects through OpenBot Desktop wi
       followedUp.push((await currentConnection())?.token ?? "none");
     },
   });
-  fake.fireInstalled("install");
-  await settle();
+  // OpenBot answers the exchange later than a fixed wait would allow, as it can on a loaded machine.
+  const exchange = holdAnswer(
+    "/api/v2/organizations/default/recorder-connections",
+  );
+  void exchange.arrived.then(settle).then(exchange.release);
+  await fake.fireInstalled("install");
   expect(await readLocal("installSecret")).toBeTruthy();
   expect(await currentConnection()).toMatchObject({ via: "desktop" });
   expect(opened).toEqual([]);
@@ -959,8 +963,7 @@ test("an install with no OpenBot Desktop to answer connects nothing and opens no
       followedUp.push("connected");
     },
   });
-  fake.fireInstalled("install");
-  await settle();
+  await fake.fireInstalled("install");
   expect(await currentConnection()).toBeNull();
   expect(opened).toEqual([]);
   expect(followedUp).toEqual([]);

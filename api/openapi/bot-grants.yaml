@@ -1142,7 +1142,7 @@ components:
               type: string
               minLength: 1
               maxLength: 2000
-              pattern: ^[^\x00]*\S[^\x00]*$
+              pattern: ^[^\x00]*[^\s\x00][^\x00]*$
         approval:
           $ref: './common.yaml#/components/schemas/SharedAccountApproval'
     BotGrantChangesSaved:
@@ -1173,7 +1173,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: >-
             What the Bot may do in the app, in a sentence or two, at most 1,000
             characters once trimmed.
@@ -1651,7 +1651,7 @@ components:
             Read only: waiting, approved, dismissed, or withdrawn by the
             person who asked. Answering a request is approveAppAccessRequest
             or dismissAppAccessRequest.
-          enum: [pending, approved, dismissed, cancelled]
+          x-extensible-enum: [pending, approved, dismissed, cancelled]
         botId:
           type: [string, 'null']
           description: The Bot it is for, or null for a request about the app alone.
