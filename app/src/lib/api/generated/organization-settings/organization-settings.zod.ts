@@ -160,6 +160,12 @@ export const GetOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
@@ -324,6 +330,12 @@ export const UpdateOrganizationSettingsBody = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .optional()
       .describe("What an administrator needs to set the settings. Read only."),
@@ -473,6 +485,12 @@ export const UpdateOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
