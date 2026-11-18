@@ -456,6 +456,12 @@ button.text-link:hover:not(:disabled) {
   background: color-mix(in srgb, var(--ring) 7%, var(--card));
 }
 
+/* "Update OpenBot" sits where a failure card would, so it keeps that card's place: apart from what
+   is above it, and the next row's own gap below. */
+.local-alert.app-too-old {
+  margin: 20px 0 0;
+}
+
 .local-alert h2 {
   display: flex;
   align-items: center;
@@ -484,6 +490,11 @@ button.text-link:hover:not(:disabled) {
 
 .local-alert .row {
   margin-top: 12px;
+}
+
+/* A card with nothing said above its button (the heading over it already says why): no gap above. */
+.local-alert.app-too-old > .row:first-child {
+  margin-top: 0;
 }
 
 /* Under its button, a line keeps the row's gap rather than touching the button. */

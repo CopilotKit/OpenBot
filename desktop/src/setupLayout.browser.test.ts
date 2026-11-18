@@ -87,7 +87,30 @@ fake.emit = emit;
 // the back end's, which the window runs first (a Mac at 8.2 GB).
 const updateShort = location.hash === "#update-short";
 const backEndShort = location.hash === "#backend-short";
-const relaunch = location.hash === "#start" || updateShort || backEndShort;
+// This app too old for its OpenBot, as the shell says it: connected to an OpenBot (such as OpenBot
+// Cloud) that needs a newer app; one whose sign-in ended, as it always was; and the OpenBot on
+// this computer needing a newer app once Start has it running.
+const CONNECTED_PROBLEMS = {
+  "#connect-app-too-old": { said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.", kind: "app-too-old" },
+  "#connect-app-too-old-security": { said: "This version of OpenBot has a security problem. Update to keep using it.", kind: "app-too-old-security" },
+  "#connect-session-ended": { said: "Your sign-in to openbot.example.com has ended. Sign in again to keep going.", kind: "session-ended" },
+};
+const connectedProblem = CONNECTED_PROBLEMS[location.hash];
+// The same, for a minimum raised because of a security problem.
+const localSecurity = location.hash === "#local-app-too-old-security";
+const localTooOld = location.hash === "#local-app-too-old" || localSecurity;
+// Start finding the release on this computer needs a newer launcher contract than this app speaks.
+const launcherAhead = location.hash === "#local-launcher-ahead";
+// A launch that finds this computer's OpenBot already running, and that it needs a newer app.
+const runningTooOld = location.hash === "#local-app-too-old-running";
+// The same launch, where showing it fails as it could before: the slot the card above lands in.
+const runningFails = location.hash === "#local-running-fails";
+// The update feed has a newer version, so the offer at the top shows too.
+const offered = location.search === "?offer";
+// A build that never updates itself (internal, candidate, or without the updater).
+const internal = location.search === "?internal";
+// Found running by the launch is a relaunch too: an installation set up and started before.
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead;
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -123,6 +146,26 @@ fake.opened = [];
 export async function invoke(command, args) {
   fake.calls.push(command);
   if (command === "plugin:opener|open_url") fake.opened.push(args.url);
+  if (connectedProblem && command === "connection")
+    return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
+  if (connectedProblem && command === "show_connected") throw connectedProblem;
+  if ((runningTooOld || runningFails) && command === "already_running") return true;
+  if (runningFails && command === "show_openbot")
+    throw { said: "Part of OpenBot needs recovery. Try starting OpenBot once more." };
+  if (localSecurity && command === "show_openbot")
+    throw {
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      detail: "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+      kind: "app-too-old-security",
+    };
+  if ((localTooOld || runningTooOld) && command === "show_openbot")
+    throw {
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      detail: "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+      kind: "app-too-old",
+    };
+  if ((connectedProblem || localTooOld || runningTooOld || launcherAhead) && command === "app_update_offer")
+    return { version: offered ? "1.2.0" : null, current: "1.1.0", installing: null, updatesItself: !internal, ready: null };
   switch (command) {
     case "windows_restart_pending":
     case "take_ai_connection_change":
@@ -140,7 +183,7 @@ export async function invoke(command, args) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld && !runningTooOld && !launcherAhead ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
       if (updateShort)
         throw {
@@ -194,9 +237,17 @@ export async function invoke(command, args) {
         };
       if (backEndShort) return { ...status("ready", "valid"), updateTo: "0.16.0-rc.13" };
       return status("ready", "valid");
-    // OpenBot's own start, the step's last row: it stays there for the test to look at.
+    // OpenBot's own start, the step's last row: it stays there for the test to look at. Running,
+    // when the window is about to find it needs a newer app. Refused, when the release laid out
+    // needs a newer launcher contract than this app speaks.
     case "start_stack":
-      return new Promise(() => {});
+      if (launcherAhead)
+        throw {
+          said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+          detail: "OpenBot v1.3.0 needs launcherApi 2; this app is v1.1.1 and speaks launcherApi 1",
+          kind: "app-too-old",
+        };
+      return localTooOld ? null : new Promise(() => {});
     // Usage data as a first run finds it: shared until the person says otherwise.
     case "plugin:openbot-desktop|usage_data":
       return { shared: true, offByEnvironment: false };
@@ -2136,3 +2187,250 @@ describe.skipIf(!asked)(
     }, 30_000);
   },
 );
+
+/*
+ * When this app is too old for its OpenBot (`client_version.rs`), the window says the shell's
+ * sentence and offers its one way on, Update and restart, in view and uncovered, without outgrowing
+ * the window. Beside them problems the screen always had, a sign-in that ended and a found-running
+ * OpenBot that fails to show, for comparison. With `OPENBOT_SHOTS_DIR` set, each is
+ * saved there in light and dark, at the window's default size.
+ */
+describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
+  const shots = process.env.OPENBOT_SHOTS_DIR;
+  const states: {
+    name: string;
+    at: string;
+    said: string;
+    way: { role: "button" | "link"; name: string };
+    /** The window's heading, where the state's screen is OpenBot on this computer running. */
+    heading?: string;
+  }[] = [
+    {
+      name: "connected-app-too-old",
+      at: "#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-app-too-old-with-offer",
+      at: "?offer#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-app-too-old-security",
+      at: "#connect-app-too-old-security",
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old-security",
+      at: "#local-app-too-old-security",
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old",
+      at: "#local-app-too-old",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+      heading: "Update OpenBot",
+    },
+    // Found running by a launch that did not start it: the same screen as when Start finds it.
+    {
+      // Start refused: the release on this computer needs a newer launcher contract (launcherApi).
+      name: "local-launcher-ahead",
+      at: "#local-launcher-ahead",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-launcher-ahead-with-offer",
+      at: "?offer#local-launcher-ahead",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old-found-running",
+      at: "?offer#local-app-too-old-running",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+      heading: "Update OpenBot",
+    },
+    {
+      name: "existing-found-running-fails",
+      at: "#local-running-fails",
+      said: "Part of OpenBot needs recovery. Try starting OpenBot once more.",
+      way: { role: "button", name: "Install" },
+    },
+    {
+      name: "existing-session-ended",
+      at: "#connect-session-ended",
+      said: "Your sign-in to openbot.example.com has ended.",
+      way: { role: "button", name: "Sign in again" },
+    },
+  ];
+  for (const state of states) {
+    for (const [width, height] of [
+      [1000, 800],
+      [720, 560],
+    ] as const) {
+      test(`${state.name} at ${width}x${height}: the sentence and its way on are in view`, async () => {
+        for (const colorScheme of ["light", "dark"] as const) {
+          const page = await browser.newPage({
+            viewport: { width, height },
+            colorScheme,
+          });
+          try {
+            await open(page, state.at);
+            await page.getByText(state.said, { exact: false }).waitFor();
+            // The card's entrance, and the update offer's first answer, settled.
+            await page.waitForTimeout(1200);
+            // The card's own way on: the last of its name, under the offer at the top when there is one.
+            const way = await page.evaluate(({ role, name }) => {
+              const found = [
+                ...document.querySelectorAll(role === "link" ? "a" : "button"),
+              ].filter((element) => element.textContent?.trim() === name);
+              const element = found.at(-1);
+              if (!element) return null;
+              // A step taller than the window scrolls inside its card: there, it is reached so.
+              element.scrollIntoView({ block: "nearest" });
+              const box = element.getBoundingClientRect();
+              const top = document.elementFromPoint(
+                box.left + box.width / 2,
+                box.top + box.height / 2,
+              );
+              return {
+                y: box.top,
+                bottom: box.bottom,
+                covered: !(top && (top === element || element.contains(top))),
+                enabled: !(element as HTMLButtonElement).disabled,
+              };
+            }, state.way);
+            expect({ state: state.name, found: way !== null }).toEqual({
+              state: state.name,
+              found: true,
+            });
+            expect(way?.y ?? -1).toBeGreaterThanOrEqual(0);
+            expect(way?.bottom ?? height + 1).toBeLessThanOrEqual(height);
+            expect({ state: state.name, covered: way?.covered }).toEqual({
+              state: state.name,
+              covered: false,
+            });
+            expect(way?.enabled).toBe(true);
+            // Running, so never "OpenBot is stopped" with a Start: Show OpenBot and Stop OpenBot.
+            if (state.heading) {
+              const screen = await page.evaluate(() => ({
+                heading: document.querySelector("h1")?.textContent?.trim(),
+                buttons: [...document.querySelectorAll("button")].map(
+                  (button) => button.textContent?.trim(),
+                ),
+              }));
+              expect(screen.heading).toBe(state.heading);
+              expect(screen.buttons).not.toContain("Start OpenBot");
+              expect(screen.buttons).toContain("Show OpenBot");
+              expect(screen.buttons).toContain("Stop OpenBot");
+            }
+            // One Update and restart: the offer at the top stands back while the card says why.
+            if (state.way.name === "Update and restart")
+              expect(
+                await page.evaluate(
+                  () =>
+                    [...document.querySelectorAll("button")].filter(
+                      (button) =>
+                        button.textContent?.trim() === "Update and restart",
+                    ).length,
+                ),
+              ).toBe(1);
+            const fits = await page.evaluate(() => ({
+              page: document.documentElement.scrollHeight,
+              window: window.innerHeight,
+              wide: document.documentElement.scrollWidth,
+              across: window.innerWidth,
+            }));
+            expect(fits.page).toBeLessThanOrEqual(fits.window);
+            expect(fits.wide).toBeLessThanOrEqual(fits.across);
+            if (shots && width === 1000)
+              await page.screenshot({
+                path: `${shots}/${state.name}-${colorScheme}.png`,
+              });
+          } finally {
+            await page.close();
+          }
+        }
+      }, 30_000);
+    }
+  }
+
+  /*
+   * On a build that never updates itself, the line that says so is part of the notice, in the
+   * notice's type, on the connect screen as on the screen for the OpenBot on this computer. Seen on
+   * a Mac: on the connect screen it sat under the notice in body type.
+   */
+  for (const state of [
+    {
+      name: "connected-app-too-old-internal",
+      at: "?internal#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+    },
+    {
+      name: "local-app-too-old-internal",
+      at: "?internal#local-app-too-old",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+    },
+  ]) {
+    test(`${state.name}: "doesn't update itself" is in the notice, in the notice's type`, async () => {
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 800 },
+          colorScheme,
+        });
+        try {
+          await open(page, state.at);
+          await page.getByText(state.said, { exact: false }).waitFor();
+          // The update's own line (Updates, folded under the buttons, says it too).
+          await page
+            .locator('p[role="status"]', { hasText: "doesn't update itself" })
+            .waitFor();
+          await page.waitForTimeout(1200);
+          const placed = await page.evaluate((said) => {
+            const notice = [...document.querySelectorAll(".local-alert")].find(
+              (element) => element.textContent?.includes(said),
+            );
+            const sentence = [...(notice?.querySelectorAll("p") ?? [])].find(
+              (element) => element.textContent?.includes(said),
+            );
+            const line = [
+              ...document.querySelectorAll('p[role="status"]'),
+            ].find((element) =>
+              element.textContent?.includes("doesn't update itself"),
+            );
+            const size = (element: Element | undefined) =>
+              element ? getComputedStyle(element).fontSize : null;
+            return {
+              inside: Boolean(notice && line && notice.contains(line)),
+              line: size(line),
+              notice: size(sentence),
+              updates: [...document.querySelectorAll("button")].filter(
+                (button) => button.textContent?.trim() === "Update and restart",
+              ).length,
+            };
+          }, state.said);
+          expect(placed.notice).not.toBeNull();
+          expect(placed).toEqual({
+            inside: true,
+            line: placed.notice,
+            notice: placed.notice,
+            updates: 0,
+          });
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/${state.name}-${colorScheme}.png`,
+            });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 30_000);
+  }
+});

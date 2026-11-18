@@ -11,6 +11,7 @@ own repository:
 | `agno.svg` | [`agno-agi/docs`](https://github.com/agno-agi/docs) `favicon.png`, embedded unchanged in an SVG |
 | `langgraph.svg` | LangChain's own symbol, `LangChain_Symbol_Black.svg` from the brand pack on [langchain.com/brand-assets](https://www.langchain.com/brand-assets) (downloaded 2026-11-09), verbatim apart from a `<title>`. Named for the harness id it belongs to |
 | `langroid.svg` | [`langroid/langroid`](https://github.com/langroid/langroid) `public/logo_light.png`, scaled to 128 px and embedded in an SVG |
+| `mastra.svg` | The glyph from Mastra's own favicon, [mastra.ai/favicon/new-brand/icon.svg](https://mastra.ai/favicon/new-brand/icon.svg) (downloaded 2026-11-18), the mark from its November 2025 [rebrand](https://mastra.ai/blog/rebrand). Its path is verbatim; the black tile behind it is dropped and the glyph drawn in `currentColor`, scaled into the 24-unit box, with a `<title>` and `1em` sizing. The lobehub set still has the old orb, so `shared/marks.test.ts` pins this path |
 | `kubernetes.svg` | The Kubernetes icon from the CNCF's own artwork repository, [`cncf/artwork`](https://github.com/cncf/artwork) `projects/kubernetes/icon/color/kubernetes-icon-color.svg`, verbatim apart from a `<title>`. Used under the Linux Foundation's trademark usage guidelines, to name the project |
 | `unbiased.svg` | Unbiased AI's own icon, as served at `platform.unbiased.ai/logos/unbiased-icon.svg` and supplied by Unbiased AI for this row, verbatim apart from a `<title>` and `1em` sizing |
 

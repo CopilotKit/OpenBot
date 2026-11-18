@@ -92,6 +92,10 @@ mock.module("../src/auth", () => ({
 mock.module("expo-crypto", () => ({
   randomUUID: () => crypto.randomUUID(),
 }));
+// The mutator names the app on every request, from the release expo-constants gives it as built.
+mock.module("expo-constants", () => ({
+  default: { expoConfig: { extra: { openbotRelease: "1.1.0" } } },
+}));
 
 const { getTask } = await import("../src/api/generated/tasks/tasks");
 const { listRoutineRuns } = await import(
