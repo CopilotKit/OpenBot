@@ -110,7 +110,7 @@ services:
       NODE_ENV: ""
       # Every address below names a service on this network rather than the loopback port the host
       # server reaches it on.
-      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
+      DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot_moved
       AGENT_COMPUTER_URL: http://agent-computer:4100
       # Per-Bot computers too, which is not automatic: the supervisor publishes each on a loopback
       # port unless `COMPUTER_NETWORK` names this project's `default` network, and a loopback port on
