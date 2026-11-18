@@ -57,6 +57,19 @@ info:
     SIGN_IN_UNAVAILABLE.
 
 
+    OpenBot's own apps name themselves on every request in the header
+    `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop,
+    mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header
+    may name more than one, separated by spaces: OpenBot Desktop adds its
+    own to the one its window's page sent. getDeployment says which API
+    versions this OpenBot serves and the oldest release of each app it
+    serves (minimumClients). Every other operation refuses an app older
+    than that with 400 and the code CLIENT_UPDATE_REQUIRED, whose problem
+    names the app (client) and its minimum (minimumVersion) and whose
+    detail tells the person to update OpenBot. A program of your own need
+    not send the header; without it nothing is refused for a version.
+
+
     This file is the single source of truth: the clients, the server's types,
     the docs and the contract tests are all generated from it or checked
     against it. A change that breaks an existing client fails the pull request.
@@ -985,6 +998,15 @@ components:
             reason: each entry names the item and says what is wrong with it.
           items:
             type: object
+        client:
+          type: string
+          enum: [web, desktop, mobile, recorder]
+          description: >-
+            On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named
+            that is older than this OpenBot serves.
+        minimumVersion:
+          type: string
+          description: On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves.
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
@@ -1302,6 +1324,19 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+            clientUpdateRequired:
+              value:
+                type: https://open.bot/errors/client-update-required
+                title: This app is too old for this OpenBot.
+                status: 400
+                detail: This OpenBot needs OpenBot Desktop 1.0.2 or later. Update OpenBot, then try again.
+                code: CLIENT_UPDATE_REQUIRED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                client: desktop
+                minimumVersion: 1.0.2
     ConversationNotFound:
       description: >-
         The conversation does not exist, was removed, or the caller is not in

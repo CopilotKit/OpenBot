@@ -1,0 +1,192 @@
+{
+  "$comment": "What each app decides from an OpenBot's deployment answer (shared/client-version.ts `compatibility`). The web app, the Recorder, OpenBot Desktop and the phone app each run every case. `deployments` are real answers: `current` is what this release's server answers (the back end's test holds its real answer to it), `v1.1.0` is what OpenBot 1.1.0 answers (no version fields), `raised` is this release with an admin's OPENBOT_MINIMUM_CLIENTS=desktop=1.2.0,mobile=1.2.0,recorder=1.2.0,web=1.2.0, and `v3-only` is a later OpenBot that serves only a new API. `before-v2` is an OpenBot from before the v2 API (1.0.3 and older): its deployment answers 404 and its /api/capabilities answers as `before-v2-capabilities` shows.",
+  "deployments": {
+    "current": {
+      "edition": "team",
+      "localEvaluation": false,
+      "generativeUi": true,
+      "selfHostBanner": false,
+      "transcription": false,
+      "voice": false,
+      "durableHistory": true,
+      "authProviders": ["okta"],
+      "ssoConfigured": false,
+      "ssoRequired": false,
+      "builtInBots": true,
+      "isolatedBots": false,
+      "botComputers": true,
+      "attachmentLimits": {
+        "imageBytes": 8388608,
+        "documentBytes": 8388608,
+        "fileBytes": 1048576
+      },
+      "api": ["v2"],
+      "minimumClients": {
+        "web": "1.1.0",
+        "desktop": "1.0.2",
+        "mobile": "1.1.0",
+        "recorder": "1.1.0"
+      },
+      "launcherApi": 1,
+      "extensionApi": 1
+    },
+    "v1.1.0": {
+      "edition": "team",
+      "localEvaluation": false,
+      "generativeUi": true,
+      "selfHostBanner": false,
+      "transcription": false,
+      "voice": false,
+      "durableHistory": true,
+      "authProviders": ["okta"],
+      "ssoConfigured": false,
+      "ssoRequired": false,
+      "builtInBots": true,
+      "isolatedBots": false,
+      "botComputers": true
+    },
+    "raised": {
+      "edition": "team",
+      "localEvaluation": false,
+      "generativeUi": true,
+      "selfHostBanner": false,
+      "transcription": false,
+      "voice": false,
+      "durableHistory": true,
+      "authProviders": ["okta"],
+      "ssoConfigured": false,
+      "ssoRequired": false,
+      "builtInBots": true,
+      "isolatedBots": false,
+      "botComputers": true,
+      "attachmentLimits": {
+        "imageBytes": 8388608,
+        "documentBytes": 8388608,
+        "fileBytes": 1048576
+      },
+      "api": ["v2"],
+      "minimumClients": {
+        "web": "1.2.0",
+        "desktop": "1.2.0",
+        "mobile": "1.2.0",
+        "recorder": "1.2.0"
+      },
+      "launcherApi": 1,
+      "extensionApi": 1
+    },
+    "v3-only": {
+      "edition": "team",
+      "localEvaluation": false,
+      "generativeUi": true,
+      "selfHostBanner": false,
+      "transcription": false,
+      "voice": false,
+      "durableHistory": true,
+      "authProviders": ["okta"],
+      "ssoConfigured": false,
+      "ssoRequired": false,
+      "builtInBots": true,
+      "isolatedBots": false,
+      "botComputers": true,
+      "api": ["v3"],
+      "minimumClients": { "desktop": "2.0.0" },
+      "launcherApi": 2,
+      "extensionApi": 2
+    }
+  },
+  "before-v2-capabilities": {
+    "mode": "intelligence",
+    "durableHistory": true,
+    "generativeUi": true,
+    "selfHostBanner": false,
+    "localEvaluation": false,
+    "edition": "team"
+  },
+  "cases": [
+    {
+      "deployment": "current",
+      "client": { "kind": "desktop", "version": "1.1.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "web", "version": "1.1.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "mobile", "version": "1.1.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "recorder", "version": "1.1.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "desktop", "version": "1.0.1" },
+      "fit": "app",
+      "minimum": "1.0.2"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "mobile", "version": "1.0.9" },
+      "fit": "app",
+      "minimum": "1.1.0"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "desktop", "version": "1.0.2-rc.3" },
+      "fit": "app",
+      "minimum": "1.0.2"
+    },
+    {
+      "deployment": "v1.1.0",
+      "client": { "kind": "desktop", "version": "1.1.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "v1.1.0",
+      "client": { "kind": "web", "version": "1.2.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "raised",
+      "client": { "kind": "desktop", "version": "1.1.0" },
+      "fit": "app",
+      "minimum": "1.2.0"
+    },
+    {
+      "deployment": "raised",
+      "client": { "kind": "web", "version": "1.1.0" },
+      "fit": "app",
+      "minimum": "1.2.0"
+    },
+    {
+      "deployment": "raised",
+      "client": { "kind": "desktop", "version": "1.2.0" },
+      "fit": "ok"
+    },
+    {
+      "deployment": "v3-only",
+      "client": { "kind": "desktop", "version": "1.1.0" },
+      "fit": "app"
+    },
+    {
+      "deployment": "current",
+      "client": { "kind": "desktop", "version": "2.0.0", "speaks": ["v3"] },
+      "fit": "server"
+    },
+    {
+      "deployment": "before-v2",
+      "client": { "kind": "desktop", "version": "1.1.0" },
+      "fit": "server"
+    },
+    {
+      "deployment": "before-v2",
+      "client": { "kind": "mobile", "version": "1.1.0" },
+      "fit": "server"
+    }
+  ]
+}

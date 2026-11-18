@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.
+ * Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no build: only whether single sign-on is set up and required, and which API versions and which releases of each OpenBot app it serves. It is never refused for the app's version, so an app reads it first to learn whether it, or the OpenBot, needs an update.
  * @summary Read what this OpenBot offers
  */
 
@@ -16,6 +16,23 @@ export const GetDeploymentParams = zod.object({
       "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
 });
+
+export const getDeploymentResponseApiItemRegExp = new RegExp(
+  "^v[1-9][0-9]{0,3}$",
+);
+
+export const getDeploymentResponseMinimumClientsWebRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseMinimumClientsDesktopRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseMinimumClientsMobileRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
+export const getDeploymentResponseMinimumClientsRecorderRegExp = new RegExp(
+  "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]{1,64})?$",
+);
 
 export const GetDeploymentResponse = zod
   .object({
@@ -82,6 +99,54 @@ export const GetDeploymentResponse = zod
       .optional()
       .describe(
         "How large a file attached to a message may be, by kind, in bytes. An upload over its kind's limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot's model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.",
+      ),
+    api: zod
+      .array(zod.string().regex(getDeploymentResponseApiItemRegExp))
+      .min(1)
+      .optional()
+      .describe(
+        "The API versions this OpenBot serves, by major, such as v2. An app that speaks none of them can't use it: when they are all newer than the app's, the app needs an update; when they are all older, this OpenBot does. Absent from a release before it was published, which serves v2.",
+      ),
+    minimumClients: zod
+      .object({
+        web: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsWebRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        desktop: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsDesktopRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        mobile: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsMobileRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+        recorder: zod
+          .string()
+          .regex(getDeploymentResponseMinimumClientsRecorderRegExp)
+          .optional()
+          .describe("An OpenBot release, such as 1.1.0."),
+      })
+      .optional()
+      .describe(
+        "The oldest release of each OpenBot app this OpenBot serves. An app names itself in the OpenBot-Client header, and one older than its minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but this deployment answer. An app not listed has no minimum. Absent from a release before it was published.",
+      ),
+    launcherApi: zod
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "The version of what OpenBot Desktop supplies when it starts this OpenBot on its own computer. It changes when Desktop must supply something new.",
+      ),
+    extensionApi: zod
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "The version of what the OpenBot Recorder and this OpenBot exchange.",
       ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");
