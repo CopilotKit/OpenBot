@@ -46,7 +46,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   API spec marks deprecated answers with the standard `Deprecation` and `Sunset` headers and a
   `Link` to this changelog, whose Deprecated list under a release's "Before upgrading" says what
   replaces it. It keeps working until at least its sunset, 12 months or more after it was
-  deprecated, and is removed only once nothing still uses it. Nothing is deprecated yet. See
+  deprecated, and is removed only once nothing still uses it. A field in an answer is the
+  exception: the server can't tell whether anything reads it, so it may go once its sunset has
+  passed. Nothing is deprecated yet. See
   [api/README.md](api/README.md#deprecating).
 - **Statuses, roles and scope kinds in API answers can gain values.** The spec declares them open
   (`x-extensible-enum`): a task's or a run's status, a person's role, a network policy's scope,

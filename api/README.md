@@ -78,7 +78,8 @@ The `API spec` job in `.github/workflows/ci.yml` fails a pull request when:
 Something a client uses is never removed in place. It is marked deprecated in the spec, answers
 with the standard headers from then on, and is removed only when two things are both true: its
 sunset has passed, at least 12 months after it was deprecated, and nothing has used it over the
-last 12 months, by the count OpenBot Cloud keeps of every use.
+last 12 months, by the count OpenBot Cloud keeps of every use. A property of a response is the one
+exception: nothing can count it, so its sunset alone decides (below).
 
 1. Mark it in its area file: `deprecated: true` on the operation, the query or header parameter, or
    the property of a request or response body, with `x-deprecation-date` (the day it is deprecated)
@@ -113,7 +114,9 @@ generated from, so a request that uses a deprecated element is answered with `De
 ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594.html)) and `Link: <changelog>; rel="deprecation"`,
 and each use is counted by the app that made it, from its `OpenBot-Client` header. Nobody writes
 those headers by hand. A deprecated response property is listed and dated the same way, but no
-answer is marked for it: a server can't see which fields a client reads.
+answer is marked for it and nothing counts it: a server can't see which fields a client reads. So a
+response property's removal waits on the 12-month window alone: it may go once its sunset has
+passed.
 
 ## Enums that grow
 

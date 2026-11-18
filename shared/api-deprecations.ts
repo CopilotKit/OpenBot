@@ -19,7 +19,7 @@
  *
  * A response property is in the table and the changelog like anything else, but no request uses it,
  * so no answer is marked for it and nothing counts it: a server can't see which fields a client
- * reads.
+ * reads. Its removal waits on its sunset alone.
  */
 
 /** Where the `Link` header points: the changelog, whose Deprecated list says what replaces each one. */
