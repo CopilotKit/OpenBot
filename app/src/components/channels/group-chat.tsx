@@ -312,15 +312,28 @@ function GroupLine({
             Thinking
           </p>
         ) : message.status === "waiting" ? (
-          <p className="text-sm text-muted-foreground">
-            {message.reason ?? "Waiting for your response."}{" "}
-            <Link
-              className="underline"
-              params={{ agentId: message.agentId }}
-              to="/bots/$agentId"
-            >
-              Open {name}
-            </Link>
+          /*
+           * Only the person whose turn it was can answer what the Bot is waiting on, on the Bot's
+           * page. Everyone else reads why it waits, in words the server writes for them, and is
+           * given nothing to do: the link would open a page with nothing of theirs to answer.
+           */
+          <p className="text-sm text-muted-foreground" role="status">
+            {message.reason ??
+              (mine
+                ? "Waiting for your response."
+                : "Waiting for someone else to answer.")}
+            {mine ? (
+              <>
+                {" "}
+                <Link
+                  className="underline"
+                  params={{ agentId: message.agentId }}
+                  to="/bots/$agentId"
+                >
+                  Open {name}
+                </Link>
+              </>
+            ) : null}
           </p>
         ) : message.consent ? (
           // Only the person whose account it asked for can answer; everyone else sees the ask.
@@ -336,6 +349,11 @@ function GroupLine({
               {message.consent.serverId} account.
             </p>
           )
+        ) : message.status === "failed" && message.declined ? (
+          // A reply its person chose not to share is a choice, not a fault: a notice, never red.
+          <p className="text-sm text-muted-foreground" role="status">
+            {message.text}
+          </p>
         ) : message.status === "failed" ? (
           <p className="text-sm text-destructive" role="alert">
             {message.text || "This Bot couldn't answer."}
