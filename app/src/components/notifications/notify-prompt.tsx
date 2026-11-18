@@ -16,7 +16,8 @@ import {
 /** Set once somebody answers the prompt either way, so it is offered once per browser. */
 export const NOTIFY_PROMPT_KEY = "openbot-notify-prompt-answered";
 
-function answered(): boolean {
+/** Whether this browser has answered the offer, either way. The star prompt waits until it has. */
+export function notifyPromptAnswered(): boolean {
   try {
     return localStorage.getItem(NOTIFY_PROMPT_KEY) !== null;
   } catch {
@@ -42,7 +43,7 @@ function remember() {
  */
 export function NotifyPrompt() {
   const permission = useNotificationPermission();
-  const [dismissed, setDismissed] = useState(answered);
+  const [dismissed, setDismissed] = useState(notifyPromptAnswered);
   if (permission !== "default" || dismissed) return null;
 
   return (
