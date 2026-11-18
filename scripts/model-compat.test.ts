@@ -233,6 +233,17 @@ test("a run that answered passes", () => {
   });
 });
 
+test("a reply that carries the model's reasoning fails, though it says OK", () => {
+  // What gemma-4-31b-it answered through the LangGraph (TypeScript) engine.
+  const leaked = agnoReply.replace(
+    '"delta":"OK"',
+    '"delta":"<thought>The user wants one word.</thought>OK"',
+  );
+  const outcome = classifyRun({ status: 200, body: leaked });
+  expect(outcome.status).toBe("fail");
+  expect(outcome.detail).toContain("reasoning in the reply text");
+});
+
 test("an error a framework puts in its raw event is still the failure's text", () => {
   const result = classifyRun({ status: 200, body: agnoNotFound });
   expect(result.status).toBe("fail");

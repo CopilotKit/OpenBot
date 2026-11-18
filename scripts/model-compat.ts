@@ -512,7 +512,18 @@ export function classifyRun(response: {
   );
 }
 
-function judgeReply(text: string, silence: string): Outcome {
+/**
+ * A model's own reasoning left in its reply, which a person would read as the Bot's answer: the
+ * Gemma 4 models, through the LangGraph (TypeScript) engine, answered "<thought>…</thought>OK".
+ */
+const REASONING_IN_REPLY = /<\/?(thought|think|thinking|reasoning)>/i;
+
+export function judgeReply(text: string, silence: string): Outcome {
+  if (REASONING_IN_REPLY.test(text))
+    return {
+      status: "fail",
+      detail: `answered with its reasoning in the reply text: ${oneLine(text, 160)}`,
+    };
   if (/\bok(ay)?\b/i.test(text))
     return { status: "pass", detail: oneLine(text, 80) };
   if (text)
@@ -1518,6 +1529,20 @@ export function pinnedClients(
       lockfile,
     )?.[1];
     if (found) pinned[name] = found;
+  }
+  // npm's lockfile, for a harness installed with `npm ci` (the LangGraph (TypeScript) engine).
+  const npmLock = read("package-lock.json");
+  if (npmLock) {
+    const packages =
+      (
+        JSON.parse(npmLock) as {
+          packages?: Record<string, { version?: string }>;
+        }
+      ).packages ?? {};
+    for (const name of NODE_CLIENTS) {
+      const version = packages[`node_modules/${name}`]?.version;
+      if (version) pinned[name] = version;
+    }
   }
   const codex = /^DEFAULT_CLIENT_VERSION\s*=\s*"([^"]+)"/m.exec(
     read("src/chatgpt_models.py"),

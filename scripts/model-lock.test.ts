@@ -92,6 +92,10 @@ test("a pin that moved past the lock is caught", () => {
   expect(Object.keys(pinnedClients(ROOT, "agent-mastra"))).toContain(
     "@mastra/core",
   );
+  // npm's lockfile, for the LangGraph (TypeScript) engine.
+  expect(Object.keys(pinnedClients(ROOT, "agent-langgraph-ts"))).toContain(
+    "@langchain/core",
+  );
 });
 
 /*
