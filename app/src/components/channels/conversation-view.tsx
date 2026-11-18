@@ -535,14 +535,14 @@ export function ConversationView({
          * beside the notifications offer: one card above the composer at a time, and the offer that
          * is useful to this person goes first.
          *
-         * Never right after an error: not while this conversation shows one (`notice`) or its last
-         * turn ended without an answer (`stopped`). It also waits while OpenBot Desktop has not yet
+         * Never right after an error: not while the last turn here ended without an answer
+         * (`stopped`, where a failed run is said). Not read off `notice`: a conversation passes one
+         * every time, mostly empty, so its presence says nothing. It also waits while OpenBot Desktop has not yet
          * said whether notifications are on (`checking`), or the card could draw, be counted as
          * shown, and vanish when the answer is "not asked yet". And never in a conversation that
          * cannot take a message: the brief "Picking a Bot" screen, or one whose Bot was deleted.
          */}
         {disabled ||
-        notice ||
         stopped ||
         notificationPermission === "checking" ||
         (notificationPermission === "default" &&

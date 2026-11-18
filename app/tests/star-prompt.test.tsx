@@ -338,10 +338,24 @@ test("never right after an error, even when the server says it is due", () => {
     stopped: "The Bot stopped before it finished answering.",
   });
   expect(card(failed)).toBeNull();
-  cleanup();
+});
 
-  const refused = conversation({ notice: <p role="alert">Couldn't send.</p> });
-  expect(card(refused)).toBeNull();
+/*
+ * A conversation always hands the view a notice: the allowances, the hand-off resume and the rest,
+ * which mostly draw nothing. Its being there is no error, and the card must still show.
+ */
+test("an ordinary conversation's notice, drawing nothing, does not hide it", () => {
+  server.last = "win";
+  loadAppShell();
+  const view = conversation({
+    notice: (
+      <>
+        {null}
+        {false}
+      </>
+    ),
+  });
+  expect(card(view)).not.toBeNull();
 });
 
 test("the server taking the win back (a routine failed after it) shows nothing", async () => {
