@@ -94,6 +94,7 @@ export function diagnostics(
 const ENGINE = "Software OpenBot runs on";
 
 type Busy =
+  | "openbot-start"
   | "openbot-restart"
   | "openbot-stop"
   | "intelligence-restart"
@@ -107,6 +108,7 @@ type Busy =
 const SERVICES = "OpenBot's services";
 
 const BUSY_SAID: Record<Busy, string> = {
+  "openbot-start": "Starting OpenBot…",
   "openbot-restart": "Restarting OpenBot…",
   "openbot-stop": "Stopping OpenBot…",
   "intelligence-restart": `Restarting ${SERVICES}…`,
@@ -115,7 +117,7 @@ const BUSY_SAID: Record<Busy, string> = {
 };
 
 /**
- * What OpenBot is running, what each part costs, and Restart and Stop for each.
+ * What OpenBot is running, what each part costs, and Start, Restart and Stop for each.
  *
  * Memory is read every few seconds while the window shows; it is Docker's figure per container,
  * OpenBot's own server among them. Intelligence's readiness is the CLI's, asked only on
@@ -183,14 +185,18 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
   async function act(what: Busy, run: () => Promise<unknown>) {
     setBusy(what);
     setSaid(null);
+    let failed = false;
     try {
       await run();
     } catch {
-      setSaid(`${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`);
+      failed = true;
     } finally {
       setBusy(null);
       await refresh();
     }
+    // Said after the refresh, which clears what the window said: said before it, it never showed.
+    if (failed)
+      setSaid(`${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`);
   }
 
   const intelligence = async (action: "start" | "stop") => {
@@ -236,6 +242,25 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                 group="bots"
                 parts={[...status.processes, ...status.containers]}
               />
+              {/* Stopped, Start is the main window's own Start OpenBot, run there: the services
+                  first, then OpenBot. After Stop this row offered nothing, and the services' Start
+                  below brought up only the services. Below the floor nothing starts here. */}
+              {!status.openbotRunning && !belowFloor && (
+                <div className="row">
+                  <button
+                    type="button"
+                    className="quiet"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      act("openbot-start", () =>
+                        invoke("start_openbot_from_status"),
+                      )
+                    }
+                  >
+                    Start
+                  </button>
+                </div>
+              )}
               {status.openbotRunning && (
                 <div className="row">
                   {/* Restart is Compose restarting the server's container this session started. */}

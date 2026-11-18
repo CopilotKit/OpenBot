@@ -248,6 +248,29 @@ export async function invoke(command, args) {
           kind: "app-too-old",
         };
       return localTooOld ? null : new Promise(() => {});
+    // The Status window (\`#status\`): everything running, or, at \`?stopped#status\`, all of it
+    // stopped as Stop leaves it, the software OpenBot runs on still running.
+    case "desktop_status": {
+      const stopped = location.search === "?stopped";
+      return {
+        openbotRunning: !stopped,
+        openbotHeld: !stopped,
+        processes: [],
+        containers: stopped ? [] : [
+          { name: "openbot-desktop-server-1", memoryBytes: 200000000 },
+          { name: "openbot-desktop-worker-1", memoryBytes: 50000000 },
+          { name: "openbot-desktop-postgres-1", memoryBytes: 150000000 },
+        ],
+        intelligenceStack: "local-abc123",
+        intelligenceContainers: stopped ? [] : [{ name: "k3d-local-abc123-server-0", memoryBytes: 2400000000 }],
+        engine: "docker",
+        root: "/Users/you/OpenBot",
+        appPort: stopped ? null : 3010,
+        version: "1.1.0",
+        build: "internal",
+        logFolder: "/Users/you/Library/Logs/ai.copilotkit.openbot.desktop",
+      };
+    }
     // Usage data as a first run finds it: shared until the person says otherwise.
     case "plugin:openbot-desktop|usage_data":
       return { shared: true, offByEnvironment: false };
@@ -2433,4 +2456,64 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
       }
     }, 30_000);
   }
+});
+
+/*
+ * After Stop, the Status window's App row said Stopped and offered nothing, while the services row
+ * under it offered Start. The App row offers Start now, laid out as the services row's: the same
+ * button, as far under its heading, at the same left edge. In the window's own size, light and dark.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the window, stopped and running.
+ */
+describe.skipIf(!asked)("the Status window after Stop", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`the App row offers Start as the services row does (${colorScheme})`, async () => {
+      const shots = process.env.OPENBOT_APP_SHOTS;
+      const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+      for (const state of ["running", "stopped"] as const) {
+        const page = await browser.newPage({
+          viewport: { width: 640, height: 720 },
+          colorScheme,
+        });
+        try {
+          await open(page, state === "stopped" ? "?stopped#status" : "#status");
+          await page.getByRole("region", { name: "App" }).waitFor();
+          await page.waitForTimeout(400);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/status-${state}-${colorScheme}-${engine}.png`,
+            });
+          if (state === "running") continue;
+          const seen = await page.evaluate(() => {
+            const part = (name: string) => {
+              const section = document.querySelector(
+                `section[aria-label="${name}"]`,
+              );
+              const head = section?.querySelector(".status-head");
+              const buttons = [...(section?.querySelectorAll("button") ?? [])];
+              const button = buttons[0]?.getBoundingClientRect();
+              const top = head?.getBoundingClientRect();
+              return {
+                said: buttons.map((one) => one.textContent),
+                left: button?.left,
+                width: button?.width,
+                height: button?.height,
+                underHead:
+                  button && top ? Math.round(button.top - top.bottom) : null,
+                className: buttons[0]?.className,
+              };
+            };
+            return { app: part("App"), services: part("OpenBot's services") };
+          });
+          expect(seen.app.said).toEqual(["Start"]);
+          expect(seen.services.said).toEqual(["Start"]);
+          expect(seen.app.className).toBe(seen.services.className);
+          expect(seen.app.left).toBe(seen.services.left);
+          expect(seen.app.width).toBe(seen.services.width);
+          expect(seen.app.height).toBe(seen.services.height);
+          expect(seen.app.underHead).toBe(seen.services.underHead);
+        } finally {
+          await page.close();
+        }
+      }
+    }, 30_000);
 });

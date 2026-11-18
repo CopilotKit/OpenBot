@@ -616,6 +616,54 @@ mod stop_ipc {
         );
     }
 
+    /// After Stop from the Status window, its App row offered no Start. Its Start now runs the
+    /// setup page's own Start OpenBot, once: said to a setup page already there, and kept for one
+    /// still loading. A main window showing anything else is sent to setup, whose page takes it.
+    #[test]
+    fn start_from_the_status_window_asks_the_setup_page_to_start_once() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::start_from_the_status_window_asks_the_setup_page_to_start_once",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/status-start";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+        let (heard, told) = mpsc::channel();
+        fixture.window.listen(START_ASKED_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+
+        // The Status window's Stop (`stop_openbot_from_status`).
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::StatusWindow);
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(
+            !take_start_asked(fixture.app.handle().clone()),
+            "Stop asks for no Start"
+        );
+
+        start_openbot_from_status(fixture.app.handle().clone()).unwrap();
+        told.recv_timeout(DEADLINE)
+            .expect("the setup page already there is told");
+        assert_eq!(fixture.window.url().unwrap().as_str(), setup);
+        assert!(take_start_asked(fixture.app.handle().clone()));
+        assert!(
+            !take_start_asked(fixture.app.handle().clone()),
+            "one Start per ask"
+        );
+
+        // Showing OpenBot's own page: sent to setup, and the ask kept for its page to take on load.
+        fixture
+            .window
+            .navigate("http://127.0.0.1:3010/".parse().unwrap())
+            .unwrap();
+        start_openbot_from_status(fixture.app.handle().clone()).unwrap();
+        assert_eq!(fixture.window.url().unwrap().as_str(), setup);
+        assert!(take_start_asked(fixture.app.handle().clone()));
+    }
+
     #[test]
     fn change_ai_connection_after_a_failed_stop_opens_setup_as_usual() {
         if crate::test_support::isolated_process(

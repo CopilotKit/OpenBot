@@ -1172,6 +1172,55 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     if (localAuto) local.start();
   }, [localAuto, resumingStart]);
 
+  /*
+   * Start in the Status window once OpenBot has stopped (`start_openbot_from_status`): this
+   * window's own Start OpenBot, so there is one Start. Before, the Status window offered no Start
+   * for the app, and its services' Start brought up only the services. Stop sends this window
+   * back to setup, so an ask can come while the page loads: it is taken once the saved setup is
+   * read. One that comes later is said (`setup:start`), and taken then. Either way, once.
+   */
+  const [startAsked, setStartAsked] = useState(false);
+  const settled = !checkingResume && !checkingWindows;
+  useEffect(() => {
+    if (!settled) return;
+    let active = true;
+    const take = () =>
+      invoke<boolean>("take_start_asked")
+        .then((asked) => {
+          if (active && asked) setStartAsked(true);
+        })
+        .catch(() => {});
+    // Listening first, then taking: an ask between the two is taken either way.
+    const stop = listen("setup:start", () => void take()).then((unlisten) => {
+      void take();
+      return unlisten;
+    });
+    return () => {
+      active = false;
+      void stop.then((unlisten) => unlisten());
+    };
+  }, [settled]);
+  // Where this window offers Start OpenBot itself. Anywhere else the ask is spent, and the window,
+  // now in front, says what comes first.
+  const startOnOffer =
+    !running &&
+    !choosing &&
+    !blocker &&
+    !blockerFailure &&
+    !restartPending &&
+    !busy &&
+    !installingAfresh &&
+    step === "connect" &&
+    !local.running &&
+    local.at === null &&
+    modelCanStart();
+  // Once per ask, whatever the window shows by then.
+  useEffect(() => {
+    if (!startAsked) return;
+    setStartAsked(false);
+    if (startOnOffer) local.start();
+  }, [startAsked]);
+
   // The person closed macOS's password prompt: whichever screen they are on says so, with Try
   // again, while Install asks again by itself. See `install::GoAhead`.
   const goAhead = goAheadNow(steps);

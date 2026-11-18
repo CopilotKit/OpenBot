@@ -70,6 +70,9 @@ struct Shell {
     /// Settings asked to change the AI connection, and the Stop it asked for finished: the setup
     /// page opens at its AI screen, once, instead of at Start.
     change_ai_connection: std::sync::atomic::AtomicBool,
+    /// Start was chosen in the Status window: the setup page runs its own Start OpenBot, once
+    /// (`start_openbot_from_status`).
+    start_asked: std::sync::atomic::AtomicBool,
     /// Quit keeps the event loop alive until one background cleanup attempt finishes.
     quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
@@ -9288,6 +9291,51 @@ fn stop_openbot_from_status(app: tauri::AppHandle) {
     stop_from_menu(app, AskedFrom::StatusWindow);
 }
 
+/// Said to a setup page already loaded when Start is chosen in the Status window.
+const START_ASKED_EVENT: &str = "setup:start";
+
+/**
+Start, from the Status window once OpenBot has stopped: the setup window's own Start OpenBot, run
+there, so there is one Start. It brings up OpenBot's services and then OpenBot, as that button does.
+Before, the Status window offered no Start for the app, and its services' Start brought up only the
+services, leaving OpenBot stopped until Start OpenBot in the main window.
+
+Stop sends the main window back to setup, so its page may still be loading: the ask is kept for it
+(`take_start_asked`), and said to a page already there (`setup:start`). A main window showing
+anything else is sent to setup, whose page takes the ask on load. The main window comes forward,
+since that is where the Start shows how far along it is.
+*/
+#[tauri::command]
+fn start_openbot_from_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    log::info!("[start] asked {}", AskedFrom::StatusWindow.said());
+    ask_setup_to_start(&app.state::<Shell>());
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there")?;
+    let on_setup = window.url().is_ok_and(|url| on_setup_page(&app, &url));
+    if !on_setup {
+        show_setup(app.clone())?;
+    }
+    bring_to_front(&app, "Start was chosen in the Status window");
+    app.emit_to("main", START_ASKED_EVENT, ())
+        .map_err(|error| format!("could not ask setup to start: {error}"))
+}
+
+fn ask_setup_to_start(shell: &Shell) {
+    shell
+        .start_asked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The setup page's question once its saved setup is read, and on `setup:start`: was Start chosen
+/// in the Status window? Answered once.
+#[tauri::command]
+fn take_start_asked<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    app.state::<Shell>()
+        .start_asked
+        .swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Both pages are single-page apps. Keep their route and in-memory state on restore.
 /// Compare the authority explicitly: tauri:// has an opaque URL origin.
 fn same_window_app(current: &tauri::Url, destination: &tauri::Url) -> bool {
@@ -13192,6 +13240,8 @@ fn main() {
             desktop_status,
             restart_openbot,
             stop_openbot_from_status,
+            start_openbot_from_status,
+            take_start_asked,
             open_log_folder,
             troubleshooting_logs,
             save_troubleshooting_logs,

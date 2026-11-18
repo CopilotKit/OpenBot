@@ -120,6 +120,62 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
   ).toBe(false);
 });
 
+const stopped = {
+  ...running,
+  openbotRunning: false,
+  openbotHeld: false,
+  containers: [],
+  intelligenceContainers: [],
+  appPort: null,
+};
+
+/**
+ * After Stop, the App row said Stopped and offered nothing: the one way back was Start OpenBot in
+ * the main window. Its Start is that same Start, run in the main window (`start_openbot_from_status`),
+ * which brings the services up and then OpenBot. Not the services row's Start, which starts only
+ * the services and leaves the app stopped.
+ */
+test("after Stop, the App row offers Start, and Start starts OpenBot as the main window does", async () => {
+  invokeHandler = answers({ desktop_status: stopped });
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  const app = await view.findByRole("region", { name: "App" });
+  expect(app.textContent).toContain("Stopped");
+  // Start, and only Start: Restart and Stop are for an app that runs.
+  expect(
+    within(app)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Start"]);
+  await userEvent.click(within(app).getByRole("button", { name: "Start" }));
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter(
+        (call) => call.command === "start_openbot_from_status",
+      ),
+    ).toHaveLength(1),
+  );
+  // The main window's Start brings the services up itself: this window does not start them apart.
+  expect(
+    invokeCalls.some(
+      (call) =>
+        call.command === "run_local_eval" &&
+        (call.args as { action: string }).action === "start",
+    ),
+  ).toBe(false);
+});
+
+test("a Start the main window could not be asked for says so", async () => {
+  invokeHandler = async (command) => {
+    if (command === "start_openbot_from_status")
+      throw "the OpenBot window is not there";
+    return answers({ desktop_status: stopped })(command);
+  };
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  const app = await view.findByRole("region", { name: "App" });
+  await userEvent.click(within(app).getByRole("button", { name: "Start" }));
+  await view.findByText("Starting OpenBot did not finish. Try again.");
+});
+
 /**
  * Seen on a Windows box below the security floor: Start for OpenBot's services was offered, the
  * shell refused it, and the window said nothing at all. Below the floor nothing starts here, so
@@ -144,6 +200,7 @@ test("below the security floor, nothing is offered to start and the window says 
     ),
   );
   expect(within(services).queryByRole("button", { name: "Start" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Start" })).toBeNull();
   expect(view.queryByRole("button", { name: "Restart" })).toBeNull();
 });
 
