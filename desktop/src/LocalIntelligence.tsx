@@ -1155,9 +1155,16 @@ export function LocalIntelligence({
   open = [],
   releaseDue = false,
   waitingOn = null,
+  room = null,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /**
+   * An update this computer has no room for (`local_eval::update_room`), said with its figures
+   * under the screen's heading, with Retry beside it. The row that stopped says why in a few
+   * words, the rows hold no Retry of their own, and the logs are offered once, here.
+   */
+  room?: { reason: string; logs: Problem } | null;
   /**
    * What the person has to choose before the sequence can go on, when it stopped for that: its
    * row waits on them, with no Failed and no Retry (leftover data, `StartFresh`).
@@ -1193,14 +1200,18 @@ export function LocalIntelligence({
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
         )
-      : plan && tooSmall
-        ? // What happened on the row; what to do in the card under it.
-          sequence.steps.map((row) =>
-            row.ok
-              ? row
-              : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+      : room && stopped
+        ? sequence.steps.map((row) =>
+            row.ok ? row : { ...row, detail: room.reason },
           )
-        : sequence.steps;
+        : plan && tooSmall
+          ? // What happened on the row; what to do in the card under it.
+            sequence.steps.map((row) =>
+              row.ok
+                ? row
+                : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+            )
+          : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
@@ -1215,7 +1226,9 @@ export function LocalIntelligence({
       <SetupProgress steps={rows} showElapsed={!journeying} />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
-      {stopped && problem && !waitingOn && <Failure problem={problem} />}
+      {stopped && problem && !waitingOn && !room && (
+        <Failure problem={problem} />
+      )}
       {plan && tooSmall && !waitingOn && (
         <PodmanTooSmall
           key={plan.machine}
@@ -1225,7 +1238,7 @@ export function LocalIntelligence({
         />
       )}
       {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
-      {!(plan && tooSmall) && (
+      {!(plan && tooSmall) && !(room && stopped) && (
         <div className="row">
           {running && at !== "start" && (
             <button type="button" className="quiet" onClick={sequence.cancel}>
@@ -1243,11 +1256,15 @@ export function LocalIntelligence({
             </p>
           )}
           {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
-          {stopped && !waitingOn && !backendLost(sequence) && !plan && (
-            <button type="button" onClick={sequence.retry}>
-              Retry
-            </button>
-          )}
+          {stopped &&
+            !waitingOn &&
+            !room &&
+            !backendLost(sequence) &&
+            !plan && (
+              <button type="button" onClick={sequence.retry}>
+                Retry
+              </button>
+            )}
           {offerStart && !running && at === null && (
             <button type="button" onClick={sequence.start}>
               Start OpenBot
@@ -1260,7 +1277,9 @@ export function LocalIntelligence({
           with a problem has them in its own card (`Failure`), a stop the person clears (signing
           in, the agreement, Start fresh) has its own action instead, and their own Cancel is no
           failure to troubleshoot. */}
+      {stopped && room && <TroubleshootingLogs problem={room.logs} />}
       {stopped &&
+        !room &&
         !problem &&
         !waitingOn &&
         !needsPerson(sequence) &&

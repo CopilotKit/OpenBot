@@ -297,6 +297,23 @@ export function resourcesShortSaid(shortfall: Shortfall): string {
   );
 }
 
+/**
+ * An update this computer has no room for: the screen's heading, and the few words the row that
+ * stopped says. The figures are the sentence under the heading (`resourcesShortSaid`).
+ */
+export const ROOM_HEADING = "OpenBot needs more free space to update";
+export const ROOM_REASON = "Not enough free space to update.";
+
+/**
+ * The shortfall of an update not started for lack of room (`local_eval::update_room`), from
+ * whichever place said it: OpenBot's own update, or the back end's. Null for anything else.
+ */
+export function updateRoomShort(
+  ...said: (Shortfall | null | undefined)[]
+): Shortfall | null {
+  return said.find((short) => short?.updating && short.disk) ?? null;
+}
+
 /** MiB as the GB a person reads: 6144 is "6", 3277 is "3.2". */
 function gb(mib: number): string {
   const tenths = Math.floor((mib / 1024) * 10) / 10;
