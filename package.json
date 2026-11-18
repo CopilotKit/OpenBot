@@ -46,6 +46,7 @@
     "playwright-core": "1.62.1"
   },
   "overrides": {
+    "fast-xml-parser": "5.12.1",
     "lodash-es": "4.18.0"
   }
 }

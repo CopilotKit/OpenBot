@@ -285,7 +285,7 @@ export const batchUpdateCapabilitiesBodyChangesMax = 100;
 export const batchUpdateCapabilitiesBodyAuthoringTextMax = 2000;
 
 export const batchUpdateCapabilitiesBodyAuthoringTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const BatchUpdateCapabilitiesBody = zod.object({
@@ -421,7 +421,7 @@ export const TranslateCapabilityChangesHeader = zod.object({
 export const translateCapabilityChangesBodyTextMax = 1000;
 
 export const translateCapabilityChangesBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const TranslateCapabilityChangesBody = zod.object({
@@ -571,9 +571,9 @@ export const PreviewCapabilityChangesResponse = zod.object({
       email: zod.string(),
       name: zod.string().nullable(),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       groups: zod.array(zod.string()),
       capabilities: zod.array(
@@ -597,13 +597,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
           title: zod.string(),
           before: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum([
-              "default",
-              "organization",
-              "role",
-              "group",
-              "team",
-            ]),
+            decidedBy: zod.string(),
             scopeId: zod
               .string()
               .describe(
@@ -612,13 +606,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
           }),
           after: zod.object({
             allowed: zod.boolean(),
-            decidedBy: zod.enum([
-              "default",
-              "organization",
-              "role",
-              "group",
-              "team",
-            ]),
+            decidedBy: zod.string(),
             scopeId: zod
               .string()
               .describe(

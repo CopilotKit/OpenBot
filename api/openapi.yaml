@@ -20269,7 +20269,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
     BotId:
       name: botId
       in: path
@@ -21533,6 +21533,13 @@ components:
         - admin
         - member
       description: 'The person''s role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.'
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum:
+        - owner
+        - admin
+        - member
+      description: 'The person''s role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn''t know as a member.'
     NoticeId:
       type: string
       minLength: 1
@@ -21597,7 +21604,7 @@ components:
             - 'null'
           description: The picture their identity provider gave, when it gave one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         needsName:
           type: boolean
           description: Whether they have still to choose what OpenBot calls them, because their name is missing or is only their address.
@@ -21968,7 +21975,7 @@ components:
           description: Who they are there, such as their GitHub login, when the service said.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - needs_reconnect
           description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
@@ -22136,7 +22143,7 @@ components:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     IdentityProviderAddress:
       type: string
       format: uri
@@ -22169,7 +22176,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The provider's SAML metadata XML, as its identity team supplied it.
     OidcIdentityProviderRequest:
       type: object
@@ -22199,13 +22206,13 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An id for the provider, unique in the organization, such as acme-okta.
     IdentityProviderDomains:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: The email domain whose people it signs in, such as acme.com. Several are separated by commas.
     CreateIdentityProviderRequest:
       description: A SAML or an OIDC provider, by protocol.
@@ -22289,7 +22296,7 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: 'The organization''s settings. Context is read only: it comes back with the settings and is never sent.'
@@ -22438,6 +22445,13 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum:
+            - per-person
+            - shared
+            - none
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -22593,7 +22607,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -22604,7 +22618,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -22647,7 +22661,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -22722,7 +22736,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object
@@ -22800,7 +22814,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum:
+          x-extensible-enum:
             - default
             - organization
             - role
@@ -22841,7 +22855,7 @@ components:
                   - string
                   - 'null'
               role:
-                $ref: '#/components/schemas/PersonRole'
+                $ref: '#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -22997,7 +23011,7 @@ components:
           description: organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum:
+          x-extensible-enum:
             - organization
             - group
             - team
@@ -23707,6 +23721,8 @@ components:
           type:
             - string
             - 'null'
+        unverified:
+          $ref: '#/components/schemas/UnverifiedModel'
     ModelChoiceInput:
       type: object
       additionalProperties: false
@@ -24264,7 +24280,7 @@ components:
           description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -24580,7 +24596,7 @@ components:
           description: The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - needs_input
         - working
         - resolved
@@ -24843,6 +24859,19 @@ components:
         text:
           type: string
           description: What was said.
+    UnverifiedModel:
+      type: object
+      description: The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.
+      required:
+        - model
+        - label
+      properties:
+        model:
+          type: string
+          description: The chosen model's id.
+        label:
+          type: string
+          description: Its name, as a model picker shows it.
     AppSource:
       type: string
       enum:
@@ -26147,7 +26176,7 @@ components:
               type: string
               minLength: 1
               maxLength: 2000
-              pattern: ^[^\x00]*\S[^\x00]*$
+              pattern: ^[^\x00]*[^\s\x00][^\x00]*$
         approval:
           $ref: '#/components/schemas/SharedAccountApproval'
     BotGrantChangesSaved:
@@ -26182,7 +26211,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What the Bot may do in the app, in a sentence or two, at most 1,000 characters once trimmed.
     BotGrantCheck:
       type: object
@@ -26632,7 +26661,7 @@ components:
         status:
           type: string
           description: 'Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.'
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - dismissed
@@ -27541,7 +27570,7 @@ components:
       description: 'What was sent: a Bot''s reply, a question it asked, an approval it needs, or what the person''s Bots'' check-ins found that needs them.'
     DeliveryState:
       type: string
-      enum:
+      x-extensible-enum:
         - queued
         - running
         - accepted
@@ -27752,12 +27781,11 @@ components:
           type:
             - string
             - 'null'
-          enum:
+          x-extensible-enum:
             - succeeded
             - failed
             - skipped
             - waiting
-            - null
           description: How it ended, or null while it is still open. Only failed is a failure.
         at:
           type:
@@ -27963,7 +27991,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - running
             - succeeded
             - failed
@@ -28131,7 +28159,7 @@ components:
           description: When it last ran, or null.
         lastStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -28309,7 +28337,7 @@ components:
           description: Where it can be opened, or null.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - open
             - dismissed
             - started
@@ -28597,7 +28625,7 @@ components:
           description: When it is done. May be empty.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - paused
             - completed
@@ -28776,7 +28804,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -29272,7 +29300,7 @@ components:
           type: string
           description: What people call it.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         active:
           type: boolean
           description: 'Whether the caller is working in this one: the organization their session works in, or for an app''s token the one its OpenBot-Organization header names, else the caller''s own. Always false for a request made with an API key.'
@@ -29308,7 +29336,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         slug:
           type: string
@@ -29343,7 +29371,7 @@ components:
           type: array
           description: The roles the caller may give this member, their current one left out. The server's verdict. Empty when the caller may not change this member's role.
           items:
-            $ref: '#/components/schemas/PersonRole'
+            $ref: '#/components/schemas/PersonRoleAnswer'
         id:
           type: string
           description: The person's id.
@@ -29361,7 +29389,7 @@ components:
             - 'null'
           description: Their picture's address, when they have one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         joinedAt:
           type: string
           format: date-time
@@ -29394,7 +29422,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
     UpdateOrganizationMemberRequest:
       type: object
@@ -29448,7 +29476,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - declined
@@ -29546,7 +29574,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - accepted
@@ -29688,7 +29716,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type: string
@@ -29717,7 +29745,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type:
@@ -29807,7 +29835,7 @@ components:
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
-      enum:
+      x-extensible-enum:
         - pending
         - approved
         - denied
@@ -30073,7 +30101,7 @@ components:
           type: string
           minLength: 1
           maxLength: 6000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The person's answer. Trimmed.
         inConversation:
           type: boolean
@@ -30199,7 +30227,7 @@ components:
       type: string
       minLength: 1
       maxLength: 300
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.
     ApprovalRuleInput:
       type: object
@@ -30580,7 +30608,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The rule in a sentence or two, at most 1,000 characters once trimmed.
     ApprovalRuleDraftWrittenRow:
       type: object
@@ -30907,7 +30935,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The sentence the rules were written from, at most 2,000 characters once trimmed.
     ApprovalRuleDraftBatch:
       type: object
@@ -30991,7 +31019,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance, at most 2,000 characters once trimmed.
     ReviewerGuidanceCheck:
       type: object
@@ -31062,7 +31090,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance to test, at most 2,000 characters once trimmed.
         limit:
           type: integer
@@ -31226,7 +31254,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: 1 to 80 characters once trimmed.
         description:
           type: string
@@ -31553,7 +31581,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The question, 1 to 500 characters once trimmed.
     WhatIfInitiator:
       type: string
@@ -31960,7 +31988,7 @@ components:
           description: The id of the person who asked.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - declined
@@ -32251,7 +32279,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: Why the Bot declined, in its own words. The trail keeps the first 500 characters.
         request:
           type: string
@@ -32833,7 +32861,7 @@ components:
           description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - waiting
             - taken
             - completed
@@ -32927,7 +32955,7 @@ components:
           description: The image it runs now.
     ComputerState:
       type: string
-      enum:
+      x-extensible-enum:
         - absent
         - starting
         - ready
@@ -34034,7 +34062,7 @@ components:
         - $ref: '#/components/schemas/PersonRealBrowserOpened'
     SignInStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - pending
         - filling
         - code_required
@@ -35002,7 +35030,7 @@ components:
           description: Whether it adds a skill, changes one, or removes one.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending_review
             - approved
             - rejected
@@ -35274,7 +35302,7 @@ components:
           format: uuid
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - freezing
             - batching
@@ -35827,7 +35855,7 @@ components:
           type: boolean
         syncStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded

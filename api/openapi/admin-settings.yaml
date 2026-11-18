@@ -1006,7 +1006,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
   schemas:
     Deployment:
       type: object
@@ -1119,7 +1119,7 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: >-
@@ -1259,6 +1259,10 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum: [per-person, shared, none]
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -1404,7 +1408,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -1417,7 +1421,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -1453,7 +1457,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -1523,7 +1527,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object
@@ -1583,7 +1587,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum: [default, organization, role, group, team]
+          x-extensible-enum: [default, organization, role, group, team]
         scopeId:
           type: string
           description: The role, the group's name or the team's id that decided it. Empty otherwise.
@@ -1606,7 +1610,7 @@ components:
               name:
                 type: [string, 'null']
               role:
-                $ref: './common.yaml#/components/schemas/PersonRole'
+                $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -1728,7 +1732,7 @@ components:
             organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum: [organization, group, team]
+          x-extensible-enum: [organization, group, team]
           description: >-
             Whose policy: the organization's, a team's, or a directory
             group's.

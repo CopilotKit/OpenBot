@@ -5,11 +5,4 @@
 /**
  * Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.
  */
-export type ComputerState = (typeof ComputerState)[keyof typeof ComputerState];
-
-export const ComputerState = {
-  absent: "absent",
-  starting: "starting",
-  ready: "ready",
-  unreachable: "unreachable",
-} as const;
+export type ComputerState = string;

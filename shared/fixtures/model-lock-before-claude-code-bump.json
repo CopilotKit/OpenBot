@@ -1,0 +1,36 @@
+{
+  "checkedAt": "2026-11-17",
+  "engines": {
+    "agent-claude-sdk": {
+      "clients": {
+        "ag-ui-claude-sdk": "0.1.5",
+        "anthropic": "2.10.0",
+        "claude-agent-sdk": "0.2.152",
+        "claude-code": "2.1.259"
+      },
+      "providers": {
+        "anthropic": {
+          "verified": [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5"
+          ],
+          "refused": {
+            "claude-fable-5-2": "API Error: 400 Claude Code 2.1.259 does not support this model; version 2.1.290 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.",
+            "claude-opus-5-5": "API Error: 400 Claude Code 2.1.259 does not support this model; version 2.1.280 or newer is required. Run 'claude update', or update the Claude desktop app, then try again."
+          }
+        }
+      }
+    }
+  }
+}

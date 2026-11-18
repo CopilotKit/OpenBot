@@ -180,7 +180,7 @@ export const batchUpdateBotGrantsBodyRemoveMax = 2000;
 export const batchUpdateBotGrantsBodyAuthoringTextMax = 2000;
 
 export const batchUpdateBotGrantsBodyAuthoringTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const batchUpdateBotGrantsBodyApprovalMembersItemValueMax = 320;
 
@@ -300,7 +300,7 @@ export const translateBotGrantsBodyAppIdRegExp = new RegExp("\\S");
 export const translateBotGrantsBodyTextMax = 1000;
 
 export const translateBotGrantsBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const TranslateBotGrantsBody = zod.object({
@@ -1248,7 +1248,7 @@ export const ApproveBotAppResponse = zod.object({
           "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
         ),
       status: zod
-        .enum(["pending", "approved", "dismissed", "cancelled"])
+        .string()
         .describe(
           "Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.",
         ),

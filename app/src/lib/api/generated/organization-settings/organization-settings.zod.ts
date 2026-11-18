@@ -111,13 +111,13 @@ export const getOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const getOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -165,6 +165,12 @@ export const GetOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
@@ -275,13 +281,13 @@ export const updateOrganizationSettingsBodyOneInactiveComputerDaysMax = 3650;
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsBodyOneProactiveDailyRunsMax = 1440;
@@ -329,6 +335,12 @@ export const UpdateOrganizationSettingsBody = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .optional()
       .describe("What an administrator needs to set the settings. Read only."),
@@ -424,13 +436,13 @@ export const updateOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -478,6 +490,12 @@ export const UpdateOrganizationSettingsResponse = zod
         actionRecordRetentionDays: zod
           .int()
           .describe("How many days recorded computer actions are kept."),
+        computerMode: zod
+          .enum(["per-person", "shared", "none"])
+          .optional()
+          .describe(
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+          ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod

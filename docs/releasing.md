@@ -9,6 +9,9 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
+   Anything the API deprecated since the last release is in the Deprecated list under "Before
+   upgrading", with its sunset; CI fails a deprecation the changelog doesn't list
+   ([api/README.md](../api/README.md#deprecating)).
 3. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
@@ -519,6 +522,13 @@ another version. Its candidates, betas and final share it, so **Create release P
 `version` along within one release, `v0.3.0` to `v0.3.0-rc.1` to `v0.3.0`, and changes nothing
 else. A policy written for an earlier release is left alone: write the new release's policy into
 the release PR before merging it. A final may not change the policy beyond its version.
+
+`requiresDowntime` is false for a release whose migrations the previous release still works
+against, which is the rule: old and new servers share the database while a rolling upgrade runs. A
+release that cannot keep to it declares `true`, and the `openbot` chart it attaches must say the
+same in its `Chart.yaml` annotation `openbot.ai/requires-downtime`, which makes `helm upgrade`
+stop every old server before a new one starts. Publishing refuses a policy and a chart that
+disagree.
 
 ## Finishing a candidate
 
@@ -1137,6 +1147,108 @@ never ran on, so a final always runs the full suite.
 it when it is not. Signed desktop builds are the exception: they read the `macos-signing` and
 `windows-signing` environments described above and in [Windows signing](windows-signing.md).
 Downloads sync signs in to AWS with GitHub's OIDC token rather than a stored key.
+
+## Model compatibility
+
+The model picker lists each provider's models live, but every harness image carries its model
+client at a fixed version: the Claude Agent SDK harness bundles a Claude Code CLI (through
+`claude-agent-sdk` in `agent-claude-sdk/requirements.txt`), the LangGraph harness sends the ChatGPT
+plan's backend a fixed Codex client version (`DEFAULT_CLIENT_VERSION` in
+`agent-langgraph-agui/src/chatgpt_models.py`), and the others carry the provider SDKs they were built
+with. A provider can refuse a new model to an older client while the picker keeps offering it:
+"Claude Code 2.1.259 does not support this model; version 2.1.290 or newer is required".
+
+**Model compatibility** (`.github/workflows/model-compat.yml`) checks for that daily, and by hand
+from the Actions tab. One job per harness in `.github/published-images.json` runs
+[`scripts/model-compat.ts`](../scripts/model-compat.ts), which:
+
+- lists each provider's models from the same source, with the same filter, as the picker (see
+  [The model list](configuration.md#the-model-list));
+- starts the harness image on each provider the way the Desktop configures it, and sends one AG-UI
+  run per model, so the harness's own client makes the call. It checks `latest`, the published
+  image people run, and `source`, the image built from this commit;
+- compares the LangGraph harness's Codex client version with the minimum each ChatGPT plan model
+  needs, from openai/codex's published model catalogue. A plan sign-in cannot run in CI. A Claude
+  plan runs through the same Claude Code CLI as an Anthropic key, so the key's rows cover it.
+
+It writes a pass, fail or skipped row per harness, image, provider and model, with the provider's
+own words, to the run's summary. On any failure the run fails and opens or updates one issue,
+**Model compatibility check failing**, and the first passing run closes it. It runs only on a
+schedule or by hand on `main`, never on a pull request.
+
+Each provider needs its key as a repository secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY` (Google, also used for Antigravity) and `XAI_API_KEY`. A provider without one is
+reported as skipped, not failed, and the summary names the missing secrets. Unbiased AI is not
+checked: it is a gateway serving its own model, not a provider's listing.
+
+**When it fails**, read the provider's words in the table:
+
+- A version refusal (a model "not supported" by the client's version, or a ChatGPT plan model that
+  needs a newer Codex) means bumping the pinned client: `claude-agent-sdk` in
+  `agent-claude-sdk/requirements.txt` (each release bundles a newer Claude Code CLI), or
+  `DEFAULT_CLIENT_VERSION` in `agent-langgraph-agui/src/chatgpt_models.py`, or the harness's
+  provider SDK in its `requirements.txt` or `package.json`. Run the check by hand: the `source` rows
+  show whether the bump fixed it before a release ships it, and the `latest` rows stay red until
+  one does.
+- A refused parameter or endpoint (a model that takes tools only through `/v1/responses`, or
+  refuses a `temperature`) means that harness builds its request in a way the model no longer
+  accepts: fix how the harness sets up its model, or bump the framework if a newer one does.
+- Billing, rate limits or a refused key are the key's problem, not a client's: fix the key.
+
+To run it locally (needs Docker), with keys in the environment or an env file:
+
+```sh
+bun scripts/model-compat.ts --env-file .env --harness agent-claude-sdk --provider anthropic
+```
+
+`--model <regex>` narrows the models, `--tags latest` skips building from source.
+
+### Model lock
+
+The picker offers a model only when this check has proven it on the Bot's harness.
+`shared/model-lock.json` holds, per harness, the model clients its `source` image carried and, per
+provider, the models that answered and the ones refused, in the provider's words. The server's model
+catalogue reads it (`shared/model-lock.ts` has the rule): a live model the lock doesn't verify for
+the harness is hidden, and a conversation already set to one runs on the default and says so.
+
+- **Which harness.** A Claude plan runs every Bot through `agent-claude-sdk`, a ChatGPT plan through
+  `agent-langgraph-agui`, and with a key, the harness picked in setup when it takes OpenBot's model
+  choice.
+- **What is locked.** Only an engine and provider pair that has been checked. A pair never checked (a
+  provider with no key here, such as xAI today) stays open, and a gateway is never locked.
+- **A new engine** can be locked before its first release, by giving it empty pairs for the
+  providers it runs on. Nothing is offered on it until a run proves a model, including on a
+  provider the check has no key for. The check runs every engine the lock names, published or not
+  yet, from its `source` image (`bun scripts/model-compat.ts harnesses` lists them). An engine new
+  Bots run on by default (`DEFAULT_ENGINES` in `shared/model-lock.ts`, today the LangGraph
+  (TypeScript) engine, `agent-langgraph-ts`) must verify at least one model on every provider it is
+  locked for, or `scripts/model-lock.test.ts` fails: write its entry from a run, never empty. The
+  lock can't reach main before an engine it names has its row in `shared/harnesses.json`.
+- **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
+  request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that
+  started and stopped answering and the clients that moved. Merging it lets the picker offer them.
+  Every failure is asked once more before it counts. A failure that says nothing about the client
+  keeps what the lock said before: the harness never started, a timeout, a rate limit, or a bare
+  404 for a model the check's key can't see. A model the provider retires ("no longer available to
+  new users") is refused, so a person set to it is told, and it never fails a pull request.
+- **A client bump** is held to the lock: a pull request from this repository that changes a
+  harness's `requirements.txt`, `package.json`, `bun.lock`, `Dockerfile` or the Codex client version
+  runs the **Model lock** workflow, which builds that harness, sends every listed model a request
+  through it and through the published image, and fails when a model the lock verifies no longer
+  answers through the change's image but still does through the published one. Models the bump
+  newly fixes are added by the next daily refresh.
+- **The lock matches the pins.** The lock records the clients it was proven on, and
+  `scripts/model-lock.test.ts` fails when a harness pins a different version (an exact
+  `requirements.txt` pin, `agent-mastra/bun.lock`, or the Codex client version): a lock proven on
+  other clients may hide models that now work. Write it again from the change's own **Model lock**
+  run, whose results each harness uploads as `model-lock-<harness>`: download them and run `lock`.
+
+To write the lock from results by hand:
+
+```sh
+bun scripts/model-compat.ts lock --changes changes.md results/*.json
+bun scripts/model-compat.ts guard results/*.json
+```
 
 ## The one thing CI cannot do
 

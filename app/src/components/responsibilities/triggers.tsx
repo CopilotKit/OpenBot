@@ -174,6 +174,16 @@ function describeFilter(config: TriggerConfig) {
  * add one. A fresh key is held here, keyed by trigger, so it survives
  * the list refetching after the write that produced it.
  */
+/**
+ * Why a goal's triggers won't start it, while it is paused or completed. Nothing for a state a newer
+ * server sends that this app doesn't know.
+ */
+export function triggersNote(status: string): string | null {
+  return status === "paused" || status === "completed"
+    ? `This goal is ${status}. Its triggers won't start it.`
+    : null;
+}
+
 export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
   const triggers = useGoalTriggers(goal.id);
   const [adding, setAdding] = useState(false);
@@ -196,9 +206,9 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       }
       title="Triggers"
     >
-      {goal.status !== "active" && (
+      {triggersNote(goal.status) && (
         <p className="mt-1 text-muted-foreground text-sm">
-          This goal is {goal.status}. Its triggers won't start it.
+          {triggersNote(goal.status)}
         </p>
       )}
       {triggers.error && (

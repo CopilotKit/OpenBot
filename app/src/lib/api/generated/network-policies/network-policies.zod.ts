@@ -64,7 +64,7 @@ export const ListNetworkPoliciesResponse = zod.object({
             "organization, team:<id> for a team, or group:<name> for a directory group.",
           ),
         scopeKind: zod
-          .enum(["organization", "group", "team"])
+          .string()
           .describe(
             "Whose policy: the organization's, a team's, or a directory group's.",
           ),
@@ -129,7 +129,7 @@ export const ListNetworkPoliciesResponse = zod.object({
 export const replaceNetworkPolicyPathNetworkPolicyIdMax = 206;
 
 export const replaceNetworkPolicyPathNetworkPolicyIdRegExp = new RegExp(
-  "^(organization|team:[^\\x00]*\\S[^\\x00]*|group:[^\\x00]*\\S[^\\x00]*)$",
+  "^(organization|team:[^\\x00]*[^\\s\\x00][^\\x00]*|group:[^\\x00]*[^\\s\\x00][^\\x00]*)$",
 );
 
 export const ReplaceNetworkPolicyParams = zod.object({
@@ -171,7 +171,7 @@ export const replaceNetworkPolicyBodyLockedDefault = false;
 export const replaceNetworkPolicyBodyAuthoringTextMax = 2000;
 
 export const replaceNetworkPolicyBodyAuthoringTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const ReplaceNetworkPolicyBody = zod.object({
@@ -228,7 +228,7 @@ export const ReplaceNetworkPolicyResponse = zod.object({
       "organization, team:<id> for a team, or group:<name> for a directory group.",
     ),
   scopeKind: zod
-    .enum(["organization", "group", "team"])
+    .string()
     .describe(
       "Whose policy: the organization's, a team's, or a directory group's.",
     ),
@@ -276,7 +276,7 @@ export const ReplaceNetworkPolicyResponse = zod.object({
 export const deleteNetworkPolicyPathNetworkPolicyIdMax = 206;
 
 export const deleteNetworkPolicyPathNetworkPolicyIdRegExp = new RegExp(
-  "^(organization|team:[^\\x00]*\\S[^\\x00]*|group:[^\\x00]*\\S[^\\x00]*)$",
+  "^(organization|team:[^\\x00]*[^\\s\\x00][^\\x00]*|group:[^\\x00]*[^\\s\\x00][^\\x00]*)$",
 );
 
 export const DeleteNetworkPolicyParams = zod.object({
@@ -339,7 +339,7 @@ export const TranslateNetworkPolicyHeader = zod.object({
 export const translateNetworkPolicyBodyTextMax = 1000;
 
 export const translateNetworkPolicyBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const TranslateNetworkPolicyBody = zod.object({
