@@ -506,6 +506,65 @@ test("a document whose row is still there keeps its card", async () => {
 });
 
 /*
+ * A Word, Excel or PowerPoint file a person sent reads as what it is: its own icon, its kind and
+ * size from the type the server found, and a Download, the same way a Bot's file card says it.
+ */
+test("an Office file a person sent is drawn as its kind, with its size and a download", async () => {
+  const cases = [
+    {
+      filename: "Q3 budget.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      sizeBytes: 14_336,
+      label: "Excel workbook · 14 KB",
+      icon: "tabler-icon-file-type-xls",
+    },
+    {
+      filename: "memo.docx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      sizeBytes: 2_411_724,
+      label: "Word document · 2.3 MB",
+      icon: "tabler-icon-file-type-docx",
+    },
+    {
+      filename: "deck.pptx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      sizeBytes: 31_457_280,
+      label: "PowerPoint presentation · 30 MB",
+      icon: "tabler-icon-file-type-ppt",
+    },
+  ];
+  const { container, getByRole, getByText, queryByText } = renderTranscript([
+    userMessage(
+      cases.map(({ filename, mimeType, sizeBytes }, index) => ({
+        type: "document" as const,
+        source: {
+          type: "url" as const,
+          value: attachmentUrl(`att-office-${index}`),
+          mimeType,
+        },
+        metadata: { attachmentId: `att-office-${index}`, filename, sizeBytes },
+      })),
+    ),
+  ]);
+
+  await waitFor(() => expect(probes).toHaveLength(3));
+
+  expect(queryByText("Attachment")).toBeNull();
+  for (const [index, { filename, label, icon }] of cases.entries()) {
+    expect(getByText(filename)).toBeTruthy();
+    expect(getByText(label)).toBeTruthy();
+    const download = getByRole("button", { name: `Download ${filename}` });
+    expect(download.getAttribute("href")).toBe(
+      attachmentPath(`att-office-${index}`),
+    );
+    expect(container.querySelector(`svg.${icon}`)).not.toBeNull();
+  }
+});
+
+/*
  * WHAT THE PROBE IS ALLOWED TO BE: a bodyless request for the file's own url. `HEAD` because the
  * question is whether the row exists and the answer is the status line — pulling a whole PDF back
  * through the browser to learn it is still there would cost the reader the file's bytes on every
@@ -938,8 +997,9 @@ test("a parked picture the browser mislabelled is drawn as a picture", () => {
   expect(container.querySelector("img")?.getAttribute("src")).toBe(
     attachmentPath("att-shot"),
   );
-  // Not the file card: that caption is the fixed word every document tile carries.
+  // Not the file card, whose caption is the file's kind, or "Attachment" when no type came with it.
   expect(queryByText("Attachment")).toBeNull();
+  expect(queryByText("PNG image")).toBeNull();
 });
 
 /*
@@ -957,7 +1017,8 @@ test("a parked file the browser called a picture is drawn as a file", () => {
 
   expect(container.querySelector("img")).toBeNull();
   expect(getByText("notes.txt")).toBeTruthy();
-  expect(getByText("Attachment")).toBeTruthy();
+  // The file card, captioned with the kind the server found rather than a picture's.
+  expect(getByText("TXT file")).toBeTruthy();
 });
 
 /*

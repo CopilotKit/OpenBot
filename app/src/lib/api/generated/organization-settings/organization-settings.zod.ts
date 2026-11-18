@@ -73,7 +73,12 @@ export const GetDeploymentResponse = zod
     attachmentLimits: zod
       .object({
         imageBytes: zod.int().min(1).describe("The largest image."),
-        documentBytes: zod.int().min(1).describe("The largest PDF."),
+        documentBytes: zod
+          .int()
+          .min(1)
+          .describe(
+            "The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).",
+          ),
         fileBytes: zod
           .int()
           .min(1)
@@ -81,7 +86,7 @@ export const GetDeploymentResponse = zod
       })
       .optional()
       .describe(
-        "How large a file attached to a message may be, by kind, in bytes. An upload over its kind's limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot's model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.",
+        "How large a file attached to a message may be, by kind, in bytes. An upload over its kind's limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot's model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.",
       ),
   })
   .describe("What this OpenBot offers and how people sign in to it.");
