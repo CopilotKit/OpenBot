@@ -12,7 +12,7 @@ import type {
   CheckInUsage,
   EgressRule as EgressRuleEntry,
   NetworkMode as NetworkModeName,
-  NetworkPolicyScopeKind,
+  NetworkPolicyCandidateScopeKind,
   OrganizationSettingsContextComputerMode,
 } from "@/lib/api/generated/model";
 import {
@@ -45,11 +45,29 @@ export type EgressRule = EgressRuleEntry;
 
 export type NetworkMode = NetworkModeName;
 
-/** Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name). */
-export type NetworkScopeKind = NetworkPolicyScopeKind;
+/**
+ * Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name).
+ * The kinds this app knows and sends, as the API takes them in a request.
+ */
+export type NetworkScopeKind = NetworkPolicyCandidateScopeKind;
 
-/** One network policy: the API's `NetworkPolicy`, without its address. */
+/**
+ * One network policy: the API's `NetworkPolicy`, without its address. Its `scopeKind` is as the
+ * server answered it, and the list can grow: a policy of a kind this app doesn't know is neither
+ * listed nor sent back (`knownNetworkScope`).
+ */
 export type NetworkPolicy = Omit<ApiNetworkPolicy, "id">;
+
+/** Whether a policy is of a kind this app knows, and so can list, open and save. */
+export function knownNetworkScope<T extends { scopeKind: string }>(
+  policy: T,
+): policy is T & { scopeKind: NetworkScopeKind } {
+  return (
+    policy.scopeKind === "organization" ||
+    policy.scopeKind === "team" ||
+    policy.scopeKind === "group"
+  );
+}
 
 export type EnterpriseSettings = {
   ssoRequired: boolean;

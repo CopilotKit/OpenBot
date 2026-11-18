@@ -1,15 +1,11 @@
 import { router } from "expo-router";
 import { Linking, Pressable, Text, View } from "react-native";
-import {
-  type CheckInItem,
-  ORGANIZATION_ID,
-  type Task,
-  type TaskStatus,
-} from "./api";
+import { type CheckInItem, ORGANIZATION_ID, type Task } from "./api";
 import {
   dismissCheckInItem,
   startCheckInItem,
 } from "./api/generated/check-ins/check-ins";
+import { taskLine } from "./tasks";
 import { card, colors, muted } from "./ui";
 
 /*
@@ -141,32 +137,6 @@ export function ItemCard({
   );
 }
 
-const TASK_LABEL: Record<TaskStatus, string> = {
-  ready_for_review: "Ready for review",
-  needs_input: "Needs input",
-  failed: "Failed",
-  working: "Working",
-  resolved: "Resolved",
-};
-
-/** Top to bottom, as on the web: what to read, what to answer, what to retry. */
-const WAITS_ON_YOU: readonly TaskStatus[] = [
-  "ready_for_review",
-  "needs_input",
-  "failed",
-];
-
-/** The tasks that wait on the person, in the order they are listed, newest first within each. */
-export function waitingTasks(tasks: readonly Task[]): Task[] {
-  return tasks
-    .filter((task) => WAITS_ON_YOU.includes(task.status))
-    .sort(
-      (a, b) =>
-        WAITS_ON_YOU.indexOf(a.status) - WAITS_ON_YOU.indexOf(b.status) ||
-        Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
-    );
-}
-
 /**
  * One task that waits on the person. The whole card opens its conversation, where they read and
  * reply, the way a row on the Bots list opens its Bot: its title in the link colour, nothing else to
@@ -199,7 +169,7 @@ export function TaskCard({ task, botName }: { task: Task; botName: string }) {
           color: task.status === "failed" ? colors.error : colors.warning,
         }}
       >
-        {botName} · {TASK_LABEL[task.status]}
+        {taskLine(botName, task.status)}
       </Text>
       {next ? <Text numberOfLines={3}>{next}</Text> : null}
     </Pressable>

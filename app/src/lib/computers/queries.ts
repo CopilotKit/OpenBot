@@ -71,7 +71,11 @@ export type ComputerState = "absent" | "starting" | "ready" | "unreachable";
 
 export type ComputerStatus = {
   botId: string;
-  state: ComputerState;
+  /**
+   * One of `ComputerState`, or a state a newer server sends that this app doesn't know: the screen
+   * then neither starts the computer nor calls it asleep, and waits for a frame.
+   */
+  state: string;
   /** Set when `state` is `unreachable`. Written for an admin, so not shown on a screen anybody can open. */
   reason?: string;
 };

@@ -131,6 +131,13 @@ const RUN_STATUS: Record<
   waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
 };
 
+/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
+export function runStatusOf(status: string) {
+  const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
+    RUN_STATUS;
+  return known[status] ?? null;
+}
+
 /** Every firing of one routine, newest first, each linking to the thread it ran in. */
 export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
   const runs = useRoutineRuns(routine.id);
@@ -147,21 +154,23 @@ export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
   return (
     <ul className="flex w-full flex-col gap-1.5">
       {runs.data.map((run) => {
-        const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
+        const status = runStatusOf(run.status);
         return (
           <li
             className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
             key={run.id}
           >
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5",
-                status.className,
-              )}
-            >
-              <span className={cn("size-1.5 rounded-full", status.dot)} />
-              {status.text}
-            </span>
+            {status ? (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5",
+                  status.className,
+                )}
+              >
+                <span className={cn("size-1.5 rounded-full", status.dot)} />
+                {status.text}
+              </span>
+            ) : null}
             <span className="text-muted-foreground">
               {run.source === "run_now"
                 ? "Run now"

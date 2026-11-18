@@ -2,6 +2,7 @@ import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { GetPersonResponse } from "@/lib/api/generated/model";
 import { getPerson } from "@/lib/api/generated/people/people";
 import { ClientError } from "@/lib/client";
+import { knownRole } from "./roles";
 import { readDeployment } from "@/lib/deployment/queries";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { ensureCurrentOrganization } from "@/lib/organizations/queries";
@@ -125,7 +126,8 @@ async function currentUser(
     name: person.name,
     needsName: person.needsName,
     image: person.image,
-    role: person.role,
+    // A role a newer server names that this app doesn't know is read as a member.
+    role: knownRole(person.role),
     onboarding: person.onboarding,
     openbotVersion: answer.openbotVersion,
   };
