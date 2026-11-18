@@ -1642,8 +1642,14 @@ fn remove(here: &Path, name: &str) {
         return;
     }
     std::fs::write(here.join(format!("{name}.stop")), "").unwrap();
+    // Back once the container is gone, however long a busy computer takes, as Docker's is. Two
+    // minutes is not stopping at all, and fails loudly.
     let began = Instant::now();
-    while pid.exists() && began.elapsed() < Duration::from_secs(10) {
+    while pid.exists() {
+        if began.elapsed() > Duration::from_secs(120) {
+            eprintln!("Error response from daemon: could not kill container {name}: it is still running");
+            std::process::exit(1);
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -1696,7 +1702,8 @@ fn run(args: &[String], here: &Path) {
         if stop.as_ref().is_some_and(|stop| stop.exists()) {
             end(listeners, 137);
         }
-        if began.elapsed() > Duration::from_secs(20) {
+        // Only so a run nobody stops does not outlive its test.
+        if began.elapsed() > Duration::from_secs(120) {
             end(listeners, 1);
         }
         let accepted = listeners.iter().find_map(|listener| listener.accept().ok());
