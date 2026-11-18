@@ -25,6 +25,9 @@ What keeps it to that:
 - On the way out it drops `Origin`, `Cookie`, `Referer`, `Forwarded` and `X-Forwarded-*`, and any
   `Authorization` the page sent. On the way back it drops `Set-Cookie`.
 
+It adds this app to the `OpenBot-Client` header the page sent, or sends this app's alone, so the
+OpenBot knows which apps a request came through (`client_version`).
+
 Bodies are passed on as they arrive, both ways, so a chat answer streams. A WebSocket upgrade is
 passed on and the two connections are joined.
 
@@ -317,6 +320,8 @@ fn dropped_on_the_way_out(name: &HeaderName) -> bool {
         || name.starts_with("sec-fetch-")
         // The shell names the organisation, not the page.
         || name.eq_ignore_ascii_case(ORGANIZATION_HEADER)
+        // Passed on with this app added after it (`client_version::added_to`).
+        || name.eq_ignore_ascii_case(crate::client_version::HEADER)
 }
 
 /// Whether a request for `path` is one of OpenBot's own that takes the person's sign-in: its API,
@@ -430,6 +435,14 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
             continue;
         }
         headers.append(name.clone(), value.clone());
+    }
+    // Which apps the request came through: the page's own name, then this app's. On everything it
+    // passes on, so OpenBot knows this app is asking whatever the page is.
+    if let (Ok(name), Some(named)) = (
+        HeaderName::from_bytes(crate::client_version::HEADER.as_bytes()),
+        crate::client_version::added_to(request.headers()),
+    ) {
+        headers.insert(name, named);
     }
     // The person's sign-in and their organisation, for OpenBot's own API only.
     let signed_in = carries_the_sign_in(request.uri().path());
@@ -1002,6 +1015,32 @@ mod tests {
         assert_eq!(sent["body"], r#"{"message":"hello"}"#);
         // The token never comes back to the page.
         assert!(!sent.to_string().contains(&window.cookie));
+    }
+
+    /// OpenBot hears which apps a request came through: the name the window's page gave, then this
+    /// app's, on OpenBot's API and on its pages alike. A page that names none is this app alone.
+    #[test]
+    fn openbot_hears_the_pages_app_and_then_this_one() {
+        let rig = rig();
+        let window = rig.window();
+        let mine = format!("desktop/{}", crate::client_version::app_version());
+        let sent = window.echo(window.get(ECHO).header("openbot-client", "web/1.1.0"));
+        assert_eq!(
+            sent["headers"]["openbot-client"],
+            format!("web/1.1.0 {mine}")
+        );
+        let sent = window.echo(window.get(ECHO));
+        assert_eq!(sent["headers"]["openbot-client"], mine.as_str());
+        let page = window
+            .get("/landing")
+            .header("openbot-client", "web/1.1.0")
+            .send()
+            .unwrap();
+        assert_eq!(page.status(), 200);
+        assert_eq!(
+            rig.openbot.seen_at("/landing")[0].header("openbot-client"),
+            Some(format!("web/1.1.0 {mine}").as_str())
+        );
     }
 
     #[test]

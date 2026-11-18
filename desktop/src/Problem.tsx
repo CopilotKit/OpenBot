@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import type { Shortfall } from "./localEvalCli";
 import { resourcesShortSaid } from "./localReadiness";
+import { AppTooOld, appTooOld } from "./UpdateOpenBot";
 
 /**
  * A failure, in both registers, wherever one happens.
@@ -179,6 +180,9 @@ export function TroubleshootingLogs({
 /**
  * `onRetry`, where the screen has no other way to run what failed again: Try again, in the card.
  * The install behind the account step had none, and its failure sat there with nothing to press.
+ *
+ * An OpenBot that needs a newer version of this app is not a failure: wherever one shows, it says
+ * "Update OpenBot" with this app's update (`AppTooOld`).
  */
 export function Failure({
   problem,
@@ -187,6 +191,7 @@ export function Failure({
   problem: Problem;
   onRetry?: () => void;
 }) {
+  if (appTooOld(problem)) return <AppTooOld problem={problem} />;
   return (
     <div className="blocker" role="alert">
       <h2>That didn’t finish</h2>

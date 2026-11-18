@@ -4190,6 +4190,7 @@ pub fn answering_at(port: u16, path: &str) -> Option<String> {
 pub fn answering_within(port: u16, path: &str, patience: std::time::Duration) -> Option<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(patience)
+        .default_headers(crate::client_version::headers())
         .build()
         .ok()?;
     LOOPBACKS.iter().find_map(|host| {
@@ -4248,6 +4249,7 @@ pub fn wait_until_healthy_saying(
     );
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
+        .default_headers(crate::client_version::headers())
         .build()
         .map_err(|error| format!("could not ask OpenBot's services: {error}"))?;
     let mut api_up = false;

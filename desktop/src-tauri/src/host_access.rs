@@ -611,7 +611,11 @@ impl Drop for HostAccess {
 }
 
 fn broker_loop(inner: Arc<Inner>) {
-    let client = match Client::builder().timeout(Duration::from_secs(15)).build() {
+    let client = match Client::builder()
+        .timeout(Duration::from_secs(15))
+        .default_headers(crate::client_version::headers())
+        .build()
+    {
         Ok(client) => client,
         Err(error) => {
             log::error!("[host access] could not create its HTTP client: {error}");
@@ -1225,6 +1229,7 @@ impl Inner {
             .spawn(move || {
                 let sent = Client::builder()
                     .timeout(Duration::from_secs(5))
+                    .default_headers(crate::client_version::headers())
                     .build()
                     .and_then(|client| {
                         client

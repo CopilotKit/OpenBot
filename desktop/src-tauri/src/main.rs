@@ -6825,6 +6825,11 @@ fn show_openbot_on<R: tauri::Runtime>(
     let (url, address) = owned_app(&shell, &root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
+    // An OpenBot that needs a newer app is not shown: the window says "Update OpenBot" instead.
+    if let Some(problem) = local_app_too_old(&shell, &root, &address, ports) {
+        log::warn!("[show] {}", logging::Failure::described(&problem));
+        return Err(problem);
+    }
     hold_shown_deployment(&app, &shell, &root, address.clone(), ports.server);
     refresh_menus(&app);
     // Only the owned app itself.
@@ -8955,6 +8960,7 @@ fn show_setup_and_focus<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(
 fn server_capabilities_answer(port: u16) -> bool {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
+        .default_headers(openbot_desktop_lib::client_version::headers())
         .build()
         .ok()
         .and_then(|client| {
@@ -9013,6 +9019,26 @@ fn already_running_at(shell: &Shell, root: &Path, ports: &openbot_env::Ports) ->
 /// the previous version again on purpose.
 fn owned_app_url(shell: &Shell, root: &Path, ports: &openbot_env::Ports) -> Option<String> {
     owned_app(shell, root, ports).map(|(url, _)| url)
+}
+
+/**
+Whether this app is too old for the OpenBot `root`'s server runs, read from its `deployment` as every
+OpenBot app reads it (`client_version::local_problem`), with the install's token. "Update OpenBot",
+with this app's update, is the only thing that stops the window from opening it: an OpenBot from an
+older release opens exactly as before (Start upgrades it), and one that does not answer is the
+readiness check's to report.
+*/
+fn local_app_too_old(
+    shell: &Shell,
+    root: &Path,
+    address: &engine::Address,
+    ports: &openbot_env::Ports,
+) -> Option<Problem> {
+    let token = install_token_for(shell, root, address);
+    openbot_desktop_lib::client_version::local_problem(
+        &format!("http://127.0.0.1:{}", ports.server),
+        token.as_deref(),
+    )
 }
 
 /// [`owned_app_url`], with the engine whose `server` container publishes it.
@@ -11330,6 +11356,8 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         if let Some((url, address)) = (!recovery_required_or_pending_quit_notice(&shell, &root))
             .then(|| owned_app(&shell, &root, ports))
             .flatten()
+            // One that needs a newer app stays on setup, which says so.
+            .filter(|(_, address)| local_app_too_old(&shell, &root, address, ports).is_none())
         {
             hold_shown_deployment(app, &shell, &root, address.clone(), ports.server);
             refresh_menus(app);
@@ -12649,6 +12677,11 @@ fn main() {
     // After an in-app update, or from the installer's last page: in front as the window first shows.
     let from_installer = started_by_installer(&args);
     let context = side_by_side(tauri::generate_context!());
+    // The version every request to an OpenBot names this app with (`client_version`): the one the
+    // installer, the update check and About name.
+    openbot_desktop_lib::client_version::set_app_version(
+        context.package_info().version.to_string(),
+    );
     // A `shell-updater` build with compiled trust supplies `plugins.updater` when no bundled block
     // (such as the signed Mac overlay) already does. Registration itself happens once, in `setup`.
     #[cfg(feature = "shell-updater")]
@@ -23816,6 +23849,16 @@ fn serve(listener: TcpListener) {
 // token it was started with (`server-host-token`), and each request recorded as one or the other.
 fn desktop_answer(request: &str) -> Option<(&'static str, String)> {
     let path = request.split_whitespace().nth(1)?;
+    // Which app asked for what, as the OpenBot-Client header named it.
+    let named = request.lines().filter_map(|line| line.split_once(':')).find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("openbot-client").then(|| value.trim().to_owned())
+    }).unwrap_or_else(|| "-".into());
+    let mut asked = std::fs::OpenOptions::new().create(true).append(true).open("client-headers.log").unwrap();
+    writeln!(asked, "{path} {named}").unwrap();
+    // What it offers, when the test gave it a deployment answer to give.
+    if path == "/api/v2/organizations/default/deployment" {
+        return std::fs::read_to_string("deployment.json").ok().map(|body| ("200 OK", body));
+    }
     let empty = match path {
         "/api/host-access/desktop/next" => "{\"operations\":[],\"leaseMs\":30000}",
         "/api/desktop/connection-failure" => "null",
@@ -24242,6 +24285,79 @@ fn main() {
         });
         show_openbot_on(app.handle().clone(), &f.ports).unwrap();
         assert_eq!(window_url(&app), shown);
+    }
+
+    /// The OpenBot on this computer is read as every app reads it before the window opens it
+    /// (API versioning design, 7.1). One whose admin raised the oldest app it serves above this
+    /// one, or one that serves only a newer API, is not shown: the window says "Update OpenBot"
+    /// and offers this app's update, and Show Window keeps it on setup. One left at 1.1.0, which
+    /// publishes no version fields, opens exactly as before. Every request names this app.
+    #[test]
+    fn the_openbot_on_this_computer_opens_only_when_this_app_is_new_enough_for_it() {
+        let f = RestoreFixture::new();
+        openbot_env::write(
+            &f.owned.join(".env"),
+            &f.ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let root = f.owned.to_string_lossy().into_owned();
+        let shown = format!("http://127.0.0.1:{}/", f.ports.app);
+        let version = openbot_desktop_lib::client_version::app_version();
+        let window_url = |app: &tauri::App<tauri::test::MockRuntime>| {
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .to_string()
+        };
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../shared/fixtures/client-version/cases.json"
+        ))
+        .unwrap();
+        let answer = |name: &str| cases["deployments"][name].clone();
+        // The fixture's `raised`, its minimum for this app above whatever this build is.
+        let mut raised = answer("raised");
+        let major: u64 = version.split('.').next().unwrap().parse().unwrap();
+        raised["minimumClients"]["desktop"] = format!("{}.0.0", major + 1).into();
+
+        for too_new in [raised, answer("v3-only")] {
+            std::fs::write(f.owned.join("deployment.json"), too_new.to_string()).unwrap();
+            let app = f.app(&f.owned, "tauri://localhost/");
+            assert!(already_running_now(app.handle(), &root));
+            let problem = show_openbot_on(app.handle().clone(), &f.ports).unwrap_err();
+            assert_eq!(problem.kind, Some("app-too-old"), "{too_new}");
+            assert_eq!(
+                problem.said,
+                "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going."
+            );
+            assert_eq!(window_url(&app), "http://127.0.0.1:9/stale-page");
+            restore_window_on(app.handle(), &f.ports);
+            assert_eq!(window_url(&app), "tauri://localhost/");
+        }
+
+        // Left at 1.1.0: the server left at an older version, which starts and opens as today.
+        std::fs::write(
+            f.owned.join("deployment.json"),
+            answer("v1.1.0").to_string(),
+        )
+        .unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        show_openbot_on(app.handle().clone(), &f.ports).unwrap();
+        assert_eq!(window_url(&app), shown);
+
+        let asked = std::fs::read_to_string(f.owned.join("client-headers.log")).unwrap();
+        for path in [
+            "/api/capabilities",
+            "/api/v2/organizations/default/deployment",
+        ] {
+            assert!(
+                asked
+                    .lines()
+                    .any(|line| line == format!("{path} desktop/{version}")),
+                "{path}: {asked}"
+            );
+        }
     }
 
     /// A deployment shown as the window's own is this session's, as one Start raised is: the menus

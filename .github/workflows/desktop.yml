@@ -9,10 +9,10 @@ name: Desktop
 # it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "shared/fixtures/client-version/**", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   push:
     branches: [main]
-    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "shared/fixtures/client-version/**", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   workflow_call:
     secrets:
       OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:

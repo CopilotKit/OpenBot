@@ -87,7 +87,23 @@ fake.emit = emit;
 // the back end's, which the window runs first (a Mac at 8.2 GB).
 const updateShort = location.hash === "#update-short";
 const backEndShort = location.hash === "#backend-short";
-const relaunch = location.hash === "#start" || updateShort || backEndShort;
+// An OpenBot and this app that don't fit, as the shell says it: connected to a company's OpenBot
+// that needs a newer app, or that is too old for this one; one whose sign-in ended, as it always
+// was; and the OpenBot on this computer needing a newer app once Start has it running.
+const CONNECTED_PROBLEMS = {
+  "#connect-app-too-old": { said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.", kind: "app-too-old" },
+  "#connect-too-old": { said: "The OpenBot at openbot.example.com is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser.", kind: "too-old" },
+  "#connect-session-ended": { said: "Your sign-in to openbot.example.com has ended. Sign in again to keep going.", kind: "session-ended" },
+};
+const connectedProblem = CONNECTED_PROBLEMS[location.hash];
+const localTooOld = location.hash === "#local-app-too-old";
+// A launch that finds this computer's OpenBot already running, and that it needs a newer app.
+const runningTooOld = location.hash === "#local-app-too-old-running";
+// The same launch, where showing it fails as it could before: the slot the card above lands in.
+const runningFails = location.hash === "#local-running-fails";
+// The update feed has a newer version, so the offer at the top shows too.
+const offered = location.search === "?offer";
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld;
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -123,6 +139,20 @@ fake.opened = [];
 export async function invoke(command, args) {
   fake.calls.push(command);
   if (command === "plugin:opener|open_url") fake.opened.push(args.url);
+  if (connectedProblem && command === "connection")
+    return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
+  if (connectedProblem && command === "show_connected") throw connectedProblem;
+  if ((runningTooOld || runningFails) && command === "already_running") return true;
+  if (runningFails && command === "show_openbot")
+    throw { said: "Part of OpenBot needs recovery. Try starting OpenBot once more." };
+  if ((localTooOld || runningTooOld) && command === "show_openbot")
+    throw {
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      detail: "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+      kind: "app-too-old",
+    };
+  if ((connectedProblem || localTooOld || runningTooOld) && command === "app_update_offer")
+    return { version: offered ? "1.2.0" : null, current: "1.1.0", installing: null, updatesItself: true, ready: null };
   switch (command) {
     case "windows_restart_pending":
     case "take_ai_connection_change":
@@ -140,7 +170,7 @@ export async function invoke(command, args) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
       if (updateShort)
         throw {
@@ -194,9 +224,10 @@ export async function invoke(command, args) {
         };
       if (backEndShort) return { ...status("ready", "valid"), updateTo: "0.16.0-rc.13" };
       return status("ready", "valid");
-    // OpenBot's own start, the step's last row: it stays there for the test to look at.
+    // OpenBot's own start, the step's last row: it stays there for the test to look at. Running,
+    // when the window is about to find it needs a newer app.
     case "start_stack":
-      return new Promise(() => {});
+      return localTooOld ? null : new Promise(() => {});
     // Usage data as a first run finds it: shared until the person says otherwise.
     case "plugin:openbot-desktop|usage_data":
       return { shared: true, offByEnvironment: false };
@@ -2136,3 +2167,141 @@ describe.skipIf(!asked)(
     }, 30_000);
   },
 );
+
+/*
+ * When this app and its OpenBot don't fit (`client_version.rs`), the window says the shell's
+ * sentence and offers its one way on, in view and uncovered, without outgrowing the window: Update
+ * and restart when this app is too old, Open in browser when that OpenBot is. Beside them a problem
+ * the screen always had, a sign-in that ended, for comparison. With `OPENBOT_SHOTS_DIR` set, each is
+ * saved there in light and dark, at the window's default size.
+ */
+describe.skipIf(!asked)("an OpenBot and this app that don't fit", () => {
+  const shots = process.env.OPENBOT_SHOTS_DIR;
+  const states: {
+    name: string;
+    at: string;
+    said: string;
+    way: { role: "button" | "link"; name: string };
+  }[] = [
+    {
+      name: "connected-app-too-old",
+      at: "#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-app-too-old-with-offer",
+      at: "?offer#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-server-too-old",
+      at: "#connect-too-old",
+      said: "Ask whoever runs your OpenBot to update it, or open it in your browser.",
+      way: { role: "link", name: "Open in browser" },
+    },
+    {
+      name: "local-app-too-old",
+      at: "#local-app-too-old",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old-found-running",
+      at: "?offer#local-app-too-old-running",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "existing-found-running-fails",
+      at: "#local-running-fails",
+      said: "Part of OpenBot needs recovery. Try starting OpenBot once more.",
+      way: { role: "button", name: "Install" },
+    },
+    {
+      name: "existing-session-ended",
+      at: "#connect-session-ended",
+      said: "Your sign-in to openbot.example.com has ended.",
+      way: { role: "button", name: "Sign in again" },
+    },
+  ];
+  for (const state of states) {
+    for (const [width, height] of [
+      [1000, 800],
+      [720, 560],
+    ] as const) {
+      test(`${state.name} at ${width}x${height}: the sentence and its way on are in view`, async () => {
+        for (const colorScheme of ["light", "dark"] as const) {
+          const page = await browser.newPage({
+            viewport: { width, height },
+            colorScheme,
+          });
+          try {
+            await open(page, state.at);
+            await page.getByText(state.said, { exact: false }).waitFor();
+            // The card's entrance, and the update offer's first answer, settled.
+            await page.waitForTimeout(1200);
+            // The card's own way on: the last of its name, under the offer at the top when there is one.
+            const way = await page.evaluate(({ role, name }) => {
+              const found = [
+                ...document.querySelectorAll(role === "link" ? "a" : "button"),
+              ].filter((element) => element.textContent?.trim() === name);
+              const element = found.at(-1);
+              if (!element) return null;
+              // A step taller than the window scrolls inside its card: there, it is reached so.
+              element.scrollIntoView({ block: "nearest" });
+              const box = element.getBoundingClientRect();
+              const top = document.elementFromPoint(
+                box.left + box.width / 2,
+                box.top + box.height / 2,
+              );
+              return {
+                y: box.top,
+                bottom: box.bottom,
+                covered: !(top && (top === element || element.contains(top))),
+                enabled: !(element as HTMLButtonElement).disabled,
+              };
+            }, state.way);
+            expect({ state: state.name, found: way !== null }).toEqual({
+              state: state.name,
+              found: true,
+            });
+            expect(way?.y ?? -1).toBeGreaterThanOrEqual(0);
+            expect(way?.bottom ?? height + 1).toBeLessThanOrEqual(height);
+            expect({ state: state.name, covered: way?.covered }).toEqual({
+              state: state.name,
+              covered: false,
+            });
+            expect(way?.enabled).toBe(true);
+            // One Update and restart: the offer at the top stands back while the card says why.
+            if (state.way.name === "Update and restart")
+              expect(
+                await page.evaluate(
+                  () =>
+                    [...document.querySelectorAll("button")].filter(
+                      (button) =>
+                        button.textContent?.trim() === "Update and restart",
+                    ).length,
+                ),
+              ).toBe(1);
+            const fits = await page.evaluate(() => ({
+              page: document.documentElement.scrollHeight,
+              window: window.innerHeight,
+              wide: document.documentElement.scrollWidth,
+              across: window.innerWidth,
+            }));
+            expect(fits.page).toBeLessThanOrEqual(fits.window);
+            expect(fits.wide).toBeLessThanOrEqual(fits.across);
+            if (shots && width === 1000)
+              await page.screenshot({
+                path: `${shots}/${state.name}-${colorScheme}.png`,
+              });
+          } finally {
+            await page.close();
+          }
+        }
+      }, 30_000);
+    }
+  }
+});

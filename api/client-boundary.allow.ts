@@ -342,6 +342,12 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "desktop/src-tauri/src/connected/address.rs",
+    what: "/api/capabilities",
+    rule: "before-sign-in",
+    why: "whether an address with no deployment is an OpenBot from before the v2 API, too old for this app, asked with no credential",
+  },
+  {
+    file: "desktop/src-tauri/src/connected/address.rs",
     what: "/.well-known/oauth-authorization-server/api/auth",
     rule: "before-sign-in",
     why: "OAuth's discovery document, which names the sign-in's addresses",

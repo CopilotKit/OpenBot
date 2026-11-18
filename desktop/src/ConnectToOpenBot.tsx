@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { asProblem, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
+import { APP_TOO_OLD, UpdateOpenBot } from "./UpdateOpenBot";
 
 /**
  * What the screen offers after something went wrong, chosen by the problem's `kind`. The sentence
@@ -10,10 +11,11 @@ import { StatusLine } from "./SetupProgress";
  *
  * `field`: the address is what to fix, so the sentence sits under the field and the field has the
  * focus. `sign-in` and `retry`: the screen's one button says Sign in again or Try again. `browser`:
- * this app can't connect to that OpenBot, and a link opens it in the browser. A kind this app does
- * not know is offered Try again.
+ * that OpenBot is too old for this app, and a link opens it in the browser. `update`: this app is
+ * too old for that OpenBot, and the way on is this app's own update. A kind this app does not know
+ * is offered Try again.
  */
-type Offer = "field" | "retry" | "sign-in" | "browser";
+type Offer = "field" | "retry" | "sign-in" | "browser" | "update";
 
 function offerFor(kind: string | null | undefined): Offer {
   switch (kind) {
@@ -23,6 +25,8 @@ function offerFor(kind: string | null | undefined): Offer {
       return "field";
     case "too-old":
       return "browser";
+    case APP_TOO_OLD:
+      return "update";
     case "sign-in-cancelled":
     case "sign-in-failed":
     case "access-refused":
@@ -142,7 +146,7 @@ export function useConnectToOpenBot({
       if (offer !== "retry") setReopens(false);
       setPhase("idle");
       // To the field when the address is what to fix, to the button when it is the way on.
-      if (offer !== "browser")
+      if (offer !== "browser" && offer !== "update")
         setFocus({ on: offer === "field" ? "field" : "action" });
     }
   }
@@ -257,27 +261,33 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
             computer.
           </p>
           {trouble && !underField && <Trouble trouble={trouble} />}
-          <div className="row">
-            <button
-              type="submit"
-              ref={connecting.action}
-              disabled={busy || !address.trim()}
-            >
-              {trouble?.offer === "sign-in"
-                ? "Sign in again"
-                : trouble?.offer === "retry"
-                  ? "Try again"
-                  : "Connect"}
-            </button>
-            {trouble?.offer === "browser" && address.trim() && (
-              <ExternalLink
-                className="button-link"
-                href={browserAddress(address)}
+          {/* This app is too old for that OpenBot: its own update is the way on, and Connect
+              comes back once the address is another. */}
+          {trouble?.offer === "update" ? (
+            <UpdateOpenBot />
+          ) : (
+            <div className="row">
+              <button
+                type="submit"
+                ref={connecting.action}
+                disabled={busy || !address.trim()}
               >
-                Open in browser
-              </ExternalLink>
-            )}
-          </div>
+                {trouble?.offer === "sign-in"
+                  ? "Sign in again"
+                  : trouble?.offer === "retry"
+                    ? "Try again"
+                    : "Connect"}
+              </button>
+              {trouble?.offer === "browser" && address.trim() && (
+                <ExternalLink
+                  className="button-link"
+                  href={browserAddress(address)}
+                >
+                  Open in browser
+                </ExternalLink>
+              )}
+            </div>
+          )}
           {phase === "checking" && (
             <StatusLine>Checking the address…</StatusLine>
           )}

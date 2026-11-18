@@ -63,6 +63,7 @@ import {
   type SetupStep,
 } from "./telemetry";
 import { choseThisComputer, rememberThisComputer } from "./thisComputer";
+import { AppTooOld, appTooOld } from "./UpdateOpenBot";
 import { UsageDataChoice } from "./UsageDataChoice";
 import { type Hosting, Welcome } from "./Welcome";
 import {
@@ -1749,7 +1750,15 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
-        <h1>{displayedFailure ? "OpenBot stopped" : "OpenBot is running"}</h1>
+        {/* Running, and needing a newer version of this app: nothing stopped, so the heading says
+          what to do and the card under it offers the update. */}
+        <h1>
+          {appTooOld(displayedFailure)
+            ? "Update OpenBot"
+            : displayedFailure
+              ? "OpenBot stopped"
+              : "OpenBot is running"}
+        </h1>
         {/* The back end runs the release it had: information, said where the lede goes. Nothing
           failed, so it is not drawn as a failure and offers no help. */}
         {!displayedFailure && backEndNotice && (
@@ -1770,8 +1779,14 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         {/* The start's rows only when something failed, to show where. Once OpenBot runs they are
           all done, and they flashed for the moment before it opened with the native side's own
           words ("settings written, credentials stored"). */}
-        {displayedFailure && <SetupProgress steps={steps} />}
-        {displayedFailure && <Failure problem={displayedFailure} />}
+        {appTooOld(displayedFailure) && displayedFailure ? (
+          <AppTooOld problem={displayedFailure} headed={false} />
+        ) : (
+          <>
+            {displayedFailure && <SetupProgress steps={steps} />}
+            {displayedFailure && <Failure problem={displayedFailure} />}
+          </>
+        )}
         {stopping && <StatusLine>Stopping OpenBot…</StatusLine>}
         {showing && <StatusLine>Loading OpenBot…</StatusLine>}
         <div className="row">

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import type { UpdateReadiness } from "../../shared/desktop-updates";
 import { asProblem } from "./Problem";
+import { useUpdateOpenBotShowing } from "./UpdateOpenBot";
 
 /**
  * What the shell offers. The same answer OpenBot's own page reads for its update banner, so the
@@ -54,6 +55,7 @@ export function UpdateOffer() {
   const [declined, setDeclined] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const standingBack = useUpdateOpenBotShowing();
 
   useEffect(() => {
     let current = true;
@@ -101,6 +103,8 @@ export function UpdateOffer() {
   }, []);
 
   const version = offer?.version;
+  // The window says an OpenBot needs this update, with its own Update and restart: one is enough.
+  if (standingBack) return null;
   if (!offer || !version || version === declined) return null;
   const progress = offer.installing;
   const ready = offer.ready;

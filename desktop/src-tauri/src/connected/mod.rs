@@ -40,7 +40,10 @@ pub enum Kind {
     Unreachable,
     NotOpenBot,
     SinglePerson,
+    /// That OpenBot is older than this app can use: the window offers it in the browser.
     TooOld,
+    /// This app is older than that OpenBot serves: the window offers this app's own update.
+    AppTooOld,
     SignInCancelled,
     SignInFailed,
     /// Signed in, and then the OpenBot refused the new sign-in on the app's screens (401 or 403).
@@ -57,6 +60,7 @@ impl Kind {
             Kind::NotOpenBot => "not-openbot",
             Kind::SinglePerson => "single-person",
             Kind::TooOld => "too-old",
+            Kind::AppTooOld => crate::client_version::APP_TOO_OLD,
             Kind::SignInCancelled => "sign-in-cancelled",
             Kind::SignInFailed => "sign-in-failed",
             Kind::AccessRefused => "access-refused",
@@ -83,7 +87,11 @@ impl Kind {
             ),
             Kind::TooOld => format!(
                 "The OpenBot at {host} is on a release this app can't connect to yet. Ask whoever \
-                 runs it to update OpenBot, or open it in your browser."
+                 runs your OpenBot to update it, or open it in your browser."
+            ),
+            Kind::AppTooOld => format!(
+                "The OpenBot at {host} needs a newer version of this app. Update OpenBot, then \
+                 connect again."
             ),
             Kind::SignInCancelled => "Sign-in didn't finish. Try again when you're ready.".into(),
             Kind::SignInFailed => format!(
@@ -124,6 +132,7 @@ pub fn kind_of(problem: &Problem) -> Option<Kind> {
         Kind::NotOpenBot,
         Kind::SinglePerson,
         Kind::TooOld,
+        Kind::AppTooOld,
         Kind::SignInCancelled,
         Kind::SignInFailed,
         Kind::AccessRefused,
@@ -149,8 +158,9 @@ pub fn host_of(address: &str) -> String {
         .unwrap_or_else(|| address.to_owned())
 }
 
-/// A client for the few requests the shell itself makes to that OpenBot: short timeouts, and a
-/// redirect followed only while it stays on the same host.
+/// A client for the few requests the shell itself makes to that OpenBot: short timeouts, a
+/// redirect followed only while it stays on the same host, and this app named on every one
+/// (`client_version`).
 pub(crate) fn http() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -168,6 +178,7 @@ pub(crate) fn http() -> Result<reqwest::blocking::Client, String> {
             }
         }))
         .user_agent("OpenBot/desktop")
+        .default_headers(crate::client_version::headers())
         .build()
         .map_err(|error| error.to_string())
 }
@@ -208,9 +219,22 @@ mod tests {
             Kind::SessionEnded.said("openbot.example.com"),
             "Your sign-in to openbot.example.com has ended. Sign in again to keep going."
         );
+        // The two sentences every OpenBot app says when it and the OpenBot don't fit
+        // (`shared/client-version.ts`): "Ask whoever runs your OpenBot to update it" when that
+        // OpenBot is too old, "Update OpenBot" when this app is.
         assert_eq!(
             Kind::TooOld.said("127.0.0.1:4000"),
-            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser."
+            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser."
+        );
+        assert_eq!(
+            Kind::AppTooOld.said("openbot.example.com"),
+            "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again."
+        );
+        let too_old = Kind::AppTooOld.problem("openbot.example.com", "minimum 1.2.0");
+        assert_eq!(kind_of(&too_old), Some(Kind::AppTooOld));
+        assert_eq!(
+            serde_json::to_value(&too_old).unwrap()["kind"],
+            "app-too-old"
         );
         let refused = Kind::AccessRefused.problem("openbot.example.com", "answered 403");
         assert_eq!(kind_of(&refused), Some(Kind::AccessRefused));

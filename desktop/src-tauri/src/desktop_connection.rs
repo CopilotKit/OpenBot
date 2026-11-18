@@ -14,6 +14,7 @@ pub fn client() -> Result<Client, String> {
     Client::builder()
         .timeout(std::time::Duration::from_secs(1))
         .redirect(reqwest::redirect::Policy::none())
+        .default_headers(openbot_desktop_lib::client_version::headers())
         .build()
         .map_err(|error| format!("Could not create connection status client: {error}"))
 }
