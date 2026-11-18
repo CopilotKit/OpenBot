@@ -1,17 +1,17 @@
 # API versions and compatibility
 
-How OpenBot's one API changes over time without stranding an app people already have. Read this
-before you change the spec (`api/`), an app's requests (the web app, OpenBot Desktop, the phone
-app, the Recorder), what OpenBot Desktop hands the OpenBot it starts, or a release's
-`release-policy.json`.
+The rules for changing OpenBot's API and the apps that call it, what CI checks, and how to fix a
+failure. Read this before you change the spec (`api/`), an app's requests (the web app, OpenBot
+Desktop, the phone app, the Recorder), what OpenBot Desktop hands the OpenBot it starts, or a
+release's `release-policy.json`.
 
-Each rule lives in one place. This page holds the policy, what CI stops, and the checklist. The
+Each rule lives in one place. This page holds the rules, what CI checks, and the checklist. The
 mechanics of marking a deprecation and opening an enum are in [api/README.md](../api/README.md),
 what OpenBot Desktop does with a release it can't launch is in
 [desktop-updates.md](desktop-updates.md), and the security floor and the release policy are in
 [releasing.md](releasing.md).
 
-- [Who this protects](#who-this-protects)
+- [What these rules cover](#what-these-rules-cover)
 - [The one API, and what breaking means](#the-one-api-and-what-breaking-means)
 - [Deprecation](#deprecation)
 - [Response enums that grow](#response-enums-that-grow)
@@ -22,19 +22,17 @@ what OpenBot Desktop does with a release it can't launch is in
 - [What CI enforces](#what-ci-enforces)
 - [Checklist for a pull request](#checklist-for-a-pull-request)
 
-## Who this protects
+## What these rules cover
 
-Apps and servers drift apart, and every pairing that can happen will happen. These rules make two
-of those pairings safe by promise and by test:
+The compatibility rules and their tests cover two pairings:
 
-- **OpenBot Desktop with its own OpenBot.** The app runs OpenBot on the computer and upgrades it
-  at the next Start after the app updates. For a moment the app is ahead; after a first install
-  from an old app, the OpenBot it laid out can be ahead.
-- **OpenBot Cloud.** One server, always the newest, serving every app version people have.
+- **OpenBot Desktop with its own OpenBot**, which the app runs on the computer and upgrades at the
+  next Start after the app updates.
+- **OpenBot Cloud**, one server serving every app version people have.
 
-A company that runs its own OpenBot rolls out both its apps and its server, so it keeps them
-matched. Nothing here is built or tested for that skew. Where a company's server and an app don't
-fit, the app says so in one sentence (below) and nothing more.
+A company that runs its own OpenBot keeps its apps and its server matched. Nothing here is built
+or tested for that pairing. Where a company's server and an app don't fit, the app says so in one
+sentence (below).
 
 ## The one API, and what breaking means
 
@@ -70,8 +68,8 @@ In OpenBot that is:
 - A new error code for a new situation.
 - A new value in a response enum declared open (`x-extensible-enum`).
 
-The server ignores query parameters it doesn't know, on purpose, so a client written against a
-newer spec still works against an older server ([api/README.md](../api/README.md#what-ci-checks)).
+The server ignores query parameters it doesn't know. Keep it that way
+([api/README.md](../api/README.md#what-ci-checks)).
 
 ### Shipping something that would break
 
@@ -120,8 +118,7 @@ only once nothing uses it.
   `YYYY-MM-DD`, on the operation, parameter or body property, with what to use instead in its
   description. How: [api/README.md, "Deprecating"](../api/README.md#deprecating).
 - **The minimum notice is 365 days**, from the day it is deprecated and from the first release that
-  served it deprecated, for every kind of element, app-only ones included. A server serves apps up
-  to 12 months old, so a shorter notice would break an app OpenBot still promises to serve.
+  served it deprecated, for every kind of element, app-only ones included.
 - **Answered with headers, never by hand.** Every request that uses a deprecated operation,
   parameter or body property is answered with `Deprecation`
   ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html), `@<unix seconds>`), `Sunset`
@@ -130,27 +127,24 @@ only once nothing uses it.
   spec it is generated from.
 - **Counted per app.** Each use is counted by the app that made it, from the `OpenBot-Client`
   header: each OpenBot app and release the header names, `unknown` with no header, `other` for a
-  header that names no OpenBot app. The count that decides removal is OpenBot Cloud's, because it
-  sees every call.
+  header that names no OpenBot app. The count that decides removal is OpenBot Cloud's.
 - **Announced in the changelog.** One line in the Deprecated list under `## Unreleased`'s "Before
   upgrading" in [CHANGELOG.md](../CHANGELOG.md), naming it as the server counts it, with its
   replacement and its sunset.
 - **Removed when both are true:** its sunset has passed, and nothing has used it over the last 12
   months by that count. Otherwise it stays, and its sunset moves later, never earlier. A response
-  property is the one exception: no server can see which fields a client reads, so it gets no
-  header and no count, and its sunset alone decides.
+  property is the one exception: it gets no header and no count, and its sunset alone decides.
 
 Live channels have no deprecation marks or counts. A channel or message is replaced by a new one
 beside it, and removing the old one is a breaking change like any other.
 
 ## Response enums that grow
 
-A value added to a response enum breaks a client that only knows the old values, so CI fails it.
-An enum whose list is expected to grow (a status, a role, a kind) is declared open instead:
+CI fails a value added to a response enum. An enum whose list is expected to grow (a status, a role, a kind) is declared open instead:
 `x-extensible-enum` in place of `enum`, with today's values. CI then lets a value be added. How,
 and which enums may be open: [api/README.md, "Enums that grow"](../api/README.md#enums-that-grow).
 
-In return, **every OpenBot app is a tolerant reader**:
+**Every OpenBot app is a tolerant reader:**
 
 - It ignores a response field it doesn't know.
 - It reads an enum value it doesn't know as "other": never a crash, never "undefined", never a
@@ -165,8 +159,8 @@ the app has never seen. The tests below fail a generated client or a screen that
 
 **A server serves every app released in the last 12 months, and an app works against any server
 released in the last 12 months**, hiding what the server doesn't offer. The window is time, not a
-count of releases, and it starts no earlier than each app's first release on `/api/v2`, because
-nothing older calls it. That first release is 1.1.0 for all four apps (`FIRST_ONE_API_RELEASES`
+count of releases, and it starts no earlier than each app's first release on `/api/v2`: 1.1.0 for
+all four apps (`FIRST_ONE_API_RELEASES`
 in `shared/client-version.ts`).
 
 ### How an app and a server find out
@@ -183,7 +177,7 @@ in `shared/client-version.ts`).
 - **An app below its minimum is refused** on every other `/api/v2` operation with 400,
   `application/problem+json`, code `CLIENT_UPDATE_REQUIRED`, naming `client` and `minimumVersion`,
   with `security: true` when the minimum is there for a security problem, and a sentence in
-  `detail`. Not 426, which RFC 9110 keeps for protocol upgrades.
+  `detail`. Never 426.
 - **A feature the server lacks is hidden** by the `deployment` field that offers it, never by
   comparing versions.
 
@@ -242,8 +236,8 @@ An app is built with its release's `launcherApi`. Against a release whose number
 Details: [desktop-updates.md](desktop-updates.md#the-upgrade).
 
 `launcherApi`, `configSchema` and `extensionApi` must also match exactly for the release tooling
-to upgrade an installation (`planUpgrade` in `shared/release-manifest.ts`). So raising one is a
-release decision, made in the release pull request that writes the new policy.
+to upgrade an installation (`planUpgrade` in `shared/release-manifest.ts`). Raise one only in a
+release pull request, in the policy it writes.
 
 ### When you must raise launcherApi
 
@@ -251,26 +245,19 @@ release decision, made in the release pull request that writes the new policy.
 supply:** a new required setting, or an optional one made required. A server that starts as before
 without the new setting doesn't need a bump.
 
-Why: on 1.1.0's release day, a person installing from the 1.0.3 app was given the 1.1.0 server,
-because a first install lays out the latest release. The 1.1.0 server for one person starts only
-with `OPENBOT_INSTALL_TOKEN`, which the 1.1.0 app writes and the 1.0.3 app had never heard of. The
-server exited, setup failed, and only updating the app recovered it. The contract had changed and
-`launcherApi` had stayed at 1.
-
 ### How an older OpenBot Desktop gets the update page
 
-An app already in people's hands can't learn to read a new number. So when OpenBot Desktop started
-the server and a launcher input is missing, the server doesn't exit. It answers `/health` and
-`/api/capabilities`, so the older app sees it running and opens its window, and serves one page at
-`/`: "Update OpenBot. This OpenBot needs a newer version of the OpenBot app. Update the app, then
-open it again." Everything else is refused with the same sentence, so nothing is admitted without
-the missing input. A server started any other way is refused at start, naming the setting.
+When OpenBot Desktop started the server and a launcher input is missing, the server doesn't exit.
+It answers `/health` and `/api/capabilities`, and serves one page at `/`: "Update OpenBot. This
+OpenBot needs a newer version of the OpenBot app. Update the app, then open it again." Everything
+else is refused with the same sentence. A server started any other way is refused at start, naming
+the setting.
 
 ### extensionApi
 
-The Recorder's calls are `/api/v2` operations and a live channel, so the API rules on this page
-already cover them. `deployment` publishes `extensionApi`, and the release tooling compares it, but
-no Recorder reads it yet. Nothing has needed it raised.
+The Recorder's calls are `/api/v2` operations and a live channel, and the API rules on this page
+cover them. `deployment` publishes `extensionApi` and the release tooling compares it; no Recorder
+reads it yet.
 
 ## The security floor
 
@@ -286,28 +273,24 @@ Update to keep using it.", and nothing else until it is updated.
   Latest. A required reviewer of the `security-floor` environment approves the signing job, the
   only place the key can be read.
 - **How apps enforce it.** At launch and every six hours. Each app keeps the floor with the highest
-  serial it has verified, so an old floor can't be replayed to lift a block. Offline, the kept floor
+  serial it has verified and ignores a lower one. Offline, the kept floor
   holds; a first launch that never reached it runs. OpenBot Desktop also stops the OpenBot it runs
   on the computer (no Bot runs, routines pause, nothing is deleted), and the Recorder stops
   recording.
 - **Where it doesn't apply.** Never for a company's own OpenBot. Desktop's own OpenBot always
   follows the floor; any other OpenBot only when the floor lists its address under `cloud`, which
   names OpenBot Cloud's addresses and nothing else. On OpenBot Cloud the floor also raises the
-  server's minimums, so an app below it is refused with `CLIENT_UPDATE_REQUIRED` and
-  `security: true` even before it has read the floor.
+  server's minimums: an app below it is refused with `CLIENT_UPDATE_REQUIRED` and `security: true`.
 
-It sits outside the 12-month window: the window is what OpenBot promises normally, and a floor
-overrides it. How to raise one, and the one-time setup: [releasing.md, "Security floor"](releasing.md#security-floor).
+A floor overrides the 12-month window. How to raise one, and the one-time setup: [releasing.md, "Security floor"](releasing.md#security-floor).
 
 ## The database under the API
 
-The API is the boundary, and storage changes behind it without an API change. During a rolling
-upgrade the new release's servers and the previous release's share one database, so a release's
-database changes must leave a database the previous release still works against.
-`upgrade.requiresDowntime` in `release-policy.json` is `false` for such a release, which is the
-rule. A release that can't keep to it declares `true`, and the `openbot` chart it ships must declare
-the same, which stops every old server before a new one starts. Publishing refuses a policy and a
-chart that disagree ([releasing.md](releasing.md#release-candidates-and-betas)).
+A release's database changes must leave a database the previous release's server still works
+against. `upgrade.requiresDowntime` in `release-policy.json` is `false` for such a release, which is
+the rule. A release that can't keep to it declares `true`, and the `openbot` chart it ships must
+declare the same, which stops every old server before a new one starts. Publishing refuses a policy
+and a chart that disagree ([releasing.md](releasing.md#release-candidates-and-betas)).
 
 When a database change does remove something the API returns, the API change comes first and goes
 through [Deprecation](#deprecation); the database keeps both shapes until the old API surface is
@@ -353,7 +336,7 @@ release of the last 12 months an installation can still be on (`desktop/scripts/
 **Fails when** the upgrade doesn't move, what the old release wrote doesn't read back from the new
 one, or a migration ran twice. **Fix it** in what changed: usually a Compose or launcher change the
 old release's layout can't carry, or an image this tree pins that doesn't start on the old data.
-Never by dropping a release from the legs: the window decides them.
+Never by dropping a release from the legs.
 
 ## Checklist for a pull request
 
