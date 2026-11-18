@@ -713,7 +713,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         slug:
           type: string
@@ -800,7 +800,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
     InvitationSender:
       type: object

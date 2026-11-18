@@ -285,7 +285,7 @@ export const batchUpdateCapabilitiesBodyChangesMax = 100;
 export const batchUpdateCapabilitiesBodyAuthoringTextMax = 2000;
 
 export const batchUpdateCapabilitiesBodyAuthoringTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const BatchUpdateCapabilitiesBody = zod.object({
@@ -421,7 +421,7 @@ export const TranslateCapabilityChangesHeader = zod.object({
 export const translateCapabilityChangesBodyTextMax = 1000;
 
 export const translateCapabilityChangesBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const TranslateCapabilityChangesBody = zod.object({
