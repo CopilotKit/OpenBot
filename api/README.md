@@ -72,7 +72,8 @@ The `API spec` job in `.github/workflows/ci.yml` fails a pull request when:
 - the spec breaks a client of the base branch's spec (oasdiff). A change that takes nothing from a
   client goes through only when it is listed with its reason in
   [accepted-breaking-changes.md](accepted-breaking-changes.md);
-- the spec breaks a client of the last release's spec (oasdiff again), a deprecation names no
+- the spec breaks a client of any release whose apps the server still serves: each release of the
+  last 12 months and the last release, each against its own spec (oasdiff again), a deprecation names no
   `x-sunset` at least 365 days out, or a minimum app version cuts the 12-month support window
   (`scripts/support-window.ts`).
 
