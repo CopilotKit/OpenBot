@@ -9,6 +9,10 @@
  * platform gives. Everything between a screen's call and the network is the app's own code.
  */
 import { afterAll, beforeEach, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import fixture from "../../shared/fixtures/client-version/cases.json";
+import appConfig from "../app.config";
 
 type Seen = {
   method: string;
@@ -20,6 +24,23 @@ type Seen = {
   body: unknown;
 };
 const seen: Seen[] = [];
+/** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
+const named: (string | null)[] = [];
+/** What this stand-in answers at `deployment` and `/api/capabilities`: one of the fixture's real answers, or a status. */
+let deploymentAnswer: { status: number; body: unknown } = {
+  status: 200,
+  body: fixture.deployments.current,
+};
+let capabilitiesAnswer: { status: number; body: unknown } = {
+  status: 404,
+  body: null,
+};
+/** The OpenBot release this app is built from: the root package.json's version, read here on its own. */
+const RELEASE = (
+  JSON.parse(
+    readFileSync(join(import.meta.dir, "../../package.json"), "utf8"),
+  ) as { version: string }
+).version;
 /** The organization the signed-in person is working in: one of two they are in, and not the first. */
 const ORG = "/api/v2/organizations/org_work";
 const MINE = "/api/v2/people/me/organizations";
@@ -38,6 +59,36 @@ const server = Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     const text = await request.text();
+    named.push(request.headers.get("openbot-client"));
+    if (url.pathname === "/api/v2/organizations/default/deployment")
+      return Response.json(deploymentAnswer.body, {
+        status: deploymentAnswer.status,
+      });
+    if (url.pathname === "/api/capabilities")
+      return Response.json(capabilitiesAnswer.body, {
+        status: capabilitiesAnswer.status,
+      });
+    if (url.pathname === `${ORG}/bots/too-old`)
+      return Response.json(
+        {
+          type: "https://open.bot/errors/client-update-required",
+          title: "This app is too old for this OpenBot.",
+          status: 400,
+          detail:
+            "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+          code: "CLIENT_UPDATE_REQUIRED",
+          category: "validation",
+          retryable: false,
+          requestId: "req_example",
+          traceId: "trace_example",
+          client: "mobile",
+          minimumVersion: "1.2.0",
+        },
+        {
+          status: 400,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
     seen.push({
       method: request.method,
       path: url.pathname,
@@ -127,6 +178,10 @@ mock.module("../src/auth", () => ({
 mock.module("expo-crypto", () => ({
   randomUUID: () => crypto.randomUUID(),
 }));
+// expo-constants gives the app the config app.config.ts evaluated to as it was built.
+mock.module("expo-constants", () => ({
+  default: { expoConfig: appConfig },
+}));
 
 const { getBot, pauseBot } = await import("../src/api/generated/bots/bots");
 const { deleteDevice, registerDevice } = await import(
@@ -140,8 +195,14 @@ const { replaceBotGrant } = await import(
 );
 const { ApiError, everyBot, ME, ORGANIZATION_ID } = await import("../src/api");
 
+const { checkVersion } = await import("../src/version-check");
+const { onUpdateRequired } = await import("../src/client-version");
+
 beforeEach(() => {
   seen.length = 0;
+  named.length = 0;
+  deploymentAnswer = { status: 200, body: fixture.deployments.current };
+  capabilitiesAnswer = { status: 404, body: null };
 });
 afterAll(() => {
   server.stop(true);
@@ -259,4 +320,93 @@ test("switching a skill on gives the Bot its grant, the grant's id one path segm
       body: {},
     },
   ]);
+});
+
+test("every request names the phone app and the OpenBot release it was built from, not Expo's own app version", async () => {
+  // The release comes from the repository's root package.json as the app is built, never the store version.
+  expect(appConfig.extra?.openbotRelease).toBe(RELEASE);
+  expect(appConfig.version).not.toBe(RELEASE);
+  await getBot(ORGANIZATION_ID, "a b");
+  await pauseBot(ORGANIZATION_ID, "ada");
+  await deleteRoutine(ORGANIZATION_ID, "r1");
+  expect(named.length).toBeGreaterThanOrEqual(3);
+  for (const header of named) expect(header).toBe(`mobile/${RELEASE}`);
+});
+
+test("before sign-in the app reads the deployment and decides: this release's OpenBot is fine, one that serves only newer phone apps says Update OpenBot", async () => {
+  expect(await checkVersion()).toEqual({ kind: "ok" });
+  expect(named).toEqual([`mobile/${RELEASE}`]);
+
+  deploymentAnswer = { status: 200, body: fixture.deployments["v1.1.0"] };
+  expect(await checkVersion()).toEqual({ kind: "ok" });
+
+  deploymentAnswer = { status: 200, body: fixture.deployments.raised };
+  expect(await checkVersion()).toEqual({
+    kind: "app",
+    detail:
+      "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+  });
+
+  deploymentAnswer = { status: 200, body: fixture.deployments["v3-only"] };
+  expect(await checkVersion()).toEqual({
+    kind: "app",
+    detail:
+      "This OpenBot needs a newer OpenBot phone app. Update OpenBot, then try again.",
+  });
+});
+
+test("an OpenBot from before the v2 API (no deployment, but an OpenBot's capabilities) is too old: Ask whoever runs your OpenBot to update it", async () => {
+  deploymentAnswer = {
+    status: 404,
+    body: { detail: "Not found.", code: "NOT_FOUND" },
+  };
+  capabilitiesAnswer = {
+    status: 200,
+    body: fixture["before-v2-capabilities"],
+  };
+  expect(await checkVersion()).toEqual({ kind: "server" });
+
+  // A 404 from something that is not OpenBot says nothing about versions: the screens say what failed.
+  capabilitiesAnswer = { status: 404, body: { detail: "Not found." } };
+  expect(await checkVersion()).toEqual({ kind: "ok" });
+  capabilitiesAnswer = { status: 200, body: { status: "ok" } };
+  expect(await checkVersion()).toEqual({ kind: "ok" });
+});
+
+test("a refusal of this app as too old, on any request, reaches the root layout as Update OpenBot with the server's sentence", async () => {
+  const heard: string[] = [];
+  const stop = onUpdateRequired((detail) => heard.push(detail));
+  try {
+    const refused = await getBot(ORGANIZATION_ID, "too-old").catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(ApiError);
+    expect(refused).toMatchObject({
+      status: 400,
+      code: "CLIENT_UPDATE_REQUIRED",
+      message:
+        "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+    });
+    expect(heard).toEqual([
+      "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+    ]);
+
+    // The deployment read itself can be refused too; the gate says the same.
+    deploymentAnswer = {
+      status: 400,
+      body: {
+        detail:
+          "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+        code: "CLIENT_UPDATE_REQUIRED",
+        minimumVersion: "1.2.0",
+      },
+    };
+    expect(await checkVersion()).toEqual({
+      kind: "app",
+      detail:
+        "This OpenBot needs the OpenBot phone app 1.2.0 or later. Update OpenBot, then try again.",
+    });
+  } finally {
+    stop();
+  }
 });

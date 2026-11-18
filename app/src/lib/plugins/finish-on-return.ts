@@ -1,4 +1,5 @@
 import { VERIFIER_PATH } from "@/lib/auth/resume";
+import { withClientName } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
 
 /** The step waiting for the window to be back in front, while there is one. */
@@ -45,6 +46,7 @@ export async function finishInBackground(): Promise<void> {
     await fetch(VERIFIER_PATH, {
       credentials: "same-origin",
       redirect: "manual",
+      headers: withClientName(),
     });
   } catch {
     // Nothing to tell anybody: the connections read that follows says whether it was finished.

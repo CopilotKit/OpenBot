@@ -1,13 +1,15 @@
 import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
+import { withClientName } from "@/lib/client";
 import type { AuthProviderId } from "./queries";
 
 export const authClient = createAuthClient({
   plugins: [ssoClient()],
   fetchOptions: {
     // The page's fetch at the time of each call, as every other request in the app uses it, rather
-    // than the one there was when this module loaded.
-    customFetchImpl: (input, init) => fetch(input, init),
+    // than the one there was when this module loaded. Naming this app, as every request does.
+    customFetchImpl: (input, init) =>
+      fetch(input, { ...init, headers: withClientName(init?.headers) }),
   },
 });
 

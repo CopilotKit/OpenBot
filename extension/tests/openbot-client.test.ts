@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   deleteCurrentRecorderConnection,
   exchangeRecorderConnectCode,
@@ -27,7 +29,16 @@ type Seen = {
   key: string | null;
   contentType: string | null;
   body: unknown;
+  /** The OpenBot-Client header: which app is asking. */
+  client: string | null;
 };
+
+/** The OpenBot release this Recorder is built from: the root package.json's version, read here on its own. */
+const RELEASE = (
+  JSON.parse(
+    readFileSync(join(import.meta.dir, "../../package.json"), "utf8"),
+  ) as { version: string }
+).version;
 
 /** A refusal as OpenBot's API answers one: problem details (RFC 9457). */
 function problem(
@@ -99,6 +110,7 @@ beforeAll(() => {
         key: request.headers.get("idempotency-key"),
         contentType: request.headers.get("content-type"),
         body: text ? JSON.parse(text) : null,
+        client: request.headers.get("openbot-client"),
       };
       const route = `${request.method} ${url.pathname}`;
       // OpenBot's API, at its addresses and in its shapes, for the Recorder's own operations.
@@ -249,6 +261,31 @@ test("each of the Recorder's operations goes out through the mutator: its addres
     auth: "Bearer obr_t",
   });
   expect(seen?.key).toMatch(/^[0-9a-f]{32}$/);
+});
+
+test("every request names the Recorder and the OpenBot release it was built from, a read and a write, through the generated client and openbotRaw", async () => {
+  const target = { openbotUrl, token: "obr_t" };
+  const named = `recorder/${RELEASE}`;
+  await getRecorderIdentity(ORGANIZATION_ID, { target });
+  expect(seen).toMatchObject({ path: API.me, client: named });
+  await reportRecorderActivity(
+    ORGANIZATION_ID,
+    { phase: "recording", actions: 1 },
+    { target },
+  );
+  expect(seen).toMatchObject({ path: API.activity, client: named });
+  await exchangeRecorderConnectCode(
+    ORGANIZATION_ID,
+    {
+      code: "obc_abc",
+      label: "Work laptop",
+      installId: "0123456789abcdef0123456789abcdef",
+    },
+    { target: { openbotUrl } },
+  );
+  expect(seen).toMatchObject({ path: API.connections, client: named });
+  await openbotRaw(target, "/ok", { method: "POST", body: "{}" });
+  expect(seen).toMatchObject({ path: "/ok", client: named });
 });
 
 test("a call that names no OpenBot is refused before any request is made", async () => {
