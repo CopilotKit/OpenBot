@@ -3519,7 +3519,7 @@ paths:
         - Conversations
       operationId: getAttachment
       summary: Download an attachment
-      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
       security:
         - webSession: []
         - appOAuth:
@@ -23801,7 +23801,7 @@ components:
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
     AttachmentLimits:
       type: object
-      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
+      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
       required:
         - imageBytes
         - documentBytes
@@ -23814,7 +23814,7 @@ components:
         documentBytes:
           type: integer
           minimum: 1
-          description: The largest PDF.
+          description: 'The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).'
         fileBytes:
           type: integer
           minimum: 1
