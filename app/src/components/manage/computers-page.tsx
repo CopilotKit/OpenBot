@@ -8,6 +8,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { SharedComputersNotice } from "@/components/admin/shared-computers-notice";
 import {
   ClearBrowserDialog,
   useClearBrowserData,
@@ -275,15 +276,8 @@ export function ComputersPage({
       ) : null}
 
       {personal || agentId ? null : isolation === "shared" ? (
-        <p className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          <span className="font-medium">
-            Every person's Bots run on one computer.
-          </span>{" "}
-          Each person keeps their own browser profile and folder for each Bot,
-          so logins aren't shared. A command one Bot runs can still read
-          another's files. Set <code>COMPUTER_SUPERVISOR_URL</code> to give each
-          person a computer of their own.
-        </p>
+        // The server's own word on whether this is a shared install (one person's isn't).
+        <SharedComputersNotice className="mt-4" />
       ) : isolation === "per-person" ? (
         <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
           Each person has their own computer, and every Bot they use runs on it,
