@@ -2,6 +2,7 @@ import * as Notifications from "expo-notifications";
 import { router, Stack } from "expo-router";
 import { useEffect, useRef } from "react";
 import { authClient } from "../src/auth";
+import { withSecurityFloor } from "../src/floor-gate";
 import { notificationDestination } from "../src/links";
 
 Notifications.setNotificationHandler({
@@ -12,7 +13,7 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
-export default function Layout() {
+function Layout() {
   const { data: session } = authClient.useSession();
   const pending = useRef<unknown>(null);
   const handled = useRef<string | null>(null);
@@ -50,3 +51,4 @@ export default function Layout() {
     </Stack>
   );
 }
+export default withSecurityFloor(Layout);

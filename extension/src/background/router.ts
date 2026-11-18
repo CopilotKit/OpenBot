@@ -64,6 +64,8 @@ const RECORDING_TYPES = new Set<string>([
   "page.voice",
   "page.narration",
   "page.site",
+  "page.floor",
+  "page.update",
 ]);
 
 const UNKNOWN: PageResponse = { ok: false, error: "Unknown request." };

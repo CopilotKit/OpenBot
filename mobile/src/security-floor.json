@@ -1,0 +1,8 @@
+{
+  "$comment": "The security floor every app checks (shared/security-floor.ts, desktop/src-tauri/src/security_floor.rs, docs/releasing.md \"Security floor\"). keys: the Ed25519 public keys a floor must be signed with, each the raw 32 bytes in base64. addresses: where the signed floor is read, in order, next to the update feed.",
+  "keys": [],
+  "addresses": [
+    "https://downloads.copilotkit.ai/latest/security-floor.json",
+    "https://github.com/CopilotKit/OpenBot/releases/latest/download/security-floor.json"
+  ]
+}

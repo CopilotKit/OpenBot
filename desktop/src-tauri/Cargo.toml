@@ -42,6 +42,9 @@ sha2 = "0.10"
 tar = "0.4"
 # Comparing the app's release with its deployment's. See `follow.rs`.
 semver = "1"
+# Verifying the signed security floor, strictly (RFC 8032, no malleable signatures). Default
+# features off: the app only verifies, never signs. See `security_floor.rs`.
+ed25519-dalek = { version = "3.0.0", default-features = false }
 # OpenBot's images downloaded before any engine answers: the registry's manifests, read as the OCI
 # Distribution spec says, for this computer's platform. The ORAS project's client. See
 # `early_images.rs`. Its blobs come through `early_downloads::fetch`, which resumes and checks them.

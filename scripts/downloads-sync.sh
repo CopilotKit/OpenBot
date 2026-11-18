@@ -8,8 +8,9 @@
 #
 # Where each file goes, in the bucket behind the CloudFront distribution:
 #   latest/<fixed name>              each installer under its fixed download name
-#                                    (scripts/release-download-names.sh), and latest.json; cached
-#                                    for five minutes
+#                                    (scripts/release-download-names.sh), latest.json, and the
+#                                    security floor when the release carries one; cached for five
+#                                    minutes
 #   releases/<tag>/<versioned name>  each installer under the name Tauri gave it, container-images.json,
 #                                    desktop-images.json and the Mac updater archives; never changes,
 #                                    so cached for a year
@@ -212,6 +213,11 @@ if [ -n "$served" ]; then
   for fixed in "${fixed_names[@]}"; do
     add "$served$fixed" "$fixed" "$latest_cache"
   done
+  # The security floor, signed and copied as it is (scripts/release-security-floor.sh). Every app
+  # reads it from latest/, which the edge never sends to a rollout, so only latest/ carries it.
+  if [ "$mode" = latest ] && grep -qxF security-floor.json <<<"$names"; then
+    add "${served}security-floor.json" security-floor.json "$latest_cache"
+  fi
   # The feed the app updates from, with each platform's download moved to this address: a URL that
   # is exactly this release's GitHub download of a file this run puts under releases/<tag>/ becomes
   # that file's address here. Nothing else changes, by a byte: minisign signs each file, not its

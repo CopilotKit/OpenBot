@@ -109,6 +109,9 @@ if [ "$make_latest" = true ]; then
         -f tag="$RELEASE_TAG" -f rollout=true
       echo "Started Downloads sync, which copies its signed installers to downloads.copilotkit.ai/rollout/$RELEASE_TAG/."
     elif [ "$becomes" = true ]; then
+      # The security floor stays where the apps read it, beside latest.json on the Latest release
+      # (scripts/release-security-floor.sh), so it is carried to this release before it becomes Latest.
+      "$root/scripts/release-security-floor.sh" "$RELEASE_TAG"
       gh release edit "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --latest
       echo "$RELEASE_TAG is now the latest release."
       # downloads.copilotkit.ai mirrors the Latest release (scripts/downloads-sync.sh). An edit made

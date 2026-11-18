@@ -9,7 +9,7 @@ const DARK_QUERY = "(prefers-color-scheme: dark)";
  * follows the theme a person picks, but keeps it in its own localStorage, which
  * an extension page cannot read, so the browser's setting is the only signal here.
  */
-function useColourScheme() {
+export function useColourScheme() {
   useLayoutEffect(() => {
     const query = window.matchMedia(DARK_QUERY);
     const apply = () =>

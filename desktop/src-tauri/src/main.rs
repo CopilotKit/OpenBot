@@ -26,9 +26,9 @@ use openbot_desktop_lib::{
     engine_versions, env as openbot_env, harness, host_access, install, local_eval,
     local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
-    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install, stack,
-    superseded_images, telemetry, tray, troubleshooting, uninstall, update_ready, upgrade,
-    windows as win,
+    provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
+    security_floor, stack, superseded_images, telemetry, tray, troubleshooting, uninstall,
+    update_ready, upgrade, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -134,6 +134,10 @@ struct Shell {
     /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
     /// window shows it. See `desktop_connected`.
     connected: desktop_connected::State,
+    /// The last security floor this app verified (`security_floor`).
+    security_floor: security_floor::Known,
+    /// This run already stopped OpenBot here for the security floor and showed its notice.
+    security_floor_held: std::sync::atomic::AtomicBool,
 }
 
 /// The deployment whose Compose up may have created containers, including a partial failure.
@@ -2107,6 +2111,10 @@ async fn upgrade_and_start_now(
     harness: Option<harness::HarnessChoice>,
 ) -> Result<upgrade::Outcome, Problem> {
     let selected = stack::root_from(&root);
+    // Below the security floor this app's own release is not safe either: only its update helps.
+    if security_floor_block(&app).is_some() {
+        return Err(Problem::plain(SECURITY_FLOOR_SAID));
+    }
     if app
         .state::<Shell>()
         .updating
@@ -2353,6 +2361,182 @@ fn watch_for_app_updates<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         });
     if let Err(error) = watching {
         log::error!("[app update] could not start checking for updates: {error}");
+    }
+}
+
+/// Where this build reads the security floor and the keys it trusts: the addresses beside the
+/// update feed and the keys it was built with, or an internal build's test floor and test key.
+fn security_floor_sources<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> (Vec<security_floor::Source>, Vec<[u8; 32]>) {
+    let mut keys = security_floor::keys();
+    let version = &app.package_info().version;
+    if let Some((sources, key)) =
+        security_floor::test_sources(version, |name| std::env::var_os(name))
+    {
+        keys.extend(key);
+        return (sources, keys);
+    }
+    let sources = security_floor::addresses()
+        .into_iter()
+        .map(security_floor::Source::Address)
+        .collect();
+    (sources, keys)
+}
+
+/// The floor this app keeps, in its config directory.
+fn security_floor_kept<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<security_floor::Kept> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|folder| security_floor::Kept::at(&folder))
+}
+
+/// The floor this app verified before, read before the window asks, so a floor kept offline
+/// holds from the first moment of a launch.
+fn know_kept_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let (_, keys) = security_floor_sources(app);
+    if let Some(kept) = security_floor_kept(app) {
+        app.state::<Shell>().security_floor.record(kept.read(&keys));
+    }
+}
+
+/// Where this app is, for the floor: on this computer, or connected to an OpenBot at an address.
+fn security_floor_place<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> security_floor::Place {
+    if !desktop_connected::is_connected(app) {
+        return security_floor::Place::Contained;
+    }
+    let address = desktop_connected::connected_address(app)
+        .or_else(|| desktop_connected::chosen(app).address)
+        .unwrap_or_default();
+    security_floor::Place::Connected(address)
+}
+
+/// The release this app has to update to before it can be used here, when it is below the
+/// security floor. None otherwise, and always None connected to a company's own OpenBot.
+fn security_floor_block<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<semver::Version> {
+    let floor = app.state::<Shell>().security_floor.get();
+    let version = app.package_info().version.clone();
+    let own = upgrade::own().version;
+    let own =
+        semver::Version::parse(own.strip_prefix('v').unwrap_or(&own)).unwrap_or(version.clone());
+    security_floor::blocked(floor.as_ref(), &version, &own, &security_floor_place(app))
+}
+
+/// The back end at `root` is below the floor, so it may not start until Start upgrades it.
+fn security_floor_backend_due<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) -> bool {
+    let floor = app.state::<Shell>().security_floor.get();
+    deployment::installed(root)
+        .and_then(|found| {
+            semver::Version::parse(found.version.strip_prefix('v').unwrap_or(&found.version)).ok()
+        })
+        .is_some_and(|installed| security_floor::backend_due(floor.as_ref(), &installed))
+}
+
+/// What Start says below the security floor, the notice's own words.
+const SECURITY_FLOOR_SAID: &str =
+    "This version of OpenBot has a security problem. Update to keep using it.";
+
+/// Whether this version is below the security floor here. The window shows the notice alone while
+/// it is (`desktop/src/SecurityFloor.tsx`).
+#[tauri::command]
+fn security_floor<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> security_floor::Status {
+    security_floor::Status {
+        blocked: security_floor_block(&app).is_some(),
+    }
+}
+
+/**
+Below the security floor here: stop OpenBot on this computer, as Stop does (no Bot runs, routines
+pause, nothing is deleted), and show the notice alone. Start refuses until the app is updated, and
+the updated app upgrades the back end at its next Start, as every update does. Connected to an
+OpenBot Cloud address the floor lists, only the notice: nothing runs here. Once per run.
+*/
+fn hold_below_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(minimum) = security_floor_block(app) else {
+        return;
+    };
+    if app
+        .state::<Shell>()
+        .security_floor_held
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    log::warn!(
+        "[security floor] {} is below the security floor {minimum}; OpenBot stays stopped here until it is updated",
+        app.package_info().version
+    );
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if !desktop_connected::is_connected(&app) {
+            let root = selected_root_or_default(&app);
+            if deployment::installed(&root).is_some() {
+                let asked = std::time::Instant::now();
+                log_stop_asked(&app.state::<Shell>(), &root, AskedFrom::SecurityFloor);
+                let stopped = stop_everything(&app, &root).into_result();
+                logging::outcome("stop", asked, &stopped);
+                refresh_menus(&app);
+            }
+        }
+        show_security_floor_notice(&app);
+    });
+}
+
+/// The window on the notice alone, wherever it was.
+fn show_security_floor_notice<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(mut notice) = setup_destination(app) else {
+        return;
+    };
+    notice.set_fragment(Some("security-floor"));
+    if let Err(error) = window.navigate(notice) {
+        log::error!("[security floor] could not show the notice: {error}");
+    }
+}
+
+/// Read the security floor at launch and every six hours, on a thread of its own, keep a newer one
+/// that verifies, and hold OpenBot here below it. Every build reads it: a build that can't update
+/// itself is told how to get one that can.
+fn watch_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let handle = app.clone();
+    let watching = std::thread::Builder::new()
+        .name("openbot-security-floor".into())
+        .spawn(move || {
+            app_update::watch(
+                app_update::Schedule::new(app_update::EVERY),
+                std::time::SystemTime::now,
+                |tick| {
+                    std::thread::sleep(tick);
+                    true
+                },
+                || {
+                    let (sources, keys) = security_floor_sources(&handle);
+                    if let Some(kept) = security_floor_kept(&handle) {
+                        let (floor, outcome) = security_floor::refresh(&kept, &sources, &keys);
+                        match outcome {
+                            security_floor::Outcome::Newer(serial) => {
+                                log::info!("[security floor] keeping floor {serial}")
+                            }
+                            security_floor::Outcome::NotNewer(serial) => {
+                                log::info!("[security floor] floor {serial}, nothing newer")
+                            }
+                            security_floor::Outcome::Nothing(why) => {
+                                log::info!("[security floor] no floor read: {why}")
+                            }
+                        }
+                        handle.state::<Shell>().security_floor.record(floor);
+                    }
+                    hold_below_security_floor(&handle);
+                },
+            )
+        });
+    if let Err(error) = watching {
+        log::error!("[security floor] could not start checking the security floor: {error}");
     }
 }
 
@@ -4581,6 +4765,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
     harness: Option<harness::HarnessChoice>,
 ) -> Result<(), Problem> {
     let shell = app.state::<Shell>();
+    // Below the security floor, nothing starts here: not this app's back end, and not one older
+    // than the back end's floor, which Start upgrades first (`upgrade_due`).
+    if security_floor_block(&app).is_some() || security_floor_backend_due(&app, &root) {
+        return Err(Problem::plain(SECURITY_FLOOR_SAID));
+    }
     let attempt = StartAttempt::begin(&shell)?;
     install_recorder_host_at_start();
     {
@@ -5238,11 +5427,14 @@ enum AskedFrom {
     /// Stop OpenBot in the tray or the window menu.
     Menu,
     Quit,
+    /// This version is below the security floor (`hold_below_security_floor`).
+    SecurityFloor,
 }
 
 impl AskedFrom {
     fn said(self) -> &'static str {
         match self {
+            AskedFrom::SecurityFloor => "by the security floor",
             AskedFrom::SetupWindow => "from the setup window",
             AskedFrom::Settings => "from Settings",
             AskedFrom::StatusWindow => "from the Status window",
@@ -12821,6 +13013,7 @@ fn main() {
             prepare_installation,
             check_app_update,
             app_update_offer,
+            security_floor,
             dismiss_app_update,
             install_app_update,
             upgrade_due,
@@ -12976,6 +13169,8 @@ fn main() {
             _ => {}
         })
         .setup(move |app| {
+            // Before the window can ask: a floor kept offline holds from the first moment.
+            know_kept_security_floor(app.handle());
             build_main_window(app.handle())?;
             log_launch(app.handle(), local_offset);
             // The window is built visible, so this is its first show: a launch the installer
@@ -13059,6 +13254,8 @@ fn main() {
             );
 
             remember_setup_url(app.handle())?;
+            // After the setup page's address is known, which the notice is shown at.
+            watch_security_floor(app.handle());
             if let Some(main) = app.get_webview_window("main") {
                 match_title_bar(&main.as_ref().window(), WindowPage::Setup);
             }
@@ -14015,6 +14212,7 @@ mod tests {
     include!("local_eval_ipc_tests.rs");
     include!("logging_file_tests.rs");
     include!("connected_ipc_tests.rs");
+    include!("security_floor_ipc_tests.rs");
 
     // The release half (it starts the install thread) is the app's own launch; a test runs a debug build.
     #[cfg(debug_assertions)]

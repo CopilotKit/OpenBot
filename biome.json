@@ -150,6 +150,7 @@
         "app/src/lib/voice/websocket.ts",
         "mobile/src/api/request.ts",
         "mobile/app/computer.tsx",
+        "mobile/src/security-floor.ts",
         "extension/src/shared/openbot-client.ts",
         "extension/src/main-world/network-hook.ts"
       ],
