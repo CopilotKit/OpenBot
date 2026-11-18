@@ -61,6 +61,36 @@ fn main() {
             .unwrap();
         writeln!(log, "{}\t{}", cwd.display(), joined).unwrap();
     }
+    // The `server` container's environment, as Compose gives it one. A container takes `.env` (the
+    // Compose file's `env_file`), and the host token and encryption key Compose was handed, when it
+    // is created, and keeps them until it is created again: `restart` changes none of it. `up`
+    // creates it when there is none, when `.env` changed since (a changed configuration), and always
+    // with `--force-recreate`. `server-env` in the installation holds what the running server has,
+    // the two credentials by their length only. Every other command succeeds and says nothing.
+    if SCENARIO == "server-env" {
+        if args.first().map(String::as_str) == Some("compose")
+            && args.iter().any(|arg| arg == "up")
+            && args.iter().any(|arg| arg == "server")
+        {
+            let env = std::fs::read_to_string(".env").unwrap_or_default();
+            let made_from = std::fs::read_to_string(".fixture-server-made-from").ok();
+            let recreate = args.iter().any(|arg| arg == "--force-recreate");
+            if recreate || made_from.as_deref() != Some(env.as_str()) {
+                let length = |name: &str| std::env::var(name).unwrap_or_default().len();
+                std::fs::write(".fixture-server-made-from", &env).unwrap();
+                std::fs::write(
+                    "server-env",
+                    format!(
+                        "{env}host-token-length={}\nencryption-key-length={}\n",
+                        length("OPENBOT_DESKTOP_HOST_TOKEN"),
+                        length("KEY_ENCRYPTION_KEY"),
+                    ),
+                )
+                .unwrap();
+            }
+        }
+        return;
+    }
     if SCENARIO == "compose-provider" {
         println!("Docker Compose version disposable-provider");
         return;

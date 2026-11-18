@@ -3915,23 +3915,43 @@ fn setting_in(environment: &[u8], name: &str) -> Result<Option<String>, String> 
 
 /**
 Restart OpenBot itself and leave everything else running: the server, and the worker where the
-installation's Compose file uses one.
+installation's Compose file uses one, made again from `.env` and `secrets`, the environment Start
+hands Compose (`compose_environment` in main.rs), so a setting changed in `.env` since Start
+reaches the server.
 
-What the Status window's Restart did to the host processes, now done by the engine that runs them:
-the database and the Bots stay up, so nothing is lost and it takes seconds. The profile is named
-because the services sit behind it, and Compose refuses to restart a service it cannot see, as it
-refuses one its file does not define.
+Not Compose's `restart`, which this used to be: it keeps each container exactly as it was made, and
+Compose documents that a restart applies no change to the configuration or environment. A container
+gets `.env` when it is created, so this one is created again, with `up --force-recreate`, which is
+how `up` applies a change and also restarts a server whose settings did not change. `--no-deps`
+leaves the database, the computer and the Bots running, so nothing is lost and it takes seconds.
+Built as Start builds its `up` (`compose_start_command`), with the same overlays, and never pulls or
+builds.
 
 Never the `worker` of a file that says its server does the scheduled work: nothing in that release
 starts it, so there is none to restart.
 */
-pub fn restart_openbot(engine: &Address, root: &Path) -> Result<(), String> {
-    crate::logging::timed("compose restart", || restart_openbot_now(engine, root))
+pub fn recreate_openbot(engine: &Address, root: &Path, secrets: &Secrets) -> Result<(), String> {
+    crate::logging::timed("compose recreate", || {
+        recreate_openbot_now(engine, root, secrets)
+    })
 }
 
-fn restart_openbot_now(engine: &Address, root: &Path) -> Result<(), String> {
-    let output = compose_command(engine, root, &Secrets::new())
-        .args(["--profile", OPENBOT_PROFILE, "restart", "server"])
+fn recreate_openbot_now(engine: &Address, root: &Path, secrets: &Secrets) -> Result<(), String> {
+    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)
+        .map_err(|problem| match problem.detail {
+            Some(detail) => format!("{} {detail}", problem.said),
+            None => problem.said,
+        })?
+        .args([
+            "up",
+            "-d",
+            "--no-deps",
+            "--force-recreate",
+            "--no-build",
+            "--pull",
+            "never",
+            "server",
+        ])
         .args(installation_uses(root, WORKER).then_some(WORKER))
         .output()
         .map_err(|error| format!("could not restart OpenBot: {error}"))?;
@@ -10639,7 +10659,7 @@ fn main() {
         installation_images(engine, root, true, &secrets).unwrap();
         pull(engine, root, true, &secrets, |_| {}).unwrap();
         up(engine, root, true, &secrets).unwrap();
-        restart_openbot(engine, root).unwrap();
+        recreate_openbot(engine, root, &secrets).unwrap();
         down(engine, root).unwrap();
         std::fs::read_to_string(record).unwrap()
     }
@@ -10700,8 +10720,8 @@ fn main() {
             "{log}"
         );
         assert_eq!(
-            commands_ending(&log, "restart server"),
-            ["compose --profile openbot restart server"],
+            commands_ending(&log, "--pull never server"),
+            ["compose up -d --no-deps --force-recreate --no-build --pull never server"],
             "{log}"
         );
         // Nothing of an earlier release's is on the engine, so nothing is removed.
@@ -10755,8 +10775,8 @@ fn main() {
             "{log}"
         );
             assert_eq!(
-                commands_ending(&log, "restart server worker"),
-                ["compose --profile openbot restart server worker"],
+                commands_ending(&log, "--pull never server worker"),
+                ["compose up -d --no-deps --force-recreate --no-build --pull never server worker"],
                 "{log}"
             );
             assert!(
