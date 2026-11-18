@@ -135,9 +135,9 @@ export function isUnread(
  *
  * Two movements only: a channel that did not exist fades in, and a channel that was just spoken in
  * moves to the top. Nothing else animates, a roster that reacts to being read is a roster that
- * moves under the cursor.
+ * moves under the cursor. For you's Recent draws the same rows.
  */
-function ChannelRow({
+export function ChannelRow({
   channel,
   animateOrder,
   emphasis,

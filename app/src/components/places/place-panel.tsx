@@ -3,7 +3,6 @@ import { BrandName } from "@/components/edition/brand-name";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { PLACES, type PlaceId } from "@/lib/places/places";
 import { usePlaceId } from "@/lib/places/store";
-import { atWorkPlace } from "./at-work-place";
 import { botsPlace } from "./bots-place";
 import { conversationsPlace } from "./conversations-place";
 import { openbotPlace } from "./openbot-place";
@@ -16,7 +15,6 @@ export const PLACE_LISTS: Record<PlaceId, PlaceEntry> = {
   conversations: conversationsPlace,
   bots: botsPlace,
   routines: routinesPlace,
-  "at-work": atWorkPlace,
 };
 
 export function PlacePanel() {

@@ -1,6 +1,8 @@
 import type { StalledHandoff } from "@/components/needs-you/stalled-handoffs";
 import type { ApprovalInboxData } from "@/lib/approvals";
 import type { ActivityItem } from "@/lib/bot-lifecycle/queries";
+import type { ChannelSummary } from "@/lib/channels/queries";
+import type { AtWorkRow } from "@/lib/places/at-work";
 import {
   countsAsWaiting,
   heldByTaskOf,
@@ -83,6 +85,42 @@ export function needsYouEntries(input: {
   for (const { botId, item } of input.handoffs)
     entries.push({ kind: "handoff", id: item.id, botId, at: item.at, item });
   return entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+/** How many conversations For you's Recent lists. */
+export const RECENT_FOR_YOU = 8;
+
+/**
+ * For you's Recent: the latest conversations anything was said in, newest first, from the list as
+ * it arrives in recency order. A conversation already in Needs you or Working on is left out, so
+ * nothing is listed twice.
+ */
+export function recentFor(
+  channels: readonly ChannelSummary[],
+  entries: readonly NeedsYouEntry[],
+  working: readonly AtWorkRow[],
+  limit = RECENT_FOR_YOU,
+): ChannelSummary[] {
+  const listed = new Set(working.map((row) => row.channelId));
+  const threads = new Set<string>();
+  for (const entry of entries) {
+    if (entry.kind === "question") {
+      if (entry.question.channelId) listed.add(entry.question.channelId);
+      threads.add(entry.question.threadId);
+    } else if (entry.kind === "request") {
+      threads.add(entry.request.action.threadId);
+    } else if (entry.kind === "task") {
+      listed.add(entry.listed.task.channelId);
+    }
+  }
+  return channels
+    .filter(
+      (channel) =>
+        channel.lastMessageAt !== null &&
+        !listed.has(channel.id) &&
+        !threads.has(channel.threadId),
+    )
+    .slice(0, limit);
 }
 
 /** The two halves of the home page's line, each null when there is nothing to say. */

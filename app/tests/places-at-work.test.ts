@@ -1,46 +1,14 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRouter,
-  RouterProvider,
-} from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
-import { createElement } from "react";
-import { atWorkPlace } from "@/components/places/at-work-place";
-import { agentKeys } from "@/lib/agents/queries";
-import {
-  type ChannelSummary,
-  type ChannelWork,
-  channelKeys,
-} from "@/lib/channels/queries";
+import { expect, test } from "bun:test";
+import type { ChannelSummary, ChannelWork } from "@/lib/channels/queries";
 import { atWork } from "@/lib/places/at-work";
+import { type NeedsYouEntry, recentFor } from "@/lib/places/openbot-sections";
 import type { ListedTask } from "@/lib/tasks/groups";
-import { type BotTask, type TaskStatus, taskKeys } from "@/lib/tasks/queries";
-import { settleReactWork } from "./settle-react-work";
+import type { BotTask, TaskStatus } from "@/lib/tasks/queries";
 
-const originalFetch = globalThis.fetch;
-const clients: QueryClient[] = [];
-
-beforeAll(() => {
-  GlobalRegistrator.register({
-    url: "http://localhost/",
-    width: 1280,
-    height: 840,
-  });
-});
-afterEach(() => {
-  cleanup();
-  for (const client of clients) client.clear();
-  clients.length = 0;
-  globalThis.fetch = originalFetch;
-});
-afterAll(async () => {
-  await settleReactWork();
-  GlobalRegistrator.unregister();
-});
+/*
+ * What For you lists under Working on (work that runs on its own, one row per conversation), and
+ * the conversations its Recent lists after that.
+ */
 
 function channel(overrides: Partial<ChannelSummary>): ChannelSummary {
   return {
@@ -178,105 +146,50 @@ test("the longest-running comes first", () => {
   ]);
 });
 
-/** The place's list drawn over a conversation read and a task read, either of which may fail. */
-function renderPlace({
-  channels = [],
-  channelsFail = false,
-  tasks = [],
-  tasksFail = false,
-}: {
-  channels?: ChannelSummary[];
-  channelsFail?: boolean;
-  tasks?: BotTask[];
-  tasksFail?: boolean;
-}) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
-  });
-  clients.push(queryClient);
-  if (channelsFail || tasksFail) {
-    globalThis.fetch = Object.assign(
-      async () => Response.json({ error: "down" }, { status: 500 }),
-      { preconnect: originalFetch.preconnect },
-    );
-  }
-  if (!channelsFail) {
-    queryClient.setQueryData(channelKeys.list(), {
-      pages: [{ channels, nextCursor: null }],
-      pageParams: [""],
+test("Recent keeps used conversations, newest first, eight at most, and none listed above it", () => {
+  const used = (id: string, extra: Partial<ChannelSummary> = {}) =>
+    channel({
+      id,
+      threadId: `thread-${id}`,
+      lastMessageAt: "2026-11-17T10:00:00Z",
+      ...extra,
     });
-  }
-  if (!tasksFail) queryClient.setQueryData(taskKeys.list, tasks);
-  queryClient.setQueryData(agentKeys.list(false), []);
-  queryClient.setQueryData(agentKeys.list(true), []);
-  const router = createRouter({
-    routeTree: createRootRoute({
-      component: () =>
-        createElement(
-          "div",
-          null,
-          createElement(
-            "span",
-            { "data-testid": "strip" },
-            atWorkPlace.Badge ? createElement(atWorkPlace.Badge) : null,
-          ),
-          createElement(atWorkPlace.List, { scrollRoot: { current: null } }),
-        ),
-    }),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  });
-  return render(
-    createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      createElement(RouterProvider, { router: router as never }),
-    ),
-  );
-}
+  const channels = [
+    used("asked"),
+    used("running", { work: [handoff("2026-11-17T10:00:00Z")] }),
+    used("a"),
+    used("questioned"),
+    channel({ id: "never-used", lastMessageAt: null }),
+    used("tasked"),
+    ...["b", "c", "d", "e", "f", "g", "h", "i"].map((id) => used(id)),
+  ];
+  const entries = [
+    {
+      kind: "question",
+      id: "q",
+      botId: "b1",
+      at: "2026-11-17T10:00:00Z",
+      question: { channelId: "questioned", threadId: "thread-questioned" },
+    },
+    {
+      kind: "request",
+      id: "r",
+      botId: "b1",
+      at: "2026-11-17T10:00:00Z",
+      request: { action: { threadId: "thread-asked" } },
+    },
+    {
+      kind: "task",
+      id: "t",
+      botId: "b1",
+      at: "2026-11-17T10:00:00Z",
+      listed: listed("needs_input", { channelId: "tasked" }),
+    },
+  ] as unknown as NeedsYouEntry[];
+  const working = atWork(channels, []);
 
-test("with nothing running the list says so", async () => {
-  const view = renderPlace({});
-  await view.findByText("Nothing is running right now.");
-});
-
-test("a Bot answering the person's message, in a conversation or a task's, lights nothing", async () => {
-  const view = renderPlace({
-    channels: [
-      channel({ id: "c1", busy: true }),
-      channel({ id: "t1-channel", busy: true }),
-    ],
-    tasks: [listed("ready_for_review", { channelId: "t1-channel" }).task],
-  });
-  await view.findByText("Nothing is running right now.");
-  expect(view.getByTestId("strip").children).toHaveLength(0);
-});
-
-test("work owed by another Bot is listed and pulses the strip", async () => {
-  const view = renderPlace({
-    channels: [
-      channel({
-        id: "c1",
-        summary: "Lead list",
-        work: [handoff("2026-11-17T10:00:00Z")],
-      }),
-    ],
-  });
-  await view.findByText("Lead list");
-  expect(view.getByTestId("strip").children.length).toBeGreaterThan(0);
-});
-
-test("when the conversations can't be read the list says so, not that nothing is running", async () => {
-  const view = renderPlace({ channelsFail: true });
-  await view.findByText(
-    "Couldn't load what is running. Try again in a moment.",
-  );
-  expect(view.queryByText("Nothing is running right now.")).toBeNull();
-});
-
-test("when the tasks can't be read the list says so, not that nothing is running", async () => {
-  const view = renderPlace({ tasksFail: true });
-  await view.findByText(
-    "Couldn't load what is running. Try again in a moment.",
-  );
-  expect(view.queryByText("Nothing is running right now.")).toBeNull();
+  expect(
+    recentFor(channels, entries, working).map((found) => found.id),
+  ).toEqual(["a", "b", "c", "d", "e", "f", "g", "h"]);
+  expect(recentFor([], [], [])).toEqual([]);
 });

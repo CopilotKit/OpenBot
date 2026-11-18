@@ -1,22 +1,22 @@
-import { type Icon, IconBolt, IconPlayerPlay } from "@tabler/icons-react";
+import { type Icon, IconBolt } from "@tabler/icons-react";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
-import { appConfig } from "@/lib/generated/application-config";
 import { primitive } from "@/lib/primitives";
 
+/** `openbot` is the For you place: the id stays what browsers already remember. */
 export const PLACE_IDS = [
   "openbot",
   "conversations",
   "bots",
   "routines",
-  "at-work",
 ] as const;
 
 export type PlaceId = (typeof PLACE_IDS)[number];
 
-export const DEFAULT_PLACE: PlaceId = "conversations";
+/** A new browser starts in For you, which holds the latest conversations as well as what needs the person. */
+export const DEFAULT_PLACE: PlaceId = "openbot";
 
 export const PLACES: Record<PlaceId, { label: string; icon: Icon }> = {
-  openbot: { label: appConfig.brand.productName, icon: OpenBotLogo },
+  openbot: { label: "For you", icon: OpenBotLogo },
   conversations: {
     label: primitive("conversations").label,
     icon: primitive("conversations").icon,
@@ -26,7 +26,6 @@ export const PLACES: Record<PlaceId, { label: string; icon: Icon }> = {
     label: primitive("routines").label,
     icon: primitive("routines").icon,
   },
-  "at-work": { label: "At work", icon: IconPlayerPlay },
 };
 
 /** The place whose pages these are, or null when the address belongs to no place but the one already chosen. */

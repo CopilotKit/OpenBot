@@ -28,13 +28,14 @@ test("a stored place that is not one falls back", () => {
 test("a stored order keeps what it knows, drops what it does not, and appends what is new", () => {
   expect(parseStoredOrder(null)).toEqual([...PLACE_IDS]);
   expect(parseStoredOrder("not json")).toEqual([...PLACE_IDS]);
-  expect(parseStoredOrder('["bots","goals","openbot","bots"]')).toEqual([
-    "bots",
-    "openbot",
-    "conversations",
-    "routines",
-    "at-work",
-  ]);
+  expect(
+    parseStoredOrder('["bots","goals","at-work","openbot","bots"]'),
+  ).toEqual(["bots", "openbot", "conversations", "routines"]);
+});
+
+test("a browser that was in At work, a place that is gone, lands in For you", () => {
+  expect(DEFAULT_PLACE).toBe("openbot");
+  expect(parseStoredPlace("at-work")).toBe("openbot");
 });
 
 test("a place moves one step and stops at the ends", () => {
@@ -44,10 +45,9 @@ test("a place moves one step and stops at the ends", () => {
     "bots",
     "conversations",
     "routines",
-    "at-work",
   ]);
   expect(movePlace(order, "openbot", -1)).toEqual(order);
-  expect(movePlace(order, "at-work", 1)).toEqual(order);
+  expect(movePlace(order, "routines", 1)).toEqual(order);
 });
 
 test("the switch is set from the address, remembered, and survives storage that throws", () => {

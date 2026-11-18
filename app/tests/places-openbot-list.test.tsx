@@ -8,21 +8,45 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import type { ComponentType } from "react";
 import { openbotPlace } from "@/components/places/openbot-place";
 import { agentKeys } from "@/lib/agents/queries";
 import type { ApprovalInboxData } from "@/lib/approvals";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
-import { channelKeys } from "@/lib/channels/queries";
+import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { proactiveKeys } from "@/lib/proactive";
+import { routineKeys } from "@/lib/routines/queries";
 import { type BotTask, taskKeys } from "@/lib/tasks/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * The OpenBot place's list: Needs you, Working on and Done this week, each drawn only when it has
+ * For you, the place behind the orb: Needs you, Working on and Recent, each drawn only when it has
  * rows. A question or an action opens beside the list, and the page behind does not change.
  */
 
 const OpenBotPlace = openbotPlace.List;
+const ForYouBadge = openbotPlace.Badge as ComponentType;
+
+function conversation(
+  id: string,
+  extra: Partial<ChannelSummary> = {},
+): ChannelSummary {
+  return {
+    id,
+    name: "Inbox",
+    agentIds: ["inbox"],
+    threadId: `thread-${id}`,
+    active: true,
+    summary: `Conversation ${id}`,
+    lastMessage: null,
+    lastMessageAt: AT,
+    lastMessageAgentId: null,
+    createdAt: AT,
+    pinned: false,
+    lastReadAt: AT,
+    ...extra,
+  };
+}
 
 class OfflineWebSocket extends EventTarget {
   static readonly CONNECTING = 0;
@@ -132,6 +156,10 @@ type Seed = {
   roster?: { id: string; name: string }[];
   /** Bots the attention read names. */
   attention?: { botId: string; name: string }[];
+  /** The conversation list, newest first. */
+  channels?: ChannelSummary[];
+  /** The person's routines, as the routines read answers. */
+  routines?: { id: string; title: string | null; instruction: string }[];
 };
 
 function renderPlace(seed: Seed = {}) {
@@ -176,13 +204,24 @@ function renderPlace(seed: Seed = {}) {
     })),
     lastPingId: null,
   });
+  queryClient.setQueryData(agentKeys.list(true), []);
   queryClient.setQueryData(channelKeys.list(), {
-    pages: [{ channels: [], nextCursor: null }],
+    pages: [{ channels: seed.channels ?? [], nextCursor: null }],
     pageParams: [""],
+  });
+  queryClient.setQueryData(routineKeys.list(), {
+    routines: seed.routines ?? [],
   });
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => <OpenBotPlace scrollRoot={{ current: null }} />,
+      component: () => (
+        <>
+          <span data-testid="strip">
+            <ForYouBadge />
+          </span>
+          <OpenBotPlace scrollRoot={{ current: null }} />
+        </>
+      ),
     }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
@@ -202,7 +241,89 @@ test("the three sections are drawn only when they have rows", async () => {
   await view.findByText("Which invoice should I chase?");
   expect(view.getByRole("heading", { name: /Needs you/ })).toBeTruthy();
   expect(view.queryByRole("heading", { name: /Working on/ })).toBeNull();
+  expect(view.queryByRole("heading", { name: /Recent/ })).toBeNull();
   expect(view.queryByRole("heading", { name: /Done this week/ })).toBeNull();
+});
+
+test("a running routine is listed by its name and its Bot, and the orb pulses", async () => {
+  const { view } = renderPlace({
+    roster: [{ id: "inbox", name: "Inbox" }],
+    routines: [
+      { id: "r1", title: "Weekday leads", instruction: "Find new leads" },
+    ],
+    channels: [
+      conversation("routine-home", {
+        work: [
+          {
+            kind: "routine",
+            key: "run-1",
+            routineId: "r1",
+            botId: "inbox",
+            botName: null,
+            since: AT,
+          },
+        ],
+      }),
+    ],
+  });
+  const row = await view.findByRole("link", { name: /Weekday leads/ });
+  expect(row.textContent).toContain("Inbox");
+  expect(row.getAttribute("href")).toBe("/channel/routine-home");
+  expect(view.getByRole("heading", { name: /Working on/ })).toBeTruthy();
+  expect(view.getByTestId("strip").textContent).toBe("Running");
+});
+
+test("work owed by another Bot is under Working on with who was asked", async () => {
+  const { view } = renderPlace({
+    roster: [
+      { id: "inbox", name: "Inbox" },
+      { id: "ops", name: "Ops" },
+    ],
+    channels: [
+      conversation("asked", {
+        work: [
+          {
+            kind: "handoff",
+            key: "hop-1",
+            botId: "ops",
+            botName: null,
+            since: AT,
+          },
+        ],
+      }),
+    ],
+  });
+  await view.findByRole("link", { name: /Conversation asked/ });
+  expect(view.getByText("Asked Ops")).toBeTruthy();
+  expect(view.queryByRole("heading", { name: /Recent/ })).toBeNull();
+});
+
+test("a Bot answering the person's message lights nothing and stays under Recent", async () => {
+  const { view } = renderPlace({
+    roster: [{ id: "inbox", name: "Inbox" }],
+    channels: [conversation("chatting", { busy: true })],
+  });
+  await view.findByRole("heading", { name: /Recent/ });
+  expect(view.queryByRole("heading", { name: /Working on/ })).toBeNull();
+  expect(view.getByTestId("strip").textContent).toBe("");
+});
+
+test("Recent lists the latest conversations, eight at most, each opening it", async () => {
+  const { view } = renderPlace({
+    roster: [{ id: "inbox", name: "Inbox" }],
+    channels: Array.from({ length: 10 }, (_, index) =>
+      conversation(`c${index}`),
+    ),
+  });
+  const heading = await view.findByRole("heading", { name: /Recent/ });
+  const links = [
+    ...((heading.closest("section") as Element).querySelectorAll("a") ?? []),
+  ];
+  expect(links.map((link) => link.getAttribute("href"))).toEqual(
+    ["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7"].map(
+      (id) => `/channel/${id}`,
+    ),
+  );
 });
 
 test("a question opens beside the list and the page does not change", async () => {
@@ -255,7 +376,7 @@ test("a row from a Bot that is hidden still says its name", async () => {
 test("with nothing in any section the list says so", async () => {
   const { view } = renderPlace();
   await view.findByText(
-    "Nothing needs you. Work your Bots start shows up here.",
+    "Nothing yet. Your conversations and what your Bots are doing show up here.",
   );
   expect(view.getByRole("link", { name: /New conversation/ })).toBeTruthy();
   expect(view.queryByRole("heading", { name: /Needs you/ })).toBeNull();
