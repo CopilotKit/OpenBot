@@ -32,6 +32,7 @@ export const localFailures = [
   "invalid-acceptance",
   "rootless-podman",
   "download-stalled",
+  "below-security-floor",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 

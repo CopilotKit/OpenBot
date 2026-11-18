@@ -2482,9 +2482,12 @@ fn hold_below_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     );
     let app = app.clone();
     std::thread::spawn(move || {
+        // The notice first: nothing of OpenBot's page stays in use while the stop runs.
+        show_security_floor_notice(&app);
         if !desktop_connected::is_connected(&app) {
             let root = selected_root_or_default(&app);
             if deployment::installed(&root).is_some() {
+                hold_running_for_security_floor(&app, &root);
                 let asked = std::time::Instant::now();
                 log_stop_asked(&app.state::<Shell>(), &root, AskedFrom::SecurityFloor);
                 let stopped = stop_everything(&app, &root).into_result();
@@ -2492,8 +2495,39 @@ fn hold_below_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 refresh_menus(&app);
             }
         }
-        show_security_floor_notice(&app);
     });
+}
+
+/**
+A back end this run never started or showed, one an earlier run left up (a crash, a force quit, an
+installer that closed the app), taken as this session's before the floor's Stop, as a shown one is
+(`hold_shown_deployment`): its own `server` container must publish its ports, on the engine found
+answering. Without this, Stop had no engine to take it down on and refused, and the back end kept
+running behind the notice. When none answers, nothing of this installation runs here: Stop then has
+no containers to take down, and says nothing of them.
+*/
+fn hold_running_for_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>, root: &Path) {
+    let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
+    if shell.containers.lock().unwrap().is_some() {
+        return;
+    }
+    let found = openbot_env::Ports::read(root)
+        .ok()
+        .and_then(|ports| app_published_by(None, root, &ports));
+    match found {
+        Some((_, address)) => {
+            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.to_path_buf(),
+                address,
+            });
+            let mut held = shell.root.lock().unwrap();
+            if held.is_none() {
+                *held = Some(root.to_path_buf());
+            }
+        }
+        None => *shell.stopped_container_root.lock().unwrap() = Some(root.to_path_buf()),
+    }
 }
 
 /// The window on the notice alone, wherever it was.
@@ -10090,6 +10124,15 @@ async fn run_local_eval<R: tauri::Runtime>(
         window_call_arrived(action, handed_back().as_ref(), std::time::SystemTime::now())
     );
     let stack = local_eval::StackId::parse(&stack)?;
+    // Below the security floor, OpenBot's services start no more than OpenBot does: not from
+    // setup, and not from the Status window's Start.
+    if matches!(
+        action,
+        local_eval::Action::Start | local_eval::Action::Update
+    ) && security_floor_block(&app).is_some()
+    {
+        return Err(local_eval::Failure::BelowSecurityFloor);
+    }
     let root = {
         let shell = app.state::<Shell>();
         let selected = shell.selected_root.lock().unwrap().clone();

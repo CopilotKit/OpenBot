@@ -25,7 +25,11 @@ mod security_floor_ipc {
         fn new(label: &str) -> Self {
             let app = tauri::test::mock_builder()
                 .manage(Shell::default())
-                .invoke_handler(tauri::generate_handler![security_floor, start_stack])
+                .invoke_handler(tauri::generate_handler![
+                    security_floor,
+                    start_stack,
+                    run_local_eval
+                ])
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .unwrap();
             let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -181,5 +185,44 @@ mod security_floor_ipc {
         deployment::record(&fixture.root, "v1.0.0", false).unwrap();
         assert!(!fixture.blocked(), "the app itself is at its floor");
         assert!(refusal(fixture.start()).contains(SECURITY_FLOOR_SAID));
+    }
+
+    /// Seen on a Windows box: below the floor, the Status window's Start for OpenBot's services
+    /// started the local back end services again. They start no more than OpenBot does.
+    #[test]
+    fn below_the_floor_openbots_services_do_not_start_either() {
+        let fixture = Fixture::new("services");
+        fixture.floor(&next_patch(&fixture), &own());
+        for action in ["start", "update"] {
+            let refused = fixture
+                .ask(
+                    "run_local_eval",
+                    serde_json::json!({
+                        "attempt": format!("floor-{action}"), "action": action,
+                        "stack": "local-abc123",
+                    }),
+                )
+                .expect_err("OpenBot's services refuse to start below the floor");
+            assert_eq!(
+                refused,
+                serde_json::json!("below-security-floor"),
+                "{action}"
+            );
+        }
+    }
+
+    /// Seen on a Windows box: every launch that found a kept floor logged "Compose down failed:
+    /// OpenBot has no runtime ownership for this installation", because the floor's Stop ran on an
+    /// installation this run had never started or shown. With nothing of it answering, there is
+    /// nothing to take down, and Stop no longer refuses.
+    #[test]
+    fn the_floors_stop_at_launch_does_not_refuse_an_installation_this_run_never_held() {
+        let fixture = Fixture::new("launch-stop");
+        std::fs::write(fixture.root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        deployment::record(&fixture.root, "v1.0.0", false).unwrap();
+        let shell = fixture.app.state::<Shell>();
+        assert!(down_owned_containers(&shell, &fixture.root).is_err());
+        hold_running_for_security_floor(fixture.app.handle(), &fixture.root);
+        assert_eq!(down_owned_containers(&shell, &fixture.root), Ok(()));
     }
 }
