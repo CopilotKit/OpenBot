@@ -123,7 +123,8 @@ export type TodayOverview = {
   settings?: Record<string, unknown>;
   groups?: string[];
   network?: {
-    scopeKind: "organization" | "group" | "team";
+    /** `organization`, `group` or `team`, or one a newer server adds. */
+    scopeKind: string;
     scopeId: string;
     mode: string;
     rules: unknown[];

@@ -1149,8 +1149,8 @@ components:
       description: >-
         How large a file attached to a message may be, by kind, in bytes. An
         upload over its kind's limit is refused. Absent, as from an older
-        OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for
-        any other file. The limits can rise while OpenBot runs, so a client
+        OpenBot, the limits are 8388608 for an image or a document (a PDF, or
+        a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client
         reads them again rather than keeping them for good. What a Bot's model
         is shown of a large file is a separate matter: the file is kept and
         can be downloaded whatever the model can read of it.
@@ -1166,7 +1166,9 @@ components:
         documentBytes:
           type: integer
           minimum: 1
-          description: The largest PDF.
+          description: >-
+            The largest document: a PDF, or a Word, Excel or PowerPoint file
+            (.docx, .xlsx, .pptx).
         fileBytes:
           type: integer
           minimum: 1
@@ -1315,6 +1317,10 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum: [per-person, shared, none]
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -1639,7 +1645,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum: [default, organization, role, group, team]
+          x-extensible-enum: [default, organization, role, group, team]
         scopeId:
           type: string
           description: The role, the group's name or the team's id that decided it. Empty otherwise.
@@ -1662,7 +1668,7 @@ components:
               name:
                 type: [string, 'null']
               role:
-                $ref: './common.yaml#/components/schemas/PersonRole'
+                $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -1784,7 +1790,7 @@ components:
             organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum: [organization, group, team]
+          x-extensible-enum: [organization, group, team]
           description: >-
             Whose policy: the organization's, a team's, or a directory
             group's.

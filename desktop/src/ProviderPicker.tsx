@@ -1,13 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { ExternalLink } from "./ExternalLink";
 import { EndpointMark } from "./EndpointMark";
+import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { Sections } from "./Sections";
-import { StatusLine, StepFooter } from "./SetupProgress";
+import {
+  type Progress,
+  SetupProgress,
+  StatusLine,
+  StepFooter,
+} from "./SetupProgress";
 
 export type Login = "plan" | "api-key" | "endpoint" | "oauth";
 
@@ -257,6 +262,11 @@ export function ProviderPicker({
    * container, and progress explains what is happening while its browser session opens.
    */
   const [progress, setProgress] = useState<string | null>(null);
+  /*
+   * The download a plan sign-in starts with, while it runs: its image, which Install downloads only
+   * for an installation already on that plan. Shown as Install shows a download.
+   */
+  const [download, setDownload] = useState<Progress | null>(null);
   // A problem, not a string: a sign-in failure carries the container's own output, and
   // stringifying it printed "[object Object]" where the diagnosis should have been.
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -403,6 +413,7 @@ export function ProviderPicker({
     setBusy(true);
     setFailure(null);
     setProgress(null);
+    setDownload(null);
     try {
       const start =
         providerId === "anthropic"
@@ -436,6 +447,7 @@ export function ProviderPicker({
       if (stillCurrent()) {
         setBusy(false);
         setProgress(null);
+        setDownload(null);
       }
     }
   }
@@ -478,10 +490,13 @@ export function ProviderPicker({
   // The same event the setup screen's step list is built from. Only the newest line is kept: this
   // is one sentence under a button, not a second copy of that list.
   useEffect(() => {
-    const stop = listen<{ step: string; ok: boolean; detail: string }>(
-      "setup:progress",
-      (event) => setProgress(event.payload.detail),
-    );
+    const stop = listen<Progress>("setup:progress", (event) => {
+      const row = event.payload;
+      setProgress(row.detail);
+      setDownload(
+        row.step === "images" && row.running && row.downloads ? row : null,
+      );
+    });
     return () => {
       stop.then((off) => off());
     };
@@ -616,6 +631,7 @@ export function ProviderPicker({
     setCode("");
     setBusy(false);
     setProgress(null);
+    setDownload(null);
     setLogin(null);
   }
   const chooseAnotherLatest = useRef(chooseAnother);
@@ -672,6 +688,7 @@ export function ProviderPicker({
                 setCode("");
                 setBusy(false);
                 setProgress(null);
+                setDownload(null);
                 // The first way in is the default, which is the plan wherever there is one.
                 setLogin(r.logins[0] ?? null);
                 // Fill from what is already on this machine, if anything.
@@ -917,9 +934,15 @@ export function ProviderPicker({
                       </button>
                     )}
                 </div>
-                {busy && (
-                  <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
-                )}
+                {busy &&
+                  (download ? (
+                    <SetupProgress
+                      label="Sign-in download"
+                      steps={[download]}
+                    />
+                  ) : (
+                    <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
+                  ))}
               </>
             ))}
 

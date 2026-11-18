@@ -1,6 +1,5 @@
 import type {
   LearningAutoAssignState,
-  LearningProposal,
   LearningTarget,
 } from "@openbot/shared/learning";
 import {
@@ -657,11 +656,16 @@ export function LearningPage() {
   );
 }
 
-const STATUS: Record<LearningProposal["status"], string> = {
+const STATUS: Partial<Record<string, string>> = {
   pending_review: "To review",
   approved: "Published",
   rejected: "Rejected",
 };
+
+/** A proposal's status in a word. Nothing for one a newer server sends that this app doesn't know. */
+export function proposalStatusWord(status: string): string | null {
+  return STATUS[status] ?? null;
+}
 
 /**
  * The skills Intelligence proposed for the container shown above, to approve (which publishes it to
@@ -738,7 +742,7 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-sm">
-                    {STATUS[proposal.status]}
+                    {proposalStatusWord(proposal.status)}
                   </span>
                   <IconChevronRight className="size-4 text-muted-foreground" />
                 </ItemActions>
@@ -770,7 +774,7 @@ function ProposedSkills({ agentId }: { agentId?: string }) {
   );
 }
 
-const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
+const RUN_STATUS: Partial<Record<string, string>> = {
   queued: "Queued",
   freezing: "Starting",
   batching: "Analyzing",
@@ -807,6 +811,21 @@ export function runPollInterval(
   )
     ? RUN_POLL_MS
     : false;
+}
+
+/**
+ * A run's title: where it stands, and whether somebody started it. A status a newer server sends that
+ * this app doesn't know is left out.
+ */
+export function runTitle(
+  run: Pick<LearningRunSummary, "status" | "triggerSource">,
+): string {
+  return [
+    RUN_STATUS[run.status],
+    run.triggerSource === "manual" ? "Manual" : "Automatic",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** One line saying how many skills and insights a run produced, for the counts it has. */
@@ -866,10 +885,7 @@ function AnalysisRuns({ agentId }: { agentId?: string }) {
                   <IconHistory />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>
-                    {RUN_STATUS[run.status]} ·{" "}
-                    {run.triggerSource === "manual" ? "Manual" : "Automatic"}
-                  </ItemTitle>
+                  <ItemTitle>{runTitle(run)}</ItemTitle>
                   {[runTimes(run), runCounts(run)]
                     .filter((line) => line !== null)
                     .map((line) => (

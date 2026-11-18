@@ -668,7 +668,7 @@ components:
           type: string
           description: What people call it.
         role:
-          $ref: './common.yaml#/components/schemas/PersonRole'
+          $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
         active:
           type: boolean
           description: >-
@@ -743,7 +743,7 @@ components:
             out. The server's verdict. Empty when the caller may not change
             this member's role.
           items:
-            $ref: './common.yaml#/components/schemas/PersonRole'
+            $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
         id:
           type: string
           description: The person's id.
@@ -757,7 +757,7 @@ components:
           type: [string, 'null']
           description: Their picture's address, when they have one.
         role:
-          $ref: './common.yaml#/components/schemas/PersonRole'
+          $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
         joinedAt:
           type: string
           format: date-time
@@ -830,7 +830,7 @@ components:
           $ref: './common.yaml#/components/schemas/AssignableRole'
         status:
           type: string
-          enum: [pending, expired, declined]
+          x-extensible-enum: [pending, expired, declined]
           description: >-
             pending while it waits for an answer, expired once its seven days
             ran out, declined when the person turned it down.
@@ -915,7 +915,7 @@ components:
           $ref: './common.yaml#/components/schemas/AssignableRole'
         status:
           type: string
-          enum: [pending, expired, accepted, declined, canceled]
+          x-extensible-enum: [pending, expired, accepted, declined, canceled]
           description: >-
             pending while it can still be answered. expired once its seven
             days ran out, accepted or declined once the person answered,

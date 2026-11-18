@@ -1055,7 +1055,7 @@ export const ListConversationMessagesResponse = zod.object({
             "What was said. Empty while another person's Bot is still writing it.",
           ),
         status: zod
-          .enum(["queued", "running", "waiting", "completed", "failed"])
+          .string()
           .describe(
             "Where a Bot's reply stands. A person's message is completed.",
           ),
@@ -1261,7 +1261,7 @@ export const UploadConversationAttachmentResponse = zod
   .describe("A file held for a message, or sent with one.");
 
 /**
- * Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+ * Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
  * @summary Download an attachment
  */
 

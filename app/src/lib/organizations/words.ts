@@ -1,4 +1,9 @@
-import { isOrganizationAdmin } from "@/lib/auth/roles";
+import {
+  isKnownRole,
+  isOrganizationAdmin,
+  type KnownRole,
+  knownRole,
+} from "@/lib/auth/roles";
 import { relativeTime } from "@/lib/relative-time";
 import type {
   OrganizationMemberSummary,
@@ -12,15 +17,18 @@ import type {
  * only keep a screen from offering what the person's role is known to be refused.
  */
 
-const ROLE_NAMES: Record<string, string> = {
+const ROLE_NAMES = {
   owner: "Owner",
   admin: "Admin",
   member: "Member",
 };
 
-/** A role as a label: Owner, Admin or Member. One the app does not know is said as it came. */
+/**
+ * A role as a label: Owner, Admin or Member. One a newer server sends that the app doesn't know is
+ * read as the least it could be, and named Member.
+ */
 export function roleName(role: string): string {
-  return ROLE_NAMES[role] ?? role;
+  return ROLE_NAMES[knownRole(role)];
 }
 
 /** A role inside a sentence: "an admin", "a member". */
@@ -67,6 +75,17 @@ export function memberControl(
 }
 
 /**
+ * The roles a member's Role menu offers: the server's verdict (`assignableRoles`), less any role a
+ * newer server lists that this app doesn't know. The app can't name one it doesn't know, and never
+ * sends one back.
+ */
+export function givableRoles(
+  member: Pick<OrganizationMemberSummary, "assignableRoles">,
+): KnownRole[] {
+  return (member.assignableRoles as readonly string[]).filter(isKnownRole);
+}
+
+/**
  * Whether giving a member a role is asked about first, and as what: making somebody an owner, or
  * the person stepping down from owner themselves. Any other change applies at once. This picks the
  * question only; which roles are offered at all is the server's verdict (`assignableRoles`).
@@ -81,15 +100,20 @@ export function roleChangeQuestion(
   return null;
 }
 
-const SENT_STATUS: Record<SentInvitation["status"], string> = {
+const SENT_STATUS: Record<string, string> = {
   pending: "Pending",
   expired: "Expired",
   declined: "Declined",
 };
 
-/** The second line of an invitation an organization sent: its role, its status, and when it expires. */
+/**
+ * The second line of an invitation an organization sent: its role, its status, and when it expires.
+ * A status a newer server sends that the app doesn't know leaves the role alone.
+ */
 export function sentInvitationLine(invitation: SentInvitation): string {
-  const parts = [roleName(invitation.role), SENT_STATUS[invitation.status]];
+  const parts = [roleName(invitation.role)];
+  const status = SENT_STATUS[invitation.status];
+  if (status) parts.push(status);
   if (invitation.status === "pending")
     parts.push(`Expires ${relativeTime(invitation.expiresAt)}`);
   return parts.join(" · ");
@@ -109,6 +133,9 @@ export function receivedInvitationLine(invitation: ReceivedInvitation): string {
       return "You declined this invitation.";
     case "canceled":
       return `This invitation was canceled. Ask ${inviter} to send a new one.`;
+    default:
+      // A status a newer server sends that the app doesn't know: only who it is from.
+      return `Invited by ${inviter}.`;
   }
 }
 

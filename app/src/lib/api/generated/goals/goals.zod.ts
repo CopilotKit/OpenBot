@@ -66,7 +66,7 @@ export const ListGoalsResponse = zod.object({
           successCriteria: zod
             .string()
             .describe("When it is done. May be empty."),
-          status: zod.enum(["active", "paused", "completed"]),
+          status: zod.string(),
           progress: zod
             .string()
             .describe("Where it stands, as the Bot last recorded it."),
@@ -254,7 +254,7 @@ export const CreateGoalResponse = zod.object({
       title: zod.string().describe("What the goal is called."),
       instruction: zod.string().describe("What the Bot is to do."),
       successCriteria: zod.string().describe("When it is done. May be empty."),
-      status: zod.enum(["active", "paused", "completed"]),
+      status: zod.string(),
       progress: zod
         .string()
         .describe("Where it stands, as the Bot last recorded it."),
@@ -438,7 +438,7 @@ export const UpdateGoalResponse = zod.object({
       title: zod.string().describe("What the goal is called."),
       instruction: zod.string().describe("What the Bot is to do."),
       successCriteria: zod.string().describe("When it is done. May be empty."),
-      status: zod.enum(["active", "paused", "completed"]),
+      status: zod.string(),
       progress: zod
         .string()
         .describe("Where it stands, as the Bot last recorded it."),
@@ -598,7 +598,7 @@ export const PauseGoalResponse = zod.object({
       title: zod.string().describe("What the goal is called."),
       instruction: zod.string().describe("What the Bot is to do."),
       successCriteria: zod.string().describe("When it is done. May be empty."),
-      status: zod.enum(["active", "paused", "completed"]),
+      status: zod.string(),
       progress: zod
         .string()
         .describe("Where it stands, as the Bot last recorded it."),
@@ -719,7 +719,7 @@ export const ResumeGoalResponse = zod.object({
       title: zod.string().describe("What the goal is called."),
       instruction: zod.string().describe("What the Bot is to do."),
       successCriteria: zod.string().describe("When it is done. May be empty."),
-      status: zod.enum(["active", "paused", "completed"]),
+      status: zod.string(),
       progress: zod
         .string()
         .describe("Where it stands, as the Bot last recorded it."),
@@ -840,7 +840,7 @@ export const CompleteGoalResponse = zod.object({
       title: zod.string().describe("What the goal is called."),
       instruction: zod.string().describe("What the Bot is to do."),
       successCriteria: zod.string().describe("When it is done. May be empty."),
-      status: zod.enum(["active", "paused", "completed"]),
+      status: zod.string(),
       progress: zod
         .string()
         .describe("Where it stands, as the Bot last recorded it."),
@@ -1017,14 +1017,7 @@ export const ListGoalRunsResponse = zod.object({
       zod
         .object({
           id: zod.string().describe("The run's id."),
-          status: zod.enum([
-            "queued",
-            "running",
-            "waiting",
-            "succeeded",
-            "failed",
-            "skipped",
-          ]),
+          status: zod.string(),
           replyText: zod
             .string()
             .nullable()

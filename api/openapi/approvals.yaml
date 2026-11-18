@@ -2500,7 +2500,7 @@ components:
         Where an approval stands. pending waits for the person. approved and
         denied are decided, and consumed is started; the server then carries
         the conversation on. completed is finished.
-      enum: [pending, approved, denied, consumed, completed]
+      x-extensible-enum: [pending, approved, denied, consumed, completed]
     ApprovalActionKind:
       type: string
       description: >-
@@ -4397,7 +4397,7 @@ components:
           description: The id of the person who asked.
         status:
           type: string
-          enum: [pending, approved, declined, superseded]
+          x-extensible-enum: [pending, approved, declined, superseded]
           description: >-
             pending until an administrator answers it. superseded when a later
             request for the same Bot and app replaced it.

@@ -9,6 +9,9 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
+   Anything the API deprecated since the last release is in the Deprecated list under "Before
+   upgrading", with its sunset; CI fails a deprecation the changelog doesn't list
+   ([api/README.md](../api/README.md#deprecating)).
 3. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
@@ -519,6 +522,13 @@ another version. Its candidates, betas and final share it, so **Create release P
 `version` along within one release, `v0.3.0` to `v0.3.0-rc.1` to `v0.3.0`, and changes nothing
 else. A policy written for an earlier release is left alone: write the new release's policy into
 the release PR before merging it. A final may not change the policy beyond its version.
+
+`requiresDowntime` is false for a release whose migrations the previous release still works
+against, which is the rule: old and new servers share the database while a rolling upgrade runs. A
+release that cannot keep to it declares `true`, and the `openbot` chart it attaches must say the
+same in its `Chart.yaml` annotation `openbot.ai/requires-downtime`, which makes `helm upgrade`
+stop every old server before a new one starts. Publishing refuses a policy and a chart that
+disagree.
 
 ## Finishing a candidate
 

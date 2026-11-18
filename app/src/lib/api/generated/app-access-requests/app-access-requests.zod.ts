@@ -74,7 +74,7 @@ export const ListAppAccessRequestsResponse = zod.object({
               "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
             ),
           status: zod
-            .enum(["pending", "approved", "dismissed", "cancelled"])
+            .string()
             .describe(
               "Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.",
             ),
@@ -170,7 +170,7 @@ export const CreateAppAccessRequestResponse = zod
         "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
       ),
     status: zod
-      .enum(["pending", "approved", "dismissed", "cancelled"])
+      .string()
       .describe(
         "Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.",
       ),
@@ -306,7 +306,7 @@ export const ApproveAppAccessRequestResponse = zod.object({
           "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
         ),
       status: zod
-        .enum(["pending", "approved", "dismissed", "cancelled"])
+        .string()
         .describe(
           "Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.",
         ),
@@ -385,7 +385,7 @@ export const DismissAppAccessRequestResponse = zod
         "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
       ),
     status: zod
-      .enum(["pending", "approved", "dismissed", "cancelled"])
+      .string()
       .describe(
         "Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.",
       ),

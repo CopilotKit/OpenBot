@@ -3521,7 +3521,7 @@ paths:
         - Conversations
       operationId: getAttachment
       summary: Download an attachment
-      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
       security:
         - webSession: []
         - appOAuth:
@@ -21208,13 +21208,14 @@ components:
           $ref: '#/components/schemas/BotInstructions'
         harness:
           type: string
-          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.'
+          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot''s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.'
           enum:
             - ''
             - crewai
             - llamaindex
             - agno
             - langgraph
+            - langgraph-ts
             - google-adk
             - antigravity
             - pydantic-ai
@@ -21534,6 +21535,13 @@ components:
         - admin
         - member
       description: 'The person''s role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.'
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum:
+        - owner
+        - admin
+        - member
+      description: 'The person''s role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn''t know as a member.'
     NoticeId:
       type: string
       minLength: 1
@@ -21598,7 +21606,7 @@ components:
             - 'null'
           description: The picture their identity provider gave, when it gave one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         needsName:
           type: boolean
           description: Whether they have still to choose what OpenBot calls them, because their name is missing or is only their address.
@@ -21969,7 +21977,7 @@ components:
           description: Who they are there, such as their GitHub login, when the service said.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - needs_reconnect
           description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
@@ -22459,6 +22467,13 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum:
+            - per-person
+            - shared
+            - none
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -22821,7 +22836,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum:
+          x-extensible-enum:
             - default
             - organization
             - role
@@ -22862,7 +22877,7 @@ components:
                   - string
                   - 'null'
               role:
-                $ref: '#/components/schemas/PersonRole'
+                $ref: '#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -23018,7 +23033,7 @@ components:
           description: organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum:
+          x-extensible-enum:
             - organization
             - group
             - team
@@ -23836,7 +23851,7 @@ components:
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
     AttachmentLimits:
       type: object
-      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
+      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
       required:
         - imageBytes
         - documentBytes
@@ -23849,7 +23864,7 @@ components:
         documentBytes:
           type: integer
           minimum: 1
-          description: The largest PDF.
+          description: 'The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).'
         fileBytes:
           type: integer
           minimum: 1
@@ -24317,7 +24332,7 @@ components:
           description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -24633,7 +24648,7 @@ components:
           description: The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - needs_input
         - working
         - resolved
@@ -26685,7 +26700,7 @@ components:
         status:
           type: string
           description: 'Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.'
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - dismissed
@@ -27594,7 +27609,7 @@ components:
       description: 'What was sent: a Bot''s reply, a question it asked, an approval it needs, or what the person''s Bots'' check-ins found that needs them.'
     DeliveryState:
       type: string
-      enum:
+      x-extensible-enum:
         - queued
         - running
         - accepted
@@ -27805,12 +27820,11 @@ components:
           type:
             - string
             - 'null'
-          enum:
+          x-extensible-enum:
             - succeeded
             - failed
             - skipped
             - waiting
-            - null
           description: How it ended, or null while it is still open. Only failed is a failure.
         at:
           type:
@@ -28016,7 +28030,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - running
             - succeeded
             - failed
@@ -28184,7 +28198,7 @@ components:
           description: When it last ran, or null.
         lastStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -28362,7 +28376,7 @@ components:
           description: Where it can be opened, or null.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - open
             - dismissed
             - started
@@ -28650,7 +28664,7 @@ components:
           description: When it is done. May be empty.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - paused
             - completed
@@ -28829,7 +28843,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -29325,7 +29339,7 @@ components:
           type: string
           description: What people call it.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         active:
           type: boolean
           description: 'Whether the caller is working in this one: the organization their session works in, or for an app''s token the one its OpenBot-Organization header names, else the caller''s own. Always false for a request made with an API key.'
@@ -29396,7 +29410,7 @@ components:
           type: array
           description: The roles the caller may give this member, their current one left out. The server's verdict. Empty when the caller may not change this member's role.
           items:
-            $ref: '#/components/schemas/PersonRole'
+            $ref: '#/components/schemas/PersonRoleAnswer'
         id:
           type: string
           description: The person's id.
@@ -29414,7 +29428,7 @@ components:
             - 'null'
           description: Their picture's address, when they have one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         joinedAt:
           type: string
           format: date-time
@@ -29501,7 +29515,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - declined
@@ -29599,7 +29613,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - accepted
@@ -29860,7 +29874,7 @@ components:
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
-      enum:
+      x-extensible-enum:
         - pending
         - approved
         - denied
@@ -32013,7 +32027,7 @@ components:
           description: The id of the person who asked.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - declined
@@ -32886,7 +32900,7 @@ components:
           description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - waiting
             - taken
             - completed
@@ -32980,7 +32994,7 @@ components:
           description: The image it runs now.
     ComputerState:
       type: string
-      enum:
+      x-extensible-enum:
         - absent
         - starting
         - ready
@@ -34087,7 +34101,7 @@ components:
         - $ref: '#/components/schemas/PersonRealBrowserOpened'
     SignInStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - pending
         - filling
         - code_required
@@ -35055,7 +35069,7 @@ components:
           description: Whether it adds a skill, changes one, or removes one.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending_review
             - approved
             - rejected
@@ -35327,7 +35341,7 @@ components:
           format: uuid
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - freezing
             - batching
@@ -35880,7 +35894,7 @@ components:
           type: boolean
         syncStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -36186,6 +36200,7 @@ components:
         - llamaindex
         - agno
         - langgraph
+        - langgraph-ts
         - google-adk
         - antigravity
         - pydantic-ai

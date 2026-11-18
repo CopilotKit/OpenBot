@@ -2463,7 +2463,7 @@ fn try_getting_own_release_ready<R: tauri::Runtime>(
     let version = update_ready::behind(&root, &upgrade::own())?;
     // The images its last install pulled say which of the release's it runs. Without them there
     // is nothing to go by, and the update pulls what it needs.
-    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let installed = preparation::images_it_runs(&root).unwrap_or_default();
     if installed.is_empty() {
         return None;
     }
@@ -2602,7 +2602,7 @@ fn try_getting_update_ready<R: tauri::Runtime>(
             }
         }
     };
-    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let installed = preparation::images_it_runs(&root).unwrap_or_default();
     let engine = local_eval::node_engine();
     let node = local_eval_state::read(&root, None)
         .map(|state| openbot_desktop_lib::local_images::Node::for_stack(&engine, &state.stack));
@@ -3911,7 +3911,15 @@ async fn deployment_ready<R: tauri::Runtime>(
 /// The reference for an image the shell runs directly, rather than through Compose.
 ///
 /// Require completed local installation before starting an authentication container.
-fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, String), Problem> {
+///
+/// With the sign-in's own image made present by `present`. Install pulls a plan's image only for an
+/// installation already on that plan (`preparation::PLAN_IMAGES`), so a sign-in downloads it when
+/// it is missing (`download_missing`).
+fn prepared_sign_in_with(
+    root: &Path,
+    published: &str,
+    present: impl FnOnce(&engine::Address, &String) -> Result<(), Problem>,
+) -> Result<(engine::Address, String), Problem> {
     let status = engine::detect_saved(preparation::saved_engine(root));
     let address = status
         .address
@@ -3920,8 +3928,67 @@ fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, St
         .pin()?;
     preparation::require(root, None, &address)?;
     let image = sign_in_reference(root, published, deployment::reference)?;
-    preparation::require_images(&address, std::slice::from_ref(&image))?;
+    present(&address, &image)?;
     Ok((address, image))
+}
+
+/**
+Download the images of `images` the engine at `address` does not have, showing the download on the
+`images` row exactly as Install shows it (`report_downloads`), and saying the row done after.
+
+For what Install leaves to the moment it is needed: a plan's image (`preparation::PLAN_IMAGES`),
+when a sign-in to that plan starts, or when a Start runs on a plan the installation was not on when
+it installed. Says nothing when every image is here. `keep_going` is asked before each pull.
+*/
+fn download_missing<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    address: &engine::Address,
+    images: &[String],
+    keep_going: impl Fn() -> Result<(), Problem> + Sync,
+) -> Result<(), Problem> {
+    let missing: Vec<String> = images
+        .iter()
+        .filter(|image| !preparation::image_present(address, image).unwrap_or(false))
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    log::info!(
+        "[images] downloading {}, which this needs and the engine does not have",
+        missing.join(", ")
+    );
+    report_running_plain(app, "images", "Downloading OpenBot.");
+    let pacer = Mutex::new(pull_metrics::Pacer::default());
+    let sizes = {
+        let address = address.clone();
+        pull_metrics::size_images(&missing, move |image| {
+            preparation::image_present(&address, image).unwrap_or(false)
+        })
+    };
+    pull_metrics::pull_images_limited(
+        &missing,
+        pull_metrics::IMAGE_PULLS_AT_ONCE,
+        sizes,
+        |_, image, on_layer| {
+            keep_going()?;
+            pull_metrics::pull_image(address, image, on_layer, |metrics| {
+                desktop_telemetry::pull_completed(app, metrics)
+            })
+        },
+        &keep_going,
+        |downloads| {
+            let paced = pacer
+                .lock()
+                .unwrap()
+                .offer(std::time::Instant::now(), downloads);
+            if let Some(downloads) = paced {
+                report_downloads(app, downloads);
+            }
+        },
+    )?;
+    report_plain(app, "images", true, "OpenBot is downloaded.");
+    Ok(())
 }
 
 fn sign_in_reference(
@@ -4562,20 +4629,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * the window says which Bot it will be while there is still a screen to say it on.
      */
     let requested_harness = harness.clone();
-    let harness =
-        match &credential {
-            openbot_env::ModelCredential::ClaudePlan { .. } => harness::speaking_for("anthropic")
-                .map(|id| harness::HarnessChoice {
-                    id: id.into(),
-                    agent_url: None,
-                }),
-            openbot_env::ModelCredential::ChatGptPlan { .. } => harness::speaking_for("openai")
-                .map(|id| harness::HarnessChoice {
-                    id: id.into(),
-                    agent_url: None,
-                }),
-            _ => harness,
-        };
+    let harness = harness::for_credential(&credential, harness);
     let picked = harness::picked(harness.as_ref(), &root).map_err(|error| {
         // Two registers, because one of these refusals is about a release and the other is
         // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
@@ -4747,7 +4801,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * the very ports the `server` container is about to publish. Stopping them here, and waiting
          * for their sockets to close, is what lets that `up` bind them.
          */
-        let previous_ports = openbot_env::Ports::read(&root).map_err(|error| {
+        // The Bot's recorded host port goes with the Bot it was recorded for (`read_for_harness`).
+        let previous_ports = openbot_env::Ports::read_for_harness(
+            &root,
+            picked.as_ref().and_then(|picked| picked.installed_port()),
+        )
+        .map_err(|error| {
             Problem::with("OpenBot could not read its local ports.", error.to_string())
         })?;
         setup_phase("cleanup");
@@ -4879,6 +4938,25 @@ async fn start_stack_inner<R: tauri::Runtime>(
             .as_ref()
             .and_then(|picked| picked.installed_port())
             .is_some();
+        /*
+         * What this Start runs that Install may not have pulled: a plan's image
+         * (`preparation::PLAN_IMAGES`), as the Bot a plan picks or the ChatGPT plan's model service.
+         * An installation that installed on an API key and now runs on a plan downloads it here,
+         * shown as Install shows it, because `up` never pulls.
+         */
+        let mut runs = Vec::new();
+        if let Some(openbot_env::PickedHarness::Installed { image, .. }) = picked.as_ref() {
+            runs.push(image.clone());
+        }
+        if stack::selected_services(&root, installed_harness)
+            .contains(&openbot_desktop_lib::plan::CHATGPT_PLAN_SERVICE)
+        {
+            runs.push(
+                deployment::reference(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)
+                    .map_err(Problem::from)?,
+            );
+        }
+        download_missing(&app, &found, &runs, || attempt.require_current())?;
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
@@ -9609,7 +9687,10 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
 /// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
 /// that on the UI thread is a window that stops repainting mid-setup.
 #[tauri::command]
-async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<String, Problem> {
+async fn begin_claude_sign_in<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+) -> Result<String, Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
     /*
@@ -9620,8 +9701,20 @@ async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<Str
      */
     #[cfg(target_os = "linux")]
     let service_app = app.clone();
+    // The sign-in's image downloads in its task, said to the window as Install says it.
+    let progress_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        let (address, image) = prepared_sign_in(&root, openbot_desktop_lib::plan::SIGN_IN_IMAGE)?;
+        // Install pulls this image only for an installation already on a Claude plan
+        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
+        let (address, image) = prepared_sign_in_with(
+            &root,
+            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
+            |address, image| {
+                download_missing(&progress_app, address, std::slice::from_ref(image), || {
+                    Ok(())
+                })
+            },
+        )?;
         #[cfg(target_os = "linux")]
         {
             let shell = service_app.state::<Shell>();
@@ -9674,17 +9767,28 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
 
 /// Start a ChatGPT plan sign-in and return the address a browser has to open.
 #[tauri::command]
-async fn begin_chatgpt_sign_in(
-    app: tauri::AppHandle,
+async fn begin_chatgpt_sign_in<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     root: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
     #[cfg(target_os = "linux")]
     let service_app = app.clone();
+    // The sign-in's image downloads in its task, said to the window as Install says it.
+    let progress_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        let (address, image) =
-            prepared_sign_in(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)?;
+        // Install pulls this image only for an installation already on a ChatGPT plan
+        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
+        let (address, image) = prepared_sign_in_with(
+            &root,
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+            |address, image| {
+                download_missing(&progress_app, address, std::slice::from_ref(image), || {
+                    Ok(())
+                })
+            },
+        )?;
         #[cfg(target_os = "linux")]
         {
             let shell = service_app.state::<Shell>();
@@ -21537,10 +21641,24 @@ fn main() {
         }
         let root = temp_root("openbot-harness-start-ipc");
         write_installed_deployment(&root);
+        // A release's Compose file defines the ChatGPT plan's model service, and Start raises it
+        // only where the file does (`stack::selected_services`).
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            format!(
+                "{INSTALLED_COMPOSE}  {}: {{}}\n",
+                openbot_desktop_lib::plan::CHATGPT_PLAN_SERVICE
+            ),
+        )
+        .unwrap();
         let mut images: deployment::Images =
             serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
                 .unwrap();
-        for name in ["agent-langgraph-agui", "agent-claude-sdk"] {
+        for name in [
+            "agent-langgraph-ts",
+            "agent-langgraph-agui",
+            "agent-claude-sdk",
+        ] {
             images.images.insert(
                 name.into(),
                 deployment::Image {
@@ -21572,7 +21690,7 @@ fn main() {
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
@@ -21583,7 +21701,19 @@ fn main() {
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
+            }
+            // An update from 1.0.3, which ran its `langgraph` Bot on the Python image at 4206 and
+            // published it on the host at 4206. The Bot now runs on the TypeScript image at 4215.
+            "updated-from-langgraph" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
+            }
+            // The same update, where the last run published the Bot on a host port of its own
+            // (moved off one somebody else held, or set by hand): that port is kept.
+            "updated-keeps-own-port" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose -f docker-compose.yml -f .openbot-harness-port.yml --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
@@ -21594,15 +21724,32 @@ fn main() {
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness agent-langgraph-agui", Some("agent-langgraph-ts"))
             }
-            "claude-plan" => {
+            "claude-plan" | "claude-plan-switched" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
                 ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-claude-sdk"))
             }
+            "chatgpt-plan-switched" => {
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness agent-langgraph-agui", Some("agent-langgraph-ts"))
+            }
             _ => panic!("unknown test case"),
         };
-        if case.ends_with("-plan") {
+        /*
+         * A person who installed on an API key, whose install pulled neither plan's image, now on
+         * a plan: a saved sign-in returned to, so no sign-in pulled it first. Start downloads it,
+         * showing the download as Install does, and then starts.
+         */
+        let switched_to = match case {
+            "claude-plan-switched" => Some("localhost/agent-claude-sdk@sha256:00"),
+            "chatgpt-plan-switched" => Some("localhost/agent-langgraph-agui@sha256:00"),
+            _ => None,
+        };
+        if let Some(image) = switched_to {
+            std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", image);
+        }
+        if case.ends_with("-plan") || switched_to.is_some() {
             std::fs::write(
                 root.join(".env"),
                 "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/ag-ui\n",
@@ -21616,11 +21763,41 @@ fn main() {
             )
             .unwrap();
         }
+        // What 1.0.3 wrote for its `langgraph` Bot: the Python image, its port inside the
+        // container, and the host port it was published on. 4212 is one the fixture stack
+        // already publishes, so the Start does not probe it against another test's Start.
+        let saved_host_port = match case {
+            "updated-from-langgraph" => Some(4206),
+            "updated-keeps-own-port" => Some(4212),
+            _ => None,
+        };
+        if let Some(host) = saved_host_port {
+            std::fs::write(
+                root.join(".env"),
+                format!(
+                    "PICKED_HARNESS_IMAGE=localhost/agent-langgraph-agui@sha256:00\n\
+                     PICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT={host}\n\
+                     PICKED_HARNESS_URL=http://127.0.0.1:{host}\n"
+                ),
+            )
+            .unwrap();
+        }
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
             .invoke_handler(tauri::generate_handler![start_stack])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
+        // What the window is told while Start runs.
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        {
+            use tauri::Listener;
+            let told = told.clone();
+            app.listen_any("setup:progress", move |event| {
+                told.lock()
+                    .unwrap()
+                    .push(serde_json::from_str(event.payload()).unwrap());
+            });
+        }
         let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
@@ -21659,6 +21836,47 @@ fn main() {
             "model":model, "harness":choice,
         })).expect_err("intentional barrier after up prevents host startup");
         let commands = std::fs::read_to_string(&record).unwrap_or_default();
+        // The Bot's host port follows the image it runs on: an update that moved the Bot from 4206
+        // to 4215 inside its container publishes 4215 on the host, so the Bot answers where it
+        // says it is. A host port the last run chose for itself stays.
+        if let Some(saved) = saved_host_port {
+            let ports = openbot_env::read_already_set(
+                &root.join(".env"),
+                &[
+                    "PICKED_HARNESS_PORT",
+                    "PICKED_HARNESS_HOST_PORT",
+                    "PICKED_HARNESS_URL",
+                ],
+            )
+            .unwrap();
+            let host = if saved == 4206 { 4215 } else { saved };
+            assert_eq!(
+                (
+                    ports.get("PICKED_HARNESS_PORT").map(String::as_str),
+                    ports.get("PICKED_HARNESS_HOST_PORT").map(String::as_str),
+                    ports.get("PICKED_HARNESS_URL").map(String::as_str),
+                ),
+                (
+                    Some("4215"),
+                    Some(host.to_string().as_str()),
+                    Some(format!("http://127.0.0.1:{host}").as_str()),
+                ),
+                "case={case}: {problem:?}"
+            );
+            let overlay = std::fs::read_to_string(root.join(".openbot-harness-port.yml")).ok();
+            if host == 4215 {
+                assert!(
+                    !commands.contains(".openbot-harness-port.yml"),
+                    "case={case}: the Bot is published on its own port, with no remapping: {commands}"
+                );
+            } else {
+                let overlay = overlay.expect("the kept host port is remapped onto the Bot's own");
+                assert!(
+                    overlay.contains(&format!("127.0.0.1:{host}:4215")),
+                    "{overlay}"
+                );
+            }
+        }
         assert!(
             problem["detail"]
                 .as_str()
@@ -21678,6 +21896,40 @@ fn main() {
             vec![expected_up],
             "case={case}, actual Start IPC commands:\n{commands}"
         );
+        // The plan's image, missing, was downloaded before `up`, with the download shown as
+        // Install shows it; an image the engine has is never pulled.
+        let pulls: Vec<_> = commands
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, command)| command)
+            .filter(|command| command.starts_with("pull "))
+            .collect();
+        match switched_to {
+            Some(image) => {
+                let pulled_at = commands
+                    .find(&format!("\tpull {image}"))
+                    .unwrap_or_else(|| panic!("case={case}: {image} was not pulled:\n{commands}"));
+                assert!(
+                    pulled_at < commands.find(" up -d ").unwrap(),
+                    "case={case}: pulled after up:\n{commands}"
+                );
+                assert_eq!(pulls, [format!("pull {image}")], "case={case}");
+                let told = told.lock().unwrap();
+                assert!(
+                    told.iter().any(|row| row["step"] == "images"
+                        && row["running"] == true
+                        && row["downloads"].is_object()),
+                    "case={case}: no download was shown: {told:?}"
+                );
+                assert!(
+                    told.iter().any(|row| row["step"] == "images"
+                        && row["running"] == false
+                        && row["ok"] == true),
+                    "case={case}: the download never finished on screen: {told:?}"
+                );
+            }
+            None => assert_eq!(pulls, [""; 0], "case={case}"),
+        }
         // The server applies its migrations as it starts (in a release that has a `migrate`
         // service, as the dependency `up` completes before `server`): never a `compose run migrate`.
         assert!(
@@ -21714,9 +21966,24 @@ fn main() {
                 "PICKED_HARNESS_URL",
                 "PICKED_HARNESS_KIND",
                 "PICKED_HARNESS_IMAGE",
+                "CHATGPT_PLAN_HARNESS_URL",
+                "LANGGRAPH_IMAGE",
             ],
         )
         .unwrap();
+        // A ChatGPT plan's model calls go to the Python image, pinned to the release, which this
+        // start raised beside the Bot (`expected_up`). Every other sign-in names no such address.
+        assert_eq!(
+            settings.get("CHATGPT_PLAN_HARNESS_URL").map(String::as_str),
+            case.starts_with("chatgpt-plan")
+                .then_some(openbot_desktop_lib::plan::CHATGPT_PLAN_URL),
+            "case={case}"
+        );
+        assert_eq!(
+            settings.get("LANGGRAPH_IMAGE").map(String::as_str),
+            Some("localhost/agent-langgraph-agui@sha256:00"),
+            "case={case}"
+        );
         assert_eq!(
             settings.get("TENANT_PACKAGE_DIR").map(String::as_str),
             Some("../examples/personal")
@@ -21787,6 +22054,26 @@ fn main() {
     }
 
     #[test]
+    fn update_from_langgraph_start_ipc_publishes_the_new_bots_own_port() {
+        if crate::test_support::isolated_process(
+            "tests::update_from_langgraph_start_ipc_publishes_the_new_bots_own_port",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("updated-from-langgraph");
+    }
+
+    #[test]
+    fn update_from_langgraph_start_ipc_keeps_a_host_port_of_its_own() {
+        if crate::test_support::isolated_process(
+            "tests::update_from_langgraph_start_ipc_keeps_a_host_port_of_its_own",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("updated-keeps-own-port");
+    }
+
+    #[test]
     fn no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services() {
         if crate::test_support::isolated_process(
             "tests::no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services",
@@ -21814,6 +22101,162 @@ fn main() {
             return;
         }
         harness_start_ipc_case("claude-plan");
+    }
+
+    /*
+     * A sign-in to a plan on an installation that installed without that plan's image: the
+     * sign-in runs in that image, so it downloads it first, showing the download as Install shows
+     * it, and then starts the sign-in's container from it. Before, it refused the sign-in as an
+     * unfinished install. The fixture engine refuses the container itself, so the flow stops there,
+     * before any browser would open.
+     */
+    fn plan_sign_in_ipc_case(command: &str, published: &str) {
+        let root = temp_root("openbot-plan-sign-in-ipc");
+        write_installed_deployment(&root);
+        let mut images: deployment::Images =
+            serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
+                .unwrap();
+        images.images.insert(
+            published.into(),
+            deployment::Image {
+                reference: format!("localhost/{published}@sha256:00"),
+            },
+        );
+        std::fs::write(
+            deployment::images_path(&root),
+            serde_json::to_string(&images).unwrap(),
+        )
+        .unwrap();
+        preparation::record(&root, None, vec!["fixture-image".into()]).unwrap();
+        let image = format!("localhost/{published}@sha256:00");
+        let path = SerializedPath::set_only_with("docker", "harness");
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", &image);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .invoke_handler(tauri::generate_handler![
+                begin_claude_sign_in,
+                begin_chatgpt_sign_in
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        {
+            use tauri::Listener;
+            let told = told.clone();
+            app.listen_any("setup:progress", move |event| {
+                told.lock()
+                    .unwrap()
+                    .push(serde_json::from_str(event.payload()).unwrap());
+            });
+        }
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let answer = tauri::test::get_ipc_response(
+            &window,
+            tauri::webview::InvokeRequest {
+                cmd: command.into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: if cfg!(any(windows, target_os = "android")) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "root": root })),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        );
+        let commands = std::fs::read_to_string(&record).unwrap_or_default();
+        let problem = answer.expect_err("the fixture engine refuses the sign-in's container");
+        assert_ne!(
+            problem["said"].as_str(),
+            Some(preparation::REQUIRED),
+            "{command}: refused as an unfinished install: {problem:?}\n{commands}"
+        );
+        let pulled_at = commands
+            .find(&format!("\tpull {image}"))
+            .unwrap_or_else(|| panic!("{command}: {image} was not pulled:\n{commands}"));
+        let ran_at = commands
+            .lines()
+            .position(|line| line.contains("\trun ") && line.contains(&image))
+            .map(|line| {
+                commands
+                    .lines()
+                    .take(line)
+                    .map(|l| l.len() + 1)
+                    .sum::<usize>()
+            })
+            .unwrap_or_else(|| panic!("{command}: the sign-in never ran {image}:\n{commands}"));
+        assert!(
+            pulled_at < ran_at,
+            "{command}: ran before the pull:\n{commands}"
+        );
+        let told = told.lock().unwrap();
+        assert!(
+            told.iter().any(|row| row["step"] == "images"
+                && row["running"] == true
+                && row["downloads"].is_object()),
+            "{command}: no download was shown: {told:?}"
+        );
+        assert!(
+            told.iter()
+                .any(|row| row["step"] == "images" && row["running"] == false && row["ok"] == true),
+            "{command}: the download never finished on screen: {told:?}"
+        );
+        drop(path);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_first_claude_plan_sign_in_downloads_its_image() {
+        if crate::test_support::isolated_process(
+            "tests::a_first_claude_plan_sign_in_downloads_its_image",
+        ) {
+            return;
+        }
+        plan_sign_in_ipc_case(
+            "begin_claude_sign_in",
+            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
+        );
+    }
+
+    #[test]
+    fn a_first_chatgpt_plan_sign_in_downloads_its_image() {
+        if crate::test_support::isolated_process(
+            "tests::a_first_chatgpt_plan_sign_in_downloads_its_image",
+        ) {
+            return;
+        }
+        plan_sign_in_ipc_case(
+            "begin_chatgpt_sign_in",
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+        );
+    }
+
+    #[test]
+    fn a_switch_to_a_claude_plan_downloads_its_bot_before_start() {
+        if crate::test_support::isolated_process(
+            "tests::a_switch_to_a_claude_plan_downloads_its_bot_before_start",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("claude-plan-switched");
+    }
+
+    #[test]
+    fn a_switch_to_a_chatgpt_plan_downloads_its_model_service_before_start() {
+        if crate::test_support::isolated_process(
+            "tests::a_switch_to_a_chatgpt_plan_downloads_its_model_service_before_start",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("chatgpt-plan-switched");
     }
 
     #[test]
