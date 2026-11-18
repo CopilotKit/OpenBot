@@ -3,6 +3,7 @@ pub mod acquire;
 pub mod ai_connection;
 pub mod app_update;
 pub mod cli_release;
+pub mod client_version;
 pub mod composio;
 pub mod connected;
 pub mod deployment;

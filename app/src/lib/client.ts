@@ -12,7 +12,46 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+import { CLIENT_HEADER, clientToken } from "@openbot/shared/client-version";
+import { noteRefusal } from "@/lib/client-version/refusal";
 import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
+
+/**
+ * This app as it names itself to its OpenBot: `web/<release>`, the release it was built from
+ * (shared/client-version.ts). The server refuses an app older than the oldest it serves.
+ */
+export const CLIENT_NAME = clientToken("web");
+
+/**
+ * `headers` with this app named in them, in the same shape they were given: a record, a `Headers`,
+ * or a list of pairs. For the few requests the app makes to OpenBot without the client: the
+ * runtime's, sign-in's and finishing a consent. A file's own address is read like a picture's,
+ * which carries no header either, and can be sent on to wherever the file is kept.
+ */
+export function withClientName(
+  headers: Record<string, string>,
+): Record<string, string>;
+export function withClientName(headers?: HeadersInit): HeadersInit;
+export function withClientName(headers?: HeadersInit): HeadersInit {
+  const header = CLIENT_HEADER.toLowerCase();
+  if (headers instanceof Headers) {
+    const named = new Headers(headers);
+    named.set(CLIENT_HEADER, CLIENT_NAME);
+    return named;
+  }
+  if (Array.isArray(headers)) {
+    return [
+      ...headers.filter(([name]) => name.toLowerCase() !== header),
+      [CLIENT_HEADER, CLIENT_NAME],
+    ];
+  }
+  const named: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (name.toLowerCase() !== header) named[name] = value;
+  }
+  named[CLIENT_HEADER] = CLIENT_NAME;
+  return named;
+}
 
 export type ClientOptions = {
   /** Absent means GET. */
@@ -41,17 +80,26 @@ export type ClientOptions = {
  *
  * A 502 is read before it is handed back, so a read failing on the relay's own answer fails with
  * the connection already known to be lost, and waits for OpenBot (`connection-lost.ts`).
+ *
+ * Every request names this app ({@link CLIENT_NAME}). A 400 is read before it is handed back too, so
+ * a refusal for being too old an app is known before the request fails, and the update screen shows
+ * in place of whatever failed (`lib/client-version/refusal.ts`).
  */
 async function request(path: string, init: RequestInit): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(path, { ...init, credentials: "include" });
+    response = await fetch(path, {
+      ...init,
+      headers: withClientName(init.headers),
+      credentials: "include",
+    });
   } catch (error) {
     noteNoAnswer(error);
     throw error;
   }
   const noted = noteAnswer(response);
   if (response.status === 502) await noted;
+  if (response.status === 400) await noteRefusal(response);
   return response;
 }
 

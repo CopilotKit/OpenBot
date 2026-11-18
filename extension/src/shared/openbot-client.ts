@@ -1,4 +1,14 @@
 import {
+  CLIENT_HEADER,
+  CLIENT_KINDS,
+  CLIENT_UPDATE_REQUIRED,
+  type ClientKind,
+  clientToken,
+  clientUpdateDetail,
+  isVersion,
+  SECURITY_UPDATE_SENTENCE,
+} from "@openbot/shared/client-version";
+import {
   RECORDER_SIGNED_OUT,
   type RecorderErrorBody,
 } from "@openbot/shared/recorder-api";
@@ -17,11 +27,54 @@ export class OpenBotError extends Error {
   get signedOut(): boolean {
     return this.status === 401 && this.body?.code === RECORDER_SIGNED_OUT;
   }
+
+  /** True when OpenBot refused this Recorder as older than it serves (CLIENT_UPDATE_REQUIRED). */
+  get updateRequired(): boolean {
+    return this.body?.code === CLIENT_UPDATE_REQUIRED;
+  }
+
+  /** True when that refusal's minimum was raised because of a security problem in older releases. */
+  get securityUpdateRequired(): boolean {
+    return (
+      this.updateRequired &&
+      (this.body as Record<string, unknown> | null)?.security === true
+    );
+  }
+}
+
+/** What the person reads when OpenBot serves only newer Recorders and its answer names no release we can use. */
+export const RECORDER_UPDATE_REQUIRED =
+  "This OpenBot needs a newer OpenBot Recorder. Update OpenBot, then try again.";
+
+/**
+ * The sentence for OpenBot refusing this Recorder as too old, or null for any other failure. It is the Recorder's own
+ * sentence, the same one OpenBot words its refusal with (`clientUpdateDetail`), built from the app and release the
+ * answer names, or the security sentence when the minimum was raised for a security problem. The text of the answer
+ * itself is never shown: any site can answer as OpenBot, and only a known app, a release number and the security flag
+ * pass through.
+ */
+export function updateRequiredSentence(error: unknown): string | null {
+  if (!(error instanceof OpenBotError) || !error.updateRequired) return null;
+  if (error.securityUpdateRequired) return SECURITY_UPDATE_SENTENCE;
+  const body = error.body as Record<string, unknown> | null;
+  const named = body?.client;
+  const kind: ClientKind = (CLIENT_KINDS as readonly unknown[]).includes(named)
+    ? (named as ClientKind)
+    : "recorder";
+  const minimum = body?.minimumVersion;
+  return isVersion(minimum)
+    ? clientUpdateDetail(kind, minimum)
+    : RECORDER_UPDATE_REQUIRED;
 }
 
 type OpenBotTarget = { openbotUrl: string; token?: string };
 
-/** Sends the request with the bearer when there is one, never with cookies, and never follows a redirect. */
+/**
+ * Sends the request with the bearer when there is one, never with cookies, and never follows a redirect. Every request
+ * names the Recorder and the OpenBot release it was built from (`OpenBot-Client: recorder/<release>`), so OpenBot can
+ * refuse a Recorder older than it serves with a sentence. These requests run in the service worker and the offscreen
+ * document, which the install's host access lets reach any OpenBot without a CORS preflight; never from a content script.
+ */
 export async function openbotRaw(
   target: OpenBotTarget,
   path: string,
@@ -29,6 +82,7 @@ export async function openbotRaw(
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (target.token) headers.set("Authorization", `Bearer ${target.token}`);
+  headers.set(CLIENT_HEADER, clientToken("recorder"));
   const url = new URL(path, target.openbotUrl);
   if (url.origin !== new URL(target.openbotUrl).origin) {
     throw new Error(

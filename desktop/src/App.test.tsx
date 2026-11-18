@@ -12,6 +12,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
+import { DOESNT_UPDATE_ITSELF } from "../../shared/desktop-updates";
 import { DEFAULT_HARNESS } from "./harness";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -887,7 +888,12 @@ const CONNECT_PROBLEMS: Array<{
   kind: string;
   said: string;
   at: "check" | "connect";
-  offer: "field" | "Try again" | "Sign in again" | "Open in browser";
+  offer:
+    | "field"
+    | "Try again"
+    | "Sign in again"
+    | "Open in browser"
+    | "Update and restart";
 }> = [
   {
     kind: "address-invalid",
@@ -918,6 +924,18 @@ const CONNECT_PROBLEMS: Array<{
     at: "check",
     offer: "Open in browser",
     said: "The OpenBot at openbot.example.com is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser.",
+  },
+  {
+    kind: "app-too-old",
+    at: "check",
+    offer: "Update and restart",
+    said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.",
+  },
+  {
+    kind: "app-too-old-security",
+    at: "check",
+    offer: "Update and restart",
+    said: "This version of OpenBot has a security problem. Update to keep using it.",
   },
   {
     kind: "sign-in-cancelled",
@@ -1116,6 +1134,19 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
         throw { said, kind };
       },
       "plugin:opener|open_url": null,
+      // This app's own update, as the shell offers it.
+      app_update_offer: {
+        version: null,
+        current: "1.1.0",
+        installing: null,
+        updatesItself: true,
+      },
+      check_app_update: {
+        found: "available",
+        version: "1.2.0",
+        current: "1.1.0",
+      },
+      install_app_update: () => new Promise(() => {}),
     });
     const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
     await userEvent.type(field, `${ELSEWHERE}{Enter}`);
@@ -1152,6 +1183,22 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
         args: { url: ELSEWHERE },
       });
       expect(view.getByRole("button", { name: "Connect" })).toBeTruthy();
+    } else if (offer === "Update and restart") {
+      // This app is what is too old: the way on is its own update, not another try.
+      expect(alert.textContent).toBe(said);
+      expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+      const update = view.getByRole("button", { name: offer });
+      await waitFor(() => expect(update).toHaveProperty("disabled", false));
+      await userEvent.click(update);
+      await waitFor(() =>
+        expect(invokeCalls.map((call) => call.command)).toContain(
+          "install_app_update",
+        ),
+      );
+      expect(checks).toBe(1);
+      // Another address is another OpenBot: Connect is back once it changes.
+      await userEvent.type(field, "x");
+      expect(view.getByRole("button", { name: "Connect" })).toBeTruthy();
     } else {
       // One way on, and it says what it does.
       expect(alert.textContent).toBe(said);
@@ -1161,6 +1208,35 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
     }
   });
 }
+
+/*
+ * On a build that never updates itself, the line that says so is part of the notice, as on the
+ * screen for the OpenBot on this computer. Seen on a Mac: it sat under the notice in body type, a
+ * second message about the same thing.
+ */
+test("an OpenBot this build is too old for says in its notice that this build doesn't update itself", async () => {
+  const said =
+    "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.";
+  const view = await chooseConnect({
+    check_openbot_address: () => {
+      throw { said, kind: "app-too-old" };
+    },
+    app_update_offer: {
+      version: null,
+      current: "1.1.0",
+      installing: null,
+      updatesItself: false,
+    },
+  });
+  const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  await userEvent.type(field, `${ELSEWHERE}{Enter}`);
+  const line = await view.findByText(DOESNT_UPDATE_ITSELF);
+  const notice = view.getByRole("alert");
+  expect(notice.textContent).toContain(said);
+  expect(notice.contains(line)).toBe(true);
+  expect(view.queryByRole("button", { name: "Update and restart" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+});
 
 test("Cancel while the browser is waited on stops the sign-in and gives the form back", async () => {
   const signIn = deferred<null>();
@@ -3889,6 +3965,198 @@ test("the running screen opens on its heading, with Updates under the buttons, w
   expect(view.getByRole("alert").textContent).toContain(
     "OpenBot is not answering on port 3010 yet",
   );
+});
+
+/*
+ * The OpenBot on this computer started, and needs a newer version of this app (its admin's minimum,
+ * or only a newer API). The window does not open it, and does not say it stopped or failed: it says
+ * "Update OpenBot" with the shell's sentence and Update and restart. Stop is still there.
+ */
+test("an OpenBot on this computer that needs a newer app says Update OpenBot, not that it stopped", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-app-too-old",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "show_openbot")
+      throw {
+        said,
+        detail:
+          "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+        kind: "app-too-old",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.0",
+        installing: null,
+        updatesItself: true,
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  const heading = await view.findByRole("heading", {
+    level: 1,
+    name: "Update OpenBot",
+  });
+  expect(view.queryByRole("heading", { name: "OpenBot stopped" })).toBeNull();
+  expect(view.queryByText("That didn’t finish")).toBeNull();
+  expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
+  const card = view.getByRole("alert");
+  expect(card.textContent).toContain(said);
+  // One heading says it: the card under it does not say it again.
+  expect(within(card).queryByRole("heading")).toBeNull();
+  expect(heading.closest(".sheet")?.contains(card)).toBe(true);
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+});
+
+// The same, for a minimum raised because of a security problem: the security sentence is the heading,
+// in place of Update OpenBot, and the card under it offers the update without saying it again.
+test("an OpenBot on this computer that raised this app's minimum for a security problem says so as the heading", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-app-too-old-security",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "This version of OpenBot has a security problem. Update to keep using it.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "show_openbot")
+      throw {
+        said,
+        detail:
+          "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+        kind: "app-too-old-security",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.0",
+        installing: null,
+        updatesItself: true,
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  await view.findByRole("heading", { level: 1, name: said });
+  expect(view.queryByRole("heading", { name: "Update OpenBot" })).toBeNull();
+  expect(view.queryByRole("heading", { name: "OpenBot stopped" })).toBeNull();
+  expect(view.getAllByText(said)).toHaveLength(1);
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+});
+
+/*
+ * The release laid out on this computer needs a launcher contract newer than this app speaks (a
+ * newer app laid it out, and this one is older): Start does not start it
+ * (`deployment_release::start_problem`). The window says "Update OpenBot" with the same sentence and
+ * Update and restart, not that OpenBot stopped or that setup failed, and Update and restart installs
+ * this app's update.
+ */
+test("a release that needs a newer app is not started, and the window says Update OpenBot with its update", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-launcher-ahead",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said,
+        detail:
+          "OpenBot v1.3.0 needs launcherApi 2; this app is v1.1.1 and speaks launcherApi 1",
+        kind: "app-too-old",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.1",
+        installing: null,
+        updatesItself: true,
+      };
+    if (command === "check_app_update")
+      return { found: "available", version: "1.3.0", current: "1.1.1" };
+    if (command === "install_app_update") return new Promise(() => {});
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await waitFor(() => expect(localSequence()).toContain("start_stack"));
+  const heading = await view.findByRole("heading", {
+    level: 1,
+    name: "Update OpenBot",
+  });
+  expect(view.queryByRole("heading", { name: "OpenBot stopped" })).toBeNull();
+  expect(view.queryByText("That didn’t finish")).toBeNull();
+  expect(view.queryByRole("list", { name: "Setup progress" })).toBeNull();
+  const card = view.getByRole("alert");
+  expect(card.textContent).toContain(said);
+  expect(within(card).queryByRole("heading")).toBeNull();
+  expect(heading.closest(".sheet")?.contains(card)).toBe(true);
+  // Nothing was shown: the release that needs a newer app is not opened.
+  expect(localSequence()).not.toContain("show_openbot");
+  const update = view.getByRole("button", { name: "Update and restart" });
+  await waitFor(() => expect(update).toHaveProperty("disabled", false));
+  await userEvent.click(update);
+  await waitFor(() =>
+    expect(invokeCalls.map((call) => call.command)).toContain(
+      "install_app_update",
+    ),
+  );
+});
+
+/*
+ * The same OpenBot, found already running by a launch that did not start it: the app was quit or
+ * killed and opened again while OpenBot kept running. Seen on a Mac and on Windows: the window said
+ * "OpenBot is stopped" with Start OpenBot, the Update OpenBot card under it, while the server was up
+ * and answering. It is the screen Start shows when it finds the same: Update OpenBot, running, with
+ * Show OpenBot and Stop OpenBot, and nothing starts.
+ */
+test("a launch that finds this computer's OpenBot running and needing a newer app says Update OpenBot, never that it stopped", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-app-too-old-found-running",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "already_running") return true;
+    if (command === "show_openbot")
+      throw {
+        said,
+        detail:
+          "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+        kind: "app-too-old",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.0",
+        installing: null,
+        updatesItself: true,
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { level: 1, name: "Update OpenBot" });
+  const card = view.getByRole("alert");
+  expect(card.textContent).toContain(said);
+  expect(within(card).queryByRole("heading")).toBeNull();
+  expect(view.queryByText("OpenBot is stopped")).toBeNull();
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Show OpenBot" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+  // Running already: nothing is started again.
+  expect(localSequence()).toEqual(["show_openbot"]);
 });
 
 test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
