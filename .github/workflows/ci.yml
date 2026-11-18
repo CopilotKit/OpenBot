@@ -46,6 +46,11 @@ jobs:
       - run: bun run typecheck
       - name: Desktop version tracks the release version
         run: bun desktop/scripts/desktop-version.ts check
+      # What each recorded OpenBot Desktop launch hands Compose, read with this tree's
+      # docker-compose.yml by Compose itself: the file must take it, and must still hand the server
+      # everything the app of the published launcherApi gives it. See scripts/check-launcher-inputs.ts.
+      - name: Every recorded Desktop launch still starts this release's server
+        run: bun scripts/check-launcher-inputs.ts
 
   # The API contract. api/openapi.yaml is the single source of truth every client is generated from,
   # so four things are checked about it, each its own step so a red run names which:
@@ -66,10 +71,11 @@ jobs:
   #   listed with its reason in api/accepted-breaking-changes.md, and only that change passes. Every
   #   deprecation names its sunset (`x-sunset`), at least 365 days after the change that deprecates
   #   it, and nothing is removed before its sunset;
-  # - it breaks nothing a client of the last release relies on. The same comparison against the last
-  #   release tag's spec, on every run, so a string of changes each harmless against its own base
-  #   cannot add up to a break for an app people already have, and a change let through as one no
-  #   release serves is checked against what the release really serves;
+  # - it breaks nothing a client of a release it still serves relies on. The same comparison against
+  #   the spec of every release of the last 12 months, and the last release's, on every run, so a
+  #   string of changes each harmless against its own base cannot add up to a break for an app people
+  #   already have, and a change let through as one no release serves is checked against what each
+  #   release really serves;
   # - the support window holds (scripts/support-window.ts): no oldest-app minimum cuts off an app
   #   released in the last 12 months, and every deprecation's sunset is at least 365 days after the
   #   release that first served it deprecated.
@@ -153,35 +159,55 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName,publishedAt,isPrerelease > "$RUNNER_TEMP/releases.json"
-      # The last release's spec, which every app people have was built from: the newest release at or
-      # below this tree's version, so a fix on a release branch is held to its own line's release. A
-      # line in api/accepted-breaking-changes.md that lets a change through because no release serves
-      # it yet ("no release serves it") is not applied here: if the release does serve it, that reason
-      # was wrong, and this fails. Every other line is, since its reason holds for any client.
+      # The spec of every release whose apps this tree's server still serves (scripts/support-window.ts
+      # held-releases): each release of the last 12 months at or below this tree's version, and the
+      # last release even once it has aged out, so a fix on a release branch is held to its own line.
+      # Each release's apps were built from its own spec and call this server, so the spec is held to
+      # each, not only to the last: a release in between need not have served everything an older one
+      # did. A release with no api/openapi.yaml predates this API and has no client of it.
+      #
+      # A line in api/accepted-breaking-changes.md that lets a change through because no release
+      # serves it yet ("no release serves it") is not applied here: if a release does serve it, that
+      # reason was wrong, and this fails. Every other line is, since its reason holds for any client.
       #
       # The deprecation window is not counted here: oasdiff counts it from today, and a deprecation
       # made after the release is new against it on every run until the next one. The base-branch run
       # counts it on the day the deprecation is made; scripts/support-window.ts counts it from the
       # release that first served it.
-      - name: No breaking change against the last release
+      - name: No breaking change against any release whose apps are served
         run: |
           set -euo pipefail
-          release="$(bun scripts/support-window.ts last-release --releases "$RUNNER_TEMP/releases.json")"
-          if [ -z "$release" ]; then
+          held="$(bun scripts/support-window.ts held-releases --releases "$RUNNER_TEMP/releases.json")"
+          if [ -z "$held" ]; then
             echo "::notice::No release at or below this tree's version yet, so there is no released spec to hold to."
             exit 0
           fi
-          git fetch --no-tags --depth=1 origin "refs/tags/$release:refs/tags/$release"
-          if ! git cat-file -e "$release:api/openapi.yaml" 2>/dev/null; then
-            echo "::notice::$release has no api/openapi.yaml, so no client of it uses this API."
-            exit 0
-          fi
-          echo "Holding api/openapi.yaml to $release's."
-          git show "$release:api/openapi.yaml" > "$RUNNER_TEMP/release-openapi.yaml"
           accepted="$RUNNER_TEMP/accepted-against-release.md"
           grep -v -F 'no release serves it' api/accepted-breaking-changes.md > "$accepted" || true
-          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/release-openapi.yaml" api/openapi.yaml --flatten-allof --err-ignore "$accepted" --warn-ignore "$accepted" || true
-          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/release-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions --err-ignore "$accepted" --warn-ignore "$accepted"
+          failed=()
+          mapfile -t releases <<< "$held"
+          # One fetch for every release, each under a ref of its own, so a tag this checkout already
+          # holds is never in the way.
+          refspecs=()
+          for release in "${releases[@]}"; do refspecs+=("+refs/tags/$release:refs/held-releases/$release"); done
+          git fetch --no-tags --depth=1 origin "${refspecs[@]}"
+          for release in "${releases[@]}"; do
+            if ! git cat-file -e "refs/held-releases/$release:api/openapi.yaml" 2>/dev/null; then
+              echo "$release has no api/openapi.yaml, so no client of it uses this API."
+              continue
+            fi
+            echo "::group::Holding api/openapi.yaml to $release's"
+            git show "refs/held-releases/$release:api/openapi.yaml" > "$RUNNER_TEMP/release-openapi.yaml"
+            "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/release-openapi.yaml" api/openapi.yaml --flatten-allof --err-ignore "$accepted" --warn-ignore "$accepted" || true
+            echo "::endgroup::"
+            if ! "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/release-openapi.yaml" api/openapi.yaml --flatten-allof --fail-on WARN --format githubactions --err-ignore "$accepted" --warn-ignore "$accepted"; then
+              failed+=("$release")
+            fi
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::api/openapi.yaml breaks a client of ${failed[*]}, whose apps this server still serves."
+            exit 1
+          fi
       - name: The 12-month support window holds
         run: bun scripts/support-window.ts check --releases "$RUNNER_TEMP/releases.json"
       # The live channels (api/asyncapi.yaml). The differences come from the AsyncAPI CLI, pinned in

@@ -16,9 +16,12 @@
  *
  *     bun scripts/support-window.ts check --releases releases.json
  *     bun scripts/support-window.ts last-release --releases releases.json
+ *     bun scripts/support-window.ts held-releases --releases releases.json
  *
  * `releases.json` is `gh release list --json tagName,publishedAt,isPrerelease`. `last-release`
  * prints the newest published release at or below this tree's version, or nothing.
+ * `held-releases` prints every release whose spec this tree's spec is held to, one per line, newest
+ * first (`heldReleases`).
  *
  * oasdiff (`--deprecation-days-stable`) holds the same 365 days on the day a deprecation is made;
  * this holds it against the release dates, over the whole spec, on every run.
@@ -84,6 +87,27 @@ export function lastRelease(
   return stableReleases(releases)
     .filter((release) => compareVersions(release.tagName, version) <= 0)
     .at(-1);
+}
+
+/**
+ * Every release whose apps this tree must still serve, newest first: each one in the window at or
+ * below this tree's version, and the last release even when it has aged out of the window. An app
+ * of any of them was built from that release's spec and calls this tree's server, so this tree's
+ * spec is held to each release's, not only to the last: a release in between need not have served
+ * everything an older one did, and an app of the older one still calls it.
+ */
+export function heldReleases(
+  releases: readonly Release[],
+  version: string,
+  now: Date,
+): Release[] {
+  const held = windowReleases(releases, now).filter(
+    (release) => compareVersions(release.tagName, version) <= 0,
+  );
+  const last = lastRelease(releases, version);
+  if (last && !held.some((release) => release.tagName === last.tagName))
+    held.push(last);
+  return held.sort((a, b) => compareVersions(b.tagName, a.tagName));
 }
 
 /**
@@ -323,9 +347,14 @@ async function main(args: readonly string[]): Promise<number> {
     if (release) console.log(release.tagName);
     return 0;
   }
+  if (args[0] === "held-releases") {
+    for (const release of heldReleases(releases, version, now))
+      console.log(release.tagName);
+    return 0;
+  }
   if (args[0] !== "check") {
     console.error(
-      "Usage: support-window.ts check|last-release --releases <file>",
+      "Usage: support-window.ts check|last-release|held-releases --releases <file>",
     );
     return 2;
   }

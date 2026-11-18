@@ -1,5 +1,15 @@
 /**
- * A ChatGPT plan's model, reached through agent-langgraph-agui.
+ * A plan's model, reached through the engine that holds the plan: a ChatGPT plan through
+ * agent-langgraph-agui at its root, a Claude plan through agent-claude-sdk at `/model`.
+ *
+ * A CLAUDE PLAN, as plan-model.ts reaches it for built-in Bots. The plan token never leaves the
+ * Claude engine; the Claude Agent SDK makes every call. Its query is kept between a step's tool call
+ * and that call's result, so every call of a run, and the next run on the same thread, goes under
+ * one thread id per (Bot, thread) (`claudeThreadId`). A stopped run whose query is answering or
+ * waiting on a call cancels it at `/model/cancel`; a run that hands a call to the surface does not,
+ * since the query waits for that result.
+ *
+ * A CHATGPT PLAN, below.
  *
  * A plan token is a bearer for the Codex backend, and the only maintained client for it is
  * LangChain's Python `_ChatOpenAICodex`, which agent-langgraph-agui already runs, token store and
@@ -19,7 +29,7 @@
  * of the harness's own state is not this run's. A RUN_ERROR ends the call with the harness's words,
  * code and category (`HarnessRunError`), which this engine relays unchanged.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { HttpAgent } from "@ag-ui/client";
 import type {
   Message as AguiMessage,
@@ -39,17 +49,33 @@ import { convertToOpenAITool } from "@langchain/core/utils/function_calling";
 import { HarnessRunError } from "./errors.ts";
 
 export type PlanHarnessFields = {
-  /** agent-langgraph-agui's address; its AG-UI endpoint is the root. */
+  /** Whose plan: "chatgpt" (the default) or "claude". */
+  plan?: "chatgpt" | "claude";
+  /** The plan engine's AG-UI run: agent-langgraph-agui's root, agent-claude-sdk's `/model`. */
   url: string;
-  /** That harness's `MANAGED_AGENT_TOKEN`. */
+  /** That engine's `MANAGED_AGENT_TOKEN`. */
   token: string;
   /** The plan model the server chose, or "" for the plan's own default. */
   model?: string;
   effort?: string;
   botId?: string;
+  /**
+   * The run's thread. On a Claude plan every call goes under one query per (Bot, thread)
+   * (`claudeThreadId`); a ChatGPT plan's calls each go under a fresh thread.
+   */
+  threadId?: string;
+  /** The run's stop, which cancels a Claude plan's query. */
+  signal?: AbortSignal;
   /** For tests: the fetch the AG-UI client uses. */
   fetch?: typeof fetch;
 };
+
+/** One Claude query per Bot and thread, as plan-model.ts names it on the server. */
+export function claudeThreadId(botId: string, threadId: string): string {
+  return createHash("sha256")
+    .update(JSON.stringify([botId, threadId]))
+    .digest("hex");
+}
 
 export interface PlanHarnessCallOptions extends BaseChatModelCallOptions {
   tools?: Tool[];
@@ -184,14 +210,52 @@ export function aguiTools(tools: BindToolsInput[]): Tool[] {
 
 export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> {
   readonly fields: PlanHarnessFields;
+  /** A call is streaming from the Claude query. */
+  private streaming = false;
+  /** Calls the Claude query made that wait on their results. */
+  private pending = 0;
+  /** The Claude query's thread, which every call of the run goes under. */
+  private readonly query?: string;
 
   constructor(fields: PlanHarnessFields) {
     super({});
     this.fields = fields;
+    if (fields.plan !== "claude" || fields.threadId === undefined) return;
+    const query = claudeThreadId(fields.botId ?? "", fields.threadId);
+    this.query = query;
+    fields.signal?.addEventListener("abort", () => void this.cancel(query), {
+      once: true,
+    });
   }
 
   _llmType(): string {
-    return "openbot-chatgpt-plan";
+    // Asked by the base class's constructor too, before `fields` is set.
+    return `openbot-${this.fields?.plan ?? "chatgpt"}-plan`;
+  }
+
+  /** Stop the Claude query this run is answering on, if it is answering or waiting. */
+  private async cancel(threadId: string): Promise<void> {
+    if (!this.streaming && this.pending === 0) return;
+    try {
+      const response = await (this.fields.fetch ?? fetch)(
+        `${this.fields.url.replace(/\/+$/, "")}/cancel`,
+        {
+          method: "POST",
+          redirect: "error",
+          signal: AbortSignal.timeout(5000),
+          headers: {
+            "content-type": "application/json",
+            "x-openbot-agent-token": this.fields.token,
+          },
+          body: JSON.stringify({ threadId }),
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch {
+      // No request details: the address and token are the deployment's. The Claude engine's own
+      // query timeout is the last cleanup.
+      console.error("The Claude plan's model query could not be cancelled.");
+    }
   }
 
   override bindTools(
@@ -213,7 +277,7 @@ export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> 
     const { messages: conversation, context } = planRequest(messages);
     const { model, effort, botId } = this.fields;
     return {
-      threadId: `plan-${randomUUID()}`,
+      threadId: this.query ?? `plan-${randomUUID()}`,
       runId: randomUUID(),
       messages: conversation,
       tools: answerOnly ? [] : (options.tools ?? []),
@@ -271,6 +335,8 @@ export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> 
 
     const calls = new Map<string, { index: number; ended: boolean }>();
     let finished = false;
+    this.streaming = true;
+    this.pending = 0;
     try {
       for (;;) {
         if (queue.length === 0)
@@ -359,11 +425,13 @@ export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> 
             if ([...calls.values()].some((call) => !call.ended))
               throw new Error("The plan harness ended during a tool call.");
             finished = true;
+            this.pending = calls.size;
             break;
           }
         }
       }
     } finally {
+      this.streaming = false;
       subscription.unsubscribe();
       if (!finished) agent.abortRun();
     }

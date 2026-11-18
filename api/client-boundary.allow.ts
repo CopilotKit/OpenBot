@@ -310,6 +310,12 @@ export const ALLOWED: Allowed[] = [
     why: "the addresses Desktop gives a Bot's harness: the model proxy and the tool callback",
   },
   {
+    file: "desktop/src-tauri/src/ai_connection.rs",
+    what: "/api/model-provider",
+    rule: "machine-credential",
+    why: "the model gateway Desktop gives every engine, which presents the gateway token",
+  },
+  {
     file: "desktop/src-tauri/src/learning_model.rs",
     what: "/api/learning-model/v1",
     rule: "machine-credential",

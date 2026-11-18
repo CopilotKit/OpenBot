@@ -49,6 +49,7 @@ const ACTIONS: Readonly<Record<string, string>> = {
  * its stored name.
  */
 export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
+  "ai_connection.replaced": "Change the AI provider",
   "configuration.changed": "Change a setting",
   "credential.created": "Save a credential",
   "credential.rotated": "Replace a credential",
