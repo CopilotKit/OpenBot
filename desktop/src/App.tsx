@@ -10,7 +10,7 @@ import {
   useEarlyDownloads,
 } from "./EarlyDownloads";
 import { handover } from "./handover";
-import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
+import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
   LocalIntelligence,
@@ -722,8 +722,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         ).catch(() => false);
         if (!active) return;
         if (installed) {
-          const key = installationKeyFor(found, installed.harness);
-          setHarness(installed.harness);
+          const saved = installed.harness && currentChoice(installed.harness);
+          const key = installationKeyFor(found, saved);
+          setHarness(saved);
           setPreparation({ key, status: "complete" });
           if (configured?.localEval) {
             setModel(resumedModel);

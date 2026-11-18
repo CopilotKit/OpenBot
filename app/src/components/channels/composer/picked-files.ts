@@ -1,6 +1,7 @@
 import {
   type AttachmentLimits,
   classifyAttachment,
+  documentKindInWords,
   formatAttachmentLimit,
   largestAttachmentBytes,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -115,7 +116,7 @@ export function screenPickedFiles(
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for a PDF. The limit is ${formatAttachmentLimit(limits.documentBytes)}.`,
+          `'${file.name}' is too large for ${documentKindInWords(mediaType, "one")}. The limit is ${formatAttachmentLimit(limits.documentBytes)}.`,
         ),
       );
       continue;

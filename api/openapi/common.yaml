@@ -845,6 +845,14 @@ components:
         admin governs it: its people, its sign-in and its policy. A member
         uses it. The owner is whoever created the organization; `default`
         has admins and no owner.
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum: [owner, admin, member]
+      description: >-
+        The person's role as a member of the organization, as the server
+        answers it. An owner or an admin governs it: its people, its sign-in
+        and its policy. A member uses it. The list can grow: a client reads a
+        role it doesn't know as a member.
     NoticeId:
       type: string
       minLength: 1
@@ -1003,10 +1011,11 @@ components:
             type: object
         client:
           type: string
-          enum: [web, desktop, mobile, recorder]
+          x-extensible-enum: [web, desktop, mobile, recorder]
           description: >-
             On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named
-            that is older than this OpenBot serves.
+            that is older than this OpenBot serves. A later OpenBot may name
+            another app; read one you don't know as other.
         minimumVersion:
           type: string
           description: On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves.

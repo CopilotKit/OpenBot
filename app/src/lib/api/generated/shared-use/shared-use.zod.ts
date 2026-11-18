@@ -146,7 +146,7 @@ export const ListSharedUseRequestsResponse = zod.object({
             ),
           requestedBy: zod.string().describe("The id of the person who asked."),
           status: zod
-            .enum(["pending", "approved", "declined", "superseded"])
+            .string()
             .describe(
               "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
             ),
@@ -358,7 +358,7 @@ export const ApproveSharedUseRequestResponse = zod
       ),
     requestedBy: zod.string().describe("The id of the person who asked."),
     status: zod
-      .enum(["pending", "approved", "declined", "superseded"])
+      .string()
       .describe(
         "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
       ),
@@ -497,7 +497,7 @@ export const DeclineSharedUseRequestResponse = zod
       ),
     requestedBy: zod.string().describe("The id of the person who asked."),
     status: zod
-      .enum(["pending", "approved", "declined", "superseded"])
+      .string()
       .describe(
         "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
       ),
@@ -712,7 +712,7 @@ export const GetBotSharedUseResponse = zod.object({
             ),
           requestedBy: zod.string().describe("The id of the person who asked."),
           status: zod
-            .enum(["pending", "approved", "declined", "superseded"])
+            .string()
             .describe(
               "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
             ),

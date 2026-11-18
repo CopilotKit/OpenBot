@@ -37,8 +37,11 @@ export type PreviewPerson = {
   id: string;
   email: string;
   name: string | null;
-  /** Their role as a member of the organization. */
-  role: "owner" | "admin" | "member";
+  /**
+   * Their role as a member of the organization. The list can grow, so it is read with
+   * `isOrganizationAdmin`, which reads a role this app doesn't know as a member's.
+   */
+  role: string;
   groups: string[];
   /** Each permission the changes touch, before and after. */
   capabilities: PreviewCapability[];

@@ -4,7 +4,6 @@
 import type { AssignableRole } from "./assignableRole";
 import type { InvitationOrganization } from "./invitationOrganization";
 import type { InvitationSender } from "./invitationSender";
-import type { InvitationStatus } from "./invitationStatus";
 
 /**
  * An invitation as the person it was sent to sees it. status is the server's verdict.
@@ -16,7 +15,7 @@ export interface Invitation {
   organization: InvitationOrganization;
   role: AssignableRole;
   /** pending while it can still be answered. expired once its seven days ran out, accepted or declined once the person answered, canceled when the organization took it back. */
-  status: InvitationStatus;
+  status: string;
   invitedBy: InvitationSender;
   /** When it was sent. */
   createdAt: string;

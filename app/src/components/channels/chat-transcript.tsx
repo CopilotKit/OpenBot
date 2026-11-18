@@ -27,7 +27,6 @@ import {
   IconChevronDown,
   IconClock,
   IconDownload,
-  IconFile,
   IconPhoto,
 } from "@tabler/icons-react";
 import { QueryClientContext, useQuery } from "@tanstack/react-query";
@@ -145,6 +144,7 @@ import {
 } from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
+import { FileTypeIcon } from "./file-icon";
 import {
   attachmentModality,
   type SentAttachment,
@@ -1219,16 +1219,48 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
     );
   }
 
+  /*
+   * A DOCUMENT SAYS WHAT IT IS, WHEN THE MESSAGE CARRIES THE TYPE THE SERVER FOUND: its own icon and
+   * its kind and size ("Excel workbook · 14 KB"), the same words a Bot's file card uses, and a
+   * Download for the file itself. A message that carries no type (one sent before types were) draws
+   * as it always did, a file icon and "Attachment".
+   */
   if (modality === "document") {
+    const name = filename ?? "Untitled file";
+    const kind = attachment.mimeType
+      ? kindLabel(attachment.mimeType, name)
+      : undefined;
     return (
       <div className="flex h-32 w-44 flex-col justify-between rounded-xl border border-border bg-muted/40 p-3">
-        <IconFile className="size-6 text-muted-foreground" />
+        <div className="flex items-start justify-between gap-2">
+          <FileTypeIcon
+            className="size-6 text-muted-foreground"
+            mimeType={attachment.mimeType}
+          />
+          <Button
+            aria-label={`Download ${name}`}
+            nativeButton={false}
+            render={<a download={name} href={address} />}
+            size="icon-sm"
+            variant="outline"
+          >
+            <IconDownload />
+          </Button>
+        </div>
         <div className="min-w-0">
           {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
           <p className="truncate font-medium text-sm" title={filename}>
-            {filename ?? "Untitled file"}
+            {name}
           </p>
-          <p className="text-muted-foreground text-xs">Attachment</p>
+          {/*
+           * Two lines at most, never cut: "PowerPoint presentation · 29 KB" is wider than the tile,
+           * and an ellipsis took the size off. See {@link kindAndSize} for where it may wrap.
+           */}
+          <p className="line-clamp-2 text-muted-foreground text-xs">
+            {kind === undefined
+              ? "Attachment"
+              : kindAndSize(kind, attachment.sizeBytes)}
+          </p>
         </div>
       </div>
     );
@@ -1274,6 +1306,19 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
       />
     </AttachmentLightbox>
   );
+}
+
+/**
+ * A file's kind and size for a narrow tile ("PowerPoint presentation · 29 KB"), joined so a line can
+ * break only between the kind's words: the kind's last word, the dot and the size stay together, and
+ * a long kind wraps to "PowerPoint" over "presentation · 29 KB" instead of losing the size.
+ */
+function kindAndSize(kind: string, sizeBytes: number | undefined): string {
+  if (sizeBytes === undefined) return kind;
+  const words = kind.split(" ");
+  const last = words.pop() ?? "";
+  const tail = [last, "·", ...fileSize(sizeBytes).split(" ")].join("\u00a0");
+  return [...words, tail].join(" ");
 }
 
 /**
