@@ -164,6 +164,19 @@ describe("keeping the floor", () => {
     expect(floor?.serial).toBe(2);
   });
 
+  test("an app built with no key reads nothing, since no floor could verify", async () => {
+    const { store } = memoryStore();
+    let asked = 0;
+    const counting = (async () => {
+      asked += 1;
+      return new Response(doc("current"));
+    }) as unknown as typeof fetch;
+    expect(
+      await refreshSecurityFloor({ store, keys: [], fetch: counting }),
+    ).toBeNull();
+    expect(asked).toBe(0);
+  });
+
   test("a kept copy changed on the device counts for nothing", async () => {
     const { store } = memoryStore(doc("tampered"));
     expect(await heldSecurityFloor({ store, keys })).toBeNull();

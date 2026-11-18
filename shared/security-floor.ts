@@ -315,6 +315,8 @@ export async function refreshSecurityFloor({
   timeoutMs?: number;
 }): Promise<SecurityFloor | null> {
   const held = await heldSecurityFloor({ store, keys, verify });
+  // Built with no key, no floor could verify: nothing is read.
+  if ((keys ?? SECURITY_FLOOR_KEYS).length === 0) return held;
   for (const address of addresses) {
     let text: string;
     // A controller and a timer, not AbortSignal.timeout: React Native's AbortSignal has no timeout.

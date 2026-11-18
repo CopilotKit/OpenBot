@@ -2514,30 +2514,38 @@ fn watch_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                     std::thread::sleep(tick);
                     true
                 },
-                || {
-                    let (sources, keys) = security_floor_sources(&handle);
-                    if let Some(kept) = security_floor_kept(&handle) {
-                        let (floor, outcome) = security_floor::refresh(&kept, &sources, &keys);
-                        match outcome {
-                            security_floor::Outcome::Newer(serial) => {
-                                log::info!("[security floor] keeping floor {serial}")
-                            }
-                            security_floor::Outcome::NotNewer(serial) => {
-                                log::info!("[security floor] floor {serial}, nothing newer")
-                            }
-                            security_floor::Outcome::Nothing(why) => {
-                                log::info!("[security floor] no floor read: {why}")
-                            }
-                        }
-                        handle.state::<Shell>().security_floor.record(floor);
-                    }
-                    hold_below_security_floor(&handle);
-                },
+                || read_security_floor(&handle),
             )
         });
     if let Err(error) = watching {
         log::error!("[security floor] could not start checking the security floor: {error}");
     }
+}
+
+/// Read the security floor now, keep a newer one that verifies, and hold OpenBot here below it.
+/// Blocking: the schedule's thread, or one of its own when somebody checks for updates.
+fn read_security_floor<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let (sources, keys) = security_floor_sources(app);
+    // Built with no key, no floor could verify: nothing is read.
+    if keys.is_empty() {
+        return;
+    }
+    if let Some(kept) = security_floor_kept(app) {
+        let (floor, outcome) = security_floor::refresh(&kept, &sources, &keys);
+        match outcome {
+            security_floor::Outcome::Newer(serial) => {
+                log::info!("[security floor] keeping floor {serial}")
+            }
+            security_floor::Outcome::NotNewer(serial) => {
+                log::info!("[security floor] floor {serial}, nothing newer")
+            }
+            security_floor::Outcome::Nothing(why) => {
+                log::info!("[security floor] no floor read: {why}")
+            }
+        }
+        app.state::<Shell>().security_floor.record(floor);
+    }
+    hold_below_security_floor(app);
 }
 
 /**
@@ -2908,6 +2916,9 @@ fn app_update_feed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<app_u
 async fn check_app_update_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<app_update::Asked, String> {
+    // Somebody asked about updates: the security floor is read again too, beside the feed.
+    let floor = app.clone();
+    std::thread::spawn(move || read_security_floor(&floor));
     let handle = app.clone();
     let asked = tauri::async_runtime::spawn_blocking(move || {
         app_update::ask(
