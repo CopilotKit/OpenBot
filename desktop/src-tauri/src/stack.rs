@@ -1772,7 +1772,9 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
 /// Quiesce the supervisor before listing so in-flight creates and restarts are included.
 /// `namespace` is the one `computer_namespace` resolved for this deployment.
 fn stop_computers(engine: &Address, root: &Path, namespace: &str) -> Result<(), String> {
-    crate::logging::timed("stop Bots' computers", || stop_computers_now(engine, root, namespace))
+    crate::logging::timed("stop Bots' computers", || {
+        stop_computers_now(engine, root, namespace)
+    })
 }
 
 fn stop_computers_now(engine: &Address, root: &Path, namespace: &str) -> Result<(), String> {
@@ -11507,8 +11509,14 @@ fn main() {
             std::fs::write(root.join(".fixture-server-stop-failure"), "").unwrap();
             down(&address, &root).unwrap();
             let log = std::fs::read_to_string(record).unwrap();
-            assert!(log.contains("--profile openbot stop --timeout 15 server"), "{log}");
-            assert!(log.contains("--profile harness --profile openbot down"), "{log}");
+            assert!(
+                log.contains("--profile openbot stop --timeout 15 server"),
+                "{log}"
+            );
+            assert!(
+                log.contains("--profile harness --profile openbot down"),
+                "{log}"
+            );
             assert_computer_shutdown_preserves_foreign_and_volumes(&root);
             assert!(root.join("stack.down").exists());
         }
