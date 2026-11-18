@@ -53,7 +53,7 @@ export const ReplaceReviewerGuidanceHeader = zod.object({
 export const replaceReviewerGuidanceBodyTextMax = 2000;
 
 export const replaceReviewerGuidanceBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const ReplaceReviewerGuidanceBody = zod.object({
@@ -136,7 +136,7 @@ export const CheckReviewerGuidanceHeader = zod.object({
 export const checkReviewerGuidanceBodyTextMax = 2000;
 
 export const checkReviewerGuidanceBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const CheckReviewerGuidanceBody = zod.object({
@@ -234,7 +234,7 @@ export const ReplayReviewerGuidanceHeader = zod.object({
 export const replayReviewerGuidanceBodyTextMax = 2000;
 
 export const replayReviewerGuidanceBodyTextRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const replayReviewerGuidanceBodyLimitMax = 50;
 

@@ -1009,7 +1009,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
   schemas:
     Deployment:
       type: object
@@ -1177,7 +1177,7 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: >-
@@ -1466,7 +1466,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -1479,7 +1479,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -1515,7 +1515,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -1585,7 +1585,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object

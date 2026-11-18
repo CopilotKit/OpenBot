@@ -1,0 +1,121 @@
+name: Model lock
+
+# A pull request that changes a harness's model client (its requirements, its package.json or
+# lockfile, its Dockerfile, or the ChatGPT plan's Codex client version) must not break a model the
+# model lock (shared/model-lock.json) says that harness runs: a person set to it would get the
+# provider's refusal on every message. This builds the changed harnesses from the pull request,
+# sends each listed model one request through them (scripts/model-compat.ts), and fails when a
+# model the lock verifies no longer answers. See docs/releasing.md, "Model lock".
+#
+# Only for pull requests from this repository: a fork's pull request is never given the provider
+# keys, so it is skipped and the daily check covers it once it merges.
+on:
+  pull_request:
+    paths:
+      - "agent-*/requirements.txt"
+      - "agent-*/Dockerfile"
+      - "agent-*/package.json"
+      - "agent-*/bun.lock"
+      - "agent-*/package-lock.json"
+      - "agent-langgraph-agui/src/chatgpt_models.py"
+      - "shared/model-lock.json"
+      - "scripts/model-compat.ts"
+      - ".github/workflows/model-lock.yml"
+
+permissions: {}
+
+concurrency:
+  group: model-lock-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changed:
+    name: Harnesses whose client changed
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      harnesses: ${{ steps.list.outputs.harnesses }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - id: list
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          # The harnesses the check runs: the published ones, and every engine the lock names,
+          # published yet or not, that has a row in shared/harnesses.json.
+          checked=$(bun scripts/model-compat.ts harnesses)
+          # The check itself, or the lock, changed: every harness the lock names is checked.
+          if grep -qxE 'shared/model-lock.json|scripts/model-compat.ts|\.github/workflows/model-lock.yml' <<<"$changed"; then
+            harnesses=$(jq -c --argjson checked "$checked" \
+              '[.engines | keys[] | select(. as $h | $checked | index($h))]' shared/model-lock.json)
+          else
+            harnesses=$(grep -oE '^agent-[a-z0-9-]+/' <<<"$changed" | tr -d / | sort -u \
+              | jq -R . | jq -sc --argjson checked "$checked" \
+                'map(select(. as $h | $checked | index($h)))')
+          fi
+          echo "harnesses=$harnesses" >> "$GITHUB_OUTPUT"
+          echo "Harnesses to check: $harnesses"
+
+  check:
+    name: ${{ matrix.harness }}
+    needs: changed
+    if: needs.changed.outputs.harnesses != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: ${{ fromJSON(needs.changed.outputs.harnesses) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: One request per model through this pull request's harness
+        env:
+          HARNESS: ${{ matrix.harness }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        # The published image too, with the same keys in the same run: a verified model that fails
+        # on both is the provider's or the key's today, not this change's (`brokenVerified`).
+        run: >-
+          bun scripts/model-compat.ts --harness "$HARNESS" --tags latest,source --exit-zero
+          --out "$RUNNER_TEMP/model-compat.json"
+      # The run's results, with the repository's own keys: `bun scripts/model-compat.ts lock` writes
+      # the lock from them when a pin moved (docs/releasing.md, "Model lock").
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: model-lock-${{ matrix.harness }}
+          path: ${{ runner.temp }}/model-compat.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Every model the lock verifies still answers
+        env:
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          set +e
+          bun scripts/model-compat.ts guard --summary "$RUNNER_TEMP/guard.md" "$RUNNER_TEMP/model-compat.json"
+          code=$?
+          cat "$RUNNER_TEMP/guard.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::A model the lock verifies for $HARNESS no longer answers through this change's client. See the summary."
+          fi
+          exit "$code"

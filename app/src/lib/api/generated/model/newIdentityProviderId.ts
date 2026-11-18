@@ -6,6 +6,6 @@
  * An id for the provider, unique in the organization, such as acme-okta.
  * @minLength 1
  * @maxLength 200
- * @pattern ^[^\x00]*\S[^\x00]*$
+ * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
  */
 export type NewIdentityProviderId = string;

@@ -155,7 +155,9 @@ export const CreateTeamHeader = zod.object({
 
 export const createTeamBodyNameMax = 100;
 
-export const createTeamBodyNameRegExp = new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+export const createTeamBodyNameRegExp = new RegExp(
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
+);
 export const createTeamBodyDescriptionMax = 500;
 
 export const createTeamBodyDescriptionRegExp = new RegExp("^[^\\x00]*$");
@@ -375,7 +377,9 @@ export const UpdateTeamHeader = zod.object({
 
 export const updateTeamBodyNameMax = 100;
 
-export const updateTeamBodyNameRegExp = new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+export const updateTeamBodyNameRegExp = new RegExp(
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
+);
 export const updateTeamBodyDescriptionMax = 500;
 
 export const updateTeamBodyDescriptionRegExp = new RegExp("^[^\\x00]*$");
