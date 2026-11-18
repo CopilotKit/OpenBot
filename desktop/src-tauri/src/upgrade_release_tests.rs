@@ -216,13 +216,13 @@ impl Installation {
             .expect("Start minted an install token")
     }
 
-    /// The person's own preferences, through the API, as the window's pages call it.
-    fn api(
+    /// A request to the server, as the window's pages send it, and what it answered.
+    fn send(
         &self,
         method: reqwest::Method,
         path: &str,
         body: Option<serde_json::Value>,
-    ) -> serde_json::Value {
+    ) -> (reqwest::StatusCode, serde_json::Value, String) {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -239,8 +239,20 @@ impl Installation {
         let response = request.send().expect("the server answers");
         let status = response.status();
         let text = response.text().unwrap_or_default();
+        let value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        (status, value, text)
+    }
+
+    /// [`Self::send`], which must succeed.
+    fn api(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> serde_json::Value {
+        let (status, value, text) = self.send(method, path, body);
         assert!(status.is_success(), "{path} answered {status}: {text}");
-        serde_json::from_str(&text).unwrap_or(serde_json::Value::Null)
+        value
     }
 
     fn server_log(&self) -> String {
@@ -395,18 +407,25 @@ fn an_installation_on_a_release_upgrades_to_this_tree_with_its_data_and_each_mig
         from
     );
 
-    // Something the person set, written by the old release.
+    // Something the person set, written by the old release through the API it has: the one API
+    // since 1.1.0, and the address the app used before it (`/api/settings/preferences`, which
+    // answers `{ preferences }`) for a release from before.
     let preferences = "/api/v2/organizations/default/people/me/preferences";
-    installation.api(
-        reqwest::Method::PATCH,
-        preferences,
-        Some(serde_json::json!({ "skin": "opendots" })),
-    );
-    assert_eq!(
-        installation.api(reqwest::Method::GET, preferences, None)["skin"],
-        "opendots",
-        "{from} kept the preference it was given"
-    );
+    let skin = serde_json::json!({ "skin": "opendots" });
+    let (status, _, said) =
+        installation.send(reqwest::Method::PATCH, preferences, Some(skin.clone()));
+    let kept = if status == reqwest::StatusCode::NOT_FOUND {
+        let legacy = "/api/settings/preferences";
+        installation.api(reqwest::Method::PATCH, legacy, Some(skin));
+        installation.api(reqwest::Method::GET, legacy, None)["preferences"]["skin"].clone()
+    } else {
+        assert!(
+            status.is_success(),
+            "{preferences} answered {status}: {said}"
+        );
+        installation.api(reqwest::Method::GET, preferences, None)["skin"].clone()
+    };
+    assert_eq!(kept, "opendots", "{from} kept the preference it was given");
     let applied_before: u64 = installation
         .sql("select count(*) from drizzle.__drizzle_migrations")
         .parse()
