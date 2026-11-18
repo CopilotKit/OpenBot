@@ -7,12 +7,15 @@ import {
   acceptedFilesInWords,
   claimedTypeOfName,
   classifyAttachment,
+  documentKindInWords,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_EXTRACTED_CHARACTERS,
   MAX_FILE_BYTES,
   mayBeTruncatedForModel,
   mediaTypeOf,
   namesNoFormat,
+  officeFileTypeOf,
+  officeFileTypeOfMainPart,
   shouldClaimPaste,
 } from "./attachments";
 import { SEND_FILE_TOOL_DESCRIPTION, sendFileUnsupported } from "./send-file";
@@ -20,10 +23,17 @@ import { SEND_FILE_TOOL_DESCRIPTION, sendFileUnsupported } from "./send-file";
 /**
  * TODAY'S SET OF FILES, PINNED. A person attaches and a Bot sends from this one list, so a change to
  * it changes both. A kind added or removed fails here first, where the change is a decision somebody
- * makes on purpose (Office files from Bots are not decided yet), not a side effect of another edit.
+ * makes on purpose, not a side effect of another edit.
  */
+const XLSX =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const DOCX =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const PPTX =
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
 describe("the one list of files OpenBot takes", () => {
-  test("is images, PDF, and four kinds of text, and nothing else", () => {
+  test("is images, PDF, Word, Excel and PowerPoint, and four kinds of text, and nothing else", () => {
     expect(
       ACCEPTED_FILE_TYPES.map(({ mimeType, kind, extensions }) => [
         mimeType,
@@ -36,6 +46,9 @@ describe("the one list of files OpenBot takes", () => {
       ["image/gif", "image", ["gif"]],
       ["image/webp", "image", ["webp"]],
       ["application/pdf", "document", ["pdf"]],
+      [DOCX, "document", ["docx"]],
+      [XLSX, "document", ["xlsx"]],
+      [PPTX, "document", ["pptx"]],
       ["text/plain", "text", ["txt", "text", "log"]],
       ["text/markdown", "text", ["md", "markdown"]],
       ["text/csv", "text", ["csv"]],
@@ -43,24 +56,61 @@ describe("the one list of files OpenBot takes", () => {
     ]);
   });
 
-  test("Office files are not on it yet, by their type or their name", () => {
-    for (const [name, mimeType] of [
+  test("Office files are the OOXML formats, each known by the main part its package names", () => {
+    for (const [name, mimeType, mainPart] of [
       [
         "budget.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        XLSX,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
       ],
       [
-        "memo.docx",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "memo.DOCX",
+        DOCX,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
       ],
       [
         "deck.pptx",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        PPTX,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+      ],
+    ] as const) {
+      expect(classifyAttachment(mimeType)).toBe("document");
+      expect(claimedTypeOfName(name)).toBe(mimeType);
+      expect(officeFileTypeOf(mimeType)?.mainPartType).toBe(mainPart);
+      expect(officeFileTypeOfMainPart(mainPart)?.mimeType).toBe(mimeType);
+    }
+  });
+
+  test("legacy and macro-enabled Office files are not on it, by their type or their name", () => {
+    for (const [name, mimeType] of [
+      ["old.doc", "application/msword"],
+      ["old.xls", "application/vnd.ms-excel"],
+      ["old.ppt", "application/vnd.ms-powerpoint"],
+      ["macros.xlsm", "application/vnd.ms-excel.sheet.macroenabled.12"],
+      ["macros.docm", "application/vnd.ms-word.document.macroenabled.12"],
+      [
+        "macros.pptm",
+        "application/vnd.ms-powerpoint.presentation.macroenabled.12",
       ],
     ] as const) {
       expect(classifyAttachment(mimeType)).toBe("unsupported");
       expect(claimedTypeOfName(name)).toBe("");
     }
+    for (const mainPart of [
+      "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+      "application/vnd.ms-word.document.macroEnabled.main+xml",
+      "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
+      "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml",
+    ])
+      expect(officeFileTypeOfMainPart(mainPart)).toBeUndefined();
+  });
+
+  test("only Office files name a main part", () => {
+    for (const type of ACCEPTED_FILE_TYPES)
+      expect("mainPartType" in type).toBe(
+        [XLSX, DOCX, PPTX].includes(type.mimeType),
+      );
   });
 
   test("each kind's types come from the list, so uploads and Bot files cannot drift", () => {
@@ -70,7 +120,12 @@ describe("the one list of files OpenBot takes", () => {
       "image/gif",
       "image/webp",
     ]);
-    expect([...ACCEPTED_DOCUMENT_MIME]).toEqual(["application/pdf"]);
+    expect([...ACCEPTED_DOCUMENT_MIME]).toEqual([
+      "application/pdf",
+      DOCX,
+      XLSX,
+      PPTX,
+    ]);
     expect([...ACCEPTED_TEXT_MIME]).toEqual([
       "text/plain",
       "text/markdown",
@@ -89,11 +144,22 @@ describe("the one list of files OpenBot takes", () => {
     expect(claimedTypeOfName("README")).toBe("");
     expect(claimedTypeOfName(".env")).toBe("");
     expect(claimedTypeOfName("tool.bin")).toBe("");
+    expect(claimedTypeOfName("Q3 budget.XLSX")).toBe(XLSX);
+  });
+
+  test("a document's kind is named the same way by the composer and the server", () => {
+    expect(documentKindInWords("application/pdf", "one")).toBe("a PDF");
+    expect(documentKindInWords("application/pdf", "many")).toBe("PDFs");
+    expect(documentKindInWords(XLSX, "one")).toBe("an Excel workbook");
+    expect(documentKindInWords(XLSX, "many")).toBe("Excel workbooks");
+    expect(documentKindInWords(DOCX, "one")).toBe("a Word document");
+    expect(documentKindInWords(PPTX, "many")).toBe("PowerPoint presentations");
+    expect(documentKindInWords("application/zip", "one")).toBe("a document");
   });
 
   test("is said the same way to the Bot and to the person", () => {
     const words =
-      "images (PNG, JPEG, GIF, WebP), PDFs, and text, Markdown, CSV or JSON files";
+      "images (PNG, JPEG, GIF, WebP), PDFs, Word documents, Excel workbooks, PowerPoint presentations, and text, Markdown, CSV or JSON files";
     expect(acceptedFilesInWords()).toBe(words);
     expect(SEND_FILE_TOOL_DESCRIPTION).toContain(`You can send ${words};`);
     expect(sendFileUnsupported("tool.bin")).toBe(
@@ -130,6 +196,12 @@ describe("classifyAttachment", () => {
   test("a PDF is a document, whose text the server reads out", () => {
     expect(classifyAttachment("application/pdf")).toBe("document");
     expect(classifyAttachment("Application/PDF")).toBe("document");
+  });
+
+  test("a Word, Excel or PowerPoint file is a document too", () => {
+    expect(classifyAttachment(DOCX)).toBe("document");
+    expect(classifyAttachment(`${XLSX}; charset=binary`)).toBe("document");
+    expect(classifyAttachment(PPTX.toUpperCase())).toBe("document");
   });
 
   test("anything else is unsupported", () => {
