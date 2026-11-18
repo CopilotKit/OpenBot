@@ -14,10 +14,12 @@ import type {
   ForbiddenResponse,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
+  NudgeEvent,
   OrganizationNotFoundResponse,
   PayloadTooLargeResponse,
   ProductEvent,
   RecordAppErrorHeaders,
+  RecordNudgeEventHeaders,
   RecordProductEventHeaders,
   ServerErrorResponse,
   UnauthenticatedResponse,
@@ -329,4 +331,152 @@ export const useRecordAppError = <
   TContext
 > => {
   return useMutation(getRecordAppErrorMutationOptions(options), queryClient);
+};
+export const getRecordNudgeEventUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/nudge-events`;
+};
+
+/**
+ * Tell OpenBot that a nudge (a notice OpenBot shows a person once, such as the ask to star OpenBot on GitHub) was shown to the caller, that they followed it, or that they dismissed it, and where. OpenBot adds the moment that made it due, from what it already knows about the caller, so the counts say which moment works. It is best effort: a client sends one per show or answer and waits on nothing. Saving the answer is a separate change to the caller's preferences (`dismissedNotices`). The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.
+ * @summary Record what the caller did with a nudge
+ */
+export const recordNudgeEvent = async (
+  organizationId: string,
+  nudgeEvent: NudgeEvent,
+  headers: RecordNudgeEventHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(getRecordNudgeEventUrl(organizationId), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(nudgeEvent),
+  });
+};
+
+export const getRecordNudgeEventMutationKey = () =>
+  ["recordNudgeEvent"] as const;
+
+export const getRecordNudgeEventMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | PayloadTooLargeResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordNudgeEvent>>,
+    TError,
+    RecordNudgeEventMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordNudgeEvent>>,
+  TError,
+  RecordNudgeEventMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRecordNudgeEventMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordNudgeEvent>>,
+    RecordNudgeEventMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return recordNudgeEvent(organizationId, data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordNudgeEventMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordNudgeEvent>>
+>;
+export type RecordNudgeEventMutationBody = NudgeEvent;
+export type RecordNudgeEventMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | OrganizationNotFoundResponse
+  | IdempotencyConflictResponse
+  | PayloadTooLargeResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type RecordNudgeEventMutationVariables = {
+  organizationId: string;
+  data: NudgeEvent;
+  headers: RecordNudgeEventHeaders;
+};
+
+/**
+ * @summary Record what the caller did with a nudge
+ */
+export const useRecordNudgeEvent = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | OrganizationNotFoundResponse
+    | IdempotencyConflictResponse
+    | PayloadTooLargeResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof recordNudgeEvent>>,
+      TError,
+      RecordNudgeEventMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof recordNudgeEvent>>,
+  TError,
+  RecordNudgeEventMutationVariables,
+  TContext
+> => {
+  return useMutation(getRecordNudgeEventMutationOptions(options), queryClient);
 };
