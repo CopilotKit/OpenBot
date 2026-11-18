@@ -99,6 +99,8 @@ const connectedProblem = CONNECTED_PROBLEMS[location.hash];
 // The same, for a minimum raised because of a security problem.
 const localSecurity = location.hash === "#local-app-too-old-security";
 const localTooOld = location.hash === "#local-app-too-old" || localSecurity;
+// Start finding the release on this computer needs a newer launcher contract than this app speaks.
+const launcherAhead = location.hash === "#local-launcher-ahead";
 // A launch that finds this computer's OpenBot already running, and that it needs a newer app.
 const runningTooOld = location.hash === "#local-app-too-old-running";
 // The same launch, where showing it fails as it could before: the slot the card above lands in.
@@ -108,7 +110,7 @@ const offered = location.search === "?offer";
 // A build that never updates itself (internal, candidate, or without the updater).
 const internal = location.search === "?internal";
 // Found running by the launch is a relaunch too: an installation set up and started before.
-const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld;
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead;
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -162,7 +164,7 @@ export async function invoke(command, args) {
       detail: "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
       kind: "app-too-old",
     };
-  if ((connectedProblem || localTooOld || runningTooOld) && command === "app_update_offer")
+  if ((connectedProblem || localTooOld || runningTooOld || launcherAhead) && command === "app_update_offer")
     return { version: offered ? "1.2.0" : null, current: "1.1.0", installing: null, updatesItself: !internal, ready: null };
   switch (command) {
     case "windows_restart_pending":
@@ -181,7 +183,7 @@ export async function invoke(command, args) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch && !localTooOld && !runningTooOld ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld && !runningTooOld && !launcherAhead ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
       if (updateShort)
         throw {
@@ -236,8 +238,15 @@ export async function invoke(command, args) {
       if (backEndShort) return { ...status("ready", "valid"), updateTo: "0.16.0-rc.13" };
       return status("ready", "valid");
     // OpenBot's own start, the step's last row: it stays there for the test to look at. Running,
-    // when the window is about to find it needs a newer app.
+    // when the window is about to find it needs a newer app. Refused, when the release laid out
+    // needs a newer launcher contract than this app speaks.
     case "start_stack":
+      if (launcherAhead)
+        throw {
+          said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+          detail: "OpenBot v1.3.0 needs launcherApi 2; this app is v1.1.1 and speaks launcherApi 1",
+          kind: "app-too-old",
+        };
       return localTooOld ? null : new Promise(() => {});
     // Usage data as a first run finds it: shared until the person says otherwise.
     case "plugin:openbot-desktop|usage_data":
@@ -2228,6 +2237,19 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
       heading: "Update OpenBot",
     },
     // Found running by a launch that did not start it: the same screen as when Start finds it.
+    {
+      // Start refused: the release on this computer needs a newer launcher contract (launcherApi).
+      name: "local-launcher-ahead",
+      at: "#local-launcher-ahead",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-launcher-ahead-with-offer",
+      at: "?offer#local-launcher-ahead",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
     {
       name: "local-app-too-old-found-running",
       at: "?offer#local-app-too-old-running",

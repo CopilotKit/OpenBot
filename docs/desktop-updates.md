@@ -28,6 +28,8 @@ An installation an earlier app left running (an installer that closed the app wi
 
 A deployment newer than the app is never moved back: its database is already migrated past what the app's release knows. It keeps running, and the app's own update offer catches the app up. Releases before v0.3.0 ran the server on the host; Install lays those out again at the latest release.
 
+What the app writes and hands the back end it starts is a contract with a number, `compatibility.launcherApi` in `release-policy.json`, which every release publishes in its `release-manifest.json` (`desktop/src-tauri/src/deployment_release.rs`). The app is built with its release's number. A first install lays out the latest release only when that release's number is not above the app's; otherwise, or when its manifest cannot be read, it lays out the app's own release, and the app's update offer brings both forward. Start does not start a deployment newer than the app whose release names a higher number: the window says "Update OpenBot" with **Update and restart**, and the deployment stays as it is. A release one number behind starts as before.
+
 Start also brings the local Intelligence up to date. When it runs a release older than the one the app's bundled CLI installs, or an earlier update of it did not finish, the window runs the CLI's `local update` once, before it starts OpenBot on that stack. The CLI keeps the stack's data and app connections and leaves the stack as it was if the update fails, and a stack is never moved back (`local_eval::update_due`).
 
 `.env`, keys, credentials, profiles, volumes, override files and everything else the installation keeps for itself are never touched.
