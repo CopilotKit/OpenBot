@@ -50,6 +50,8 @@ type QuitEvent = { seq: number; steps: ProgressEvent[] };
 const quitListeners = new Set<(event: { payload: QuitEvent }) => void>();
 /** The window's ear for "Windows is busy installing an update" (`setup:windows-busy`). */
 const windowsBusyListeners = new Set<() => void>();
+/** The window's ear for Start chosen in the Status window (`setup:start`). */
+const startAskedListeners = new Set<() => void>();
 
 /** What `local_eval_steps` answers for the CLI call running now: the steps it has finished. */
 let localSteps: unknown = null;
@@ -80,10 +82,12 @@ mock.module("@tauri-apps/api/event", () => ({
     if (name === "quit:progress") quitListeners.add(quit);
     const windowsBusy = listener as unknown as () => void;
     if (name === "setup:windows-busy") windowsBusyListeners.add(windowsBusy);
+    if (name === "setup:start") startAskedListeners.add(windowsBusy);
     return () => {
       progressListeners.delete(listener);
       quitListeners.delete(quit);
       windowsBusyListeners.delete(windowsBusy);
+      startAskedListeners.delete(windowsBusy);
     };
   },
 }));
@@ -141,6 +145,7 @@ afterEach(() => {
   progressListeners.clear();
   quitListeners.clear();
   windowsBusyListeners.clear();
+  startAskedListeners.clear();
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -5030,6 +5035,59 @@ test("menu Stop retains the installed root for explicit Start without the wizard
     harness: { id: "mastra" },
   });
   expect(installationCalls()).toHaveLength(0);
+});
+
+/**
+ * Start in the Status window, after Stop: this window's own Start OpenBot, run here. Before, the
+ * Status window offered no Start for the app, and its services' Start brought up the services only,
+ * leaving OpenBot stopped until Start OpenBot here. Asked while this page loads (Stop sends the
+ * window back to setup), the page takes it once the saved setup is read; asked once the stopped
+ * screen shows, the native side says so (`setup:start`). Either way, once.
+ */
+test("Start from the Status window after Stop starts OpenBot as Start OpenBot does", async () => {
+  for (const asked of ["while loading", "on the stopped screen"] as const) {
+    const root = "/tmp/status-window-start";
+    setupConnectedLocalStack(root, localStatus("ready", "valid"), {
+      autoStart: false,
+    });
+    let pending = asked === "while loading";
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "take_start_asked") {
+        const taken = pending;
+        pending = false;
+        return taken;
+      }
+      return previous(command, args);
+    };
+    const view = await renderApp();
+    if (asked === "on the stopped screen") {
+      await view.findByRole("heading", { name: "OpenBot is stopped" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(localSequence()).toEqual([]);
+      pending = true;
+      await act(async () => {
+        for (const listener of startAskedListeners) listener();
+      });
+    }
+    await waitFor(() =>
+      expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+    );
+    // The same Start as the button's: the services checked, then OpenBot started and shown.
+    expect(localSequence()).toEqual([
+      "run_local_eval",
+      "start_stack",
+      "show_openbot",
+    ]);
+    expect(getStartStackPayload()).toMatchObject({
+      root,
+      ...LOCAL_ADDRESSES,
+      harness: { id: "mastra" },
+    });
+    expect(installationCalls()).toHaveLength(0);
+    cleanup();
+    invokeCalls = [];
+  }
 });
 
 test("a completed installation with a recorded stack resumes at the AI step when it has never launched", async () => {

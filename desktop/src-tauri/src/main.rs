@@ -70,6 +70,9 @@ struct Shell {
     /// Settings asked to change the AI connection, and the Stop it asked for finished: the setup
     /// page opens at its AI screen, once, instead of at Start.
     change_ai_connection: std::sync::atomic::AtomicBool,
+    /// Start was chosen in the Status window: the setup page runs its own Start OpenBot, once
+    /// (`start_openbot_from_status`).
+    start_asked: std::sync::atomic::AtomicBool,
     /// Quit keeps the event loop alive until one background cleanup attempt finishes.
     quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
@@ -2130,6 +2133,7 @@ async fn upgrade_and_start(
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
     let selected = stack::root_from(&root);
+    let status = app.clone();
     let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness)
         .await
         .map(|mut outcome| {
@@ -2151,6 +2155,8 @@ async fn upgrade_and_start(
         );
     }
     logging::outcome("update", asked, &ran);
+    // The update is over, whichever way: the Status window stops saying Updating.
+    status_changed(&status);
     ran
 }
 
@@ -4856,8 +4862,9 @@ async fn start_stack_now<R: tauri::Runtime>(
     let menus = app.clone();
     let started =
         start_stack_inner(app, root.clone(), api_url, gateway_ws_url, model, harness).await;
-    // The menu bar says whether OpenBot is running.
+    // The menu bar says whether OpenBot is running, and so does the Status window.
     refresh_menus(&menus);
+    status_changed(&menus);
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
     if started.is_ok() {
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
@@ -5575,6 +5582,7 @@ async fn stop_stack<R: tauri::Runtime>(
     );
     // Inventory, held-child cleanup and Compose all block. Keep the complete shutdown off both
     // Tauri's event loop and its async workers, and resolve IPC only when shutdown has finished.
+    let status = app.clone();
     let stopped = tauri::async_runtime::spawn_blocking(move || {
         stop_everything(&app, &stack::root_from(&root)).into_result()
     })
@@ -5582,6 +5590,7 @@ async fn stop_stack<R: tauri::Runtime>(
     .map_err(|error| format!("the shutdown did not run: {error}"))
     .and_then(|stopped| stopped);
     logging::outcome("stop", asked, &stopped);
+    status_changed(&status);
     stopped
 }
 
@@ -9047,6 +9056,9 @@ fn show_status_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         focus(&window, "the Status window");
+        // Shown again, it reads everything afresh. On Windows the page is not told it is visible
+        // again, and a window reopened from the tray showed what it read before it was closed.
+        status_changed(app);
         return;
     }
     let Ok(mut url) = setup_destination(app) else {
@@ -9148,6 +9160,10 @@ pub(crate) struct DesktopStatus {
     /// The folder this app's log file is in (`logging`), for Open log folder. Absent from a desktop
     /// app older than the log, so a page can tell the button would have nothing to open.
     log_folder: Option<String>,
+    /// OpenBot is updating itself (`RuntimeUpdateGuard`), as the setup window's Updating OpenBot
+    /// says. It stops and starts again on its own meanwhile, so nothing offers Start for it: the
+    /// Status window offered Start while an update had OpenBot stopped.
+    updating: bool,
 }
 
 impl DesktopStatus {
@@ -9173,6 +9189,7 @@ impl DesktopStatus {
             log_folder: logging::folder(app)
                 .ok()
                 .map(|folder| folder.display().to_string()),
+            updating: false,
         }
     }
 }
@@ -9269,6 +9286,25 @@ fn read_desktop_status<R: tauri::Runtime>(
         log_folder: logging::folder(app)
             .ok()
             .map(|folder| folder.display().to_string()),
+        updating: shell.updating.load(std::sync::atomic::Ordering::SeqCst),
+    }
+}
+
+/// Said to the Status window when it should read everything afresh: a start, a stop or an update
+/// finished, or the window was shown again.
+const STATUS_REFRESH_EVENT: &str = "status:refresh";
+
+/**
+A start, a stop or an update has finished: the Status window, if there is one, reads everything
+again. Its services' readiness is the CLI's, which it asks only when told, since the main window's
+own CLI calls take the same lock. Seen on a Mac and on Windows: after the App row's Start brought
+everything up, the services row still said Stopped, with Start, until Refresh.
+*/
+fn status_changed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if app.get_webview_window("status").is_some() {
+        if let Err(error) = app.emit_to("status", STATUS_REFRESH_EVENT, ()) {
+            log::warn!("[status] could not ask the Status window to read again: {error}");
+        }
     }
 }
 
@@ -9514,6 +9550,51 @@ fn restart_openbot_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(
 #[tauri::command]
 fn stop_openbot_from_status(app: tauri::AppHandle) {
     stop_from_menu(app, AskedFrom::StatusWindow);
+}
+
+/// Said to a setup page already loaded when Start is chosen in the Status window.
+const START_ASKED_EVENT: &str = "setup:start";
+
+/**
+Start, from the Status window once OpenBot has stopped: the setup window's own Start OpenBot, run
+there, so there is one Start. It brings up OpenBot's services and then OpenBot, as that button does.
+Before, the Status window offered no Start for the app, and its services' Start brought up only the
+services, leaving OpenBot stopped until Start OpenBot in the main window.
+
+Stop sends the main window back to setup, so its page may still be loading: the ask is kept for it
+(`take_start_asked`), and said to a page already there (`setup:start`). A main window showing
+anything else is sent to setup, whose page takes the ask on load. The main window comes forward,
+since that is where the Start shows how far along it is.
+*/
+#[tauri::command]
+fn start_openbot_from_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    log::info!("[start] asked {}", AskedFrom::StatusWindow.said());
+    ask_setup_to_start(&app.state::<Shell>());
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there")?;
+    let on_setup = window.url().is_ok_and(|url| on_setup_page(&app, &url));
+    if !on_setup {
+        show_setup(app.clone())?;
+    }
+    bring_to_front(&app, "Start was chosen in the Status window");
+    app.emit_to("main", START_ASKED_EVENT, ())
+        .map_err(|error| format!("could not ask setup to start: {error}"))
+}
+
+fn ask_setup_to_start(shell: &Shell) {
+    shell
+        .start_asked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The setup page's question once its saved setup is read, and on `setup:start`: was Start chosen
+/// in the Status window? Answered once.
+#[tauri::command]
+fn take_start_asked<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    app.state::<Shell>()
+        .start_asked
+        .swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Both pages are single-page apps. Keep their route and in-memory state on restore.
@@ -12548,6 +12629,7 @@ fn stop_then_show_setup<R: tauri::Runtime>(
             Some(problem) => Err(problem),
         };
         logging::outcome("stop", asked, &settled);
+        status_changed(&app);
         settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
         // Asked for only once everything stopped, as the AI screen is.
         if choose_connection && settled.is_ok() {
@@ -13683,6 +13765,8 @@ fn main() {
             desktop_status,
             restart_openbot,
             stop_openbot_from_status,
+            start_openbot_from_status,
+            take_start_asked,
             open_log_folder,
             troubleshooting_logs,
             save_troubleshooting_logs,
@@ -19504,6 +19588,36 @@ mod tests {
             status_of(env!("CARGO_PKG_VERSION")),
             env!("CARGO_PKG_VERSION")
         );
+    }
+
+    /// Seen on a Mac: opened while OpenBot updated itself, the Status window said the app was
+    /// Stopped and offered Start. The status says OpenBot is updating for as long as an update
+    /// holds it, and not after.
+    #[test]
+    fn status_says_openbot_is_updating_while_an_update_holds_it() {
+        if crate::test_support::isolated_process(
+            "tests::status_says_openbot_is_updating_while_an_update_holds_it",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_only_with("docker", "desktop-status-updating");
+        let root = temp_root("desktop-status-updating");
+        std::fs::create_dir_all(&root).unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        *app.state::<Shell>().root.lock().unwrap() = Some(root.clone());
+        let updating = || {
+            serde_json::to_value(read_desktop_status(app.handle(), false)).unwrap()["updating"]
+                .clone()
+        };
+        assert_eq!(updating(), false);
+        let update = RuntimeUpdateGuard::begin(app.handle()).unwrap();
+        assert_eq!(updating(), true);
+        drop(update);
+        assert_eq!(updating(), false);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// The Windows check runs on a blocking thread, never the one that asked: Tauri runs a command
