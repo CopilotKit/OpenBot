@@ -927,6 +927,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     }
     setBusy(true);
     setFailure(null);
+    // Why the last Start stopped is not this one's: kept, it stayed under Starting OpenBot through
+    // a Retry until OpenBot opened. This Start says its own reason if it stops too.
+    setRecoveryFailure(null);
     setReleaseNotice(null);
     setBackEndNotice(null);
     setSteps([]);
