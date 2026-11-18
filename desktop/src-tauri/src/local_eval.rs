@@ -11496,16 +11496,11 @@ fn main() {
             let source = fixture.root.join("engine.rs");
             std::fs::write(&source, FAKE_ENGINE).unwrap();
             for engine in ["docker", "podman"] {
-                let program = bin.join(format!("{engine}{}", std::env::consts::EXE_SUFFIX));
-                compile_fixture(&source, &program);
-                // A program's first launch waits for the system to check it: more than ten
-                // seconds on a busy Mac, longer than an engine check may take. Launched once here,
-                // untimed, so the checks' own limits time the engine and nothing else.
-                let launched = std::process::Command::new(&program).output().unwrap();
-                assert_eq!(launched.status.code(), Some(125), "{launched:?}");
+                compile_fixture(
+                    &source,
+                    &bin.join(format!("{engine}{}", std::env::consts::EXE_SUFFIX)),
+                );
             }
-            // That launch is not one OpenBot made.
-            std::fs::remove_file(bin.join("asked")).unwrap();
             std::env::set_var(
                 "PATH",
                 std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
