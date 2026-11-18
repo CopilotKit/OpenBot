@@ -1,10 +1,11 @@
-import { IconFile, IconPhoto, IconX } from "@tabler/icons-react";
+import { IconPhoto, IconX } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { kindLabel } from "@/lib/computers/sent-file";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
+import { FileTypeIcon } from "../file-icon";
 import { Collapse } from "./collapse";
 
 /**
@@ -50,6 +51,8 @@ export type StagedFile = {
   id: string;
   name: string;
   size?: number;
+  /** The type the server found in the bytes, or the browser's claim until it has; draws the icon. */
+  mimeType?: string;
   loading: boolean;
   /**
    * The model reads at most MAX_EXTRACTED_CHARACTERS of a text file, while
@@ -113,7 +116,10 @@ export function AttachmentStrip({
              * only child that can give: this icon. It renders visibly smaller on precisely the
              * tiles that carry the warning, which is the wrong moment to look broken.
              */}
-            <IconFile className="size-5 shrink-0 text-muted-foreground" />
+            <FileTypeIcon
+              className="size-5 shrink-0 text-muted-foreground"
+              mimeType={file.mimeType}
+            />
             <div className="min-w-0">
               <p className="truncate font-medium text-xs" title={file.name}>
                 {file.name}

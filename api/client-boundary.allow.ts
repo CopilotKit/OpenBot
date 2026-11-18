@@ -310,6 +310,12 @@ export const ALLOWED: Allowed[] = [
     why: "the addresses Desktop gives a Bot's harness: the model proxy and the tool callback",
   },
   {
+    file: "desktop/src-tauri/src/ai_connection.rs",
+    what: "/api/model-provider",
+    rule: "machine-credential",
+    why: "the model gateway Desktop gives every engine, which presents the gateway token",
+  },
+  {
     file: "desktop/src-tauri/src/learning_model.rs",
     what: "/api/learning-model/v1",
     rule: "machine-credential",
@@ -397,6 +403,12 @@ export const ALLOWED: Allowed[] = [
     what: "fetch()",
     rule: "third-party",
     why: "image registries, never OpenBot's server",
+  },
+  {
+    file: "scripts/model-compat.ts",
+    what: /^(fetch\(\)|\/health|\/api\/agents\/openbot\/generate)$/,
+    rule: "third-party",
+    why: "model providers' listings and the harness images the model check starts on this machine, never OpenBot's server",
   },
   // Scripts that run and stop a server on this machine.
   {

@@ -5,9 +5,7 @@ import {
 } from "@/lib/api/generated/conversations/conversations";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
-  ACCEPTED_DOCUMENT_MIME,
-  ACCEPTED_IMAGE_MIME,
-  ACCEPTED_TEXT_MIME,
+  ACCEPTED_FILE_TYPES,
   type AttachmentLimits,
   attachmentUrl,
   classifyAttachment,
@@ -149,22 +147,14 @@ function isUploadedAttachment(body: unknown): body is UploadedAttachment {
  * the media types alone therefore greys out, in the dialog, exactly the files this composer went
  * to some trouble to accept everywhere else. `matchesAcceptFilter` and every browser's dialog both
  * read a leading-dot entry as a filename suffix, so the two doors now agree.
+ *
+ * Built from the one list of files OpenBot takes (`ACCEPTED_FILE_TYPES`): every type and every
+ * extension that claims it, so a type added there is offered here with nothing else to change.
  */
-export const FILE_PICKER_ACCEPT = [
-  ...ACCEPTED_IMAGE_MIME,
-  ...ACCEPTED_TEXT_MIME,
-  ...ACCEPTED_DOCUMENT_MIME,
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".txt",
-  ".md",
-  ".csv",
-  ".json",
-  ".pdf",
-].join(",");
+export const FILE_PICKER_ACCEPT = ACCEPTED_FILE_TYPES.flatMap((type) => [
+  type.mimeType,
+  ...type.extensions.map((extension) => `.${extension}`),
+]).join(",");
 
 /**
  * `AttachmentsConfig` for one channel's composer.

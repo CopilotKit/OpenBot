@@ -79,16 +79,7 @@ export const ListSignInRequestsResponse = zod.object({
             .nullable()
             .describe("Why the Bot asked, in its own words."),
           status: zod
-            .enum([
-              "pending",
-              "filling",
-              "code_required",
-              "taken_over",
-              "signed_in",
-              "failed",
-              "cancelled",
-              "expired",
-            ])
+            .string()
             .describe(
               "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
             ),
@@ -256,16 +247,7 @@ export const CreateSignInRequestResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -378,16 +360,7 @@ export const GetSignInRequestResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -531,16 +504,7 @@ export const SubmitSignInResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -677,16 +641,7 @@ export const SubmitSignInCodeResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -821,16 +776,7 @@ export const UseSavedLoginResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -955,16 +901,7 @@ export const TakeOverSignInResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -1089,16 +1026,7 @@ export const FinishSignInResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),
@@ -1223,16 +1151,7 @@ export const CancelSignInResponse = zod.object({
         .nullable()
         .describe("Why the Bot asked, in its own words."),
       status: zod
-        .enum([
-          "pending",
-          "filling",
-          "code_required",
-          "taken_over",
-          "signed_in",
-          "failed",
-          "cancelled",
-          "expired",
-        ])
+        .string()
         .describe(
           "Where a sign-in request has got to. code_required: the site took the password and sent a verification code, and the form now asks for only that. signed_in, failed, cancelled and expired are final.",
         ),

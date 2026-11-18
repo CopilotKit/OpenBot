@@ -16,8 +16,9 @@ and installs it when the person says (`SUAutomaticallyUpdate`), and Tauri's upda
 
 WHICH IMAGES. Each release publishes every image the app may pull for it as `desktop-images.json`
 (`release_images`), with the back end release its CLI installs. Of those, only the ones this
-installation runs: for each image its last install pulled (`preparation::installed_images`), the
-release's image of the same repository; and, when the back end's release changes, for each
+installation runs: for each image its last install pulled that it still runs
+(`preparation::images_it_runs`, which leaves out the ChatGPT plan's image unless it is on that
+plan), the release's image of the same repository; and, when the back end's release changes, for each
 repository the bundled CLI pulls into the node (`local_eval::bundled_cli_images`), the release's.
 An image the release adds under a new repository is left to the update, as before.
 

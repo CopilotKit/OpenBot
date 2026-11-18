@@ -1,6 +1,7 @@
 import {
   IconAlertTriangle,
   IconCircleCheck,
+  IconCircleDashed,
   IconFileCheck,
   IconHandStop,
   IconPlayerStop,
@@ -35,15 +36,16 @@ import {
   stoppedByYou,
   TASK_DONE_LABEL,
   TASK_FAILED_LABEL,
-  TASK_STATUS_LABEL,
   TASK_STOPPED,
   TASK_STOPPED_LABEL,
   type TaskStatus,
+  taskStatusLabel,
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
-const ICONS: Record<TaskStatus, typeof IconProgress> = {
+/** Each status's icon. A status a newer server sends that this app doesn't know has a plain circle. */
+const ICONS: Partial<Record<TaskStatus, typeof IconProgress>> = {
   ready_for_review: IconFileCheck,
   needs_input: IconHandStop,
   failed: IconAlertTriangle,
@@ -83,7 +85,7 @@ function look(listed: ListedTask): {
     ? { state: "stopped", Icon: IconPlayerStop, dot: "bg-muted-foreground" }
     : {
         state: listed.status,
-        Icon: ICONS[listed.status],
+        Icon: ICONS[listed.status] ?? IconCircleDashed,
         dot: DOT[listed.status],
       };
 }
@@ -92,14 +94,14 @@ function look(listed: ListedTask): {
  * The task's status in a word or two. One the person stopped reads Stopped, as its card does, and
  * one listed as finished (`settled`) reads Done, as its card does and as the heading over it says.
  */
-function statusLabel(listed: ListedTask, settled = false): string {
+function statusLabel(listed: ListedTask, settled = false): string | null {
   if (stopped(listed)) return TASK_STOPPED_LABEL;
   if (
     settled &&
     (listed.status === "ready_for_review" || listed.status === "resolved")
   )
     return TASK_DONE_LABEL;
-  return TASK_STATUS_LABEL[listed.status];
+  return taskStatusLabel(listed.status);
 }
 
 /**
@@ -125,7 +127,7 @@ function nextLine(listed: ListedTask): string | null {
 function boardStatus(
   listed: ListedTask,
   settled = false,
-): { label: string; line: string | null } {
+): { label: string | null; line: string | null } {
   if (listed.status === "failed" && !stopped(listed))
     return {
       label: TASK_FAILED_LABEL,
@@ -404,7 +406,7 @@ export function TaskBoardRow({
         detail={said.line}
         icon={<Icon />}
         meta={[
-          <span key="status">{boardStatus(listed).label}</span>,
+          said.label ? <span key="status">{said.label}</span> : null,
           <span key="when">{relativeTime(task.updatedAt)}</span>,
           ...held.meta,
           error ? (
@@ -446,7 +448,7 @@ export function TaskBoardRow({
       readDetail={status === "needs_input" || state === "stopped"}
       icon={<Icon />}
       meta={[
-        <span key="status">{said.label}</span>,
+        said.label ? <span key="status">{said.label}</span> : null,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">

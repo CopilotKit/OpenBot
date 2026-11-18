@@ -29,6 +29,15 @@ export function withdrawnModelNotice(
 }
 
 /**
+ * What the composer says when the model a person chose here hasn't been proven to work with this
+ * Bot (shared/model-lock.ts): the provider would turn down every message, so runs use the default
+ * until a check proves it.
+ */
+export function unverifiedModelNotice(picked: string, now: string): string {
+  return `${picked} doesn't work with this Bot yet, so this conversation uses ${now}. Pick another model to change it.`;
+}
+
+/**
  * The model and thinking effort one conversation runs on, as its picker shows them, and the way
  * to change them.
  *
@@ -133,8 +142,19 @@ export function useConversationModel(
         ? undefined
         : shownPick(picked, catalogue),
     saving: save.isPending,
-    /** What the composer says about the pick, when the picked model stopped being offered. */
-    notice: withdrawn?.channelId === channelId ? withdrawn.notice : null,
+    /**
+     * What the composer says about the pick: the chosen model doesn't work with this Bot yet, or
+     * it stopped being offered.
+     */
+    notice:
+      (!save.isPending && saved.data?.unverified && catalogue
+        ? unverifiedModelNotice(
+            saved.data.unverified.label,
+            catalogue.models.find((option) => option.id === catalogue.default)
+              ?.label ?? catalogue.default,
+          )
+        : null) ??
+      (withdrawn?.channelId === channelId ? withdrawn.notice : null),
     // Read the ref at submission time, including a choice made before React renders again.
     beforeSend: async () => {
       await pendingSave.current;

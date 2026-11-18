@@ -80,9 +80,9 @@ export const ListPeopleResponse = zod.object({
               "The picture their identity provider gave, when it gave one.",
             ),
           role: zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
           needsName: zod
             .boolean()
@@ -193,9 +193,9 @@ export const GetPersonResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       needsName: zod
         .boolean()
@@ -336,9 +336,9 @@ export const UpdatePersonResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       needsName: zod
         .boolean()
@@ -451,9 +451,9 @@ export const RevokePersonAccessResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       needsName: zod
         .boolean()
@@ -566,9 +566,9 @@ export const RestorePersonAccessResponse = zod.object({
           "The picture their identity provider gave, when it gave one.",
         ),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       needsName: zod
         .boolean()

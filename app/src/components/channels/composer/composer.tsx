@@ -1,3 +1,24 @@
+  type KeyboardEvent,
+import { isComposing } from "@/lib/composing";
+          mimeType: stagedMimeType(attachment),
+  /**
+   * The Enter that confirms a character an input method is composing finishes a
+   * character, not a message — the same guard the New Bot sheet, the Bot name
+   * field and the boundary rule form already apply through `isComposing`.
+   * PromptArea calls the caller's `onKeyDown` first and skips its own submit
+   * when the event was already default-prevented, so stopping the key here is
+   * what keeps it from sending. Both PromptAreas below share this handler:
+   * the compact box and the centred one are the same composer.
+   */
+  const handlePromptAreaKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (isComposing(event)) event.preventDefault();
+    },
+    [],
+  );
+
+                onKeyDown={handlePromptAreaKeyDown}
+                onKeyDown={handlePromptAreaKeyDown}
 import {
   type Attachment,
   type AttachmentsConfig,
@@ -19,7 +40,6 @@ import {
   type ChangeEvent,
   type DragEvent,
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -39,7 +59,6 @@ import {
   mediaTypeOf,
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
-import { isComposing } from "@/lib/composing";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "@/lib/new-id";
 import { cn } from "@/lib/utils";
@@ -131,13 +150,17 @@ function stagedModality(attachment: Attachment) {
 }
 
 /**
- * Whether a staged attachment is a document whose text the server extracts (a PDF), by the type the
- * server sniffed when there is one, else the type the browser gave the picked file.
+ * Whether a staged attachment is a document whose text the server extracts (a PDF, or a Word, Excel
+ * or PowerPoint file), by the type the server sniffed when there is one, else the type the browser
+ * gave the picked file.
  */
 function stagedIsDocument(attachment: Attachment): boolean {
-  const { source } = attachment;
-  const mimeType = source.mimeType ?? heldFileOf(attachment)?.type ?? "";
-  return classifyAttachment(mimeType) === "document";
+  return classifyAttachment(stagedMimeType(attachment)) === "document";
+}
+
+/** A staged attachment's type: the one the server sniffed when there is one, else the browser's. */
+function stagedMimeType(attachment: Attachment): string {
+  return attachment.source.mimeType ?? heldFileOf(attachment)?.type ?? "";
 }
 
 const MAX_HEIGHT_PX = 220;
@@ -1200,15 +1223,9 @@ export function Composer({
   );
 
   /**
-   * NO `type` HERE, BECAUSE NOTHING HAS EVER READ ONE. This carried
-   * `type: attachment.source.mimeType`, `StagedFile` (`attachment-strip.tsx`) declares no such
-   * field, and `AttachmentStrip` draws the same `IconFile` for every file whatever its type. It
-   * survived because the array is a variable rather than a fresh object literal at the JSX site, so
-   * TypeScript's excess-property check — the thing that would have caught it — never ran.
-   *
-   * Deleted rather than adopted. Adding `type` to `StagedFile` and drawing a per-format label off
-   * it is a real improvement and a deliberately separate one: it is a design change to the tile,
-   * not the removal of a line that pretends to feed something.
+   * `mimeType` is what the tile's icon is drawn from: the type the server found once it has the
+   * bytes, the browser's claim until then (the same order `stagedIsDocument` reads them in), so an
+   * Excel workbook shows a spreadsheet icon from the moment it is picked.
    *
    * The complement of `images` above, and it has to be read as one: whatever is not an image is a
    * card, so both halves must ask the same question of the same field or an attachment lands in
@@ -1240,8 +1257,9 @@ export function Composer({
            * goes down the extraction path, and is exactly the one that gets cut.
            */
           /*
-           * NOT FOR A PDF. Its bytes are mostly fonts and layout, so its size says nothing about
-           * how many characters of text it holds, and a one-page invoice would be warned about.
+           * NOT FOR A DOCUMENT. A PDF's bytes are mostly fonts and layout, and an Office file's are
+           * compressed, so its size says nothing about how many characters of text it holds, and a
+           * one-page invoice would be warned about.
            */
           mayTruncate:
             attachment.status !== "uploading" &&
@@ -1282,22 +1300,6 @@ export function Composer({
    * removable by hand, and Send says no with a sentence naming the limit until it is.
    */
   const tooManyStaged = overCap(draft);
-
-  /**
-   * The Enter that confirms a character an input method is composing finishes a
-   * character, not a message — the same guard the New Bot sheet, the Bot name
-   * field and the boundary rule form already apply through `isComposing`.
-   * PromptArea calls the caller's `onKeyDown` first and skips its own submit
-   * when the event was already default-prevented, so stopping the key here is
-   * what keeps it from sending. Both PromptAreas below share this handler:
-   * the compact box and the centred one are the same composer.
-   */
-  const handlePromptAreaKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (isComposing(event)) event.preventDefault();
-    },
-    [],
-  );
 
   const handleChange = useCallback(
     (next: Segment[]) => {
@@ -1778,7 +1780,6 @@ export function Composer({
                 minHeight={COMPACT_MIN_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
-                onKeyDown={handlePromptAreaKeyDown}
                 onSubmit={submitDraft}
                 placeholder={placeholder}
                 ref={promptAreaRef}
@@ -1873,7 +1874,6 @@ export function Composer({
                 maxHeight={MAX_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
-                onKeyDown={handlePromptAreaKeyDown}
                 onSubmit={submitDraft}
                 placeholder={placeholder}
                 ref={promptAreaRef}

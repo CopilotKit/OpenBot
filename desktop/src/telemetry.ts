@@ -19,6 +19,7 @@ const HARNESSES = {
   llamaindex: "llamaindex",
   agno: "agno",
   langgraph: "langgraph",
+  "langgraph-ts": "langgraph_ts",
   "google-adk": "google_adk",
   "pydantic-ai": "pydantic_ai",
   "microsoft-agent-framework": "microsoft_agent_framework",

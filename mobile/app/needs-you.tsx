@@ -5,13 +5,8 @@ import { everyBot, everyPage, ORGANIZATION_ID } from "../src/api";
 import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
 import { listTasks } from "../src/api/generated/tasks/tasks";
 import { authClient } from "../src/auth";
-import {
-  hideItem,
-  ItemCard,
-  startItem,
-  TaskCard,
-  waitingTasks,
-} from "../src/check-ins";
+import { hideItem, ItemCard, startItem, TaskCard } from "../src/check-ins";
+import { waitingTasks } from "../src/tasks";
 import { heading, muted, Problem, Screen, Section, useAction } from "../src/ui";
 import { useLoad } from "../src/use-load";
 

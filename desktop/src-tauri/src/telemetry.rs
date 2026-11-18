@@ -1419,6 +1419,7 @@ pub enum Harness {
     Llamaindex,
     Agno,
     Langgraph,
+    LanggraphTs,
     GoogleAdk,
     PydanticAi,
     MicrosoftAgentFramework,
@@ -1688,6 +1689,7 @@ pub enum CliFailure {
     InvalidAcceptance,
     RootlessPodman,
     DownloadStalled,
+    BelowSecurityFloor,
 }
 
 /**
@@ -1799,6 +1801,7 @@ const CLI_FAILURES: &[&str] = &[
     "invalid_acceptance",
     "rootless_podman",
     "download_stalled",
+    "below_security_floor",
 ];
 
 /// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`):
@@ -1832,7 +1835,7 @@ pub fn schema_json() -> serde_json::Value {
         },
         "events": {
             "step_viewed": { "step": steps },
-            "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
+            "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "langgraph_ts", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
             "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
@@ -2222,6 +2225,27 @@ mod tests {
         assert!(NumericVersion::parse("1.2.3.4.5").is_err());
         assert!(NumericVersion::parse("1.2-beta").is_err());
         assert!(NumericVersion::parse("123456789012345678901234567890123").is_err());
+    }
+
+    /// The default Bot is the TypeScript LangGraph engine, and the window records choosing it.
+    /// Refused here, the first screen's Install would record no Bot at all.
+    #[test]
+    fn the_default_bot_can_be_recorded_as_chosen() {
+        let chosen = serde_json::from_value::<EventData>(serde_json::json!({
+            "kind": "harness_chosen",
+            "harness": "langgraph_ts"
+        }))
+        .expect("the default Bot's choice is refused");
+        assert_eq!(
+            chosen,
+            EventData::HarnessChosen {
+                harness: Harness::LanggraphTs
+            }
+        );
+        assert!(schema_json()["events"]["harness_chosen"]["harness"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("langgraph_ts")));
     }
 
     #[test]

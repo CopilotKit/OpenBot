@@ -166,6 +166,7 @@ const IMAGE_VARIABLES: Record<string, string> = {
   supervisor: "SUPERVISOR_IMAGE",
   "agent-computer": "COMPUTER_IMAGE",
   "agent-langgraph-agui": "LANGGRAPH_IMAGE",
+  "agent-langgraph-ts": "LANGGRAPH_TS_IMAGE",
 };
 
 export function atomicJson(path: string, value: unknown) {

@@ -448,6 +448,7 @@ fn client() -> reqwest::Result<Client> {
     Client::builder()
         .timeout(DEADLINES.handoff)
         .redirect(reqwest::redirect::Policy::none())
+        .default_headers(crate::client_version::headers())
         .build()
 }
 
@@ -507,7 +508,6 @@ mod tests {
     use std::net::TcpListener;
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Instant;
 
     const ID: &str = "icpcnhgjghecmklnjbccdgdicklblcgd";
     const DESKTOP: &str = "ai.copilotkit.openbot.desktop";
@@ -1031,9 +1031,9 @@ mod tests {
 
     #[test]
     fn handoff_is_not_running_when_nothing_listens() {
-        let (url, listener) = fake_app();
-        drop(listener);
-        let (environment, _) = environment(running(&url));
+        // Port 9, below every operating system's ephemeral range: no fake app a test running beside this one binds can
+        // be given it and be dialled in its place, as a port this test let go could.
+        let (environment, _) = environment(running("http://127.0.0.1:9"));
         assert_eq!(
             ask(json!({ "type": "handoff" }), true, &environment),
             not("not-running")
@@ -1383,14 +1383,25 @@ mod tests {
 
     #[test]
     fn a_check_still_running_at_its_deadline_is_answered_timed_out_and_the_next_message_is_heard() {
+        // The slow checks are let go only once the host has answered every message. A host that waited for one would
+        // wait out its patience and answer what the check found, however fast or slow the computer.
+        let (release, held) = mpsc::channel::<()>();
+        let held = Arc::new(std::sync::Mutex::new(held));
+        let patience = std::time::Instant::now() + Duration::from_secs(30);
+        let hold = move || {
+            let held = held.lock().unwrap();
+            let _ =
+                held.recv_timeout(patience.saturating_duration_since(std::time::Instant::now()));
+        };
+        let hold_too = hold.clone();
         let slow = HostEnvironment {
             installed: Box::new(|| true),
-            app_answers: Box::new(|| {
-                std::thread::sleep(Duration::from_secs(3));
+            app_answers: Box::new(move || {
+                hold();
                 true
             }),
-            app_url: Box::new(|| {
-                std::thread::sleep(Duration::from_secs(3));
+            app_url: Box::new(move || {
+                hold_too();
                 None
             }),
             install_token: Box::new(|| None),
@@ -1401,7 +1412,6 @@ mod tests {
             address: Duration::from_millis(150),
             entry: Duration::from_millis(150),
         };
-        let started = Instant::now();
         let (status, replies) = serve_all(
             &[
                 json!({ "type": "ping" }),
@@ -1413,11 +1423,7 @@ mod tests {
             &Arc::new(slow),
             deadlines,
         );
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "{:?}",
-            started.elapsed()
-        );
+        drop(release);
         assert_eq!(status, 0);
         assert_eq!(
             replies,

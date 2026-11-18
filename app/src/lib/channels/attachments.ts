@@ -7,6 +7,7 @@
  */
 export {
   ACCEPTED_DOCUMENT_MIME,
+  ACCEPTED_FILE_TYPES,
   ACCEPTED_IMAGE_MIME,
   ACCEPTED_TEXT_MIME,
   type AttachmentKind,
@@ -17,6 +18,7 @@ export {
   attachmentUrl,
   classifyAttachment,
   DEFAULT_ATTACHMENT_LIMITS,
+  documentKindInWords,
   formatAttachmentLimit,
   LARGEST_PICTURE_DRAWN_INLINE,
   largestAttachmentBytes,

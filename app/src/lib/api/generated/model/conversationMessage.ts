@@ -4,7 +4,6 @@
 import type { Attachment } from "./attachment";
 import type { ConversationMessageConsent } from "./conversationMessageConsent";
 import type { ConversationMessageRole } from "./conversationMessageRole";
-import type { ConversationMessageStatus } from "./conversationMessageStatus";
 
 /**
  * One thing said in a conversation: a person's message, or one Bot's reply.
@@ -27,14 +26,16 @@ export interface ConversationMessage {
   /** What was said. Empty while another person's Bot is still writing it. */
   text: string;
   /** Where a Bot's reply stands. A person's message is completed. */
-  status: ConversationMessageStatus;
+  status: string;
   /**
    * When it was said. Null where the time was not kept.
    * @nullable
    */
   createdAt: string | null;
-  /** Why a waiting Bot is waiting. */
+  /** Why a waiting Bot is waiting, in words for the person reading the conversation. */
   reason?: string;
+  /** True on a failed Bot reply in a group that the person whose turn it answered chose not to share. It was a choice, not a fault, and nothing was sent. text says whose choice it was. */
+  declined?: boolean;
   /** For an answer passed on from another Bot: which Bot answered. */
   answeredBy?: string;
   /** A Team Bot asking the person whose turn it was to use their own account. */

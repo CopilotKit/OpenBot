@@ -8,6 +8,7 @@
  * Unknown is never shown as ready. The Intelligence row is ready only when the CLI itself reports
  * readiness "ready" and licence "valid"; a CLI that reports neither leaves it unknown.
  */
+import { SECURITY_FLOOR_SENTENCE } from "../../shared/security-floor";
 import {
   type ChatGateInput,
   chatGate,
@@ -506,6 +507,8 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "The download stopped. Retry continues where it left off.",
     "retry",
   ),
+  // Below the security floor nothing of OpenBot starts here until the app is updated.
+  "below-security-floor": blocked(SECURITY_FLOOR_SENTENCE),
 };
 
 function intelligenceRow(

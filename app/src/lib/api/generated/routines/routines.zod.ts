@@ -103,13 +103,7 @@ export const ListRoutinesResponse = zod.object({
             .union([
               zod.object({
                 status: zod
-                  .union([
-                    zod.literal("succeeded"),
-                    zod.literal("failed"),
-                    zod.literal("skipped"),
-                    zod.literal("waiting"),
-                    zod.literal(null),
-                  ])
+                  .string()
                   .nullable()
                   .describe(
                     "How it ended, or null while it is still open. Only failed is a failure.",
@@ -288,13 +282,7 @@ export const CreateRoutineResponse = zod.object({
         .union([
           zod.object({
             status: zod
-              .union([
-                zod.literal("succeeded"),
-                zod.literal("failed"),
-                zod.literal("skipped"),
-                zod.literal("waiting"),
-                zod.literal(null),
-              ])
+              .string()
               .nullable()
               .describe(
                 "How it ended, or null while it is still open. Only failed is a failure.",
@@ -460,13 +448,7 @@ export const UpdateRoutineResponse = zod.object({
         .union([
           zod.object({
             status: zod
-              .union([
-                zod.literal("succeeded"),
-                zod.literal("failed"),
-                zod.literal("skipped"),
-                zod.literal("waiting"),
-                zod.literal(null),
-              ])
+              .string()
               .nullable()
               .describe(
                 "How it ended, or null while it is still open. Only failed is a failure.",
@@ -713,7 +695,7 @@ export const ListRoutineRunsResponse = zod.object({
         .object({
           id: zod.string().describe("The run's id."),
           status: zod
-            .enum(["running", "succeeded", "failed", "skipped", "waiting"])
+            .string()
             .describe(
               "running until it ends; waiting while it waits on the person, for an approval or an answer.",
             ),

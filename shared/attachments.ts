@@ -209,19 +209,32 @@ export function mayBeTruncatedForModel(sizeBytes: number): boolean {
  * how the model reads it), the name a person reads, and the extensions that claim it. A Bot's file
  * has no browser to name its type, so its extension is the claim; the bytes still decide.
  *
- * ADDING A ROW IS NOT ALL OF ADDING A KIND. The server must recognise it by its bytes (images and
- * documents by their signatures, text only when it is UTF-8), and the model must have a way to read
- * it (a document's text is extracted on the server). Without both, a row makes a file the composer
- * offers and the server refuses. The test beside this file pins today's set, so a change here is one
- * somebody decided on.
+ * ADDING A ROW IS NOT ALL OF ADDING A TYPE. A type needs four things, and the row is one of them:
+ *
+ *   1. The row here, with the name a person reads (a document's name takes an "s" in a list, so
+ *      "Word document" becomes "Word documents") and every extension that claims it.
+ *   2. The server recognising it by its BYTES, never by its name or the client's word: images and
+ *      PDFs by their signatures, text only when every byte is UTF-8, and an Office file only when it
+ *      is a zip package whose `[Content_Types].xml` gives its main part the row's `mainPartType`.
+ *   3. A way for the model to read it: a document's text is extracted on the server and handed on
+ *      as text, cut at `MAX_EXTRACTED_CHARACTERS` and marked so, and a file whose text cannot be read
+ *      reaches the model as a note saying so.
+ *   4. An icon for the file's card in the app.
+ *
+ * Without all four, a row makes a file the composer offers and the server refuses, or one the server
+ * stores and the model cannot read. The test beside this file pins today's set, so a change here is
+ * one somebody decided on.
  *
  * `image/svg+xml` is deliberately absent. An SVG is an image and can also carry script. Served inline
  * from this app's own origin, one pasted into a channel is stored XSS against everybody in it. Nobody
  * pastes an SVG expecting a model to read it, so it is refused at the door rather than sanitised.
  *
- * PDF is the one document today: its text is extracted before the model sees it. It is accepted only
- * when the bytes start with the PDF signature; a claim of `application/pdf` on anything else is
- * refused. Served back as a download, never inline, like every type that is not an image.
+ * DOCUMENTS ARE READ, NEVER RENDERED. A PDF is accepted only when the bytes start with the PDF
+ * signature. A Word, Excel or PowerPoint file is accepted only in the Office Open XML form (.docx,
+ * .xlsx, .pptx): a zip package naming its main part. The older binary forms (.doc, .xls, .ppt) and the
+ * macro-enabled ones (.docm, .xlsm, .pptm) are not on the list; a macro-enabled package names a
+ * different main part, so renaming one to .xlsx does not get it in. Every document is served back as
+ * a download, never inline, like every type that is not an image.
  */
 export const ACCEPTED_FILE_TYPES = [
   { mimeType: "image/png", kind: "image", name: "PNG", extensions: ["png"] },
@@ -238,6 +251,33 @@ export const ACCEPTED_FILE_TYPES = [
     kind: "document",
     name: "PDF",
     extensions: ["pdf"],
+  },
+  {
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    kind: "document",
+    name: "Word document",
+    extensions: ["docx"],
+    mainPartType:
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+  },
+  {
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    kind: "document",
+    name: "Excel workbook",
+    extensions: ["xlsx"],
+    mainPartType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+  },
+  {
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    kind: "document",
+    name: "PowerPoint presentation",
+    extensions: ["pptx"],
+    mainPartType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
   },
   {
     mimeType: "text/plain",
@@ -263,6 +303,11 @@ export const ACCEPTED_FILE_TYPES = [
   kind: "image" | "text" | "document";
   name: string;
   extensions: readonly string[];
+  /**
+   * An Office file's main part, as its package's `[Content_Types].xml` types it. The server takes a
+   * zip as this file only when that part is in the package with exactly this type.
+   */
+  mainPartType?: string;
 }[];
 
 export type AcceptedFileType = (typeof ACCEPTED_FILE_TYPES)[number];
@@ -285,8 +330,40 @@ export const ACCEPTED_IMAGE_MIME = mimeTypesOf("image");
 
 export const ACCEPTED_TEXT_MIME = mimeTypesOf("text");
 
-/** Documents whose text the server extracts before the model sees them. Today that is PDF alone. */
+/** Documents whose text the server extracts before the model sees them: PDF, Word, Excel and PowerPoint. */
 export const ACCEPTED_DOCUMENT_MIME = mimeTypesOf("document");
+
+/** The accepted Office types: each is a zip package, known by the main part it names. */
+export type OfficeFileType = Extract<
+  AcceptedFileType,
+  { mainPartType: string }
+>;
+
+/**
+ * The Office type whose package names this main part, or undefined for any other part type (a
+ * macro-enabled workbook, a template, a slide show, or anything that is not an accepted Office file).
+ * Compared as media types are, ignoring case and surrounding space.
+ */
+export function officeFileTypeOfMainPart(
+  mainPartType: string,
+): OfficeFileType | undefined {
+  const wanted = mainPartType.trim().toLowerCase();
+  return ACCEPTED_FILE_TYPES.find(
+    (type): type is OfficeFileType =>
+      "mainPartType" in type && type.mainPartType.toLowerCase() === wanted,
+  );
+}
+
+/** The accepted Office type a media type names, or undefined for any other type. */
+export function officeFileTypeOf(mimeType: string): OfficeFileType | undefined {
+  const type = acceptedFileTypeOf(mimeType);
+  return type && "mainPartType" in type ? (type as OfficeFileType) : undefined;
+}
+
+/** Whether a media type is one of the accepted Office types. */
+export function isOfficeFileType(mimeType: string): boolean {
+  return officeFileTypeOf(mimeType) !== undefined;
+}
 
 /** The accepted type a media type names, or undefined for one OpenBot does not take. */
 export function acceptedFileTypeOf(
@@ -312,8 +389,8 @@ export function claimedTypeOfName(name: string): string {
 }
 
 /**
- * What can be sent, as a person or a model reads it: "images (PNG, JPEG, GIF, WebP), PDFs, and text,
- * Markdown, CSV or JSON files". Built from {@link ACCEPTED_FILE_TYPES}, so it never lists a kind the
+ * What can be sent, as a person or a model reads it: "images (PNG, JPEG, GIF, WebP), PDFs, Word
+ * documents, Excel workbooks, PowerPoint presentations, and text, Markdown, CSV or JSON files". Built from {@link ACCEPTED_FILE_TYPES}, so it never lists a kind the
  * server refuses or leaves out one it takes.
  */
 export function acceptedFilesInWords(): string {
@@ -335,6 +412,22 @@ export function acceptedFilesInWords(): string {
   ].filter(Boolean);
   if (groups.length < 2) return groups.join("");
   return `${groups.slice(0, -1).join(", ")}, and ${groups[groups.length - 1]}`;
+}
+
+/**
+ * A document's kind as a size refusal names it, from the one list: one of them ("a PDF", "an Excel
+ * workbook") for the composer's "too large for ...", and several ("PDFs", "Excel workbooks") for the
+ * server's "the limit for ...". One function for both sides, so the two refusals name the same kind.
+ * A type that is not a document on the list reads as a document in general.
+ */
+export function documentKindInWords(
+  mimeType: string,
+  form: "one" | "many",
+): string {
+  const type = acceptedFileTypeOf(mimeType);
+  const name = type?.kind === "document" ? type.name : "document";
+  if (form === "many") return `${name}s`;
+  return `${/^[AEIOU]/i.test(name) ? "an" : "a"} ${name}`;
 }
 
 /**

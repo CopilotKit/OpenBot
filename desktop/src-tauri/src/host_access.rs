@@ -611,7 +611,11 @@ impl Drop for HostAccess {
 }
 
 fn broker_loop(inner: Arc<Inner>) {
-    let client = match Client::builder().timeout(Duration::from_secs(15)).build() {
+    let client = match Client::builder()
+        .timeout(Duration::from_secs(15))
+        .default_headers(crate::client_version::headers())
+        .build()
+    {
         Ok(client) => client,
         Err(error) => {
             log::error!("[host access] could not create its HTTP client: {error}");
@@ -1225,6 +1229,7 @@ impl Inner {
             .spawn(move || {
                 let sent = Client::builder()
                     .timeout(Duration::from_secs(5))
+                    .default_headers(crate::client_version::headers())
                     .build()
                     .and_then(|client| {
                         client
@@ -2514,9 +2519,12 @@ mod tests {
         }
     }
 
+    /// Takes the results a test's operations post, for as long as the test holds it: a busy
+    /// computer can take far longer than the operations themselves.
     struct ResultCollector {
         base_url: String,
         bodies: Arc<Mutex<Vec<String>>>,
+        done: Arc<std::sync::atomic::AtomicBool>,
         thread: Option<JoinHandle<()>>,
     }
 
@@ -2527,8 +2535,9 @@ mod tests {
             let base_url = format!("http://{}", listener.local_addr().unwrap());
             let bodies = Arc::new(Mutex::new(Vec::new()));
             let worker_bodies = bodies.clone();
+            let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let worker_done = done.clone();
             let thread = thread::spawn(move || {
-                let deadline = Instant::now() + Duration::from_secs(3);
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
@@ -2582,7 +2591,7 @@ mod tests {
                                 .unwrap();
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            if Instant::now() >= deadline {
+                            if worker_done.load(std::sync::atomic::Ordering::SeqCst) {
                                 return;
                             }
                             thread::sleep(Duration::from_millis(10));
@@ -2594,19 +2603,23 @@ mod tests {
             Self {
                 base_url,
                 bodies,
+                done,
                 thread: Some(thread),
             }
         }
 
+        /// Waits for `count` results to have been posted. A minute is only there so that results
+        /// that never come fail the test instead of holding it.
         fn wait_for_posts(&self, count: usize) {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                if self.bodies.lock().unwrap().len() >= count {
-                    return;
-                }
+            let patience = Instant::now() + Duration::from_secs(60);
+            while self.bodies.lock().unwrap().len() < count {
+                assert!(
+                    Instant::now() < patience,
+                    "{count} host results were never posted: {:?}",
+                    self.bodies()
+                );
                 thread::sleep(Duration::from_millis(10));
             }
-            panic!("timed out waiting for {count} host result posts");
         }
 
         fn bodies(&self) -> Vec<String> {
@@ -2616,6 +2629,7 @@ mod tests {
 
     impl Drop for ResultCollector {
         fn drop(&mut self) {
+            self.done.store(true, std::sync::atomic::Ordering::SeqCst);
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
             }

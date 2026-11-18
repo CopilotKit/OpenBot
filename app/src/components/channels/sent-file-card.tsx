@@ -1,13 +1,4 @@
-import {
-  IconAlertTriangle,
-  IconDownload,
-  IconFileText,
-  IconFileTypeCsv,
-  IconFileTypePdf,
-  IconJson,
-  IconMarkdown,
-  IconPhoto,
-} from "@tabler/icons-react";
+import { IconAlertTriangle, IconDownload } from "@tabler/icons-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { attachmentAddress } from "@/lib/channels/attachments";
@@ -17,6 +8,7 @@ import {
   unavailableSentence,
   useDocumentIsGone,
 } from "./attachment-view";
+import { FileTypeIcon } from "./file-icon";
 
 /**
  * A file a Bot sent from its computer, as it sits in the conversation.
@@ -91,7 +83,7 @@ export function SentFileCard({
           </AttachmentLightbox>
         ) : (
           <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-border bg-background text-muted-foreground">
-            <FileIcon mimeType={file.mimeType} />
+            <FileTypeIcon className="size-5" mimeType={file.mimeType} />
           </span>
         )}
         <span className="min-w-0 flex-1">
@@ -122,21 +114,4 @@ export function SentFileCard({
       </figcaption>
     </figure>
   );
-}
-
-function FileIcon({ mimeType }: { mimeType: string }) {
-  const type = mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
-  const Icon =
-    type === "application/pdf"
-      ? IconFileTypePdf
-      : type === "text/csv"
-        ? IconFileTypeCsv
-        : type === "application/json"
-          ? IconJson
-          : type === "text/markdown"
-            ? IconMarkdown
-            : type.startsWith("image/")
-              ? IconPhoto
-              : IconFileText;
-  return <Icon aria-hidden className="size-5" />;
 }

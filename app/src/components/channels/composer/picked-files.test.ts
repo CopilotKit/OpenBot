@@ -178,6 +178,72 @@ describe("screenPickedFiles", () => {
     );
   });
 
+  /**
+   * Word, Excel and PowerPoint files are documents: staged like a PDF, held to the document limit,
+   * and offered by the file dialog by type and by extension (a browser on a computer without Office
+   * may not know the type).
+   */
+  test("accepts Word, Excel and PowerPoint files, and the file dialog offers them", () => {
+    const picked = [
+      file(
+        "memo.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ),
+      file(
+        "budget.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ),
+      file(
+        "deck.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      ),
+    ];
+    const result = screenPickedFiles(picked, { alreadyStaged: 0, limits });
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toEqual(picked);
+    const offered = FILE_PICKER_ACCEPT.split(",");
+    for (const { type, name } of picked) {
+      expect(offered).toContain(type);
+      expect(offered).toContain(name.slice(name.lastIndexOf(".")));
+    }
+  });
+
+  test("rejects an Office file over the document limit, naming its kind and the limit", () => {
+    const big = sized(
+      "budget.xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      MAX_DOCUMENT_BYTES + 1,
+    );
+    const result = screenPickedFiles([big], { alreadyStaged: 0, limits });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toBe(
+      "'budget.xlsx' is too large for an Excel workbook. The limit is 8MB.",
+    );
+  });
+
+  test("still refuses the older Office formats by name", () => {
+    const result = screenPickedFiles(
+      [
+        file("old.doc", "application/msword"),
+        file("old.xls", "application/vnd.ms-excel"),
+        file("macros.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12"),
+      ],
+      { alreadyStaged: 0, limits },
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected.map(({ reason }) => reason)).toEqual([
+      "'old.doc' isn't a file type you can attach.",
+      "'old.xls' isn't a file type you can attach.",
+      "'macros.xlsm' isn't a file type you can attach.",
+    ]);
+    const offered = FILE_PICKER_ACCEPT.split(",");
+    for (const legacy of [".doc", ".xls", ".ppt", ".xlsm"])
+      expect(offered).not.toContain(legacy);
+  });
+
   test("rejects an oversized image", () => {
     const big = file("huge.png", "image/png", MAX_IMAGE_BYTES + 1);
     const result = screenPickedFiles([big], { alreadyStaged: 0, limits });
