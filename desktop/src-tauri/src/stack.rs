@@ -284,6 +284,47 @@ pub fn postgres_volume_exists(
     named_volume_exists(engine, root, &volume)
 }
 
+/**
+How much this installation's database takes on disk, for the room an update needs to back it up
+(`local_eval::update_needs`): `du` of its volume, read-only, in a container of the Postgres image the
+installation already has, with no network and nothing pulled. Zero when it has no database yet, and
+nothing when it cannot be measured. Never creates the volume: one that is not there is not mounted.
+*/
+pub fn database_bytes(engine: &Address, root: &Path, secrets: &Secrets) -> Option<u64> {
+    let configuration = postgres_configuration(engine, root, secrets).ok()?;
+    let volume = postgres_volume_name(&configuration).ok()?;
+    if !named_volume_exists(engine, root, &volume).ok()? {
+        return Some(0);
+    }
+    let config: serde_json::Value = serde_json::from_slice(&configuration).ok()?;
+    let image = config["services"]["postgres"]["image"].as_str()?.to_owned();
+    let mut command = engine.command();
+    command.current_dir(root).args([
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=none",
+        "--volume",
+        &format!("{volume}:/data:ro"),
+        "--entrypoint",
+        "/bin/sh",
+        &image,
+        "-c",
+        "du -sk /data",
+    ]);
+    let (succeeded, output) =
+        crate::local_images::run_within(command, std::time::Duration::from_secs(60), 64 * 1024)?;
+    if !succeeded {
+        return None;
+    }
+    let kib: u64 = String::from_utf8_lossy(&output)
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kib * 1024)
+}
+
 fn postgres_configuration(
     engine: &Address,
     root: &Path,

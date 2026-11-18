@@ -1558,8 +1558,15 @@ fn free_space_at(path: &Path) -> Option<u64> {
     if unsafe { libc::statvfs(path.as_ptr(), &mut stats) } != 0 {
         return None;
     }
-    #[allow(clippy::unnecessary_cast)]
-    Some(stats.f_bavail as u64 * stats.f_frsize as u64)
+    Some(statvfs_free(&stats))
+}
+
+/// The bytes free to this account in what `statvfs` answered: the blocks free to an unprivileged
+/// user, of the fragment size.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
+pub fn statvfs_free(stats: &libc::statvfs) -> u64 {
+    stats.f_bavail as u64 * stats.f_frsize as u64
 }
 
 #[cfg(windows)]

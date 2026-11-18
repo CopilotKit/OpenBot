@@ -177,7 +177,7 @@ export const ROUTINE_FORM_DEFAULTS: Omit<
   interval: "1440",
 };
 
-type Schedule = Pick<
+export type Schedule = Pick<
   RoutineFormValues,
   "repeat" | "time" | "weekday" | "monthDay"
 >;
@@ -207,6 +207,61 @@ export function cronFrom(schedule: Schedule): string {
     default:
       return `${minute} ${hour} * * *`;
   }
+}
+
+const pad = (value: number) => String(value).padStart(2, "0");
+
+/** A plain whole number from `min` to `max` in one cron field, or null for anything else. */
+function plain(field: string, min: number, max: number): number | null {
+  if (!/^\d{1,2}$/.test(field)) return null;
+  const value = Number(field);
+  return value >= min && value <= max ? value : null;
+}
+
+/**
+ * The picker's choices for a routine's five cron fields, when the picker can say them: the exact
+ * shapes `cronFrom` writes, and nothing else. Null for any other schedule, such as one a Bot wrote
+ * ("every other Tuesday"), which Edit routine keeps as it is unless the person picks a new one.
+ *
+ * Read only to prefill the picker: what a routine's row says is still the server's `schedule`.
+ */
+export function scheduleFrom(cron: string): Schedule | null {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const [minuteField, hourField, dayField, monthField, weekdayField] =
+    fields as [string, string, string, string, string];
+  if (monthField !== "*") return null;
+  const defaults = {
+    weekday: ROUTINE_FORM_DEFAULTS.weekday,
+    monthDay: ROUTINE_FORM_DEFAULTS.monthDay,
+  };
+  if (
+    minuteField === "0" &&
+    hourField === "*" &&
+    dayField === "*" &&
+    weekdayField === "*"
+  )
+    return { ...defaults, repeat: "hourly", time: ROUTINE_FORM_DEFAULTS.time };
+  const minute = plain(minuteField, 0, 59);
+  const hour = plain(hourField, 0, 23);
+  if (minute === null || hour === null) return null;
+  const time = `${pad(hour)}:${pad(minute)}`;
+  if (dayField === "*" && weekdayField === "*")
+    return { ...defaults, repeat: "daily", time };
+  if (dayField === "*" && weekdayField === "1-5")
+    return { ...defaults, repeat: "weekdays", time };
+  const weekday = plain(weekdayField, 0, 6);
+  if (dayField === "*" && weekday !== null)
+    return { ...defaults, repeat: "weekly", weekday: String(weekday), time };
+  const monthDay = plain(dayField, 1, 28);
+  if (weekdayField === "*" && monthDay !== null)
+    return {
+      ...defaults,
+      repeat: "monthly",
+      monthDay: String(monthDay),
+      time,
+    };
+  return null;
 }
 
 /** "9:00 AM", on the person's own clock. */

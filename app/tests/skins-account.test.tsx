@@ -77,6 +77,7 @@ function preferences(skin: UserPreferences["skin"]): UserPreferences {
   return {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin,
     proactive: "on",

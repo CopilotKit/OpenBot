@@ -3,6 +3,7 @@
 //! The app updates itself with the signed updater. On the next Start, an installation whose
 //! deployment (`.openbot-deployment`) is not the app's own release is upgraded before it starts:
 //!
+//! 0. Check this computer has room for it (`Steps::room`). Without, nothing below runs.
 //! 1. Stop OpenBot.
 //! 2. Take one `pg_dump` of its database, if it has one, and keep the previous version's files
 //!    (`KEPT`) in `.openbot-previous/`.
@@ -145,6 +146,11 @@ pub trait Steps {
     /// line for the whole upgrade, and a step that said nothing left the one before it on that line:
     /// "Stopping OpenBot." under the rows through a whole download, install and start.
     fn now(&mut self, _now: Now) {}
+    /// Whether this computer has room for the update, before anything stops, is backed up or
+    /// downloads (`local_eval::update_room`). A problem that says what is short when it has not.
+    fn room(&mut self) -> Result<(), Problem> {
+        Ok(())
+    }
     /// Stop OpenBot: every container and host process of this installation. Volumes stay.
     fn stop(&mut self) -> Result<(), Problem>;
     /// Whether the installation has a database to back up. One that never started has none, and
@@ -168,6 +174,7 @@ pub trait Steps {
 /// The step an upgrade is on, said as it begins (see `Steps::now`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Now {
+    Checking,
     Stopping,
     BackingUp,
     Downloading,
@@ -184,6 +191,7 @@ pub enum Now {
 /// `internal-…` tag) are in the log only, beside it.
 pub fn now_said(now: Now, root: &Path, own: &Own) -> StepLine {
     match now {
+        Now::Checking => StepLine::here("Checking there's room for the update."),
         Now::Stopping => StepLine::here("Stopping OpenBot."),
         Now::BackingUp => {
             StepLine::here("Backing up your data.").logged("Backing up OpenBot's database.")
@@ -219,6 +227,9 @@ pub fn put_back_said(root: &Path) -> StepLine {
 pub enum Ran {
     /// The new version is running.
     Moved,
+    /// This computer has no room for the update (`Steps::room`): nothing stopped, moved or
+    /// downloaded, and the version it has is as it was.
+    Short(Problem),
     /// The upgrade failed, and the previous version is back, with its database, and running.
     Kept(Problem),
     /// The upgrade failed, the previous version is back, and then it did not start.
@@ -231,6 +242,11 @@ pub enum Ran {
 /// Upgrade the installation in `root`. See the module documentation for the steps.
 pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
     let previous = root.join(PREVIOUS);
+    // Before anything changes: an update that runs out of room part way can leave nothing to go
+    // back to (a Mac that filled mid-update broke Docker's disk, and its database with it).
+    if let Err(short) = said(steps, Now::Checking, |steps| steps.room()) {
+        return Ran::Short(short);
+    }
     if let Err(failed) = said(steps, Now::Stopping, |steps| steps.stop()) {
         return restart(steps, failed);
     }
@@ -428,6 +444,18 @@ pub fn moving_said(planned: &Move) -> StepLine {
 /// The upgrade, by its releases, for the log beside what the screen says.
 pub fn moved_log(planned: &Move) -> String {
     format!("updating OpenBot from {} to {}", planned.from, planned.to)
+}
+
+/// This computer is short of `short` for the update (`local_eval::update_room`): the problem Start
+/// reports, which the window says with the figures, as it says the back end's own shortfall.
+pub fn short_problem(short: crate::local_eval::Shortfall) -> Problem {
+    let mut problem =
+        Problem::plain("There isn't room on this computer for the update, so nothing changed.");
+    problem.room = Some(Box::new(crate::problem::Room {
+        shortfall: Some(short),
+        cause: None,
+    }));
+    problem
 }
 
 /// The upgrade failed, and the previous version is running again.
@@ -667,6 +695,8 @@ mod tests {
         /// What the line under Start's rows says now, and what it said as each step ran.
         line: Option<String>,
         lines: Vec<Option<String>>,
+        /// What the computer is short of for the update, as its preflight found it.
+        short: Option<crate::local_eval::Shortfall>,
     }
 
     impl Recorded {
@@ -683,6 +713,16 @@ mod tests {
     impl Steps for Recorded {
         fn now(&mut self, now: Now) {
             self.line = Some(now_said(now, &self.root, &released(&self.version)).said);
+        }
+        fn room(&mut self) -> Result<(), Problem> {
+            match self.short.take() {
+                Some(short) => {
+                    self.ran.push("room".into());
+                    self.lines.push(self.line.clone());
+                    Err(short_problem(short))
+                }
+                None => Ok(()),
+            }
         }
         fn stop(&mut self) -> Result<(), Problem> {
             self.step("stop")
@@ -746,8 +786,55 @@ mod tests {
             has_database: true,
             line: None,
             lines: Vec::new(),
+            short: None,
         };
         (root, steps)
+    }
+
+    /**
+    A Mac with 7.5 GB free updating to 1.1.0. Nothing checked for room, so the update stopped
+    OpenBot, backed it up and downloaded until the Mac was full, Docker's disk stopped writing, and
+    neither the new version nor the one it had would start. The preflight runs first now, and short
+    of room nothing else does: OpenBot is not stopped, nothing is backed up, set aside or
+    downloaded, and the problem carries what is short for the window to say.
+    */
+    #[test]
+    fn an_update_without_room_stops_before_it_stops_or_backs_up_anything() {
+        let (root, mut steps) = installation();
+        let mac = crate::local_eval::Shortfall {
+            disk: true,
+            disk_gb: Some("7.5".into()),
+            needed_gb: Some("13".into()),
+            free_on_drive: true,
+            mac: true,
+            updating: true,
+            ..crate::local_eval::Shortfall::default()
+        };
+        steps.short = Some(mac.clone());
+        let Ran::Short(problem) = run(&root, &mut steps) else {
+            panic!("an update without room went ahead: {:?}", steps.ran);
+        };
+        assert_eq!(steps.ran, ["room"]);
+        assert_eq!(
+            steps.lines,
+            [Some("Checking there's room for the update.".to_string())]
+        );
+        assert_eq!(problem.shortfall(), Some(&mac));
+        assert!(!problem.said.contains('\u{2014}'), "{}", problem.said);
+        // The version it had, its files and its database, exactly as they were.
+        assert_eq!(deployment::installed(&root).unwrap().version, "v0.3.0");
+        assert!(!root.join(PREVIOUS).exists());
+        assert_eq!(steps.database, "rows at v0.3.0");
+        assert!(root.join("agent-computer/package.json").is_file());
+        untouched(&root);
+
+        // Room again, and Retry: the same update runs, every step in its order.
+        assert!(matches!(run(&root, &mut steps), Ran::Moved));
+        assert_eq!(
+            steps.ran,
+            ["room", "stop", "back_up", "lay_out", "install", "start"]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn untouched(root: &Path) {

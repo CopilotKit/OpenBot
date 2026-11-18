@@ -273,13 +273,7 @@ pub fn computer_free(address: &Address) -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
         let _ = address;
-        let home = std::env::var_os("HOME")?;
-        let path = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(home.as_os_str()))
-            .ok()?;
-        // SAFETY: `path` is a valid C string, and `statvfs` only writes the struct it is given.
-        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-        let read = unsafe { libc::statvfs(path.as_ptr(), &mut stat) };
-        (read == 0).then(|| u64::from(stat.f_bavail) * stat.f_frsize)
+        crate::windows::mac_drive().map(|drive| drive.free)
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {

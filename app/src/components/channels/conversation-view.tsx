@@ -1,5 +1,3 @@
-import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import {
@@ -25,7 +23,15 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { StillWorkingError } from "@/components/channels/composer/queue";
-import { NotifyPrompt } from "@/components/notifications/notify-prompt";
+import {
+  NotifyPrompt,
+  notifyPromptAnswered,
+} from "@/components/notifications/notify-prompt";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
+import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import { useNotificationPermission } from "@/lib/notifications/permission";
 import { newId } from "../../lib/new-id";
 
 /** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
@@ -41,6 +47,7 @@ export function ConversationView({
   commands,
   channelId,
   holdsFilesUntilSent = false,
+  attachmentLimits,
   disabled = false,
   onSendHeld,
   pending = false,
@@ -84,6 +91,8 @@ export function ConversationView({
    * creates the conversation. See `Composer`.
    */
   holdsFilesUntilSent?: boolean;
+  /** How large a picked file may be, forwarded to the composer (`useAttachmentLimits`). */
+  attachmentLimits?: ComposerAttachmentLimits;
   disabled?: boolean;
   /** Writing is open and sending waits on the caller; forwarded to the composer. */
   onSendHeld?: () => void;
@@ -199,6 +208,7 @@ export function ConversationView({
    * for the same fact.
    */
   const [running, setRunning] = useState(false);
+  const notificationPermission = useNotificationPermission();
   const inFlight = pending || running;
 
   /**
@@ -525,6 +535,25 @@ export function ConversationView({
           <NotifyPrompt />
         ) : null}
         {/*
+         * The ask to star OpenBot on GitHub, when the server says it is due (`StarPrompt`), and never
+         * beside the notifications offer: one card above the composer at a time, and the offer that
+         * is useful to this person goes first.
+         *
+         * Never right after an error: not while the last turn here ended without an answer
+         * (`stopped`, where a failed run is said). Not read off `notice`: a conversation passes one
+         * every time, mostly empty, so its presence says nothing. It also waits while OpenBot Desktop has not yet
+         * said whether notifications are on (`checking`), or the card could draw, be counted as
+         * shown, and vanish when the answer is "not asked yet". And never in a conversation that
+         * cannot take a message: the brief "Picking a Bot" screen, or one whose Bot was deleted.
+         */}
+        {disabled ||
+        stopped ||
+        notificationPermission === "checking" ||
+        (notificationPermission === "default" &&
+          !notifyPromptAnswered()) ? null : (
+          <StarPrompt />
+        )}
+        {/*
          * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
          *
          * It is tucked under the composer (`-mb-4`, no bottom border), so anything drawn between the
@@ -553,6 +582,7 @@ export function ConversationView({
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
           holdsFilesUntilSent={holdsFilesUntilSent}
+          {...(attachmentLimits ? { attachmentLimits } : {})}
           {...(commands ? { commands } : {})}
           className="relative w-full mt-auto"
           compact

@@ -1,7 +1,9 @@
-import { IconFile, IconX } from "@tabler/icons-react";
+import { IconFile, IconPhoto, IconX } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
+import { useState } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
+import { kindLabel } from "@/lib/computers/sent-file";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { Collapse } from "./collapse";
 
@@ -37,6 +39,11 @@ export type StagedImage = {
   url: string;
   alt?: string;
   loading: boolean;
+  /** What the tile says the file is if the picture cannot be drawn. See {@link StagedPicture}. */
+  name?: string;
+  /** The type the server found in the bytes, once it has them. */
+  mimeType?: string;
+  size?: number;
 };
 
 export type StagedFile = {
@@ -46,7 +53,7 @@ export type StagedFile = {
   loading: boolean;
   /**
    * The model reads at most MAX_EXTRACTED_CHARACTERS of a text file, while
-   * the pick ceiling is MAX_FILE_BYTES. A file over the first may be read
+   * the pick ceiling is the server's limit for files. A file over the first may be read
    * truncated — warned on the tile, never refused.
    */
   mayTruncate?: boolean;
@@ -88,44 +95,18 @@ export function AttachmentStrip({
         className="flex flex-wrap items-start gap-2 pb-3"
       >
         {images.map((image) => (
-          <Staged key={image.id}>
-            {image.loading || image.url === "" ? (
-              /*
-               * The placeholder stands in for the picture, so it carries the picture's role and
-               * the picture's name — otherwise the tile is a shape and nothing else, and the only
-               * thing a screen reader finds in it is a button offering to remove something
-               * unnamed. The file tile has said "Uploading…" in plain text since it was written.
-               *
-               * A name, not an announcement. `role="status"` would make each of these a live
-               * region, and a paste of eight images would interrupt eight times to say so.
-               */
-              <Skeleton
-                aria-label={`${image.alt ?? "Attachment"}, uploading`}
-                className="size-20 rounded-xl"
-                role="img"
-              />
-            ) : (
-              <img
-                alt={image.alt ?? "Attachment"}
-                className="size-20 rounded-xl border border-border object-cover"
-                src={image.url}
-              />
-            )}
-            <RemoveButton
-              name={image.alt ?? "attachment"}
-              onRemove={() => onRemove(image.id)}
-            />
-          </Staged>
+          <StagedPicture
+            image={image}
+            key={image.id}
+            onRemove={() => onRemove(image.id)}
+          />
         ))}
         {files.map((file) => (
           /*
            * The same height as a thumbnail, so a message carrying one of each reads as one row of
            * attachments rather than as two things that happened to land next to each other.
            */
-          <Staged
-            className="flex h-20 w-40 flex-col justify-between rounded-xl border border-border bg-muted/40 p-2"
-            key={file.id}
-          >
+          <Staged className={FILE_TILE} key={file.id}>
             {/*
              * `shrink-0` because the tile's height is fixed and the text below it is not. A third
              * line, which is exactly what the truncation warning adds, takes the extra out of the
@@ -171,6 +152,81 @@ export function AttachmentStrip({
         ))}
       </ul>
     </Collapse>
+  );
+}
+
+/** A file's tile: the height of a thumbnail, so a row of both reads as one row. */
+const FILE_TILE =
+  "flex h-20 w-40 flex-col justify-between rounded-xl border border-border bg-muted/40 p-2";
+
+/**
+ * One picture on the composer: its thumbnail, or, when the browser cannot draw it, the file's tile.
+ *
+ * A PICTURE THAT WILL NOT DRAW STILL SAYS WHAT IT IS. Pictures up to 100MB can be attached, and a
+ * picture can fail to draw in one browser while it is fine on the server: a phone runs out of
+ * memory for it, or its bytes are damaged past the part the server checks. The browser's own
+ * answer is a broken-image glyph, which tells the person nothing. So the tile turns into the file
+ * tile every other file on the composer has: the name, the kind and the size, still removable, and
+ * still sent like any other file.
+ */
+function StagedPicture({
+  image,
+  onRemove,
+}: {
+  image: StagedImage;
+  onRemove: () => void;
+}) {
+  // Remembered by address: the preview and the uploaded file are two addresses, and each gets its own try.
+  const [failedUrl, setFailedUrl] = useState<string>();
+  const name = image.name ?? image.alt ?? "Attachment";
+
+  if (failedUrl === image.url && !image.loading && image.url !== "") {
+    const kind = image.mimeType ? kindLabel(image.mimeType, name) : "Image";
+    return (
+      <Staged className={FILE_TILE}>
+        <IconPhoto className="size-5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <p className="truncate font-medium text-xs" title={name}>
+            {name}
+          </p>
+          <p className="truncate text-muted-foreground text-xs">
+            {image.size === undefined
+              ? kind
+              : `${kind} · ${formatBytes(image.size)}`}
+          </p>
+        </div>
+        <RemoveButton name={name} onRemove={onRemove} />
+      </Staged>
+    );
+  }
+
+  return (
+    <Staged>
+      {image.loading || image.url === "" ? (
+        /*
+         * The placeholder stands in for the picture, so it carries the picture's role and
+         * the picture's name — otherwise the tile is a shape and nothing else, and the only
+         * thing a screen reader finds in it is a button offering to remove something
+         * unnamed. The file tile has said "Uploading…" in plain text since it was written.
+         *
+         * A name, not an announcement. `role="status"` would make each of these a live
+         * region, and a paste of eight images would interrupt eight times to say so.
+         */
+        <Skeleton
+          aria-label={`${image.alt ?? "Attachment"}, uploading`}
+          className="size-20 rounded-xl"
+          role="img"
+        />
+      ) : (
+        <img
+          alt={image.alt ?? "Attachment"}
+          className="size-20 rounded-xl border border-border object-cover"
+          onError={() => setFailedUrl(image.url)}
+          src={image.url}
+        />
+      )}
+      <RemoveButton name={image.alt ?? "attachment"} onRemove={onRemove} />
+    </Staged>
   );
 }
 
@@ -236,9 +292,9 @@ function RemoveButton({
 }
 
 /**
- * Whole kilobytes below a megabyte and one decimal above it. A staged attachment is capped at 8MB
- * (`shared/attachments.ts`), so this never has to reach gigabytes, and "0.1MB" for a 100KB text
- * file tells the reader less than "98KB" does.
+ * Whole kilobytes below a megabyte and one decimal above it. A staged attachment is capped at the
+ * server's limit (8MB by default, 100MB at the most any server takes today), so this never has to
+ * reach gigabytes, and "0.1MB" for a 100KB text file tells the reader less than "98KB" does.
  */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
