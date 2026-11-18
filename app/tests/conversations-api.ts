@@ -168,6 +168,7 @@ export type GroupFixture = {
     status: string;
     createdAt: string;
     reason?: string;
+    declined?: boolean;
     answeredBy?: string;
     consent?: { botId: string; serverId: string };
     [other: string]: unknown;
@@ -200,6 +201,7 @@ export function messagesOf(group: Pick<GroupFixture, "messages">) {
       status: message.status,
       createdAt: message.createdAt,
       ...(message.reason === undefined ? {} : { reason: message.reason }),
+      ...(message.declined === undefined ? {} : { declined: message.declined }),
       ...(message.answeredBy === undefined
         ? {}
         : { answeredBy: message.answeredBy }),

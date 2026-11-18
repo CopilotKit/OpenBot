@@ -1401,6 +1401,56 @@ fn pass_the_foreground_on() {
     }
 }
 
+/**
+The OpenBot already running, as the single-instance plugin finds it: the plugin's hidden window,
+whose class and title are the app's identifier followed by `-sic` and `-siw`
+(`tauri-plugin-single-instance`, `platform_impl/windows.rs`). That window's process, or None when
+no OpenBot runs.
+*/
+#[cfg(windows)]
+fn running_openbot(identifier: &str) -> Option<u32> {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
+    let class = HSTRING::from(format!("{identifier}-sic"));
+    let title = HSTRING::from(format!("{identifier}-siw"));
+    // SAFETY: two null-terminated strings that outlive the call.
+    let window = unsafe { FindWindowW(&class, &title) }.ok()?;
+    let mut process = 0u32;
+    // SAFETY: `window` was just found, and `process` outlives the call.
+    unsafe { GetWindowThreadProcessId(window, Some(&mut process)) };
+    (process != 0).then_some(process)
+}
+
+/**
+Windows, as a launch starts and before the single-instance plugin hands it to an OpenBot already
+running and ends it: this launch's right to the foreground, passed to that OpenBot.
+
+Windows lets a process set the foreground window only if, among others, it "was started by the
+foreground process" or "received the last input event" ("SetForegroundWindow function", Remarks,
+Microsoft Learn). A launch from the Start menu, the taskbar or the desktop was; the OpenBot it is
+handed to was not. When that OpenBot was quitting, with the tray's flyout still open from its Quit,
+it could neither bring its Shutting down screen forward nor give the OpenBot it opens next the
+right, and that one opened behind with its taskbar button flashing.
+
+"A process that can set the foreground window can enable another process to set the foreground
+window by calling AllowSetForegroundWindow", until "the user generates input, unless the input is
+directed at that process" ("AllowSetForegroundWindow function", Microsoft Learn). So the OpenBot
+that gets the launch can come forward with it (`kept_for_after_quit`, `restore_window_on`), and,
+once in front, start the next OpenBot with the right (`open_again_after_quit`). A launch Windows
+gave no right passes none, and that OpenBot flashes its taskbar button as before. Nothing when no
+OpenBot runs.
+*/
+#[cfg(windows)]
+fn pass_the_launch_on(identifier: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    let Some(running) = running_openbot(identifier).filter(|&id| id != std::process::id()) else {
+        return;
+    };
+    // SAFETY: takes no pointers; it only widens which process may set the foreground window. It
+    // fails when this launch has no right to pass, and the running OpenBot then flashes instead.
+    let _ = unsafe { AllowSetForegroundWindow(running) };
+}
+
 /// The person said yes to pausing their Podman while OpenBot runs. See `own_machine`. False when
 /// nothing was waiting for it.
 #[tauri::command]
@@ -7099,6 +7149,35 @@ struct QuitState {
     phase: Mutex<QuitPhase>,
     /// The Shutting down screen's rows.
     status: Mutex<QuitStatus>,
+    /// Somebody launched OpenBot while it quit (`launch_while_quitting`): it opens again once
+    /// Quit has stopped everything (`after_exit`). Set and cleared only while `phase` is held.
+    open_again: std::sync::atomic::AtomicBool,
+}
+
+/**
+Whether a launch that reached this OpenBot came while it quits, and if so keeps it for after.
+
+The single-instance plugin hands every later launch to the OpenBot already running and ends the new
+process: on Windows it sends its arguments with `SendMessageW` and calls `process::exit(0)`; on a Mac
+opening a running app is a Reopen. Quit keeps the event loop alive while its cleanup stops the stack
+(about twenty seconds on Windows), so a launch then reached the OpenBot that was about to exit, and
+nothing opened. Decided under Quit's own lock, so a launch is never both missed and too late.
+*/
+fn launch_while_quitting(quit: &QuitState) -> bool {
+    let phase = quit.phase.lock().unwrap();
+    let quitting = !matches!(*phase, QuitPhase::Idle);
+    if quitting {
+        quit.open_again
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    quitting
+}
+
+/// Quit did not finish and OpenBot stays open, which answers any launch it held.
+fn quit_back_to_idle(quit: &QuitState) {
+    *quit.phase.lock().unwrap() = QuitPhase::Idle;
+    quit.open_again
+        .store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[derive(Default)]
@@ -7156,7 +7235,7 @@ where
     let code = code.unwrap_or(0);
     let work = Box::new(move || {
         if let Err(error) = report_exit_cleanup_failures(cleanup(), diagnostic) {
-            *completing.phase.lock().unwrap() = QuitPhase::Idle;
+            quit_back_to_idle(&completing);
             diagnostic_failed(error);
             return;
         }
@@ -7164,7 +7243,7 @@ where
         exit(code);
     });
     if let Err(error) = spawn(work) {
-        *state.phase.lock().unwrap() = QuitPhase::Idle;
+        quit_back_to_idle(&state);
         return Err(error);
     }
     Ok(())
@@ -12015,11 +12094,90 @@ fn navigate_to_notice_page(
 }
 
 fn restore_after_second_instance(app: &tauri::AppHandle) {
+    another_launch(app, |app| show_whichever_applies(&app));
+}
+
+/// What the exit handler does once Quit has stopped everything.
+#[derive(Debug, PartialEq, Eq)]
+enum AfterExit {
+    Exit,
+    OpenAgain,
+}
+
+/// Open again when a launch came while this Quit ran (`launch_while_quitting`). Not after an
+/// update's restart, which Tauri starts again itself: that would be two.
+fn after_exit(quit: &QuitState) -> AfterExit {
+    let phase = quit.phase.lock().unwrap();
+    let quit_done = matches!(*phase, QuitPhase::Complete(code) if code != tauri::RESTART_EXIT_CODE);
+    if quit_done
+        && quit
+            .open_again
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+    {
+        AfterExit::OpenAgain
+    } else {
+        AfterExit::Exit
+    }
+}
+
+/// The argument OpenBot starts again with, after a Quit that a launch came during (`after_exit`).
+const OPENED_AFTER_QUIT: &str = "--opened-after-quit";
+
+/// Whether this launch is OpenBot opening again after such a Quit, from the program's arguments
+/// (the program first).
+fn opened_after_quit(args: &[std::ffi::OsString]) -> bool {
+    args.iter().skip(1).any(|arg| arg == OPENED_AFTER_QUIT)
+}
+
+/**
+OpenBot again, for the launch that came while it quit. Called from `RunEvent::Exit`, after the
+single-instance plugin's own `Exit` handler has released its mutex (Windows) or removed its socket
+(macOS), so the new OpenBot is the one running rather than handing itself back to this one.
+
+Through Tauri's `process::restart`: a new process on Windows, `open -n` through LaunchServices on a
+Mac. With `OPENED_AFTER_QUIT` only, as a launch from the Start menu or the Dock has no arguments,
+so its window comes forward at first show. On Windows this OpenBot's right to the foreground is
+passed on first, as the update's restart does (`pass_the_foreground_on`).
+*/
+fn open_again_after_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ! {
+    log::info!("[quit] everything stopped; opening OpenBot again for the launch made meanwhile");
+    #[cfg(windows)]
+    pass_the_foreground_on();
+    app.cleanup_before_exit();
+    let mut env = app.env();
+    env.args_os = env
+        .args_os
+        .first()
+        .cloned()
+        .into_iter()
+        .chain([std::ffi::OsString::from(OPENED_AFTER_QUIT)])
+        .collect();
+    tauri::process::restart(&env)
+}
+
+/// A launch while OpenBot quits (`launch_while_quitting`): the Shutting down screen in front, as it
+/// is. Not a restore, which would take the window to OpenBot or setup halfway through stopping.
+fn kept_for_after_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    if !launch_while_quitting(&app.state::<Shell>().quit) {
+        return false;
+    }
+    log::info!("[launch] OpenBot is quitting; it opens again once everything has stopped");
+    bring_to_front(app, "OpenBot was launched while it quits");
+    true
+}
+
+/// Another launch of OpenBot, which the single-instance plugin ended and handed to this one: the
+/// window, restored by `restore`, or while OpenBot quits, kept for after (`kept_for_after_quit`).
+fn another_launch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    restore: impl FnOnce(tauri::AppHandle<R>) + Send + 'static,
+) {
+    if kept_for_after_quit(app) {
+        return;
+    }
     let app = app.clone();
     let reporting_app = app.clone();
-    if let Err(error) = schedule_second_instance_restore(app, |app| {
-        show_whichever_applies(&app);
-    }) {
+    if let Err(error) = schedule_second_instance_restore(app, restore) {
         log::warn!("[single-instance] restore scheduling failed: {error}");
         report(
             &reporting_app,
@@ -13297,6 +13455,8 @@ fn main() {
     let local_offset = time::UtcOffset::current_local_offset().ok();
     // After an in-app update, or from the installer's last page: in front as the window first shows.
     let from_installer = started_by_installer(&args);
+    // OpenBot opening again for a launch made while it quit (`open_again_after_quit`).
+    let reopened = opened_after_quit(&args);
     let context = side_by_side(tauri::generate_context!());
     // The version every request to an OpenBot names this app with (`client_version`): the one the
     // installer, the update check and About name.
@@ -13315,6 +13475,10 @@ fn main() {
         );
         context
     };
+    // Before the single-instance plugin hands this launch to an OpenBot already running and ends
+    // it: this launch's right to the foreground, handed on with it (`pass_the_launch_on`).
+    #[cfg(windows)]
+    pass_the_launch_on(&context.config().identifier);
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
         // second stack. Without this both copies bind the same ports and the loser reports a
@@ -13533,6 +13697,9 @@ fn main() {
             // The window is built visible, so this is its first show: a launch the installer
             // started comes forward now, while Starting OpenBot is what it shows.
             forward_at_first_show(from_installer, |why| bring_to_front(app.handle(), why));
+            if reopened {
+                bring_to_front(app.handle(), "OpenBot opened again after quitting");
+            }
             // Built by `generate_context!`, so the permissions OpenBot's page is granted are
             // compiled in. First, before anything that could trust an app and open it.
             know_app_page_grants(app.handle());
@@ -13644,7 +13811,11 @@ fn main() {
             match event {
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
-                    show_whichever_applies(app);
+                    // Opening OpenBot from the Dock, Finder or Spotlight while it runs. While it
+                    // quits, that is a launch to keep for after (`kept_for_after_quit`).
+                    if !kept_for_after_quit(app) {
+                        show_whichever_applies(app);
+                    }
                 }
                 tauri::RunEvent::ExitRequested { api, code, .. } => {
                     // Exit runs on the event-loop thread. Waiting there for Windows process
@@ -13692,8 +13863,15 @@ fn main() {
                 // Windows ending the session exits here without Quit. With a fix's restart owed,
                 // that is setup's planned restart, from the Start menu as the screen offers, not an
                 // abandonment. After Quit, setup already said how it ended and this adds nothing.
-                tauri::RunEvent::Exit if windows_restart_owed(app) => {
-                    desktop_telemetry::restart_required(app);
+                tauri::RunEvent::Exit => {
+                    if windows_restart_owed(app) {
+                        desktop_telemetry::restart_required(app);
+                    }
+                    // Somebody launched OpenBot while it quit: now that everything has stopped,
+                    // it opens again (`after_exit`).
+                    if after_exit(&app.state::<Shell>().quit) == AfterExit::OpenAgain {
+                        open_again_after_quit(app);
+                    }
                 }
                 _ => {}
             }
@@ -14757,6 +14935,176 @@ mod tests {
             |_| panic!("an update restart starts no cleanup worker"),
         )
         .unwrap();
+    }
+
+    /// Launching OpenBot while it quit opened nothing. The single-instance plugin hands a launch to
+    /// the OpenBot already running and ends the new process (on Windows, `SendMessageW` then
+    /// `process::exit(0)`); on a Mac, a launch of a running app is its Reopen. The OpenBot that got
+    /// it was stopping its stack, about twenty seconds on Windows, and then exited. The launch has
+    /// to outlive the Quit: once everything has stopped, OpenBot opens again.
+    #[test]
+    fn a_launch_while_quitting_opens_openbot_again_once_quit_has_stopped_everything() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let quit = Arc::clone(&app.state::<Shell>().quit);
+        let (entered, cleanup_started) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let (exiting, exited) = mpsc::channel();
+        request_quit_with(
+            Arc::clone(&quit),
+            Some(0),
+            || {},
+            move || {
+                entered.send(()).unwrap();
+                released.recv().unwrap();
+                Vec::new()
+            },
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("Quit's cleanup succeeded"),
+                failed: |_: String| panic!("Quit's cleanup succeeded"),
+            },
+            move |code| exiting.send(code).unwrap(),
+            |work| std::thread::Builder::new().spawn(work).map(|_| ()),
+        )
+        .unwrap();
+        cleanup_started
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+
+        // The launch arrives, as the plugin hands it over, while Quit is still stopping OpenBot.
+        let (restored, restores) = mpsc::channel();
+        another_launch(app.handle(), move |_| restored.send(()).unwrap());
+
+        release.send(()).unwrap();
+        assert_eq!(exited.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        // Quit's own exit then passes the handler, as it always has.
+        request_quit_with(
+            Arc::clone(&quit),
+            Some(0),
+            || panic!("the exit Quit asked for is not held"),
+            || panic!("the exit Quit asked for runs no second cleanup"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("no second cleanup"),
+                failed: |_: String| panic!("no second cleanup"),
+            },
+            |_| panic!("no second exit"),
+            |_| panic!("no second worker"),
+        )
+        .unwrap();
+        assert_eq!(
+            after_exit(&quit),
+            AfterExit::OpenAgain,
+            "a launch that came while OpenBot quit was dropped"
+        );
+        // The Shutting down screen stays as it is: the launch is not a restore that takes the
+        // window to OpenBot or setup halfway through stopping.
+        assert!(restores.recv_timeout(Duration::from_millis(300)).is_err());
+        // The OpenBot that opens again knows it is one, and comes forward as it first shows.
+        let args = |given: &[&str]| -> Vec<std::ffi::OsString> {
+            std::iter::once("openbot-desktop.exe")
+                .chain(given.iter().copied())
+                .map(std::ffi::OsString::from)
+                .collect()
+        };
+        assert!(opened_after_quit(&args(&[OPENED_AFTER_QUIT])));
+        assert!(!opened_after_quit(&args(&[])));
+        assert!(!opened_after_quit(&[std::ffi::OsString::from(
+            OPENED_AFTER_QUIT
+        )]));
+    }
+
+    /// A launch hands its right to the foreground to the OpenBot already running
+    /// (`pass_the_launch_on`), which it finds the way the single-instance plugin does: by the
+    /// plugin's own hidden window. With the real plugin registered, that lookup must name this
+    /// process, and before it, nothing.
+    #[cfg(windows)]
+    #[test]
+    fn a_launch_finds_the_running_openbot_by_the_single_instance_plugins_window() {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        let identifier = format!("ai.openbot.launch-hand-off-test-{}", std::process::id());
+        context.config_mut().identifier = identifier.clone();
+        assert_eq!(running_openbot(&identifier), None);
+        let _app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_single_instance::init(|_, _, _| {}))
+            .build(context)
+            .unwrap();
+        assert_eq!(running_openbot(&identifier), Some(std::process::id()));
+        // A launch never passes its right to itself.
+        pass_the_launch_on(&identifier);
+    }
+
+    /// Quit with no launch exits as it always has; a launch during an update's restart is left to
+    /// that restart; and a launch held by a Quit that could not finish, which leaves OpenBot open,
+    /// is not owed to a later Quit.
+    #[test]
+    fn only_a_launch_during_the_quit_that_exits_opens_openbot_again() {
+        use std::sync::Arc;
+        let app = || {
+            tauri::test::mock_builder()
+                .manage(Shell::default())
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap()
+        };
+        // Quit, with a launch handed over while its cleanup runs when `launch` is given. Returns
+        // the code Quit exited with, or None when it did not exit.
+        let quit_with = |app: &tauri::App<tauri::test::MockRuntime>,
+                         launch: bool,
+                         cleanup: Vec<String>,
+                         sink: Result<(), String>| {
+            let (exiting, exited) = std::sync::mpsc::channel();
+            let work = std::cell::RefCell::new(None);
+            request_quit_with(
+                Arc::clone(&app.state::<Shell>().quit),
+                Some(0),
+                || {},
+                move || cleanup,
+                QuitDiagnostics {
+                    sink: move |_: Vec<String>| sink,
+                    failed: |_: String| {},
+                },
+                move |code| exiting.send(code).unwrap(),
+                |task| {
+                    *work.borrow_mut() = Some(task);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            if launch {
+                another_launch(app.handle(), |_| {});
+            }
+            work.into_inner().expect("Quit's cleanup worker")();
+            exited.try_recv().ok()
+        };
+
+        // A plain Quit exits, as it always has.
+        let plain = app();
+        assert_eq!(quit_with(&plain, false, Vec::new(), Ok(())), Some(0));
+        assert_eq!(after_exit(&plain.state::<Shell>().quit), AfterExit::Exit);
+
+        // An update's restart: Tauri starts the new version itself, so nothing opens a second one.
+        let updating = app();
+        quit_done_for_restart(&updating.state::<Shell>().quit);
+        another_launch(updating.handle(), |_| {});
+        assert_eq!(after_exit(&updating.state::<Shell>().quit), AfterExit::Exit);
+
+        // A Quit that could not record its failure stays open with the window up, which answers
+        // the launch it held. The next Quit, with no launch of its own, just exits.
+        let failed = app();
+        assert_eq!(
+            quit_with(
+                &failed,
+                true,
+                vec!["synthetic".into()],
+                Err("no notice".into())
+            ),
+            None
+        );
+        assert_eq!(quit_with(&failed, false, Vec::new(), Ok(())), Some(0));
+        assert_eq!(after_exit(&failed.state::<Shell>().quit), AfterExit::Exit);
     }
 
     #[test]
