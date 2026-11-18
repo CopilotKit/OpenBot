@@ -258,15 +258,27 @@ describe("a release's Helm charts", () => {
   });
 
   test("the files are read as what they are, by the function the release uses", () => {
-    const files = published({ version: "v0.4.0", database: "0091_last" });
+    const files = published({
+      version: "v0.4.0",
+      database: "0091_last",
+      requiresDowntime: true,
+    });
     expect(readReleaseFiles(files, "v0.4.0")).toEqual({
       database: "0091_last",
+      requiresDowntime: true,
       chart: { path: join(files, "openbot-0.3.0.tgz"), version: "0.3.0" },
       bundleChart: {
         path: join(files, "openbot-bundle-0.1.0.tgz"),
         version: "0.1.0",
       },
     });
+    // A chart from before the value rolls its servers.
+    expect(
+      readReleaseFiles(
+        published({ version: "v0.4.0", database: "0091_last" }),
+        "v0.4.0",
+      ).requiresDowntime,
+    ).toBe(false);
   });
 });
 

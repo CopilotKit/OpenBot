@@ -255,8 +255,20 @@ describe("release policy", () => {
    */
   describe("a release whose tree carries no migrations", () => {
     const to = policy.compatibility.database.to;
-    function published(database: string, version = "v0.4.0") {
-      const files = releaseFiles({ version, database });
+    /**
+     * By default the chart does what the committed policy declares, as a release's chart must.
+     * `"absent"` is a chart from before `upgrade.requiresDowntime`.
+     */
+    function published(
+      database: string,
+      version = "v0.4.0",
+      downtime: boolean | "absent" = policy.upgrade.requiresDowntime,
+    ) {
+      const files = releaseFiles({
+        version,
+        database,
+        ...(downtime === "absent" ? {} : { requiresDowntime: downtime }),
+      });
       directories.push(dirname(files));
       return files;
     }
@@ -361,6 +373,79 @@ describe("release policy", () => {
       });
       expect(other.exitCode).not.toBe(0);
       expect(other.output).toContain("0061_other");
+    });
+
+    /**
+     * The policy's downtime is what the release's chart does, not a note beside it. 1.1.0 declared
+     * downtime while its chart upgraded the servers one by one, so a plain `helm upgrade` ran old and
+     * new servers on a database the old could not read. The chart now stops every old server first
+     * when its `upgrade.requiresDowntime` is true, and the release is held to the two agreeing.
+     */
+    describe("downtime", () => {
+      const declaring = (requiresDowntime: boolean) => {
+        const written = forVersion("v0.4.0");
+        return publisher(
+          { ...written, upgrade: { ...written.upgrade, requiresDowntime } },
+          { migration: null },
+        );
+      };
+
+      test("a policy that declares downtime beside a chart that rolls is refused, naming both fixes", () => {
+        const { repo, env } = declaring(true);
+        const result = validate(repo, {
+          ...env,
+          OPENBOT_RELEASE_FILES: published(to, "v0.4.0", false),
+        });
+        expect(result.exitCode).not.toBe(0);
+        expect(result.output).toContain(
+          "release-policy.json says this release requires downtime, but the openbot chart it attaches upgrades its servers one by one",
+        );
+        expect(result.output).toContain(
+          "set upgrade.requiresDowntime to false in release-policy.json",
+        );
+      });
+
+      test("a policy that declares no downtime beside a chart that stops every server is refused", () => {
+        const { repo, env } = declaring(false);
+        const result = validate(repo, {
+          ...env,
+          OPENBOT_RELEASE_FILES: published(to, "v0.4.0", true),
+        });
+        expect(result.exitCode).not.toBe(0);
+        expect(result.output).toContain(
+          "release-policy.json says this release needs no downtime, but the openbot chart it attaches stops every old server",
+        );
+      });
+
+      test("a chart that declares downtime under a policy that does passes", () => {
+        const { repo, env } = declaring(true);
+        expect(
+          validate(repo, {
+            ...env,
+            OPENBOT_RELEASE_FILES: published(to, "v0.4.0", true),
+          }).exitCode,
+        ).toBe(0);
+      });
+
+      test("a chart from before the value rolls, so it passes under a policy with no downtime", () => {
+        const { repo, env } = declaring(false);
+        expect(
+          validate(repo, {
+            ...env,
+            OPENBOT_RELEASE_FILES: published(to, "v0.4.0", "absent"),
+          }),
+        ).toEqual({
+          exitCode: 0,
+          output: expect.stringContaining("describes v0.4.0"),
+        });
+        const { repo: other, env: otherEnv } = declaring(true);
+        expect(
+          validate(other, {
+            ...otherEnv,
+            OPENBOT_RELEASE_FILES: published(to, "v0.4.0", "absent"),
+          }).exitCode,
+        ).not.toBe(0);
+      });
     });
   });
 
