@@ -898,7 +898,9 @@ aws cloudfront-keyvaluestore put-key --kvs-arn "$kvs" --if-match "$(etag)" --key
   already installed the newer release keep it.
 - **Finish at 100%:**
   1. Remove the tag from `RELEASE_HOLD_LATEST`.
-  2. Mark the release Latest on its release page, or `gh release edit v1.1.0 --latest`.
+  2. Carry the security floor to it, if the Latest release has one
+     (`GITHUB_REPOSITORY=CopilotKit/OpenBot scripts/release-security-floor.sh v1.1.0`), then mark the
+     release Latest on its release page, or `gh release edit v1.1.0 --latest`.
   3. Run Downloads sync for the Latest release, `gh workflow run downloads-sync.yml --ref main`, and
      wait for it to finish, so `latest/` serves the release.
   4. Remove the installers of every older release from GitHub, which the signing run would have
@@ -916,6 +918,72 @@ The test path `/rollout-test/latest/<file>` routes the same way, to `latest/` or
 It exists so the function can be attached to a test cache behavior (`/rollout-test/*`) and shown
 answering both ways through the real distribution before it touches `latest/`. With no such
 behavior it is never reached, and on the default behavior it serves what `latest/` would.
+
+## Security floor
+
+A forced update, for a release with a security problem and for nothing else. The security floor
+names the lowest safe release of OpenBot Desktop, the back end OpenBot Desktop runs on the computer,
+the phone app and the Recorder. An app below its floor shows one notice, "This version of OpenBot
+has a security problem. Update to keep using it.", and nothing else until it is updated. OpenBot
+Desktop also stops the back end it runs on the computer: no Bot runs and routines pause, and nothing
+is deleted. Update and restart then upgrades the back end at the next start, as every update does.
+
+**Never for a company's own OpenBot.** OpenBot Desktop's own back end always follows the floor,
+because it ships with the app. Any other OpenBot follows it only when the floor lists its address
+under `cloud`, which names OpenBot Cloud's addresses and nothing else. So OpenBot Desktop, the phone
+app and the Recorder connected to a company's server ignore the floor, and so does that server.
+
+### How it works
+
+- **The document.** `security-floor.json`, beside `latest.json` on the Latest release, and copied by
+  Downloads sync to `downloads.copilotkit.ai/latest/security-floor.json`. The apps read it from
+  there first and from `releases/latest/download/security-floor.json` when that fails. Each app
+  names both itself, never `shared/`, which every self-hosted OpenBot ships
+  ([`tests/security-floor-addresses.test.ts`](../tests/security-floor-addresses.test.ts) holds the
+  copies equal).
+- **Its own signature.** Tauri signs each installer, and nothing signs `latest.json` itself, so a
+  field there would be unauthenticated. The floor is `{ "payload": <base64>, "signature": <base64> }`:
+  the signature is Ed25519 over the payload's exact bytes. An app reads nothing in the payload until
+  the signature verifies against a public key it was built with (`keys` in
+  `shared/security-floor.json`). The payload names `kind: "openbot-security-floor"`, a `serial`, when
+  it was `issued`, the `floors` per app and the `cloud` addresses.
+- **Only up.** An app keeps the floor with the highest serial it has verified and ignores any with a
+  lower one, so a replayed old floor can't lift a block. Each new floor's serial is the published
+  one's plus one, and a floor raised by mistake is undone by signing a newer one with a lower floor
+  (`lower`).
+- **When apps check.** At launch and every six hours, with the update check. Offline, the floor the
+  app kept still holds. An app that has never verified a floor runs as normal.
+- **OpenBot Cloud.** Cloud's server reads the same signed floor and raises its oldest supported app
+  releases with it, so an app below the floor is refused with the update screen even if it has not
+  read the floor yet. A server reads it only when its deployment turns that on; it is off by default.
+- **Releases carry it.** A release that becomes Latest carries the Latest release's floor on
+  ([`scripts/release-security-floor.sh`](../scripts/release-security-floor.sh), run by
+  [`scripts/release-make-latest.sh`](../scripts/release-make-latest.sh)), so a new release never
+  drops it. A release keeps the floor with the higher serial.
+
+### Raising it
+
+1. Publish the fixed release first and let it become Latest. The workflow refuses a floor above the
+   Latest release, because an app below it would have no update to reach.
+2. Run the Security floor workflow on `main`
+   ([`.github/workflows/security-floor.yml`](../.github/workflows/security-floor.yml)) with the
+   lowest safe release of each affected app. An empty input keeps the published floor for that app.
+3. A required reviewer of the `security-floor` environment approves the `sign` job. It is the only
+   place the signing key can be read, and it has no write access. The `publish` job puts the signed
+   floor on the Latest release and starts Downloads sync; it never sees the key.
+
+### One-time setup
+
+- **The key pair.** Made on the release owner's own machine, never on a release host or a runner:
+  `openssl genpkey -algorithm ed25519 -out security-floor.pem`. The private key goes in the
+  `security-floor` environment's secret `SECURITY_FLOOR_SIGNING_KEY` and in the company password
+  manager, and nowhere else. The public key, in the form the apps read, comes from
+  `SECURITY_FLOOR_SIGNING_KEY="$(cat security-floor.pem)" bun scripts/security-floor-sign.ts --public`.
+  It goes in `keys` in `shared/security-floor.json`, in a reviewed PR, before the next release:
+  only apps built with it can verify a floor.
+- **The environment.** Create the protected GitHub environment `security-floor` with required
+  reviewers and deployment branches limited to `main`, and add the secret above.
+- **A second key.** `keys` is a list so a new key can ship in releases before the old one is retired.
 
 ## What merging does
 

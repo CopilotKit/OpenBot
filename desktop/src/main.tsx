@@ -2,6 +2,11 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { startHeartbeat } from "./heartbeat";
+import {
+  isSecurityFloorPage,
+  SecurityFloorGate,
+  SecurityFloorNotice,
+} from "./SecurityFloor";
 import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
 import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/inter";
@@ -30,12 +35,14 @@ createRoot(root).render(
       <ShuttingDownWindow />
     ) : isStatusPage(window.location.hash) ? (
       <StatusWindow />
+    ) : isSecurityFloorPage(window.location.hash) ? (
+      <SecurityFloorNotice />
     ) : (
-      <>
+      <SecurityFloorGate>
         <SetupHeartbeat />
         <UpdateOffer />
         <App />
-      </>
+      </SecurityFloorGate>
     )}
   </StrictMode>,
 );
