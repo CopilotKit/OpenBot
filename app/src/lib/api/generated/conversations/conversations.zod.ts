@@ -1066,7 +1066,15 @@ export const ListConversationMessagesResponse = zod.object({
         reason: zod
           .string()
           .optional()
-          .describe("Why a waiting Bot is waiting."),
+          .describe(
+            "Why a waiting Bot is waiting, in words for the person reading the conversation.",
+          ),
+        declined: zod
+          .boolean()
+          .optional()
+          .describe(
+            "True on a failed Bot reply in a group that the person whose turn it answered chose not to share. It was a choice, not a fault, and nothing was sent. text says whose choice it was.",
+          ),
         answeredBy: zod
           .string()
           .optional()

@@ -2501,7 +2501,13 @@ components:
           description: When it was said. Null where the time was not kept.
         reason:
           type: string
-          description: Why a waiting Bot is waiting.
+          description: Why a waiting Bot is waiting, in words for the person reading
+            the conversation.
+        declined:
+          type: boolean
+          description: True on a failed Bot reply in a group that the person whose turn
+            it answered chose not to share. It was a choice, not a fault, and
+            nothing was sent. text says whose choice it was.
         answeredBy:
           type: string
           description: 'For an answer passed on from another Bot: which Bot answered.'
