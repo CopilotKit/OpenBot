@@ -129,10 +129,14 @@ export const EARLIER_HARNESS_NAMES: Readonly<
  * picked: what it is, what runs it, and that any other agent can be brought along, with the article
  * the name reads with ("an AWS Strands agent"). Atai's wording and punctuation, November 10. Shown
  * only: the starter is still stored, and told to the Bot, as "Everyday life. Powered by <name>.".
+ *
+ * The subtitle is itself in parentheses, so a name with its own ("LangGraph (TypeScript)") reads
+ * without them ("a LangGraph TypeScript agent") rather than nesting one pair inside the other.
  */
 export function starterSubtitle(name: string): string {
-  const article = /^[AEIOU]/.test(name) ? "an" : "a";
-  return `Everyday life agent. (powered by ${article} ${name} agent; you can bring your own agent from any stack.)`;
+  const plain = name.replace(/\s*\(([^()]*)\)/g, " $1").trim();
+  const article = /^[AEIOU]/.test(plain) ? "an" : "a";
+  return `Everyday life agent. (powered by ${article} ${plain} agent; you can bring your own agent from any stack.)`;
 }
 
 /** Every name a harness the installer can run has had, with the harness it belongs to now. */
