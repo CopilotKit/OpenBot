@@ -3619,7 +3619,10 @@ pub const REFUSAL_FILE: &str = "refusal";
 /// on Windows or macOS is a virtual machine with a clock of its own, and naming the container in the
 /// file would need every server image to write it.
 pub fn forget_refusal(engine: &Address, root: &Path) {
-    if refusal_written(root).is_some() || engine_reports_refusal(engine, root) {
+    let file = root.join(".openbot").join(REFUSAL_FILE);
+    // The file there at all is a server that refused, even caught half written: a server empties
+    // it before it writes its sentence, every time the engine restarts it.
+    if file.exists() || engine_reports_refusal(engine, root) {
         let removed = compose_command(engine, root, &Secrets::new())
             .args(["rm", "--stop", "--force", "server"])
             .output();
@@ -3636,7 +3639,6 @@ pub fn forget_refusal(engine: &Address, root: &Path) {
             }
         }
     }
-    let file = root.join(".openbot").join(REFUSAL_FILE);
     if let Err(error) = std::fs::remove_file(&file) {
         if error.kind() != std::io::ErrorKind::NotFound {
             log::warn!("[start] could not remove {}: {error}", file.display());
@@ -7350,10 +7352,16 @@ fn main() {
             eprint!("{}", std::fs::read_to_string(".fixture-server-stderr").unwrap_or_default());
         } else if actual.first().map(String::as_str) == Some("compose") && actual.iter().any(|arg| arg == "rm") {
             // `rm --stop` returns once the container is gone: the old server is told to stop, and
-            // the engine waits for it as an engine does.
+            // the engine waits for it as an engine does, however long it takes. Past two minutes
+            // something is wrong: it says so, fails, and leaves `.fixture-rm-gave-up` for the test.
             std::fs::write(".fixture-stop-server", "").unwrap();
-            for _ in 0..500 {
-                if !std::path::Path::new(".fixture-old-server-alive").exists() { break; }
+            let patience = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while std::path::Path::new(".fixture-old-server-alive").exists() {
+                if std::time::Instant::now() >= patience {
+                    std::fs::write(".fixture-rm-gave-up", "").unwrap();
+                    eprintln!("the old server was still running two minutes after it was told to stop");
+                    std::process::exit(1);
+                }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
@@ -9764,6 +9772,14 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        // It needs its port free again once it lets go: a process another test starts would hold
+        // a copy of the listener until it execs, which waits on the system's check of a new
+        // program for seconds on a busy Mac.
+        if crate::test_support::isolated_process(
+            "stack::tests::an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
@@ -9786,6 +9802,12 @@ fn main() {
 
     #[test]
     fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        // It needs its port free again once it lets go, as the test above does.
+        if crate::test_support::isolated_process(
+            "stack::tests::an_ipv6_only_port_is_not_clear_while_its_listener_is_held",
+        ) {
+            return;
+        }
         let _ports = crate::test_support::hold_ports();
         let Some(listener) = ipv6_loopback_listener() else {
             return;
@@ -12555,6 +12577,13 @@ fn main() {
                         std::fs::write(&file, format!("{REFUSAL}\n")).ok();
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
+                    // Told to stop, it takes a moment to go, and refuses again meanwhile: only
+                    // waiting for it to be gone, as `rm --stop` does, leaves nothing to read.
+                    let stopping = std::time::Instant::now();
+                    while stopping.elapsed() < std::time::Duration::from_secs(1) {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).ok();
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
                     std::fs::remove_file(root.join(".fixture-old-server-alive")).unwrap();
                 })
             };
@@ -12566,6 +12595,61 @@ fn main() {
 
             std::fs::write(root.join(".fixture-stop-server"), "").unwrap();
             old_server.join().unwrap();
+            assert!(
+                !root.join(".fixture-rm-gave-up").exists(),
+                "{address:?}: the engine gave up waiting for the old server to stop"
+            );
+            assert_eq!(read, None, "{address:?}: the old server's refusal was read");
+        }
+    }
+
+    /// A Retry that catches the old server's sentence half written still removes that server.
+    ///
+    /// A server writes the file by emptying it and then writing its sentence, every time the
+    /// engine restarts it. Caught between the two, the file was there but empty, read as no
+    /// refusal; Podman reports the server `running` nearly all the time, so the old server was
+    /// left in place and wrote its sentence again before Compose replaced it. Here the old
+    /// server is held between the two until the engine stops it, or until the Retry is over.
+    #[test]
+    fn a_retry_that_catches_a_refusal_half_written_still_removes_its_server() {
+        if crate::test_support::isolated_process(
+            "stack::tests::a_retry_that_catches_a_refusal_half_written_still_removes_its_server",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("server-refusal");
+        for address in computer_stop_addresses(&path) {
+            let (root, _) =
+                computer_stop_root(&path, &format!("half-{}", address.engine.binary()), "{}");
+            std::fs::write(root.join(".fixture-server-rows"), PODMAN_RUNNING).unwrap();
+            std::fs::create_dir_all(root.join(".openbot")).unwrap();
+            let file = root.join(".openbot").join(REFUSAL_FILE);
+            // Emptied, its sentence not yet written.
+            std::fs::write(&file, "").unwrap();
+            std::fs::write(root.join(".fixture-old-server-alive"), "").unwrap();
+            let old_server = {
+                let (root, file) = (root.clone(), file.clone());
+                std::thread::spawn(move || {
+                    let (stop, finish) = (
+                        root.join(".fixture-stop-server"),
+                        root.join(".fixture-finish-writing"),
+                    );
+                    while !stop.exists() && !finish.exists() {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    if !stop.exists() {
+                        std::fs::write(&file, format!("{REFUSAL}\n")).unwrap();
+                    }
+                    std::fs::remove_file(root.join(".fixture-old-server-alive")).unwrap();
+                })
+            };
+
+            forget_refusal(&address, &root);
+            // A server still there finishes its sentence now.
+            std::fs::write(root.join(".fixture-finish-writing"), "").unwrap();
+            old_server.join().unwrap();
+            let read = server_refusal(&address, &root);
+
             assert_eq!(read, None, "{address:?}: the old server's refusal was read");
         }
     }

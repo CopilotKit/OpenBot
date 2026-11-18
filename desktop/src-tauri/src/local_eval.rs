@@ -8270,6 +8270,9 @@ step update-agent-wait
 '{helm}' upgrade --install cpki '{chart}' -f '{stopped}' --no-hooks || fail dependencies-install
 step dependencies-install
 sleep "$(cat "$S/wait-seconds" 2>/dev/null || echo 0)"
+# Held here, when a test asks, until it lets the update go on: two minutes at most.
+held=0
+while [ -e "$S/hold" ] && [ ! -e "$S/go-on" ] && [ "$held" -lt 2400 ]; do held=$((held + 1)); sleep 0.05; done
 # The databases' rollout: nothing schedules on a cordoned node. The real wait is ten minutes.
 tries=0
 while [ "$(cat "$S/unschedulable" 2>/dev/null)" = true ]; do
@@ -8574,40 +8577,57 @@ printf '%s' '{completed}'
             return;
         }
         let world = UpdateWorld::new("update-quit");
-        let wait_for = |what: &str, done: &dyn Fn() -> bool| {
-            let until = Instant::now() + Duration::from_secs(30);
+        // Waits for `done` while the update runs, however long a busy computer takes; an update
+        // that ends first, as its own limits end it, never got there.
+        let wait_for = |what: &str, ended: &dyn Fn() -> bool, done: &dyn Fn() -> bool| {
             while !done() {
-                assert!(Instant::now() < until, "never saw {what}");
+                assert!(!ended() || done(), "the update ended before {what}");
                 std::thread::sleep(Duration::from_millis(20));
             }
         };
 
-        // Before Helm: stopped.
-        world.set("quiesce-seconds", "30");
+        // Before Helm: stopped, in the pause before `update-quiesce`, which it never ends.
+        world.set("quiesce-seconds", "120");
         let early = Attempt::register("update-before-helm");
-        let started = Instant::now();
         let stopped = std::thread::scope(|scope| {
             let call = scope.spawn(|| world.update("update-before-helm", &early.0));
-            wait_for("secrets-apply", &|| world.cli_log_has("secrets-apply"));
+            wait_for("secrets-apply", &|| call.is_finished(), &|| {
+                world.cli_log_has("secrets-apply")
+            });
             assert!(!update_finishing());
             cancel("update-before-helm");
             call.join().unwrap()
         });
         assert_eq!(stopped, Err(Failure::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(20));
+        // Stopped in the pause, not after it: the step that follows it never ran.
+        let calls = world.calls();
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("kubectl scale deployment/cpki-app-api")),
+            "the update ran past its pause before it was stopped: {calls:?}"
+        );
         assert!(!world.finished());
         drop(early);
 
-        // Past its first Helm step: Quit waits for it.
+        // Past its first Helm step: Quit waits for it. The update is held there until Quit says
+        // it is waiting, so it is still running when Quit comes however slow the computer.
         world.set("quiesce-seconds", "0");
-        world.set("wait-seconds", "3");
+        world.set("hold", "");
         let attempt = Attempt::register("update-during-quit");
         let (finished, said, waited) = std::thread::scope(|scope| {
             let call = scope.spawn(|| world.update("update-during-quit", &attempt.0));
-            wait_for("the update past update-agent-wait", &|| update_finishing());
+            wait_for(
+                "the update past update-agent-wait",
+                &|| call.is_finished(),
+                &update_finishing,
+            );
             assert!(!world.finished(), "still running when Quit comes");
             let mut said = 0;
-            let waited = close_for_quit_reporting(|| said += 1);
+            let waited = close_for_quit_reporting(|| {
+                said += 1;
+                world.set("go-on", "");
+            });
             (call.join().unwrap(), said, waited)
         });
         assert!(waited, "Quit waited for the update");
@@ -11476,11 +11496,16 @@ fn main() {
             let source = fixture.root.join("engine.rs");
             std::fs::write(&source, FAKE_ENGINE).unwrap();
             for engine in ["docker", "podman"] {
-                compile_fixture(
-                    &source,
-                    &bin.join(format!("{engine}{}", std::env::consts::EXE_SUFFIX)),
-                );
+                let program = bin.join(format!("{engine}{}", std::env::consts::EXE_SUFFIX));
+                compile_fixture(&source, &program);
+                // A program's first launch waits for the system to check it: more than ten
+                // seconds on a busy Mac, longer than an engine check may take. Launched once here,
+                // untimed, so the checks' own limits time the engine and nothing else.
+                let launched = std::process::Command::new(&program).output().unwrap();
+                assert_eq!(launched.status.code(), Some(125), "{launched:?}");
             }
+            // That launch is not one OpenBot made.
+            std::fs::remove_file(bin.join("asked")).unwrap();
             std::env::set_var(
                 "PATH",
                 std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
