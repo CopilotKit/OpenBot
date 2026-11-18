@@ -14,11 +14,12 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { CommandMenu } from "@/components/navigation/command-menu";
 import { NewOrganizationDialog } from "@/components/organizations/new-organization-dialog";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
@@ -28,13 +29,14 @@ import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { organizationKeys } from "@/lib/organizations/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { setSidebarInverted } from "@/lib/settings/sidebar-layout";
 import { settleReactWork } from "./settle-react-work";
 
 /*
  * In a narrow window (under 768px) the sidebar is a sheet over the page. Picking a conversation in
  * it opened that conversation behind the sheet, and the sheet stayed open until the person clicked
  * outside it, so it looked as if nothing had happened. Every way out of the sheet to a page closes
- * it; typing in its search box and opening its menus does not.
+ * it; opening search and the sidebar menus leaves the sheet mounted.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -185,6 +187,7 @@ function renderNarrowApp(
       component: () => (
         <SidebarProvider>
           <AppSidebar />
+          <CommandMenu />
           {/* The page's own Show sidebar button, which is how a narrow window opens the sheet. */}
           <SidebarToggle />
           <TeamFeaturesDialog />
@@ -234,7 +237,7 @@ test.each([
   ["Bots", "link", /^Bots/, "/bots"],
   ["Connections", "link", /^Connections/, "/connections"],
   // A link drawn as a button: it still goes somewhere.
-  ["New conversation", "button", /^New conversation$/, "/channel/new"],
+  ["New conversation", "link", /^New conversation$/, "/channel/new"],
 ] as const)(
   "picking %s in the narrow sheet closes it and opens the page",
   async (_label, role, name, path) => {
@@ -303,16 +306,112 @@ test("New organization in the account menu closes the sheet and opens its dialog
   expect(app.router.state.location.pathname).toBe("/channel/models");
 });
 
-test("searching the sheet keeps it open", async () => {
+test("search opens over the sheet and Escape returns to the sidebar", async () => {
   const app = renderNarrowApp();
   const sheet = await app.openSheet();
-  await app.user.type(
-    within(sheet).getByRole("textbox", { name: "Search conversations" }),
-    "hacker",
+  const trigger = within(sheet).getByRole("button", {
+    name: "Search conversations",
+  });
+  await app.user.click(trigger);
+  const dialog = await app.view.findByRole("dialog", {
+    name: "Search conversations",
+  });
+  const input = within(dialog).getByRole("combobox", {
+    name: "Search conversations",
+  });
+  expect(document.activeElement).toBe(input);
+
+  await app.user.type(input, "a");
+  expect(input).toHaveProperty("value", "a");
+  await app.user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(
+      app.view.queryByRole("dialog", { name: "Search conversations" }),
+    ).toBeNull(),
   );
-  expect(app.view.getByRole("dialog", { name: "Sidebar" })).toBeTruthy();
-  expect(
-    within(sheet).getByRole("textbox", { name: "Search conversations" }),
-  ).toHaveProperty("value", "hacker");
+  expect(app.view.getByRole("dialog", { name: "Sidebar" })).toBe(sheet);
+  expect(document.activeElement).toBe(trigger);
   expect(app.router.state.location.pathname).toBe("/channel/models");
+});
+
+test("choosing a conversation in search also closes the sidebar sheet", async () => {
+  const app = renderNarrowApp();
+  const sheet = await app.openSheet();
+  await app.user.click(
+    within(sheet).getByRole("button", { name: "Search conversations" }),
+  );
+  const dialog = await app.view.findByRole("dialog", {
+    name: "Search conversations",
+  });
+  const results = within(dialog);
+  expect(results.queryByRole("option", { name: "Bots" })).toBeNull();
+  expect(results.getAllByRole("option")).toHaveLength(2);
+  await app.user.keyboard("{ArrowDown}{Enter}");
+  await app.sheetCloses();
+  expect(
+    app.view.queryByRole("dialog", { name: "Search conversations" }),
+  ).toBeNull();
+  expect(app.router.state.location.pathname).toBe("/channel/hn");
+});
+
+test("the desktop sidebar can invert, collapse, and follow history", async () => {
+  const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: 1200,
+  });
+  try {
+    const { router, user, view } = renderNarrowApp();
+    const bots = await view.findByRole("link", { name: "Bots" });
+    const conversation = view.getByRole("link", {
+      name: /Hacker News Top Stories/,
+    });
+    expect(
+      bots.compareDocumentPosition(conversation) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    act(() => setSidebarInverted(true));
+    const invertedBots = view.getByRole("link", { name: "Bots" });
+    expect(
+      invertedBots.compareDocumentPosition(conversation) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+
+    await user.click(view.getByRole("button", { name: "Collapse sidebar" }));
+    expect(
+      view.container.querySelector('[data-collapsible="icon"]'),
+    ).toBeTruthy();
+    await user.click(
+      view.getByRole("button", { name: "Search conversations" }),
+    );
+    const search = await view.findByRole("dialog", {
+      name: "Search conversations",
+    });
+    expect(document.activeElement).toBe(
+      within(search).getByRole("combobox", { name: "Search conversations" }),
+    );
+    expect(
+      view.container.querySelector('[data-collapsible="icon"]'),
+    ).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await user.click(await view.findByRole("button", { name: "Show sidebar" }));
+
+    await user.click(conversation);
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/channel/hn"),
+    );
+    await user.click(view.getByRole("button", { name: "Go back" }));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/channel/models"),
+    );
+    await user.click(view.getByRole("button", { name: "Go forward" }));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/channel/hn"),
+    );
+  } finally {
+    act(() => setSidebarInverted(false));
+    if (width) Object.defineProperty(window, "innerWidth", width);
+    else Reflect.deleteProperty(window, "innerWidth");
+  }
 });

@@ -61,7 +61,7 @@ export function AccountLabel() {
   return (
     <>
       <UserAvatar />
-      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-2 text-left *:leading-4">
+      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-2 text-left *:leading-4 group-data-[collapsible=icon]:sr-only">
         <span className="truncate text-sm trackint-tight">{person}</span>
         <OpenBotVersion className="text-right text-[10px] leading-3 text-muted-foreground" />
         {organization ? (
@@ -100,7 +100,7 @@ export function AccountMenu({ children }: { children: ReactNode }) {
             <DropdownMenuTrigger
               ref={ref}
               render={
-                <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
+                <SidebarMenuButton className="h-10 cursor-pointer px-1.5! hover:bg-foreground/5" />
               }
             />
           }

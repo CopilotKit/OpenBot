@@ -19,7 +19,12 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
+import {
+  setSidebarInverted,
+  useSidebarInverted,
+} from "@/lib/settings/sidebar-layout";
 import { SkinPicker } from "@/skins/skin-picker";
 
 export const Route = createFileRoute("/_authed/settings/")({
@@ -27,6 +32,7 @@ export const Route = createFileRoute("/_authed/settings/")({
 });
 
 function RouteComponent() {
+  const inverted = useSidebarInverted();
   /*
    * The measurements that used to be written out here now live in `PageShell`, which Skills, Admin
    * and this screen all render through. The reason they match is no longer that somebody remembered
@@ -60,6 +66,22 @@ function RouteComponent() {
           <ThemeRow />
           <Separator />
           <SkinPicker />
+          <Separator />
+          <Item size="sm">
+            <ItemContent>
+              <ItemTitle>Invert sidebar</ItemTitle>
+              <ItemDescription>
+                Show conversations above navigation in the default OpenBot skin.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Invert sidebar"
+                checked={inverted}
+                onCheckedChange={setSidebarInverted}
+              />
+            </ItemActions>
+          </Item>
         </PageRows>
         <MessageListPreference />
       </PageSection>

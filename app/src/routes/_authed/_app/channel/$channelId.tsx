@@ -167,7 +167,7 @@ function RouteComponent() {
         >
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
-            <SidebarToggle />
+            <SidebarToggle conversationHeader />
             <motion.div
               animate={{ opacity: 1 }}
               className="shrink-0"

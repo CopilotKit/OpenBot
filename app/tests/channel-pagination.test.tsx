@@ -20,9 +20,11 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { CommandMenu } from "@/components/navigation/command-menu";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
@@ -229,6 +231,7 @@ function renderSidebar() {
     component: () => (
       <SidebarProvider>
         <AppSidebar />
+        <CommandMenu />
       </SidebarProvider>
     ),
   });
@@ -341,8 +344,19 @@ function results(names: string[], nextCursor: string | null = null) {
   return Response.json(conversationPage(names.map(channel), nextCursor));
 }
 
-function searchBox(view: ReturnType<typeof renderSidebar>) {
-  return view.getByRole("textbox", { name: "Search conversations" });
+async function openSearch(
+  view: ReturnType<typeof renderSidebar>,
+  user: ReturnType<typeof userEvent.setup>,
+) {
+  await user.click(view.getByRole("button", { name: "Search conversations" }));
+  const dialog = await view.findByRole("dialog", {
+    name: "Search conversations",
+  });
+  return within(dialog);
+}
+
+function searchBox(dialog: ReturnType<typeof within>) {
+  return dialog.getByRole("combobox", { name: "Search conversations" });
 }
 
 test("two characters search the whole history on the server and page its results, never the roster", async () => {
@@ -353,16 +367,17 @@ test("two characters search the whole history on the server and page its results
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  await user.type(searchBox(view), "Archived");
+  const dialog = await openSearch(view, user);
+  await user.type(searchBox(dialog), "Archived");
 
   expect(await view.findByText("Archived conversation")).toBeTruthy();
   expect(
-    view.getByText("Search conversation names and recent messages"),
+    view.getByText("Searches conversation names and recent messages."),
   ).toBeTruthy();
-  // The roster is not what is on screen, and nothing pages it looking for a match.
-  expect(view.queryByText("Recent conversation")).toBeNull();
+  // The dialog lists the server results and pauses paging the roster underneath.
+  expect(dialog.queryByText("Recent conversation")).toBeNull();
   expect(
-    view.queryByRole("button", { name: "Load older conversations" }),
+    dialog.queryByRole("button", { name: "Load older conversations" }),
   ).toBeNull();
   expect(ScrollObserver.active.size).toBe(0);
   // One request for the pause in typing, not one per keystroke.
@@ -389,15 +404,16 @@ test("one character asks for another instead of searching", async () => {
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  await user.type(searchBox(view), " A ");
+  const dialog = await openSearch(view, user);
+  await user.type(searchBox(dialog), " A ");
 
   expect(
-    await view.findByText("Type at least 2 characters to search history"),
+    await view.findByText("Type at least 2 characters to search history."),
   ).toBeTruthy();
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(requests).toEqual([]);
-  expect(view.queryByText("Searching…")).toBeNull();
-  expect(view.queryByText("No conversations match your search")).toBeNull();
+  expect(view.queryByText("Searching conversations…")).toBeNull();
+  expect(view.queryByText("No conversations match.")).toBeNull();
 });
 
 test("a search on its way says so, and only an answer says nothing matched", async () => {
@@ -406,18 +422,25 @@ test("a search on its way says so, and only an answer says nothing matched", asy
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  await user.type(searchBox(view), "zz");
+  const dialog = await openSearch(view, user);
+  await user.type(searchBox(dialog), "zz");
 
-  expect(await view.findByText("Searching…")).toBeTruthy();
+  expect(
+    await dialog.findByText("Searching conversations…", {
+      selector: "p:not(.sr-only)",
+    }),
+  ).toBeTruthy();
   await waitFor(() => expect(requests).toEqual([searchUrl("zz")]));
-  expect(view.getByText("Searching…")).toBeTruthy();
-  expect(view.queryByText("No conversations match your search")).toBeNull();
+  expect(
+    dialog.getByText("Searching conversations…", {
+      selector: "p:not(.sr-only)",
+    }),
+  ).toBeTruthy();
+  expect(view.queryByText("No conversations match.")).toBeNull();
 
   pending.resolve(results([]));
-  expect(
-    await view.findByText("No conversations match your search"),
-  ).toBeTruthy();
-  expect(view.queryByText("Searching…")).toBeNull();
+  expect(await view.findByText("No conversations match.")).toBeTruthy();
+  expect(view.queryByText("Searching conversations…")).toBeNull();
 });
 
 test("a failed search says so with Retry, never as no matches", async () => {
@@ -425,13 +448,14 @@ test("a failed search says so with Retry, never as no matches", async () => {
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  await user.type(searchBox(view), "zz");
+  const dialog = await openSearch(view, user);
+  await user.type(searchBox(dialog), "zz");
 
   expect(await view.findByRole("alert")).toHaveProperty(
     "textContent",
     "Search is unavailable.",
   );
-  expect(view.queryByText("No conversations match your search")).toBeNull();
+  expect(view.queryByText("No conversations match.")).toBeNull();
 
   respond = async () => results(["Recovered match"], "more");
   fireEvent.click(view.getByRole("button", { name: "Retry" }));
@@ -459,10 +483,11 @@ test("a slow answer to an earlier search is abandoned and never replaces the cur
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
   await view.findByText("Recent conversation");
-  await user.type(searchBox(view), "ab");
+  const dialog = await openSearch(view, user);
+  await user.type(searchBox(dialog), "ab");
   await waitFor(() => expect(requests).toEqual([searchUrl("ab")]));
 
-  await user.type(searchBox(view), "c");
+  await user.type(searchBox(dialog), "c");
   expect(await view.findByText("Current match")).toBeTruthy();
   expect(requests).toEqual([searchUrl("ab"), searchUrl("abc")]);
   expect(signals[0]?.aborted).toBe(true);
@@ -473,7 +498,7 @@ test("a slow answer to an earlier search is abandoned and never replaces the cur
   expect(view.getByText("Current match")).toBeTruthy();
 });
 
-test("clearing the search puts back the loaded history where it was scrolled, paging as before", async () => {
+test("closing search preserves the roster scroll position and resumes paging", async () => {
   respond = async () => results(["Archived conversation"]);
   const view = renderSidebar();
   const user = userEvent.setup({ document: view.container.ownerDocument });
@@ -483,17 +508,21 @@ test("clearing the search puts back the loaded history where it was scrolled, pa
   ) as HTMLElement;
   root.scrollTop = 120;
 
-  await user.type(searchBox(view), "Archived");
+  const dialog = await openSearch(view, user);
+  await user.type(searchBox(dialog), "Archived");
   expect(await view.findByText("Archived conversation")).toBeTruthy();
-  root.scrollTop = 0;
 
-  await user.click(searchBox(view));
-  await user.keyboard("{Control>}a{/Control}{Backspace}");
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(
+      view.queryByRole("dialog", { name: "Search conversations" }),
+    ).toBeNull(),
+  );
   expect(await view.findByText("Recent conversation")).toBeTruthy();
   expect(view.queryByText("Archived conversation")).toBeNull();
   expect(root.scrollTop).toBe(120);
   expect(
-    view.queryByText("Search conversation names and recent messages"),
+    view.queryByText("Searches conversation names and recent messages."),
   ).toBeNull();
 
   // The roster's own paging is back, from the cursor it had.

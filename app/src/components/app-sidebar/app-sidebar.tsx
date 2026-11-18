@@ -1,4 +1,9 @@
-import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
+import {
+  IconLayoutSidebar,
+  IconLogout,
+  IconPlus,
+  IconSearch,
+} from "@tabler/icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   Link,
@@ -8,8 +13,15 @@ import {
 } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrandName } from "@/components/edition/brand-name";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
+import { SidebarHistoryButtons } from "@/components/layout/sidebar-history";
+import {
+  openConversationSearch,
+  useBeforeCommandNavigate,
+  useCommandMenuMode,
+} from "@/components/navigation/command-menu";
 import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
 import { OrganizationMenuItems } from "@/components/organizations/organization-menu";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
@@ -17,11 +29,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
 import {
   Sidebar,
   SidebarContent,
@@ -39,14 +46,10 @@ import { untitledLine } from "@/lib/channels/label";
 import {
   type ChannelSummary,
   channelListQueryOptions,
-  channelSearchInfiniteQueryOptions,
-  isChannelSearchable,
-  normalizeChannelSearch,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { useBeforeCommandNavigate } from "@/components/navigation/command-menu";
 import {
   isNavigationLink,
   type NavigationLink,
@@ -61,6 +64,7 @@ import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
+import { useSidebarInverted } from "@/lib/settings/sidebar-layout";
 import { BotsNavBadge } from "../bot-profile/attention";
 import {
   RecordingDot,
@@ -69,7 +73,6 @@ import {
 } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
 import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import {
   AccountMenu,
   accountMenuClassName,
@@ -78,6 +81,9 @@ import {
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
 import { useSignOut } from "./use-sign-out";
+
+// The rail is 48px wide, with a 40px row between these two gutters.
+const APP_SIDEBAR_GUTTER = "px-1";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
@@ -94,7 +100,7 @@ const MAX_ANIMATED_ROWS = 60;
  * cannot account for. The opening and the last message are included because one of them is what the
  * second line draws until the conversation has been named.
  *
- * Only what is loaded. This sidebar asks the server instead (see `SearchResults`), which searches
+ * Only what is loaded. This sidebar asks the server through the command palette, which searches
  * the whole history; the alternate skins' rosters still narrow their loaded rows with this.
  *
  * An empty query returns the input array unchanged rather than a copy, so typing and clearing does
@@ -116,26 +122,6 @@ export function matchingChannels(
       (field) => field?.toLowerCase().includes(needle),
     ),
   );
-}
-
-/** How long typing has to pause before the box is searched. */
-export const SEARCH_DEBOUNCE_MS = 250;
-
-/** What the search box searches, said where the person types. Not every word of every message. */
-export const SEARCH_SCOPE = "Search conversation names and recent messages";
-export const SEARCH_HINT = "Type at least 2 characters to search history";
-
-/**
- * `value`, once it has stopped changing for `delay`. Each search is a request, so one per pause in
- * typing rather than one per keystroke.
- */
-function useDebounced(value: string, delay: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
 }
 
 /**
@@ -234,109 +220,6 @@ function ChannelRow({
 }
 
 /**
- * What the server found for the search box, a page at a time.
- *
- * The answer is for the text in the box or it is not shown: while the box is still settling, or the
- * first page is on its way, this says it is searching. A list left over from what was typed a
- * moment ago would answer a question nobody is asking any more, and an empty one would say there
- * is nothing to find. A failure says so and offers Retry. It is never shown as no matches.
- *
- * FILTERING DOES NOT ANIMATE. The rows are drawn without the roster's order animation: results
- * replace each other as somebody types, and a list that moves under them is the very thing they
- * are trying to read.
- */
-function SearchResults({
-  term,
-  settled,
-  emphasis,
-}: {
-  /** The search as it was when typing last paused, normalised. This is what is asked for. */
-  term: string;
-  /** Whether that is still what is in the box. */
-  settled: boolean;
-  emphasis: MessageListEmphasis;
-}) {
-  const results = useInfiniteQuery(channelSearchInfiniteQueryOptions(term));
-
-  if (!settled || results.isPending) {
-    return (
-      <p role="status" className="px-2 py-3 text-xs text-muted-foreground">
-        Searching…
-      </p>
-    );
-  }
-  if (!results.data) {
-    return (
-      <div className="px-2 py-3 text-center">
-        <p role="alert" className="mb-2 text-xs text-muted-foreground">
-          {results.error?.message || "Couldn't search your conversations."}
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full text-xs"
-          disabled={results.isFetching}
-          onClick={() => void results.refetch()}
-        >
-          Retry
-        </Button>
-      </div>
-    );
-  }
-  if (results.data.length === 0) {
-    return (
-      <div className="py-4">
-        <Empty className="border border-dashed min-h-[40dvh]">
-          <EmptyHeader>
-            <EmptyTitle>No conversations match your search</EmptyTitle>
-            <EmptyDescription className="text-pretty">
-              {`No conversation has “${term}” in its name or recent messages.`}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
-    );
-  }
-  return (
-    <>
-      {/* Mounted with its first rows, so they appear without the entrance a new channel gets. */}
-      <AnimatePresence initial={false}>
-        {results.data.map((channel) => (
-          <ChannelRow
-            emphasis={emphasis}
-            key={channel.id}
-            animateOrder={false}
-            channel={channel}
-          />
-        ))}
-      </AnimatePresence>
-      {results.hasNextPage ? (
-        <div className="px-2 py-3 text-center">
-          {results.isFetchNextPageError ? (
-            <p role="alert" className="mb-2 text-xs text-muted-foreground">
-              Couldn't load more results.
-            </p>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full text-xs"
-            disabled={results.isFetching}
-            onClick={() => void results.fetchNextPage({ cancelRefetch: false })}
-          >
-            {results.isFetchingNextPage
-              ? "Loading more results…"
-              : results.isFetchNextPageError
-                ? "Retry"
-                : "Load more results"}
-          </Button>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-/**
  * Whether the pointer has stayed where it was since the page last changed.
  *
  * The account menu opens upwards, over the rows above it, and Invitations sits right over Bots. Chosen
@@ -370,13 +253,19 @@ function usePointerRestingSinceNavigation(): boolean {
   return movedOn !== pathname;
 }
 
-/** One of the main menu's own destinations, in the sidebar's footer, with what goes at the end of its row. */
+/** A destination row in the sidebar, with optional content at its trailing edge. */
 function PrimaryNavItem({
   item,
   tooltip,
+  accessibleLabel,
+  suppressRestingHover = true,
   children,
 }: {
-  item: NavigationLink;
+  item: Pick<NavigationLink, "label" | "icon"> & {
+    to: NavigationLink["to"] | "/channel/new";
+  };
+  accessibleLabel?: string;
+  suppressRestingHover?: boolean;
   tooltip?: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
   children?: React.ReactNode;
 }) {
@@ -385,7 +274,7 @@ function PrimaryNavItem({
       <SidebarMenuButton
         // No hover fill under a pointer that has not moved since the page changed (see
         // usePointerRestingSinceNavigation); the open page's row keeps its own.
-        className="hover:bg-foreground/5 h-10 group-data-[pointer-resting]/footer-menu:hover:bg-transparent group-data-[pointer-resting]/footer-menu:data-[status=active]:hover:bg-foreground/5"
+        className={`h-10 px-1.5! hover:bg-foreground/5 ${suppressRestingHover ? "group-data-[pointer-resting]/footer-menu:hover:bg-transparent group-data-[pointer-resting]/footer-menu:data-[status=active]:hover:bg-foreground/5" : ""}`}
         render={(props) => (
           <Link
             {...props}
@@ -393,12 +282,15 @@ function PrimaryNavItem({
             activeProps={{ className: "bg-foreground/5" }}
           />
         )}
-        tooltip={tooltip}
+        tooltip={tooltip ?? item.label}
+        aria-label={accessibleLabel}
       >
-        <div className="size-[28px] flex items-center justify-center">
+        <div className="size-7 flex shrink-0 items-center justify-center">
           <item.icon />
         </div>
-        <span className="text-sm">{item.label}</span>
+        <span className="text-sm transition-opacity duration-150 motion-reduce:transition-none group-data-[collapsible=icon]:opacity-0">
+          {item.label}
+        </span>
         {children}
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -414,7 +306,7 @@ function SkillsNavItem({ item }: { item: NavigationLink }) {
   return (
     <PrimaryNavItem
       item={item}
-      tooltip={recordingTooltip(recording, item.label)}
+      tooltip={recording ? recordingTooltip(recording, item.label) : item.label}
     >
       {recording ? <RecordingDot {...recording} /> : null}
     </PrimaryNavItem>
@@ -433,176 +325,155 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
   const scrollRoot = useRef<HTMLDivElement>(null);
-  const term = normalizeChannelSearch(search);
-  const debouncedTerm = normalizeChannelSearch(debouncedSearch);
-  const searching = term.length > 0;
-  const searchable = isChannelSearchable(term);
-  /*
-   * WHILE SEARCHING, THE ROSTER IS NOT ON SCREEN. Its rows and its pagination unmount, so nothing
-   * pages through recent history looking for a match: the server searches all of it. Clearing the
-   * box puts the roster back as it was, scrolled where it was.
-   */
-  const rosterScroll = useRef<number | null>(null);
-  const changeSearch = (value: string) => {
-    if (!searching && normalizeChannelSearch(value)) {
-      rosterScroll.current = scrollRoot.current?.scrollTop ?? 0;
-    }
-    setSearch(value);
-  };
-  useLayoutEffect(() => {
-    if (searching || rosterScroll.current === null || !scrollRoot.current) {
-      return;
-    }
-    scrollRoot.current.scrollTop = rosterScroll.current;
-    rosterScroll.current = null;
-  }, [searching]);
+  const searchOpen = useCommandMenuMode() === "conversations";
   const visibleChannels = pinnedFirst(channels.data ?? []);
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
   const navigation = useNavigationItems();
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, isMobile, open, toggleSidebar } = useSidebar();
+  const inverted = useSidebarInverted();
+  const collapsed = !isMobile && !open;
   // Opened with Cmd/Ctrl+K over the phone sidebar, the menu closes it before it navigates.
   useBeforeCommandNavigate(() => setOpenMobile(false));
 
+  const primaryNavigation = (
+    <>
+      {navigation
+        .filter(isNavigationLink)
+        .filter((item) => item.section === "primary")
+        .map((item) =>
+          // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
+          item.id === "skills" ? (
+            <SkillsNavItem item={item} key={item.id} />
+          ) : (
+            <PrimaryNavItem item={item} key={item.id}>
+              {/* What waits on you across every Bot; Bots lists them first. */}
+              {item.id === "bots" ? <BotsNavBadge /> : null}
+            </PrimaryNavItem>
+          ),
+        )}
+    </>
+  );
+  const layoutNavigation = !inverted || collapsed;
+
   return (
-    <Sidebar variant="inset" {...props}>
-      <SidebarHeader className="h-12 p-2">
+    <Sidebar variant="inset" collapsible="icon" data-app-sidebar="" {...props}>
+      <SidebarHeader
+        className={`relative h-14 shrink-0 py-2 after:pointer-events-none after:absolute after:inset-x-1 after:bottom-0 after:border-sidebar-border/75 group-data-[collapsible=icon]:after:border-b ${APP_SIDEBAR_GUTTER}`}
+      >
         <SidebarMenu>
-          <SidebarMenuItem className="flex flex-row gap-1.5">
-            {/* The same hover as every other row in the sidebar, not the menu button's accent tint. */}
-            <SidebarMenuButton
-              className="font-semibold text-[14px] tracking-tighter h-full leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground"
-              render={(props) => (
-                <Link {...appLinkOptions} {...props}>
-                  <BrandName>{appConfig.brand.productName}</BrandName>
-                </Link>
-              )}
-            />
-            {/* Square, as tall as the name beside it, with the sidebar's hover rather than `muted`, which
-                is nearly the sidebar's own colour. */}
-            <Button
-              aria-label="New conversation"
-              className="aspect-square h-full w-auto hover:bg-foreground/5 dark:hover:bg-foreground/5"
-              size="icon"
-              variant="ghost"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/channel/new"
-                  activeProps={{
-                    className: "bg-foreground/5",
-                  }}
-                />
-              )}
+          <SidebarMenuItem className="flex h-10 items-center justify-between gap-1">
+            <Link
+              {...appLinkOptions}
+              aria-label={appConfig.brand.productName}
+              className="inline-flex h-full w-fit min-w-0 items-center gap-2 ps-1.5 rounded-sm text-lg font-semibold leading-none tracking-[-0.02em] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sidebar-ring"
             >
-              <IconPlus />
-            </Button>
+              {(appConfig.brand.productName === "OpenBot" ||
+                appConfig.brand.productName === "OpenBot for Business") && (
+                <span className="flex size-7 shrink-0 items-center justify-center">
+                  <OpenBotLogo size={24} className="size-6" />
+                </span>
+              )}
+              {collapsed &&
+              !["OpenBot", "OpenBot for Business"].includes(
+                appConfig.brand.productName,
+              ) ? (
+                <span
+                  aria-hidden="true"
+                  className="flex size-7 shrink-0 items-center justify-center"
+                >
+                  {appConfig.brand.productName.charAt(0)}
+                </span>
+              ) : null}
+              <span className="min-w-0 truncate transition-opacity duration-150 motion-reduce:transition-none group-data-[collapsible=icon]:opacity-0">
+                <BrandName>{appConfig.brand.productName}</BrandName>
+              </span>
+            </Link>
+            {!isMobile && !collapsed ? (
+              <div className="flex shrink-0 items-center gap-0.5 pe-1.5">
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Collapse sidebar"
+                  className="cursor-pointer hover:bg-foreground/5"
+                  title="Collapse sidebar"
+                  onClick={toggleSidebar}
+                >
+                  <IconLayoutSidebar />
+                </Button>
+                <SidebarHistoryButtons />
+              </div>
+            ) : null}
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent ref={scrollRoot} className="scroll-fade-b">
-        <SidebarMenu>
-          <SidebarGroup className="gap-px">
+      <SidebarContent
+        ref={scrollRoot}
+        className="scroll-fade-b group-data-[collapsible=icon]:overflow-y-auto!"
+      >
+        <SidebarGroup className={`gap-px ${APP_SIDEBAR_GUTTER}`}>
+          <SidebarMenu
+            className="group/footer-menu gap-0.5"
+            data-pointer-resting={pointerResting || undefined}
+          >
+            <PrimaryNavItem
+              item={{ to: "/channel/new", label: "New", icon: IconPlus }}
+              accessibleLabel="New conversation"
+              tooltip="New conversation"
+              suppressRestingHover={false}
+            />
             <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
-                <InputGroupInput
-                  aria-label="Search conversations"
-                  aria-describedby={
-                    searching ? "conversation-search-scope" : undefined
-                  }
-                  onChange={(event) => changeSearch(event.target.value)}
-                  placeholder="Search…"
-                  value={search}
-                />
-                <InputGroupAddon>
-                  <IconSearch />
-                </InputGroupAddon>
-              </InputGroup>
-            </SidebarMenuItem>
-            {/*
-             * What is searched, said while somebody types: names and the recent lines the rows
-             * show, not every message of every conversation. One character is not searched at
-             * all, and says how many it takes, so a box that does nothing never looks broken.
-             */}
-            {searching ? (
-              <p
-                id="conversation-search-scope"
-                className="px-2 pt-1.5 text-xs text-muted-foreground"
+              <SidebarMenuButton
+                aria-label="Search conversations"
+                aria-haspopup="dialog"
+                type="button"
+                className="h-10 cursor-pointer px-1.5! hover:bg-foreground/5"
+                onClick={openConversationSearch}
+                tooltip="Search conversations"
               >
-                {searchable ? SEARCH_SCOPE : SEARCH_HINT}
-              </p>
-            ) : null}
-            <div className="w-full h-2" />
-            {searching ? (
-              searchable ? (
-                <SearchResults
-                  emphasis={emphasis}
-                  settled={debouncedTerm === term}
-                  term={debouncedTerm}
-                />
-              ) : null
-            ) : (
-              <>
-                {/*
-                 * TWO DIFFERENT NOTHINGS, AND SAYING THE WRONG ONE IS ALARMING. A roster nobody
-                 * has used yet needs telling how to start; a search that matches nothing says so
-                 * and quotes it back (see SearchResults). Told "you don't have channels yet" while
-                 * holding a typo, a person reads their conversations as gone.
-                 */}
-                {channels.data?.length === 0 ? (
-                  <div className="py-4">
-                    <Empty className="border border-dashed min-h-[40dvh]">
-                      <EmptyHeader>
-                        <EmptyTitle>No conversations yet</EmptyTitle>
-                        <EmptyDescription className="text-pretty">
-                          Start a conversation with a Bot and it shows up here.
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  </div>
-                ) : null}
-                <AnimatePresence initial={false}>
-                  {visibleChannels.map((channel) => (
-                    <ChannelRow
-                      emphasis={emphasis}
-                      key={channel.id}
-                      animateOrder={animateOrder}
-                      channel={channel}
-                    />
-                  ))}
-                </AnimatePresence>
-                {/* Never searching here: a search unmounts the roster, this with it. */}
-                <ChannelPagination
-                  query={channels}
-                  scrollRoot={scrollRoot}
-                  searching={false}
-                />
-              </>
-            )}
-          </SidebarGroup>
-        </SidebarMenu>
+                <span className="flex size-7 shrink-0 items-center justify-center">
+                  <IconSearch />
+                </span>
+                <span className="truncate group-data-[collapsible=icon]:sr-only">
+                  Search
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {layoutNavigation ? primaryNavigation : null}
+          </SidebarMenu>
+          <div className="h-2 w-full" />
+          {channels.data?.length === 0 ? (
+            <p
+              className="px-2 py-2 text-xs leading-5 text-muted-foreground group-data-[collapsible=icon]:hidden"
+              data-slot="sidebar-empty-conversations"
+            >
+              No conversations yet
+            </p>
+          ) : null}
+          <AnimatePresence initial={false}>
+            {visibleChannels.map((channel) => (
+              <ChannelRow
+                emphasis={emphasis}
+                key={channel.id}
+                animateOrder={animateOrder}
+                channel={channel}
+              />
+            ))}
+          </AnimatePresence>
+          <ChannelPagination
+            query={channels}
+            scrollRoot={scrollRoot}
+            searching={searchOpen}
+          />
+        </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className={APP_SIDEBAR_GUTTER}>
         <SidebarMenu
           className="group/footer-menu gap-px"
           data-pointer-resting={pointerResting || undefined}
         >
-          {navigation
-            .filter(isNavigationLink)
-            .filter((item) => item.section === "primary")
-            .map((item) =>
-              // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
-              item.id === "skills" ? (
-                <SkillsNavItem item={item} key={item.id} />
-              ) : (
-                <PrimaryNavItem item={item} key={item.id}>
-                  {/* What waits on you across every Bot; Bots lists them first. */}
-                  {item.id === "bots" ? <BotsNavBadge /> : null}
-                </PrimaryNavItem>
-              ),
-            )}
+          {!layoutNavigation ? primaryNavigation : null}
           <SidebarMenuItem>
             <AccountMenu>
               <DropdownMenuContent

@@ -15,6 +15,12 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { useOptionalSidebar } from "@/components/ui/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
@@ -71,6 +77,20 @@ export const Channel = memo(function Channel({
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const sidebar = useOptionalSidebar();
+  const showPreview = sidebar?.state === "collapsed" && !sidebar.isMobile;
+  const title = summary || untitled || "New conversation";
+  const rowContent = {
+    participantIds,
+    name,
+    title,
+    lastMessageAt,
+    emphasis,
+    busy,
+    unread,
+    pinned,
+  };
   /**
    * Why a pin did not take, said on the row it was asked of.
    *
@@ -83,35 +103,42 @@ export const Channel = memo(function Channel({
 
   return (
     <>
-      <ContextMenu>
+      <ContextMenu onOpenChange={setMenuOpen}>
         <ContextMenuTrigger>
-          <Link
-            // Two or more Bots is a group conversation, which has its own shared transcript.
-            to={
-              participantIds.length > 1
-                ? "/group/$channelId"
-                : "/channel/$channelId"
-            }
-            params={{ channelId }}
-            type="button"
-            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
-            activeProps={{
-              className: "bg-foreground/5",
-            }}
-          >
-            <ChannelItemContent
-              participantIds={participantIds}
-              name={name}
-              title={summary || untitled || "New conversation"}
-              displayedTitle={threadTitle}
-              lastMessageAt={lastMessageAt}
-              emphasis={emphasis}
-              busy={busy}
-              unread={unread}
-              pinned={pinned}
-              revealing={revealed.typing}
-            />
-          </Link>
+          <Tooltip disabled={!showPreview || menuOpen} disableHoverablePopup>
+            <TooltipTrigger
+              render={
+                <Link
+                  // Two or more Bots is a group conversation, which has its own shared transcript.
+                  to={
+                    participantIds.length > 1
+                      ? "/group/$channelId"
+                      : "/channel/$channelId"
+                  }
+                  params={{ channelId }}
+                  type="button"
+                  title={showPreview ? undefined : summary || untitled || name}
+                  className="flex h-12 w-full flex-row items-center gap-2 rounded-lg px-1.5 hover:bg-foreground/5 [contain-intrinsic-size:auto_3rem] [content-visibility:auto] group-data-[collapsible=icon]:size-10 group-data-[collapsible=icon]:[contain-intrinsic-size:auto_2.5rem]"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              }
+            >
+              <ChannelItemContent
+                {...rowContent}
+                displayedTitle={threadTitle}
+                revealing={revealed.typing}
+              />
+            </TooltipTrigger>
+            {showPreview && !menuOpen ? (
+              <TooltipContent
+                side="right"
+                sideOffset={8}
+                className="w-72 max-w-[calc(100vw-2rem)] rounded-lg bg-popover px-3 py-2.5 text-popover-foreground shadow-md ring-1 ring-foreground/10 [&>[data-side]]:bg-popover [&>[data-side]]:fill-popover"
+              >
+                <ChannelItemContent {...rowContent} />
+              </TooltipContent>
+            ) : null}
+          </Tooltip>
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem
