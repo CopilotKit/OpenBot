@@ -54,7 +54,7 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
   return (
     <>
       <Button
-        className="ml-auto"
+        className="ml-auto cursor-pointer"
         onClick={() => setOpen(true)}
         size="sm"
         variant="ghost"

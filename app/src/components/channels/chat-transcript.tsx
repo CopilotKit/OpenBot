@@ -11,6 +11,10 @@ import {
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
 import { answeredBy } from "@openbot/shared/handoff-markers";
+import {
+  type MessageReply,
+  splitMessageReplies,
+} from "@openbot/shared/message-reply";
 import { readBrief, readTaskReport } from "@openbot/shared/orchestration";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
@@ -91,11 +95,11 @@ import {
 } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { useComponentTest } from "@/lib/copilot/tool-steps";
-import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type FolderNames,
@@ -154,6 +158,8 @@ import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
+import { LinkedReply } from "./linked-reply";
+import { MessageActions, ReplyQuote } from "./message-actions";
 import { usePacedReveal } from "./paced-reveal";
 import { ResearchResults } from "./research-results";
 import { TeamBotConsentCard } from "./team-bot-consent";
@@ -176,9 +182,11 @@ import {
   type Turn,
   turnsOf,
 } from "./transcript-turns";
+import { TurnHoverSurface } from "./turn-hover";
 import { VoiceChatCard } from "./voice-chat-card";
 
 type ChatTranscriptProps = {
+  onReply?: (reply: MessageReply) => void;
   /** Server-owned thread identity, used only to correlate rendered result messages. */
   threadId?: string;
   busy?: boolean;
@@ -467,6 +475,7 @@ function Queued({
    * pictures above the words — because this IS their message, just not yet run.
    */
   const files = parkedTiles(attachments);
+  const replyContent = splitMessageReplies(text);
 
   return (
     <MessageRow align="end">
@@ -479,11 +488,14 @@ function Queued({
          * this gets used, and it drew an empty muted bubble above the footer — which reads as a
          * message sent by mistake rather than as a file waiting its turn.
          */}
-        {text ? (
+        {replyContent.replies.map((reply) => (
+          <ReplyQuote key={reply.messageId} reply={reply} />
+        ))}
+        {replyContent.text ? (
           <Bubble align="end" className="opacity-60" variant="muted">
             <BubbleContent>
               {/* Shown exactly as typed, for the same reason a sent message is. */}
-              <span className="whitespace-pre-wrap">{text}</span>
+              <span className="whitespace-pre-wrap">{replyContent.text}</span>
             </BubbleContent>
           </Bubble>
         ) : null}
@@ -829,7 +841,9 @@ const TranscriptMessage = memo(function TranscriptMessage({
   threadId,
   messageId,
   underItsCard = false,
+  onReply,
 }: {
+  onReply?: (reply: MessageReply) => void;
   commandLabels?: string;
   role: "user" | "assistant";
   /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
@@ -891,7 +905,8 @@ const TranscriptMessage = memo(function TranscriptMessage({
   const align = isUser ? "end" : "start";
   // Slack/Teams turns carry a model-facing participant line; show a marker instead of the line.
   const origin = isUser ? splitChatOrigin(text) : null;
-  const said = origin ? origin.text : text;
+  const replyContent = splitMessageReplies(origin ? origin.text : text);
+  const said = replyContent.text;
   const invoked = isUser ? splitSkillChip(said, commandLabels) : null;
   /*
    * Another Bot's answer, asked for by this one: drawn under that Bot's face and name, as a group
@@ -924,87 +939,97 @@ const TranscriptMessage = memo(function TranscriptMessage({
             inside it — a fenced code block, a table — should span the transcript rather than
             shrink to its own text. A person's bubble keeps fitting what they said.
           */}
-          <Bubble
-            align={align}
-            variant={isUser ? "muted" : "ghost"}
-            className={isUser ? undefined : "w-full"}
-          >
-            <BubbleContent className={isUser ? undefined : "w-full"}>
-              {isUser ? (
-                // A person's own message is shown exactly as they typed it. Rendering it as markdown
-                // would silently reformat what they said, and an asterisk in a sentence is not
-                // emphasis. The chip is the one exception, and it is not reformatting: it is drawing
-                // the thing that was already a chip in the composer as a chip here too, so the
-                // transcript shows a skill was used rather than a slash that was typed.
-                <span className="whitespace-pre-wrap">
-                  {origin && (
-                    <span className="mr-1.5 inline-flex items-center rounded bg-foreground/10 px-1.5 py-0.5 align-middle text-foreground/70 text-xs">
-                      via {origin.via}
+          <LinkedReply replies={isUser ? replyContent.replies : []}>
+            <MessageActions
+              showToolbar={false}
+              disabled={isUser || streaming || !settled}
+              messageId={messageId}
+              text={text}
+              onReply={onReply}
+            >
+              <Bubble
+                align={align}
+                variant={isUser ? "muted" : "ghost"}
+                className={isUser ? undefined : "w-full"}
+              >
+                <BubbleContent className={isUser ? undefined : "w-full"}>
+                  {isUser ? (
+                    // A person's own message is shown exactly as they typed it. Rendering it as markdown
+                    // would silently reformat what they said, and an asterisk in a sentence is not
+                    // emphasis. The chip is the one exception, and it is not reformatting: it is drawing
+                    // the thing that was already a chip in the composer as a chip here too, so the
+                    // transcript shows a skill was used rather than a slash that was typed.
+                    <span className="whitespace-pre-wrap">
+                      {origin && (
+                        <span className="mr-1.5 inline-flex items-center rounded bg-foreground/10 px-1.5 py-0.5 align-middle text-foreground/70 text-xs">
+                          via {origin.via}
+                        </span>
+                      )}
+                      {invoked ? (
+                        <>
+                          {/*
+                           * The same icon the sidebar uses for Skills, so the badge says WHAT KIND of
+                           * thing was invoked before it says which one. `inline-flex` with
+                           * `align-middle` rather than a block: this sits mid-sentence, and a badge that
+                           * breaks the line it is in reads as a separate message.
+                           */}
+                          <span className="mr-1 inline-flex items-center gap-1 rounded bg-foreground/10 px-1.5 py-0.5 align-middle text-foreground/80 text-xs">
+                            <IconBox className="size-3 shrink-0" />
+                            {invoked.chip}
+                          </span>
+                          {invoked.rest}
+                        </>
+                      ) : (
+                        said
+                      )}
                     </span>
-                  )}
-                  {invoked ? (
-                    <>
-                      {/*
-                       * The same icon the sidebar uses for Skills, so the badge says WHAT KIND of
-                       * thing was invoked before it says which one. `inline-flex` with
-                       * `align-middle` rather than a block: this sits mid-sentence, and a badge that
-                       * breaks the line it is in reads as a separate message.
-                       */}
-                      <span className="mr-1 inline-flex items-center gap-1 rounded bg-foreground/10 px-1.5 py-0.5 align-middle text-foreground/80 text-xs">
-                        <IconBox className="size-3 shrink-0" />
-                        {invoked.chip}
-                      </span>
-                      {invoked.rest}
-                    </>
                   ) : (
-                    said
-                  )}
-                </span>
-              ) : (
-                /*
-                 * A Bot's prose is markdown, and it arrives in pieces.
-                 *
-                 * Rendered with a streaming-aware renderer rather than an ordinary one: half a fenced
-                 * code block or an unclosed bold marker is the NORMAL state for most of a run, and a
-                 * plain markdown parser draws that as literal asterisks and backticks until the
-                 * closing token arrives, so the answer visibly rewrites itself as it lands. This
-                 * closes them for the duration.
-                 */
-                <div ref={resultRef}>
-                  {report ? (
                     /*
-                     * A task the Bot handed out, saying how it went: its words, framed with the
-                     * task they are about and the way into its thread. See `taskReportMessageId`.
+                     * A Bot's prose is markdown, and it arrives in pieces.
+                     *
+                     * Rendered with a streaming-aware renderer rather than an ordinary one: half a fenced
+                     * code block or an unclosed bold marker is the NORMAL state for most of a run, and a
+                     * plain markdown parser draws that as literal asterisks and backticks until the
+                     * closing token arrives, so the answer visibly rewrites itself as it lands. This
+                     * closes them for the duration.
                      */
-                    <TaskReport
-                      kind={report.kind}
-                      taskId={report.taskId}
-                      underCard={underItsCard}
-                      words={text}
-                    >
-                      <BotMarkdown
-                        components={markdownComponents}
-                        mode={mode}
-                        plugins={markdownPlugins}
-                        remarkPlugins={replyRemarkPluginsFor(slackNames)}
-                      >
-                        {revealed}
-                      </BotMarkdown>
-                    </TaskReport>
-                  ) : (
-                    <BotMarkdown
-                      components={markdownComponents}
-                      mode={mode}
-                      plugins={markdownPlugins}
-                      remarkPlugins={replyRemarkPluginsFor(slackNames)}
-                    >
-                      {revealed}
-                    </BotMarkdown>
+                    <div ref={resultRef}>
+                      {report ? (
+                        /*
+                         * A task the Bot handed out, saying how it went: its words, framed with the
+                         * task they are about and the way into its thread. See `taskReportMessageId`.
+                         */
+                        <TaskReport
+                          kind={report.kind}
+                          taskId={report.taskId}
+                          underCard={underItsCard}
+                          words={text}
+                        >
+                          <BotMarkdown
+                            components={markdownComponents}
+                            mode={mode}
+                            plugins={markdownPlugins}
+                            remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                          >
+                            {revealed}
+                          </BotMarkdown>
+                        </TaskReport>
+                      ) : (
+                        <BotMarkdown
+                          components={markdownComponents}
+                          mode={mode}
+                          plugins={markdownPlugins}
+                          remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                        >
+                          {revealed}
+                        </BotMarkdown>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-            </BubbleContent>
-          </Bubble>
+                </BubbleContent>
+              </Bubble>
+            </MessageActions>
+          </LinkedReply>
           {isUser && threadId ? (
             <MessageReactions messageId={messageId} threadId={threadId} />
           ) : null}
@@ -1961,6 +1986,7 @@ export function ChatTranscript({
   intro,
   messages,
   onRemoveQueued,
+  onReply,
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
@@ -1990,6 +2016,36 @@ export function ChatTranscript({
     toVisibleChatItems(messages, isComponent),
   );
   const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
+  // Place one action bar after the last row (including tools) of each assistant turn.
+  const turnHoverIds = new Map<string, string>();
+  const turnActions = new Map<string, { messageId: string; text: string }>();
+  let turnRows: TranscriptItem[] = [];
+  const closeActionsTurn = () => {
+    const words = turnRows.filter(
+      (row) => row.kind === "text" && row.role === "assistant",
+    );
+    const last = turnRows.at(-1);
+    const lastWords = words.at(-1);
+    if (lastWords)
+      for (const row of turnRows) turnHoverIds.set(row.id, lastWords.id);
+    if (last && lastWords)
+      turnActions.set(last.id, {
+        messageId: lastWords.id,
+        text: words
+          .map((row) => (row.kind === "text" ? row.text : ""))
+          .join("\n\n"),
+      });
+    turnRows = [];
+  };
+  for (const row of items) {
+    if (
+      (row.kind === "text" && row.role === "user") ||
+      row.kind === "attachments"
+    )
+      closeActionsTurn();
+    else turnRows.push(row);
+  }
+  closeActionsTurn();
   /*
    * In a task's thread, each turn's steps and the lines said on the way fold into one "Worked for"
    * row (`foldTurnWork`). Worked out on every render, as `items` is.
@@ -2376,6 +2432,7 @@ export function ChatTranscript({
       <TranscriptActivity message={item.message} />
     ) : item.kind === "text" ? (
       <TranscriptMessage
+        onReply={onReply}
         threadId={threadId}
         messageId={item.id}
         settled={!busy || index < turnStart}
@@ -2403,12 +2460,25 @@ export function ChatTranscript({
    * task's thread a turn's work is one row, drawn where its first step is; the rest of it is drawn
    * inside that row.
    */
+  const turnToolbar = (item: TranscriptItem, index: number) => {
+    const turn = turnActions.get(item.id);
+    return turn && (!busy || index < turnStart) ? (
+      <MessageActions
+        messageId={turn.messageId}
+        text={turn.text}
+        onReply={onReply}
+      >
+        <span className="sr-only">Actions for this agent turn</span>
+      </MessageActions>
+    ) : null;
+  };
   const renderRow = (item: TranscriptItem, index: number) => {
     const work = taskWork.folds.at.get(item.id);
     if (work)
       return (
         <MessageScrollerItem
           key={work.id}
+          className="group/agent-turn"
           messageId={work.id}
           {...openingProps(item.id)}
         >
@@ -2419,7 +2489,10 @@ export function ChatTranscript({
           >
             {work.rows.map((row) => (
               <Fragment key={row.item.id}>
-                {rowContent(row.item, row.index)}
+                <TurnHoverSurface turnId={turnHoverIds.get(row.item.id)}>
+                  {rowContent(row.item, row.index)}
+                  {turnToolbar(row.item, row.index)}
+                </TurnHoverSurface>
               </Fragment>
             ))}
           </WorkedFor>
@@ -2429,6 +2502,7 @@ export function ChatTranscript({
     return (
       <MessageScrollerItem
         key={item.id}
+        className="group/agent-turn"
         messageId={item.id}
         scrollAnchor={
           item.kind === "text" || item.kind === "attachments"
@@ -2437,7 +2511,10 @@ export function ChatTranscript({
         }
         {...openingProps(item.id)}
       >
-        {rowContent(item, index)}
+        <TurnHoverSurface turnId={turnHoverIds.get(item.id)}>
+          {rowContent(item, index)}
+          {turnToolbar(item, index)}
+        </TurnHoverSurface>
       </MessageScrollerItem>
     );
   };

@@ -4,34 +4,19 @@ import {
   useCopilotChatConfiguration,
 } from "@copilotkit/react-core/v2";
 import { type ComponentProps, createContext, useContext } from "react";
+import { assistantTurn } from "@/lib/channels/assistant-turn";
 import {
   type ResultReference,
   recordResultAction,
   useResultVisibility,
 } from "@/lib/product-telemetry";
+import { MessageActions } from "./message-actions";
+import { useReplyToMessage } from "./replying-chat-view";
 
 const ResultContext = createContext<{
   reference?: ResultReference;
   settled: boolean;
 }>({ settled: false });
-
-/** Preserve the SDK's existing copy action and its boolean clipboard-success result. */
-function ResultCopyButton(
-  props: ComponentProps<typeof CopilotChatAssistantMessage.CopyButton>,
-) {
-  const { reference } = useContext(ResultContext);
-  return (
-    <CopilotChatAssistantMessage.CopyButton
-      {...props}
-      onClick={async (event) => {
-        const copied: unknown = await props.onClick?.(event);
-        if (copied === true && reference)
-          void recordResultAction("result_copied", reference);
-        return copied;
-      }}
-    />
-  );
-}
 
 /** Observe the actual markdown body; a toolbar or an empty tool shell is not a viewed answer. */
 function ResultMarkdownRenderer(
@@ -51,6 +36,7 @@ function ResultMarkdownRenderer(
 
 /** The packaged direct Bot chat shares the same condition as OpenBot's channel transcript. */
 function ResultAssistantMessage(props: CopilotChatAssistantMessageProps) {
+  const onReply = useReplyToMessage();
   const configuration = useCopilotChatConfiguration();
   const threadId = configuration?.threadId;
   const reference = threadId
@@ -69,13 +55,30 @@ function ResultAssistantMessage(props: CopilotChatAssistantMessageProps) {
           ?.slice(index + 1)
           .some((message) => message.role === "user"),
       ));
+  const turn = assistantTurn(
+    props.messages ?? [props.message],
+    props.message.id,
+  );
+  const ownsToolbar = turn?.messageId === props.message.id;
   return (
     <ResultContext.Provider value={{ reference, settled }}>
-      <CopilotChatAssistantMessage
-        {...props}
-        copyButton={props.copyButton ?? ResultCopyButton}
-        markdownRenderer={props.markdownRenderer ?? ResultMarkdownRenderer}
-      />
+      <MessageActions
+        messageId={props.message.id}
+        text={turn?.text ?? props.message.content ?? ""}
+        onReply={onReply}
+        disabled={!settled || !turn?.text.trim()}
+        showToolbar={ownsToolbar}
+        turnId={turn?.messageId}
+        onCopied={() => {
+          if (reference) void recordResultAction("result_copied", reference);
+        }}
+      >
+        <CopilotChatAssistantMessage
+          {...props}
+          copyButton={() => null}
+          markdownRenderer={props.markdownRenderer ?? ResultMarkdownRenderer}
+        />
+      </MessageActions>
     </ResultContext.Provider>
   );
 }

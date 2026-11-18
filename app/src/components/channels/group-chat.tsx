@@ -1,6 +1,12 @@
+import type { Message } from "@ag-ui/core";
+import {
+  type MessageReply,
+  splitMessageReplies,
+  withMessageReply,
+} from "@openbot/shared/message-reply";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   QuestionNotice,
   type WaitingQuestion,
@@ -34,8 +40,12 @@ import {
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
-import { SentFileCard } from "./sent-file-card";
 import { Composer, toAgentOptions } from "./composer";
+import { LinkedReply } from "./linked-reply";
+import { MessageActions, ReplyQuote } from "./message-actions";
+import { ReplyChainProvider } from "./reply-chain";
+import { useOpenReplyChain } from "./reply-chain-context";
+import { SentFileCard } from "./sent-file-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
 /**
@@ -61,6 +71,37 @@ export function GroupChat({ channelId }: { channelId: string }) {
   const bots = group.data?.bots ?? [];
   const names = new Map(bots.map((bot) => [bot.id, bot.name]));
   const messages = group.data?.messages ?? [];
+  const [replyTo, setReplyTo] = useState<MessageReply | null>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const speakers = new Map(
+    messages.map((message) => [
+      message.id,
+      {
+        author: message.agentId
+          ? (names.get(message.agentId) ?? "A Bot no longer here")
+          : message.ownerUserId === me?.id
+            ? "You"
+            : "Someone else",
+        ...(message.agentId ? { botId: message.agentId } : {}),
+      },
+    ]),
+  );
+  const chainMessages: Message[] = messages.map((message) => ({
+    id: message.id,
+    role: message.agentId ? "assistant" : "user",
+    content: message.text,
+  }));
+  const chooseReply = (reply: MessageReply) => {
+    setReplyTo({ ...reply, ...speakers.get(reply.messageId) });
+    setTimeout(
+      () =>
+        composerRef.current
+          ?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')
+          ?.focus(),
+      0,
+    );
+  };
+
   const working = messages.some(
     (message) => message.status === "running" || message.status === "queued",
   );
@@ -152,96 +193,112 @@ export function GroupChat({ channelId }: { channelId: string }) {
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div
-        className="min-h-0 flex-1 overflow-y-auto"
-        onScroll={(event) => {
-          atBottom.current = isNearBottom(event.currentTarget);
-        }}
-        ref={viewportRef}
-      >
+    <ReplyChainProvider
+      messages={chainMessages}
+      speakers={speakers}
+      onReply={chooseReply}
+    >
+      <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
-          data-transcript-column
+          className="min-h-0 flex-1 overflow-y-auto"
+          onScroll={(event) => {
+            atBottom.current = isNearBottom(event.currentTarget);
+          }}
+          ref={viewportRef}
         >
-          {messages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Say something to {bots.map((bot) => bot.name).join(" and ")}.
-              Every Bot answers in turn; start with @Name to ask just one.
+          <div
+            className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+            data-transcript-column
+          >
+            {messages.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Say something to {bots.map((bot) => bot.name).join(" and ")}.
+                Every Bot answers in turn; start with @Name to ask just one.
+              </p>
+            ) : null}
+            {messages.map((message) => (
+              <GroupLine
+                key={message.id}
+                message={message}
+                onReply={chooseReply}
+                name={
+                  message.agentId
+                    ? (names.get(message.agentId) ?? "A Bot no longer here")
+                    : message.ownerUserId === me?.id
+                      ? "You"
+                      : "Someone else"
+                }
+                answeredBy={
+                  message.answeredBy
+                    ? (names.get(message.answeredBy) ?? "another Bot")
+                    : undefined
+                }
+                mine={message.ownerUserId === me?.id}
+              />
+            ))}
+          </div>
+        </div>
+        {/* The same column and the same compact composer as a conversation with one Bot. */}
+        <div
+          ref={composerRef}
+          className="mx-auto w-full max-w-2xl shrink-0 pb-4"
+        >
+          {send.error ? (
+            <p className="pb-2 text-sm text-destructive" role="alert">
+              {send.error.message}
             </p>
           ) : null}
-          {messages.map((message) => (
-            <GroupLine
-              key={message.id}
-              message={message}
-              name={
-                message.agentId
-                  ? (names.get(message.agentId) ?? "A Bot no longer here")
-                  : message.ownerUserId === me?.id
-                    ? "You"
-                    : "Someone else"
+          {answer.error ? (
+            <p className="pb-2 text-sm text-destructive" role="alert">
+              {answer.error.message}
+            </p>
+          ) : null}
+          {/* The same drawer a conversation with one Bot draws its question in. */}
+          {question ? (
+            <div
+              className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+              data-slot="composer-drawer"
+            >
+              <QuestionNotice
+                avatarSeed={asker?.avatarSeed || (askerId ?? question.id)}
+                botName={
+                  (askerId && names.get(askerId)) || asker?.name || "A Bot"
+                }
+                onAnswered={(text) => answerTo(text, question)}
+                question={question}
+              />
+            </div>
+          ) : null}
+          {replyTo ? (
+            <div className="mb-2">
+              <ReplyQuote reply={replyTo} onCancel={() => setReplyTo(null)} />
+            </div>
+          ) : null}
+          <Composer
+            agents={toAgentOptions(bots)}
+            className="relative mt-auto w-full"
+            commands={[]}
+            compact
+            disabled={bots.length === 0}
+            pending={send.isPending || answer.isPending || working}
+            autoFocus
+            onSubmit={async (draft) => {
+              if (!draft.text) return;
+              const agentId = draft.agentId ?? replyTo?.botId ?? null;
+              const text = replyTo
+                ? withMessageReply(draft.text, replyTo)
+                : draft.text;
+              if (question && (!agentId || agentId === askerId)) {
+                await answerTo(text, question);
+              } else {
+                await send.mutateAsync({ id: newId(), text, agentId });
               }
-              answeredBy={
-                message.answeredBy
-                  ? (names.get(message.answeredBy) ?? "another Bot")
-                  : undefined
-              }
-              mine={message.ownerUserId === me?.id}
-            />
-          ))}
+              setReplyTo(null);
+            }}
+          />
         </div>
       </div>
-      {/* The same column and the same compact composer as a conversation with one Bot. */}
-      <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
-        {send.error ? (
-          <p className="pb-2 text-sm text-destructive" role="alert">
-            {send.error.message}
-          </p>
-        ) : null}
-        {answer.error ? (
-          <p className="pb-2 text-sm text-destructive" role="alert">
-            {answer.error.message}
-          </p>
-        ) : null}
-        {/* The same drawer a conversation with one Bot draws its question in. */}
-        {question ? (
-          <div
-            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
-            data-slot="composer-drawer"
-          >
-            <QuestionNotice
-              avatarSeed={asker?.avatarSeed || (askerId ?? question.id)}
-              botName={
-                (askerId && names.get(askerId)) || asker?.name || "A Bot"
-              }
-              onAnswered={(text) => answerTo(text, question)}
-              question={question}
-            />
-          </div>
-        ) : null}
-        <Composer
-          agents={toAgentOptions(bots)}
-          className="relative mt-auto w-full"
-          commands={[]}
-          compact
-          disabled={bots.length === 0}
-          pending={send.isPending || answer.isPending || working}
-          autoFocus
-          onSubmit={async (draft) => {
-            if (!draft.text) return;
-            if (question && (!draft.agentId || draft.agentId === askerId)) {
-              await answerTo(draft.text, question);
-              return;
-            }
-            await send.mutateAsync({
-              id: newId(),
-              text: draft.text,
-              agentId: draft.agentId,
-            });
-          }}
-        />
-      </div>
-    </div>
+    </ReplyChainProvider>
   );
 }
 
@@ -262,12 +319,16 @@ function GroupLine({
   name,
   answeredBy,
   mine,
+  onReply,
 }: {
+  onReply: (reply: MessageReply) => void;
   message: GroupMessage;
   name: string;
   answeredBy?: string;
   mine: boolean;
 }) {
+  const content = splitMessageReplies(message.text);
+  const openChain = useOpenReplyChain();
   if (message.agentId === null)
     return (
       <MessageRow align={mine ? "end" : "start"}>
@@ -277,91 +338,124 @@ function GroupLine({
               {name}
             </MessageHeader>
           )}
-          <Bubble align={mine ? "end" : "start"} variant="muted">
-            <BubbleContent>
-              <span className="whitespace-pre-wrap">{message.text}</span>
-            </BubbleContent>
-          </Bubble>
+          <LinkedReply replies={content.replies}>
+            <Bubble align={mine ? "end" : "start"} variant="muted">
+              <BubbleContent
+                render={
+                  content.replies.length ? (
+                    <button
+                      type="button"
+                      aria-label="View this reply thread"
+                      onClick={() => {
+                        const reply = content.replies[0];
+                        if (reply) openChain?.(reply);
+                      }}
+                    />
+                  ) : undefined
+                }
+                className={
+                  content.replies.length ? "cursor-pointer" : undefined
+                }
+              >
+                <span className="whitespace-pre-wrap">{content.text}</span>
+              </BubbleContent>
+            </Bubble>
+          </LinkedReply>
         </MessageContent>
       </MessageRow>
     );
   return (
-    <MessageRow align="start" data-speaker={message.agentId}>
-      <div className="shrink-0 pt-0.5">
-        <ChannelAvatar participantIds={[message.agentId]} size={24} />
-      </div>
-      <MessageContent>
-        <MessageHeader className="text-xs font-medium text-muted-foreground">
-          {name}
-          {answeredBy ? ` · answer from ${answeredBy}` : null}
-        </MessageHeader>
-        {(message.status === "running" || message.status === "queued") &&
-        !message.text ? (
-          <p
-            className="tool-line-running text-sm text-muted-foreground"
-            role="status"
-          >
-            Thinking
-          </p>
-        ) : message.status === "waiting" ? (
-          <p className="text-sm text-muted-foreground">
-            {message.reason ?? "Waiting for your response."}{" "}
-            <Link
-              className="underline"
-              params={{ agentId: message.agentId }}
-              to="/bots/$agentId"
-            >
-              Open {name}
-            </Link>
-          </p>
-        ) : message.consent ? (
-          // Only the person whose account it asked for can answer; everyone else sees the ask.
-          mine ? (
-            <TeamBotConsentCard
-              botId={message.consent.botId}
-              message={message.text}
-              serverId={message.consent.serverId}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Asked someone else for permission to use their own{" "}
-              {message.consent.serverId} account.
-            </p>
-          )
-        ) : message.status === "failed" ? (
-          <p className="text-sm text-destructive" role="alert">
-            {message.text || "This Bot couldn't answer."}
-          </p>
-        ) : (
-          <>
-            <Bubble
-              align="start"
-              aria-busy={message.status === "running"}
-              variant="ghost"
-              className="w-full"
-            >
-              <BubbleContent className="w-full">
-                <BotMarkdown
-                  components={markdownComponents}
-                  plugins={markdownPlugins}
-                  remarkPlugins={replyRemarkPlugins}
+    <div className="[&_[data-slot=message-actions]]:ms-8">
+      <MessageActions
+        messageId={message.id}
+        text={message.text}
+        onReply={(reply) =>
+          onReply({
+            ...reply,
+            author: name,
+            botId: message.agentId ?? undefined,
+          })
+        }
+        disabled={message.status !== "completed" || !message.text.trim()}
+      >
+        <MessageRow align="start" data-speaker={message.agentId}>
+          <div className="shrink-0 pt-0.5">
+            <ChannelAvatar participantIds={[message.agentId]} size={24} />
+          </div>
+          <MessageContent>
+            <MessageHeader className="cursor-text px-0 text-xs font-medium text-muted-foreground">
+              {name}
+              {answeredBy ? ` · answer from ${answeredBy}` : null}
+            </MessageHeader>
+            {(message.status === "running" || message.status === "queued") &&
+            !message.text ? (
+              <p
+                className="tool-line-running text-sm text-muted-foreground"
+                role="status"
+              >
+                Thinking
+              </p>
+            ) : message.status === "waiting" ? (
+              <p className="text-sm text-muted-foreground">
+                {message.reason ?? "Waiting for your response."}{" "}
+                <Link
+                  className="underline"
+                  params={{ agentId: message.agentId }}
+                  to="/bots/$agentId"
                 >
-                  {message.text}
-                </BotMarkdown>
-              </BubbleContent>
-            </Bubble>
-            {/*
-             * The files the Bot sent from its computer with this reply, each as the card a
-             * conversation of its own draws, under its words: the reply is all a group keeps of a
-             * turn, so without them the file was a name in the words and nothing to open.
-             */}
-            {message.files?.map((file) => (
-              <SentFileCard file={file} key={file.attachmentId} />
-            ))}
-          </>
-        )}
-      </MessageContent>
-    </MessageRow>
+                  Open {name}
+                </Link>
+              </p>
+            ) : message.consent ? (
+              // Only the person whose account it asked for can answer; everyone else sees the ask.
+              mine ? (
+                <TeamBotConsentCard
+                  botId={message.consent.botId}
+                  message={message.text}
+                  serverId={message.consent.serverId}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Asked someone else for permission to use their own{" "}
+                  {message.consent.serverId} account.
+                </p>
+              )
+            ) : message.status === "failed" ? (
+              <p className="text-sm text-destructive" role="alert">
+                {message.text || "This Bot couldn't answer."}
+              </p>
+            ) : (
+              <>
+                <Bubble
+                  align="start"
+                  aria-busy={message.status === "running"}
+                  variant="ghost"
+                  className="w-full"
+                >
+                  <BubbleContent className="w-full">
+                    <BotMarkdown
+                      components={markdownComponents}
+                      plugins={markdownPlugins}
+                      remarkPlugins={replyRemarkPlugins}
+                    >
+                      {message.text}
+                    </BotMarkdown>
+                  </BubbleContent>
+                </Bubble>
+                {/*
+                 * The files the Bot sent from its computer with this reply, each as the card a
+                 * conversation of its own draws, under its words: the reply is all a group keeps of a
+                 * turn, so without them the file was a name in the words and nothing to open.
+                 */}
+                {message.files?.map((file) => (
+                  <SentFileCard file={file} key={file.attachmentId} />
+                ))}
+              </>
+            )}
+          </MessageContent>
+        </MessageRow>
+      </MessageActions>
+    </div>
   );
 }
 

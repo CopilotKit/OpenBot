@@ -1,6 +1,10 @@
 import type { Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import {
+  type MessageReply,
+  withMessageReply,
+} from "@openbot/shared/message-reply";
+import {
   type ReactNode,
   useCallback,
   useEffect,
@@ -28,12 +32,16 @@ import { deleteAttachment } from "@/lib/api/generated/conversations/conversation
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "../../lib/new-id";
+import { ReplyQuote } from "./message-actions";
+import { ReplyChainProvider, type ReplySpeaker } from "./reply-chain";
 
 /** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
 export const STILL_WORKING_RETRY_MS = 500;
 
 export function ConversationView({
   messages,
+  assistant,
+  resolveBotName,
   threadId,
   busy = false,
   notice,
@@ -61,6 +69,8 @@ export function ConversationView({
   routine,
 }: {
   messages: readonly Message[];
+  assistant?: ReplySpeaker;
+  resolveBotName?: (id: string) => string | undefined;
   threadId?: string;
   busy?: boolean;
   /** Shown above the composer. An error, or why this conversation is read-only. */
@@ -179,6 +189,19 @@ export function ConversationView({
    * turns a new object here into new rejection lines, one batch per event, rather than this file
    * accumulating a list nobody here has any other use for.
    */
+  const [replyTo, setReplyTo] = useState<MessageReply | null>(null);
+  const composerColumn = useRef<HTMLDivElement>(null);
+  const chooseReply = useCallback((reply: MessageReply) => {
+    setReplyTo(reply);
+    // Run after the menu restores focus to its trigger.
+    setTimeout(
+      () =>
+        composerColumn.current
+          ?.querySelector<HTMLElement>('textarea, [contenteditable="true"]')
+          ?.focus(),
+      0,
+    );
+  }, []);
   const [droppedAttachments, setDroppedAttachments] =
     useState<DroppedAttachments>();
 
@@ -357,14 +380,22 @@ export function ConversationView({
     (draft: ComposerDraft, whileBusy: boolean) => {
       const next = apply({
         busy: whileBusy,
-        draft,
+        draft: replyTo
+          ? { ...draft, text: withMessageReply(draft.text, replyTo) }
+          : draft,
         id: newId(),
         type: "submit",
       });
+      const selectedReply = replyTo;
+      setReplyTo(null);
       if (!next.run) {
         return undefined;
       }
       const started = startRef.current(next.run);
+      if (selectedReply)
+        void started.catch(() =>
+          setReplyTo((current) => current ?? selectedReply),
+        );
       /*
        * A SEND THAT TOOK THE QUEUE WITH IT AND THEN FAILED LEAVES THE PARKED HALF HELD BY NOBODY,
        * which is the same shape the drain effect below answers, and with the same line.
@@ -392,7 +423,7 @@ export function ConversationView({
       }
       return started;
     },
-    [apply, restoreFailedRun],
+    [apply, restoreFailedRun, replyTo],
   );
 
   /**
@@ -476,146 +507,160 @@ export function ConversationView({
   }, [apply, disabled, inFlight, restoreFailedRun, busyRetry]);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-1 min-h-0">
-        {/*
-         * The commands and their names as one string, rather than the option objects.
-         *
-         * The transcript needs them only to tell a real skill chip from a message that happens to
-         * begin with a slash, and to name it; its message rows are memoised on primitives — handing them an
-         * array would give every message a new prop identity on each refetch and re-render the whole
-         * conversation to change nothing.
-         */}
-        <ChatTranscript
-          threadId={threadId}
-          busy={busy}
-          commandLabels={skillLabels(commands ?? [])}
-          {...(orbs && intro ? { intro } : {})}
-          messages={messages}
-          onRemoveQueued={(id) => {
-            apply({ id, type: "remove" });
-          }}
-          queued={queued}
-          restoring={restoring}
-          {...(stopped ? { stopped } : {})}
-          working={working}
-        />
-      </div>
-      {/*
-       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
-       *
-       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
-       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
-       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
-       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
-       * before, and below that it stands 16px off each edge.
-       *
-       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
-       * window the sidebar takes, and a container query would need `@container` on an ancestor of
-       * the composer, which is layout containment: it would become the containing block for the @
-       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
-       */}
-      <div
-        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
-        data-slot="composer-column"
-      >
-        {notice}
-        {/*
-         * Notifications are offered once this person has started a task: a Bot is working for them,
-         * so what a notification is for is plain. Read off the transcript, so the conversation a
-         * first message from home opens offers it too.
-         */}
-        {messages.some((message) => message.role === "user") ? (
-          <NotifyPrompt />
-        ) : null}
-        {/*
-         * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
-         *
-         * It is tucked under the composer (`-mb-4`, no bottom border), so anything drawn between the
-         * two lands on its open bottom edge. The starter tasks and the notifications offer used to
-         * sit there, and the question the Bot was waiting on read as cut off behind them.
-         *
-         * The starter tasks give way rather than move above the drawer: while the Bot waits on an
-         * answer they cannot start anything (`channel-chat.tsx` disables them), they look the same
-         * disabled, and in the Desktop's default window the room belongs to the question. They come
-         * back when it is answered or dismissed.
-         */}
-        {attached ? (
-          <div
-            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
-            data-slot="composer-drawer"
-          >
-            {attached}
-          </div>
-        ) : (
-          starterSuggestions
-        )}
-        <Composer
-          modelPicker={modelPicker}
-          {...(routine ? { routine } : {})}
-          agents={agents}
-          autoFocus={autoFocus}
-          {...(channelId ? { channelId } : {})}
-          holdsFilesUntilSent={holdsFilesUntilSent}
-          {...(attachmentLimits ? { attachmentLimits } : {})}
-          {...(commands ? { commands } : {})}
-          className="relative w-full mt-auto"
-          compact
-          voiceCall={voiceCall}
-          disabled={disabled}
-          {...(onSendHeld ? { onSendHeld } : {})}
-          droppedAttachments={droppedAttachments}
-          onQueue={
-            queueWhileBusy
-              ? (draft) => {
-                  submit(draft, true);
-                }
-              : undefined
-          }
-          onStop={onStop}
-          onSubmit={(draft) => submit(draft, false)}
-          /*
-           * `inFlight` rather than the `pending` this was given. A drained turn is started from the
-           * effect above rather than from the composer, so the composer's own send tracking knows
-           * nothing about it — told only `pending`, it would believe the conversation was idle for
-           * as long as the drained run took to start, and the next thing typed would open a third
-           * turn instead of joining the queue.
-           */
-          pending={inFlight}
-          /*
-           * THE HALF OF THE PER-MESSAGE CAP THE COMPOSER CANNOT SEE.
+    <ReplyChainProvider
+      messages={messages}
+      assistant={assistant}
+      resolveBotName={resolveBotName}
+      onReply={chooseReply}
+    >
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0">
+          {/*
+           * The commands and their names as one string, rather than the option objects.
            *
-           * The composer counts what is on its own strip, and parking a message empties it. The
-           * server counts every row this person has staged in that composer's `uploadGroup` that
-           * has not been sent, and parking a message changes nothing about those: `attachedAt` is
-           * written when the message really goes. So without this the two disagree by exactly the
-           * size of the queue, and a ninth pick behind eight parked files is accepted here and
-           * refused on arrival — a 409 the person was given no chance to avoid, phrased as a count
-           * against a strip they can see is empty.
+           * The transcript needs them only to tell a real skill chip from a message that happens to
+           * begin with a slash, and to name it; its message rows are memoised on primitives — handing them an
+           * array would give every message a new prop identity on each refetch and re-render the whole
+           * conversation to change nothing.
+           */}
+          <ChatTranscript
+            onReply={disabled ? undefined : chooseReply}
+            threadId={threadId}
+            busy={busy}
+            commandLabels={skillLabels(commands ?? [])}
+            {...(orbs && intro ? { intro } : {})}
+            messages={messages}
+            onRemoveQueued={(id) => {
+              apply({ id, type: "remove" });
+            }}
+            queued={queued}
+            restoring={restoring}
+            {...(stopped ? { stopped } : {})}
+            working={working}
+          />
+        </div>
+        {/*
+         * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
+         *
+         * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
+         * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
+         * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
+         * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
+         * before, and below that it stands 16px off each edge.
+         *
+         * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
+         * window the sidebar takes, and a container query would need `@container` on an ancestor of
+         * the composer, which is layout containment: it would become the containing block for the @
+         * menu, which is `position: fixed` at the caret (see `DictationSurface`).
+         */}
+        <div
+          className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
+          data-slot="composer-column"
+          ref={composerColumn}
+        >
+          {notice}
+          {/*
+           * Notifications are offered once this person has started a task: a Bot is working for them,
+           * so what a notification is for is plain. Read off the transcript, so the conversation a
+           * first message from home opens offers it too.
+           */}
+          {messages.some((message) => message.role === "user") ? (
+            <NotifyPrompt />
+          ) : null}
+          {/*
+           * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
            *
-           * READ OFF THE QUEUE ON EVERY RENDER RATHER THAN ACCUMULATED, which is what makes it fall
-           * as well as rise. A running total would be right until somebody took a parked message
-           * back, and then it would hold slots that nothing occupies — the same refusal, now issued
-           * by their own client with no round trip to blame it on.
+           * It is tucked under the composer (`-mb-4`, no bottom border), so anything drawn between the
+           * two lands on its open bottom edge. The starter tasks and the notifications offer used to
+           * sit there, and the question the Bot was waiting on read as cut off behind them.
            *
-           * `queued` and not `queuedRef`: this is a render, so the state is the value React is
-           * drawing from, and the ref exists for the callbacks that cannot wait a render. They
-           * agree here anyway — `apply` writes both on the same line.
-           */
-          queuedAttachmentCount={queued.reduce(
-            (total, message) => total + message.attachments.length,
-            0,
+           * The starter tasks give way rather than move above the drawer: while the Bot waits on an
+           * answer they cannot start anything (`channel-chat.tsx` disables them), they look the same
+           * disabled, and in the Desktop's default window the room belongs to the question. They come
+           * back when it is answered or dismissed.
+           */}
+          {attached ? (
+            <div
+              className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+              data-slot="composer-drawer"
+            >
+              {attached}
+            </div>
+          ) : (
+            starterSuggestions
           )}
-          /*
-           * The caller's answer, not `inFlight`. `running` is true from the instant `start` is
-           * entered, which is before `onSubmit` has done anything at all, so a Stop drawn from
-           * `inFlight` appears while there is still nothing to stop — the press is swallowed and the
-           * message goes anyway.
-           */
-          stoppable={stoppable ?? pending}
-        />
+          {replyTo ? (
+            <div className="mb-2">
+              <ReplyQuote reply={replyTo} onCancel={() => setReplyTo(null)} />
+            </div>
+          ) : null}
+          <Composer
+            modelPicker={modelPicker}
+            {...(routine ? { routine } : {})}
+            agents={agents}
+            autoFocus={autoFocus}
+            {...(channelId ? { channelId } : {})}
+            holdsFilesUntilSent={holdsFilesUntilSent}
+            {...(commands ? { commands } : {})}
+            className="relative w-full mt-auto"
+            compact
+            voiceCall={voiceCall}
+            disabled={disabled}
+            {...(onSendHeld ? { onSendHeld } : {})}
+            droppedAttachments={droppedAttachments}
+            {...(attachmentLimits ? { attachmentLimits } : {})}
+            onQueue={
+              queueWhileBusy
+                ? (draft) => {
+                    submit(draft, true);
+                  }
+                : undefined
+            }
+            onStop={onStop}
+            onSubmit={(draft) => submit(draft, false)}
+            /*
+             * `inFlight` rather than the `pending` this was given. A drained turn is started from the
+             * effect above rather than from the composer, so the composer's own send tracking knows
+             * nothing about it — told only `pending`, it would believe the conversation was idle for
+             * as long as the drained run took to start, and the next thing typed would open a third
+             * turn instead of joining the queue.
+             */
+            pending={inFlight}
+            /*
+             * THE HALF OF THE PER-MESSAGE CAP THE COMPOSER CANNOT SEE.
+             *
+             * The composer counts what is on its own strip, and parking a message empties it. The
+             * server counts every row this person has staged in that composer's `uploadGroup` that
+             * has not been sent, and parking a message changes nothing about those: `attachedAt` is
+             * written when the message really goes. So without this the two disagree by exactly the
+             * size of the queue, and a ninth pick behind eight parked files is accepted here and
+             * refused on arrival — a 409 the person was given no chance to avoid, phrased as a count
+             * against a strip they can see is empty.
+             *
+             * READ OFF THE QUEUE ON EVERY RENDER RATHER THAN ACCUMULATED, which is what makes it fall
+             * as well as rise. A running total would be right until somebody took a parked message
+             * back, and then it would hold slots that nothing occupies — the same refusal, now issued
+             * by their own client with no round trip to blame it on.
+             *
+             * `queued` and not `queuedRef`: this is a render, so the state is the value React is
+             * drawing from, and the ref exists for the callbacks that cannot wait a render. They
+             * agree here anyway — `apply` writes both on the same line.
+             */
+            queuedAttachmentCount={queued.reduce(
+              (total, message) => total + message.attachments.length,
+              0,
+            )}
+            /*
+             * The caller's answer, not `inFlight`. `running` is true from the instant `start` is
+             * entered, which is before `onSubmit` has done anything at all, so a Stop drawn from
+             * `inFlight` appears while there is still nothing to stop — the press is swallowed and the
+             * message goes anyway.
+             */
+            stoppable={stoppable ?? pending}
+          />
+        </div>
       </div>
-    </div>
+    </ReplyChainProvider>
   );
 }
 

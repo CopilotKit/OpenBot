@@ -1,12 +1,15 @@
-import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
+import {
+  DirectReplySpeaker,
+  ReplyingChatView,
+} from "@/components/channels/replying-chat-view";
+import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
-import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,7 @@ import {
 import { getBot } from "@/lib/api/generated/bots/bots";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
@@ -265,12 +269,17 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
             />
           ) : null}
           {threadId ? (
-            <CopilotChat
-              agentId={agentId}
-              messageView={{ assistantMessage: TelemetryAssistantMessage }}
-              key={`${agentId}:${threadId}`}
-              threadId={threadId}
-            />
+            <DirectReplySpeaker.Provider
+              value={{ author: name, botId: agentId }}
+            >
+              <CopilotChat
+                chatView={ReplyingChatView}
+                agentId={agentId}
+                messageView={{ assistantMessage: TelemetryAssistantMessage }}
+                key={`${agentId}:${threadId}`}
+                threadId={threadId}
+              />
+            </DirectReplySpeaker.Provider>
           ) : null}
         </div>
       </div>
