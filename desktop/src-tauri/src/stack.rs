@@ -10898,6 +10898,13 @@ fn main() {
             .map(|image| format!("{image}\t\n"))
             .collect();
         std::fs::write(root.join(".fixture-images"), others).unwrap();
+        // On a ChatGPT plan, so each release's install pulls the plan's image too
+        // (`preparation::on_chatgpt_plan`): the image a later release replaces under the same name.
+        std::fs::write(
+            root.join(".env"),
+            "CHATGPT_AUTH_FILE=/root/.langchain/chatgpt-auth.json\n",
+        )
+        .unwrap();
         lay_out_release(&root, &earlier);
         install_release(engine, &root).unwrap();
         up(engine, &root, false, &Secrets::new()).unwrap();

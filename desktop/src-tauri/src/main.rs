@@ -2435,7 +2435,7 @@ fn try_getting_own_release_ready<R: tauri::Runtime>(
     let version = update_ready::behind(&root, &upgrade::own())?;
     // The images its last install pulled say which of the release's it runs. Without them there
     // is nothing to go by, and the update pulls what it needs.
-    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let installed = preparation::images_it_runs(&root).unwrap_or_default();
     if installed.is_empty() {
         return None;
     }
@@ -2574,7 +2574,7 @@ fn try_getting_update_ready<R: tauri::Runtime>(
             }
         }
     };
-    let installed = preparation::installed_images(&root).unwrap_or_default();
+    let installed = preparation::images_it_runs(&root).unwrap_or_default();
     let engine = local_eval::node_engine();
     let node = local_eval_state::read(&root, None)
         .map(|state| openbot_desktop_lib::local_images::Node::for_stack(&engine, &state.stack));
@@ -3864,6 +3864,19 @@ async fn deployment_ready<R: tauri::Runtime>(
 ///
 /// Require completed local installation before starting an authentication container.
 fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, String), Problem> {
+    prepared_sign_in_with(root, published, |address, image| {
+        preparation::require_images(address, std::slice::from_ref(image))
+    })
+}
+
+/// [`prepared_sign_in`], with the sign-in's own image made present by `present`: required of the
+/// installation, or pulled for a sign-in whose image Install leaves to it (the ChatGPT plan's,
+/// `preparation::pull_chatgpt_plan_image`).
+fn prepared_sign_in_with(
+    root: &Path,
+    published: &str,
+    present: impl FnOnce(&engine::Address, &String) -> Result<(), Problem>,
+) -> Result<(engine::Address, String), Problem> {
     let status = engine::detect_saved(preparation::saved_engine(root));
     let address = status
         .address
@@ -3872,7 +3885,7 @@ fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, St
         .pin()?;
     preparation::require(root, None, &address)?;
     let image = sign_in_reference(root, published, deployment::reference)?;
-    preparation::require_images(&address, std::slice::from_ref(&image))?;
+    present(&address, &image)?;
     Ok((address, image))
 }
 
@@ -4820,6 +4833,24 @@ async fn start_stack_inner<R: tauri::Runtime>(
             .as_ref()
             .and_then(|picked| picked.installed_port())
             .is_some();
+        // The one image Install may not have: the ChatGPT plan's, which it pulls only for an
+        // installation already on that plan. A saved plan returned to after another sign-in finds
+        // it missing, and `up` never pulls.
+        if stack::selected_services(&root, installed_harness)
+            .contains(&openbot_desktop_lib::plan::CHATGPT_PLAN_SERVICE)
+        {
+            let image =
+                deployment::reference(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)
+                    .map_err(Problem::from)?;
+            if !preparation::image_present(&found, &image)? {
+                report_running_plain(
+                    &app,
+                    "services",
+                    "Downloading what your ChatGPT plan needs.",
+                );
+                preparation::pull_chatgpt_plan_image(&found, &root)?;
+            }
+        }
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
@@ -9598,8 +9629,13 @@ async fn begin_chatgpt_sign_in(
     #[cfg(target_os = "linux")]
     let service_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        let (address, image) =
-            prepared_sign_in(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)?;
+        // Install pulls this image only for an installation already on a ChatGPT plan, so a person
+        // signing in to one for the first time gets it here, while the screen says it is preparing.
+        let (address, image) = prepared_sign_in_with(
+            &root,
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+            |address, _| preparation::pull_chatgpt_plan_image(address, &root).map(drop),
+        )?;
         #[cfg(target_os = "linux")]
         {
             let shell = service_app.state::<Shell>();

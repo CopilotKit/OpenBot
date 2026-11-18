@@ -1152,9 +1152,16 @@ fn the_image_list_waits_for_openbots_own_compose_and_asks_it() {
         images.contains(&"pgvector/pgvector:pg17".to_string()),
         "{images:?}"
     );
-    // The two sign-in images, from the release's image list.
+    // The Claude sign-in's image, from the release's image list. Not the ChatGPT plan's: it runs
+    // only on that plan, and nobody has signed in yet.
     assert!(
         images
+            .iter()
+            .any(|image| image.contains("openbot-agent-claude-sdk@")),
+        "{images:?}"
+    );
+    assert!(
+        !images
             .iter()
             .any(|image| image.contains("openbot-agent-langgraph-agui@")),
         "{images:?}"

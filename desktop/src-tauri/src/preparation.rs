@@ -90,6 +90,69 @@ pub fn installed_images(root: &Path) -> Option<Vec<String>> {
     Some(record.images)
 }
 
+/**
+The images of [`installed_images`] that the installation in `root` still runs: all of them but the
+ChatGPT plan's model service, which runs only on a ChatGPT plan ([`on_chatgpt_plan`]).
+
+Every install pulled that image while the Python LangGraph image was the default Bot, and while it
+was pulled for every sign-in, so an update that went by the record alone would download the next
+release's copy for installations that never run it. Matched by repository, as `update_ready` matches
+the next release's images.
+*/
+pub fn images_it_runs(root: &Path) -> Option<Vec<String>> {
+    let images = installed_images(root)?;
+    if on_chatgpt_plan(root) {
+        return Some(images);
+    }
+    let repository = |image: &str| {
+        crate::registry::parse_reference(image).map(|found| (found.host, found.repository))
+    };
+    let Some(plan) = deployment::reference(root, crate::plan::CHATGPT_SIGN_IN_IMAGE)
+        .ok()
+        .and_then(|plan| repository(&plan))
+    else {
+        return Some(images);
+    };
+    Some(
+        images
+            .into_iter()
+            .filter(|image| repository(image).as_ref() != Some(&plan))
+            .collect(),
+    )
+}
+
+/**
+Whether the installation in `root` is on a ChatGPT plan: the one sign-in that runs the Python
+LangGraph image, as the plan's model service beside its Bot (`plan::CHATGPT_PLAN_SERVICE`).
+
+Read from the `.env` the last Start wrote. A ChatGPT plan names the service's address there. An
+installation from before the plan ran as a service names only the plan's token store, until the
+Start after its update writes the address. Every other sign-in empties both.
+*/
+pub fn on_chatgpt_plan(root: &Path) -> bool {
+    crate::env::already_set(
+        &root.join(".env"),
+        &["CHATGPT_PLAN_HARNESS_URL", "CHATGPT_AUTH_FILE"],
+    )
+    .values()
+    .any(|value| !value.trim().is_empty())
+}
+
+/**
+The ChatGPT plan's image, from the release laid out in `release`, pulled into `address` when it is
+not there yet.
+
+Install pulls it only for an installation already on a ChatGPT plan, so the ChatGPT sign-in, which
+runs in this image, pulls it first, and so does a Start that raises the plan's service and does not
+find it (a saved plan an installation returns to after it was signed in with something else).
+*/
+pub fn pull_chatgpt_plan_image(address: &Address, release: &Path) -> Result<String, Problem> {
+    let image = deployment::reference(release, crate::plan::CHATGPT_SIGN_IN_IMAGE)
+        .map_err(Problem::from)?;
+    crate::pull_metrics::pull_image(address, &image, |_| {}, |_| {})?;
+    Ok(image)
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedEngine {
     engine: Engine,
@@ -318,8 +381,9 @@ fn require_with(
 }
 
 /// Every image Install pulls for the release laid out in `release`, run as `root`'s project: the
-/// Compose services desktop runs with the picked Bot, the migration, and the two sign-in images,
-/// and never the agents this installation does not run or the all-in-one image desktop never runs.
+/// Compose services desktop runs with the picked Bot, the migration, the Claude sign-in's image,
+/// and the ChatGPT plan's image only on a ChatGPT plan ([`on_chatgpt_plan`]); never the agents this
+/// installation does not run or the all-in-one image desktop never runs.
 pub fn installation_pull_set(
     address: &Address,
     root: &Path,
@@ -350,11 +414,14 @@ pub fn installation_pull_set_by(
         .and_then(|picked| picked.installed_port())
         .is_some();
     let mut images = stack::installation_images_by(compose(&settings), root, release, installed)?;
-    for published in [
-        crate::plan::SIGN_IN_IMAGE,
-        crate::plan::CHATGPT_SIGN_IN_IMAGE,
-    ] {
-        images.push(deployment::reference(release, published)?);
+    images.push(deployment::reference(release, crate::plan::SIGN_IN_IMAGE)?);
+    // The ChatGPT plan's image runs only on a ChatGPT plan, so it is pulled only for one. A first
+    // install has no sign-in yet: the ChatGPT sign-in pulls it (`pull_chatgpt_plan_image`).
+    if on_chatgpt_plan(root) {
+        images.push(deployment::reference(
+            release,
+            crate::plan::CHATGPT_SIGN_IN_IMAGE,
+        )?);
     }
     images.sort();
     images.dedup();
@@ -374,6 +441,9 @@ pub fn image_settings(
     }
     Ok(settings)
 }
+
+#[cfg(test)]
+mod chatgpt_plan_image_tests;
 
 #[cfg(test)]
 mod tests {
