@@ -1401,6 +1401,56 @@ fn pass_the_foreground_on() {
     }
 }
 
+/**
+The OpenBot already running, as the single-instance plugin finds it: the plugin's hidden window,
+whose class and title are the app's identifier followed by `-sic` and `-siw`
+(`tauri-plugin-single-instance`, `platform_impl/windows.rs`). That window's process, or None when
+no OpenBot runs.
+*/
+#[cfg(windows)]
+fn running_openbot(identifier: &str) -> Option<u32> {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
+    let class = HSTRING::from(format!("{identifier}-sic"));
+    let title = HSTRING::from(format!("{identifier}-siw"));
+    // SAFETY: two null-terminated strings that outlive the call.
+    let window = unsafe { FindWindowW(&class, &title) }.ok()?;
+    let mut process = 0u32;
+    // SAFETY: `window` was just found, and `process` outlives the call.
+    unsafe { GetWindowThreadProcessId(window, Some(&mut process)) };
+    (process != 0).then_some(process)
+}
+
+/**
+Windows, as a launch starts and before the single-instance plugin hands it to an OpenBot already
+running and ends it: this launch's right to the foreground, passed to that OpenBot.
+
+Windows lets a process set the foreground window only if, among others, it "was started by the
+foreground process" or "received the last input event" ("SetForegroundWindow function", Remarks,
+Microsoft Learn). A launch from the Start menu, the taskbar or the desktop was; the OpenBot it is
+handed to was not. When that OpenBot was quitting, with the tray's flyout still open from its Quit,
+it could neither bring its Shutting down screen forward nor give the OpenBot it opens next the
+right, and that one opened behind with its taskbar button flashing.
+
+"A process that can set the foreground window can enable another process to set the foreground
+window by calling AllowSetForegroundWindow", until "the user generates input, unless the input is
+directed at that process" ("AllowSetForegroundWindow function", Microsoft Learn). So the OpenBot
+that gets the launch can come forward with it (`kept_for_after_quit`, `restore_window_on`), and,
+once in front, start the next OpenBot with the right (`open_again_after_quit`). A launch Windows
+gave no right passes none, and that OpenBot flashes its taskbar button as before. Nothing when no
+OpenBot runs.
+*/
+#[cfg(windows)]
+fn pass_the_launch_on(identifier: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    let Some(running) = running_openbot(identifier).filter(|&id| id != std::process::id()) else {
+        return;
+    };
+    // SAFETY: takes no pointers; it only widens which process may set the foreground window. It
+    // fails when this launch has no right to pass, and the running OpenBot then flashes instead.
+    let _ = unsafe { AllowSetForegroundWindow(running) };
+}
+
 /// The person said yes to pausing their Podman while OpenBot runs. See `own_machine`. False when
 /// nothing was waiting for it.
 #[tauri::command]
@@ -13202,6 +13252,10 @@ fn main() {
         );
         context
     };
+    // Before the single-instance plugin hands this launch to an OpenBot already running and ends
+    // it: this launch's right to the foreground, handed on with it (`pass_the_launch_on`).
+    #[cfg(windows)]
+    pass_the_launch_on(&context.config().identifier);
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
         // second stack. Without this both copies bind the same ports and the loser reports a
@@ -14737,6 +14791,26 @@ mod tests {
         assert!(!opened_after_quit(&[std::ffi::OsString::from(
             OPENED_AFTER_QUIT
         )]));
+    }
+
+    /// A launch hands its right to the foreground to the OpenBot already running
+    /// (`pass_the_launch_on`), which it finds the way the single-instance plugin does: by the
+    /// plugin's own hidden window. With the real plugin registered, that lookup must name this
+    /// process, and before it, nothing.
+    #[cfg(windows)]
+    #[test]
+    fn a_launch_finds_the_running_openbot_by_the_single_instance_plugins_window() {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        let identifier = format!("ai.openbot.launch-hand-off-test-{}", std::process::id());
+        context.config_mut().identifier = identifier.clone();
+        assert_eq!(running_openbot(&identifier), None);
+        let _app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_single_instance::init(|_, _, _| {}))
+            .build(context)
+            .unwrap();
+        assert_eq!(running_openbot(&identifier), Some(std::process::id()));
+        // A launch never passes its right to itself.
+        pass_the_launch_on(&identifier);
     }
 
     /// Quit with no launch exits as it always has; a launch during an update's restart is left to
