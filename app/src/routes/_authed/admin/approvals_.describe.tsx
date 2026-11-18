@@ -91,8 +91,8 @@ function DescribeTeamRulesPage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
-      title="Describe team rules"
+      description="Say what Bots should do before an action, and your model writes the organization rules. Nothing changes until you save them."
+      title="Describe organization rules"
     >
       <form
         noValidate
@@ -187,10 +187,10 @@ function DescribeTeamRulesPage() {
 function DescribeTeamRulesPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say what Bots should do before an action, and your model writes the team rules. Nothing changes until you save them."
+      description="Say what Bots should do before an action, and your model writes the organization rules. Nothing changes until you save them."
       backButton={BACK}
       more={<YourOwnApprovals />}
-      title="Describe team rules"
+      title="Describe organization rules"
     >
       <DescribeTeamRulesPage />
     </TeamPage>

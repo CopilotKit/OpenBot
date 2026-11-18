@@ -1,10 +1,22 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { createBot, deleteBot, updateBot } from "@/lib/api/generated/bots/bots";
+import {
+  createBot,
+  deleteBot,
+  duplicateBot,
+  hideBot,
+  issueBotCallbackToken,
+  pinBot,
+  revokeBotCallbackToken,
+  unhideBot,
+  unpinBot,
+  updateBot,
+} from "@/lib/api/generated/bots/bots";
 import type { CreateBotRequest } from "@/lib/api/generated/model";
-import { idempotencyKey, ORGANIZATION_ID } from "@/lib/api/request";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { botAgentKeys } from "@/lib/bot-agents/queries";
 import { channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
-import { type AgentProfile, agentApiPath, agentKeys } from "./queries";
+import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
+import { type AgentProfile, agentKeys } from "./queries";
 
 /**
  * What a Bot is created or changed with: api/openapi.yaml's `CreateBotRequest`, generated from the
@@ -30,7 +42,7 @@ export function createAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (input: AgentInput): Promise<AgentProfile> =>
       (
-        await createBot(ORGANIZATION_ID, input, once(), {
+        await createBot(organizationId(), input, once(), {
           fallback: FALLBACK,
         })
       ).bot,
@@ -46,7 +58,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
     }): Promise<AgentProfile> =>
       (
         await updateBot(
-          ORGANIZATION_ID,
+          organizationId(),
           variables.agentId,
           variables.input,
           once(),
@@ -64,11 +76,12 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
 
 export function duplicateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (agentId: string): Promise<AgentProfile> =>
-      client(`${agentApiPath(agentId)}/duplicate`, "agent", {
-        method: "POST",
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (agentId: string): Promise<AgentProfile> =>
+      (
+        await duplicateBot(organizationId(), agentId, once(), {
+          fallback: FALLBACK,
+        })
+      ).bot,
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
@@ -76,10 +89,10 @@ export function duplicateAgentMutationOptions(queryClient: QueryClient) {
 export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; hidden: boolean }) => {
-      await client(
-        `${agentApiPath(variables.agentId)}/${variables.hidden ? "hide" : "unhide"}`,
-        { method: "POST", fallback: FALLBACK },
-      );
+      const write = variables.hidden ? hideBot : unhideBot;
+      await write(organizationId(), variables.agentId, once(), {
+        fallback: FALLBACK,
+      });
     },
     onSuccess: () => invalidateAgents(queryClient),
   });
@@ -88,19 +101,8 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
 export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; pinned: boolean }) => {
-      await client(
-        `${agentApiPath(variables.agentId)}/${variables.pinned ? "pin" : "unpin"}`,
-        { method: "POST", fallback: FALLBACK },
-      );
-    },
-    onSuccess: () => invalidateAgents(queryClient),
-  });
-}
-
-export function deleteAgentMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (agentId: string) => {
-      await deleteBot(ORGANIZATION_ID, agentId, once(), {
+      const write = variables.pinned ? pinBot : unpinBot;
+      await write(organizationId(), variables.agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -108,30 +110,70 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** Every Bot delete, so what reads a Bot can tell it is being deleted from this browser. */
+export const deleteAgentMutationKey = [...agentKeys.all, "delete"] as const;
+
 /**
- * Issue this coworker a credential for calling tools back, and hand it over once.
+ * Delete a Bot. What was read of it (the Bot itself, its handoffs) stops existing with it, so it is
+ * removed rather than read again: a read would ask for a Bot that is gone and answer 404, which the
+ * Bot's page, still up while the list of Bots is read again, used to do on its way back to Bots.
+ * Every other Bot read is refreshed.
+ */
+export function deleteAgentMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationKey: deleteAgentMutationKey,
+    mutationFn: async (agentId: string) => {
+      await deleteBot(organizationId(), agentId, once(), {
+        fallback: FALLBACK,
+      });
+    },
+    onSuccess: async (_result, agentId) => {
+      // Each of one Bot's reads is keyed ["agents", <read>, <Bot id>].
+      const ofThisBot = {
+        queryKey: agentKeys.all,
+        predicate: (query: { queryKey: readonly unknown[] }) =>
+          query.queryKey[2] === agentId,
+      };
+      // A read of it already on its way is dropped too, not left to land in the cache.
+      await queryClient.cancelQueries(ofThisBot);
+      queryClient.removeQueries(ofThisBot);
+      // How it worked goes with it, and the agents it used now count one Bot fewer.
+      const itsDelegation = { queryKey: botAgentKeys.delegation(agentId) };
+      await queryClient.cancelQueries(itsDelegation);
+      queryClient.removeQueries(itsDelegation);
+      void queryClient.invalidateQueries({ queryKey: botAgentKeys.list() });
+      return queryClient.invalidateQueries({
+        queryKey: agentKeys.all,
+        predicate: (query) => query.queryKey[2] !== agentId,
+      });
+    },
+  });
+}
+
+/**
+ * Issue this Bot a credential for calling tools back, and hand it over once.
  *
  * The token is in this response and nowhere else, ever again, so the caller has to show it to the
- * person immediately. Calling this on a coworker that already has one rotates it, which is how a
- * leaked token is retired.
+ * person immediately. Calling this on a Bot that already has one rotates it, which is how a leaked
+ * token is retired.
  */
 export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (agentId: string): Promise<string> =>
-      client(`${agentApiPath(agentId)}/callback-token`, "token", {
-        method: "POST",
-        fallback: FALLBACK,
-      }),
+    mutationFn: async (agentId: string): Promise<string> =>
+      (
+        await issueBotCallbackToken(organizationId(), agentId, once(), {
+          fallback: FALLBACK,
+        })
+      ).token,
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
 
-/** Take the credential away. The coworker may still talk; it may not reach anything outside a chat. */
+/** Take the credential away. The Bot may still talk; it may not reach anything outside a chat. */
 export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await client(`${agentApiPath(agentId)}/callback-token`, {
-        method: "DELETE",
+      await revokeBotCallbackToken(organizationId(), agentId, once(), {
         fallback: FALLBACK,
       });
     },
@@ -142,9 +184,9 @@ export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
 /**
  * Whether one Bot may hand work to another.
  *
- * The same `plugin_grants` write every other grant makes, with `kind: "bot"`, so the audit row and
- * the refusals are the ones already in place: an administrator only, never a Bot on itself, and
- * never onto a Bot that does not exist.
+ * The same grant every other grant is (replaceBotGrant, deleteBotGrant), addressed `bot:<Bot id>`,
+ * so the audit row and the refusals are the ones already in place: an administrator only, never a
+ * Bot on itself, and never onto a Bot that does not exist.
  *
  * DIRECTIONAL, and the two ids are easy to swap: `agentId` is the Bot doing the asking and `ref` is
  * the Bot it may reach. Granted the other way round it reads as working and hands over nothing.
@@ -158,18 +200,16 @@ export function setHandoffGrantMutationOptions(queryClient: QueryClient) {
       ref: string;
       granted: boolean;
     }) => {
+      const grant = {
+        kind: "bot" as const,
+        ref: variables.ref,
+        agentId: variables.agentId,
+      };
       if (variables.granted) {
-        await client("/api/plugins/grants", {
-          method: "POST",
-          body: { kind: "bot", ref: variables.ref, agentId: variables.agentId },
-          fallback: FALLBACK,
-        });
+        await grantPlugin(grant);
         return;
       }
-      await client(
-        `/api/plugins/grants?kind=bot&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
-        { method: "DELETE", fallback: FALLBACK },
-      );
+      await revokePlugin(grant);
     },
     onSuccess: () => invalidateAgents(queryClient),
   });

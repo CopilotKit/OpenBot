@@ -1,56 +1,23 @@
 import { queryOptions } from "@tanstack/react-query";
+import { replayApprovalRules } from "@/lib/api/generated/approval-rules/approval-rules";
+import type {
+  ApprovalRuleDraftReplayChange,
+  ApprovalRuleDraftReplayReport,
+} from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { ApprovalRuleInput } from "@/lib/approvals";
-import { client } from "@/lib/client";
 import type { RuleRowsCheck } from "./translate";
 
-type Behaviour = "allow" | "ask" | "hand_off" | "deny";
+/**
+ * One action the gate already decided that candidate rules are about: who the Bot acted for, what
+ * started the run, what it was aimed at, what happened (`was`, and `wasSource` for what decided it),
+ * what would happen with the rules (`would`), and what the person answered when they were asked.
+ * `change` is `fixed` for an action whose verdict no rule changes, listed as unchanged.
+ */
+export type BacktestChange = ApprovalRuleDraftReplayChange;
 
-/** One action the gate already decided that candidate rules are about. */
-export type BacktestChange = {
-  id: string;
-  createdAt: string;
-  /** The person the Bot acted for. */
-  ownerUserId: string | null;
-  /** What started the run: a person, a routine, a handoff. */
-  initiator: { kind: string; id: string | null };
-  bot: string;
-  toolRef: string;
-  effect: string;
-  scope: string;
-  /** The file, page, command or folder it was aimed at, as its audit row names it. */
-  subject: { file?: string; page?: string; command?: string; folder?: string };
-  was: Behaviour;
-  /** Which layer decided what happened: `safety`, `team_rule`, `personal_rule`, `default`… */
-  wasSource: string;
-  would: Behaviour;
-  /** `fixed` is an action whose verdict no rule changes, listed as unchanged. */
-  change: "removes_ask" | "adds_ask" | "stricter" | "looser" | "fixed";
-  /** What the person answered when they were asked. */
-  person:
-    | "allow_once"
-    | "allow_conversation"
-    | "allow_always"
-    | "deny"
-    | "handled"
-    | "waiting"
-    | "withdrawn"
-    | null;
-  /** Which rule decided it, counted from 1. */
-  rule: number;
-  reason: string;
-};
-
-export type ApprovalBacktest = {
-  scanned: number;
-  matched: number;
-  changed: number;
-  removedAsks: number;
-  removedDenied: number;
-  addedAsks: number;
-  fixed: number;
-  /** Changed first, denied asks first of all, then unchanged ones. Capped; the counts are not. */
-  changes: BacktestChange[];
-};
+/** Changed first, denied asks first of all, then unchanged ones. `changes` is capped; the counts are not. */
+export type ApprovalBacktest = ApprovalRuleDraftReplayReport;
 
 export type ApprovalRulesPreview = {
   /** The rules as they stand now, checked against this OpenBot's tools and Bots. */
@@ -77,14 +44,16 @@ export function approvalRulesBacktestQueryOptions(
 ) {
   return queryOptions({
     queryKey: approvalRuleKeys.backtest(rules),
-    queryFn: async (): Promise<ApprovalRulesPreview> =>
-      (
-        await client("/api/approvals/team/rules/backtest", {
-          method: "POST",
-          body: { rules },
+    queryFn: async ({ signal }): Promise<ApprovalRulesPreview> =>
+      (await replayApprovalRules(
+        organizationId(),
+        { rules: [...rules] },
+        { "Idempotency-Key": idempotencyKey() },
+        {
+          signal,
           fallback: "The rules could not be tested against history.",
-        })
-      ).json(),
+        },
+      )) as ApprovalRulesPreview,
     retry: false,
   });
 }

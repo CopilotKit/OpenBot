@@ -16,7 +16,12 @@ import {
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
 import type { ComposerDraft } from "@/components/channels/composer/draft";
+import { attachmentPath, problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * WHAT HAPPENS TO A STAGED FILE AFTER IT IS STAGED: the send it rides on, and the Remove that
@@ -60,6 +65,8 @@ beforeEach(() => {
   holdUpload = false;
   deleteFails = false;
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     if (init?.method === "DELETE") {
       deletes.push(path);
       if (deleteFails) {
@@ -80,6 +87,7 @@ beforeEach(() => {
         id: "stored-id",
         name: file.name,
         mimeType: "text/plain",
+        sizeBytes: file.size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -255,7 +263,7 @@ test("removing a staged attachment gives its row back to the server", async () =
 
   // The id the server stored it under — `metadata.attachmentId` — not the client-side placeholder
   // id the strip keys its chips on.
-  await waitFor(() => expect(deletes).toEqual(["/api/attachments/stored-id"]));
+  await waitFor(() => expect(deletes).toEqual([attachmentPath("stored-id")]));
   expect(queryByLabelText("Remove notes.txt")).toBeNull();
 });
 
@@ -312,7 +320,7 @@ test("a delete that fails still takes the chip off the strip", async () => {
   // Best-effort, and the person asked for it gone: the removal is not held open by the request,
   // and the sweeper is the backstop for the row this one did not reclaim.
   expect(queryByLabelText("Remove notes.txt")).toBeNull();
-  await waitFor(() => expect(deletes).toEqual(["/api/attachments/stored-id"]));
+  await waitFor(() => expect(deletes).toEqual([attachmentPath("stored-id")]));
 });
 
 test("a refusal is dismissible, and a send clears it", async () => {

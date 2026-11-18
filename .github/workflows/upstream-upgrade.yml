@@ -35,22 +35,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-    # The same database the CI `test` job has, because the default checks are that job's steps and
-    # the suite includes real database tests. pgvector because the knowledge schema uses it.
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_DB: openbot_test
-          POSTGRES_USER: openbot
-          POSTGRES_PASSWORD: openbot
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U openbot -d openbot_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     outputs:
       status: ${{ steps.status.outputs.status }}
       baseline: ${{ steps.baseline.outputs.baseline }}
@@ -62,8 +46,6 @@ jobs:
       # `ci` runs the candidate's own CI `static` and `test` job steps, as CI runs them.
       UPGRADE_CHECKS: ${{ vars.OPENBOT_UPGRADE_CHECKS || 'ci' }}
       UPGRADE_BRANCH: upgrade/upstream-${{ github.run_id }}
-      DATABASE_URL: postgres://openbot:openbot@127.0.0.1:5432/openbot_test
-      TEST_DATABASE_URL: postgres://openbot:openbot@127.0.0.1:5432/openbot_test
     steps:
       - name: Set isolated candidate path
         run: |

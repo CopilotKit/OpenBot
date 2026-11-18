@@ -80,7 +80,7 @@ function RecordedActions() {
   if (actions.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load recorded actions. Reload the page.
+        Couldn't load recorded actions. Try again in a moment.
       </p>
     );
   if (actions.data.length === 0)

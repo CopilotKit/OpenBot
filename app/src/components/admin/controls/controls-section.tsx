@@ -21,7 +21,7 @@ export type Controls = {
     key: K,
     value: EnterpriseSettings[K],
   ) => void;
-  /** At the organization's scope. Roles and groups are set in the overrides dialog. */
+  /** At the organization's scope. Roles and teams are set in the overrides dialog. */
   setCapability: (capability: CapabilityKey, allowed: boolean) => void;
   saving: boolean;
 };
@@ -82,7 +82,7 @@ export function ControlsSection({
     return (
       <PageSection title={title}>
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Reload the page.
+          Couldn't load these settings. Try again in a moment.
         </p>
       </PageSection>
     );

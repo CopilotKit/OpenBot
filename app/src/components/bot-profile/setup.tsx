@@ -1,5 +1,7 @@
+import { OPENBOT_HARNESS_NAME } from "@openbot/shared/harnesses";
 import {
   IconChevronRight,
+  IconCpu,
   IconDeviceDesktop,
   IconEye,
   IconId,
@@ -58,10 +60,7 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  type AgentProfile,
-  agentCapabilitiesQueryOptions,
-} from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/agents/queries";
 import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -311,11 +310,11 @@ function IsolatedRow({
   agent: AgentProfile;
   onSave: (isolated: boolean) => Promise<unknown>;
 }) {
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const available = capabilities?.isolationAvailable ?? false;
+  const available = capabilities?.isolatedBots ?? false;
   const allowed = mine?.capabilities.isolatedComputers !== false;
   const isPublic = agent.visibility === "public";
   // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.
@@ -490,10 +489,16 @@ function EditTextDialog({
 
 /**
  * Where it runs. A built-in Bot runs on the deployment's own Bot, whose process already holds the
- * deployment's tool credential, so there is nothing to show but that sentence.
+ * deployment's tool credential, so there is nothing to connect. When it runs on an engine other
+ * than OpenBot's own agent (a Bot made from New Bot runs on LangGraph (TypeScript)), the Bot API
+ * names it as the Bot's framework, and a row under Built in says so.
  */
 function ConnectionSection({ agent }: { agent: AgentProfile }) {
   const builtIn = !agent.endpoint || agent.builtIn;
+  const engine =
+    builtIn && agent.framework && agent.framework !== OPENBOT_HARNESS_NAME
+      ? agent.framework
+      : undefined;
   return (
     <PageSection title="Connection">
       <PageRows>
@@ -514,6 +519,20 @@ function ConnectionSection({ agent }: { agent: AgentProfile }) {
             </ItemDescription>
           </ItemContent>
         </Item>
+        {engine ? (
+          <>
+            <Separator />
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconCpu />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Runs on</ItemTitle>
+                <ItemDescription>{engine}</ItemDescription>
+              </ItemContent>
+            </Item>
+          </>
+        ) : null}
       </PageRows>
       {!builtIn && agent.canManage ? (
         <CallbackTokenPanel

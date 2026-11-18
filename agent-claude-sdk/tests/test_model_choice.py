@@ -80,6 +80,26 @@ def test_without_a_choice_claude_code_keeps_its_own_model(model_only, props):
     asyncio.run(adapter.shutdown())
 
 
+@pytest.mark.parametrize("model_only", [True, False])
+def test_a_run_the_server_retries_itself_starts_claude_code_with_no_retries_of_its_own(model_only):
+    adapter = OpenBotClaudeAgentAdapter(name="choice", model_only=model_only)
+    options = adapter.build_options(run_input({"openbotSendOnce": True}), "thread")
+
+    # What the SDK lays over the process's environment when it starts Claude Code.
+    assert options.env["CLAUDE_CODE_MAX_RETRIES"] == "0"
+    asyncio.run(adapter.shutdown())
+
+
+@pytest.mark.parametrize("model_only", [True, False])
+@pytest.mark.parametrize("props", [{}, {"openbotSendOnce": False}, {"openbotSendOnce": "true"}])
+def test_any_other_run_keeps_claude_codes_own_retries(model_only, props):
+    adapter = OpenBotClaudeAgentAdapter(name="choice", model_only=model_only)
+    options = adapter.build_options(run_input(props), "thread")
+
+    assert "CLAUDE_CODE_MAX_RETRIES" not in options.env
+    asyncio.run(adapter.shutdown())
+
+
 def test_the_servers_choice_wins_over_a_forwarded_model():
     adapter = OpenBotClaudeAgentAdapter(name="choice")
     options = adapter.build_options(

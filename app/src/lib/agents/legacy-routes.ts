@@ -19,6 +19,18 @@ export function legacyAgentsTarget(search: { new?: boolean; agent?: string }) {
 }
 
 /**
+ * Whether an `/agents` address is an old link to a Bot or to New Bot. `/agents` on its own is the
+ * Agents page now, the list of agents Bots hand work to; only the two old search parameters still
+ * lead to the Bots.
+ */
+export function isLegacyAgentsLink(search: {
+  new?: boolean;
+  agent?: string;
+}): boolean {
+  return search.new === true || Boolean(search.agent);
+}
+
+/**
  * The pages that left the sidebar, and where their contents went. What was about one Bot is on that
  * Bot's page; what was the person's own is in Settings, or on Routines.
  */

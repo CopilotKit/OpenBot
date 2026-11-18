@@ -116,7 +116,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 
 test("the reason and failure lists in this test match the source", () => {
   expect(new Set(reasons).size).toBe(20);
-  expect(localFailures.length).toBe(18);
+  expect(localFailures.length).toBe(19);
 });
 
 test("Docker reasons block the runtime when the probe has no answer", () => {
@@ -127,7 +127,7 @@ test("Docker reasons block the runtime when the probe has no answer", () => {
   });
   expect(rows.runtime).toEqual({
     state: "blocked",
-    said: "The software OpenBot runs on isn't running.",
+    said: "OpenBot can't reach the software it runs on.",
     action: "retry",
   });
   expect(rows.intelligence.state).toBe("blocked");
@@ -771,4 +771,68 @@ test("every way setup, start or update can stop is said in plain words, with wha
   expect(said.flatMap(plain)).toEqual([]);
   // Each stop that the person can do something about says what: a Retry, a setting, a command.
   for (const sentence of said) expect(sentence).toMatch(/^[A-Z][^—]*[.]$/);
+});
+
+/*
+ * A Mac updating to 1.1.0 with 7.5 GB free of 926 GB: Docker's disk showed room, the update filled
+ * the Mac, and the card showed only containerd's input/output errors. The update is checked first
+ * now (`local_eval::update_room`), and short of room it says what the Mac has and what the update
+ * needs, and what to do.
+ */
+test("an update with no room says what is free and what the update needs", () => {
+  const mac: Shortfall = {
+    podman: false,
+    cpu: false,
+    memory: false,
+    disk: true,
+    diskGb: "7.5",
+    freeOnDrive: true,
+    mac: true,
+    updating: true,
+    neededGb: "13",
+  };
+  expect(resourcesShortSaid(mac)).toBe(
+    "This Mac has 7.5 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+  );
+  // Windows G's C:, under Docker Desktop's disk.
+  expect(
+    resourcesShortSaid({
+      ...mac,
+      mac: false,
+      drive: "C:",
+      diskGb: "11.8",
+    }),
+  ).toBe(
+    "This computer has 11.8 GB of free space on drive C:, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+  );
+  // Docker Desktop's own disk limit is what is short: raised or freed there.
+  expect(
+    resourcesShortSaid({
+      ...mac,
+      mac: false,
+      freeOnDrive: false,
+      diskGb: "12",
+      neededGb: "16",
+    }),
+  ).toBe(
+    "Docker Desktop has 12 GB of free disk space, and OpenBot needs about 16 GB to update. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  // Memory short as well: said after the disk.
+  expect(resourcesShortSaid({ ...mac, memory: true })).toBe(
+    "This Mac has 7.5 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry. Docker Desktop doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  // A first setup on that Mac: its own disk, said as the Mac's, with the setup's 40 GB.
+  expect(
+    engineTooSmallSaid({
+      podman: false,
+      cpu: false,
+      memory: false,
+      disk: true,
+      diskGb: "7.5",
+      freeOnDrive: true,
+      mac: true,
+    }),
+  ).toBe(
+    "This Mac has 7.5 GB of free space, and OpenBot needs 40 GB. Free up some space, then Try again.",
+  );
 });

@@ -118,14 +118,20 @@ export function joinedLearningContainer(
     ? learning.containerId
     : null;
 }
-/** `GET /api/recorder/learning`: the person's own Learning space, which every recording they make joins. */
+/** `getRecorderLearning`: the person's own Learning space, which every recording they make joins. */
 export type RecorderLearningResponse = { learning: LearningSpaceState };
 export type TrajectoryGrant = {
   joinToken: string;
   realtime: { clientUrl: string; topic: string };
 };
+/**
+ * A refusal as the Recorder reads it: the API's problem details (RFC 9457). `detail` is the sentence a person reads,
+ * `code` the refusal's stable name (`RECORDER_SIGNED_OUT`, `RECORDER_AUTHORITY_UNAVAILABLE`), and `reason` why a
+ * connection ended, on a sign-out. The capture pass's gate answers `error` in place of `detail`; both are read.
+ */
 export type RecorderErrorBody = {
-  error: string;
+  detail?: string;
+  error?: string;
   code?: string;
   reason?: "revoked" | "removed" | "organization";
 };
@@ -207,18 +213,15 @@ export function isAllowedGatewayUrl(
 }
 
 const id = (value: string) => encodeURIComponent(value);
+
+/**
+ * The Recorder's two addresses outside the API. `connectCodes` is where the Desktop shells released as 1.0.2 and 1.0.3
+ * ask for the connect code they hand a Recorder; nothing newer calls it. `trajectoryConnect` is the capture pass, which
+ * is the runtime's. Everything else the Recorder reaches through its generated client (extension/src/shared/generated,
+ * the spec's Recorder tag), and OpenBot's own screens through theirs.
+ */
 export const recorderPaths = {
   connectCodes: "/api/recorder/connect-codes",
-  connections: "/api/recorder/connections",
-  connection: (connectionId: string) =>
-    `/api/recorder/connections/${id(connectionId)}`,
-  currentConnection: "/api/recorder/connections/current",
-  me: "/api/recorder/me",
-  /** GET, the signed-in person's own recordings, `?cursor=`. */
-  recordings: "/api/recorder/recordings",
-  learning: "/api/recorder/learning",
-  /** POST `RecorderActivity`, with the Recorder's bearer: what this browser's Recorder is doing now (the red dot). */
-  activity: "/api/recorder/activity",
   trajectoryConnect: (t: string) =>
     `/api/copilotkit/trajectory/${id(t)}/connect`,
 } as const;

@@ -1,7 +1,4 @@
-import type {
-  LearningSharingMode,
-  PersonalLearningSharing,
-} from "@openbot/shared/learning";
+import type { LearningSharingMode } from "@openbot/shared/learning";
 import {
   IconCheck,
   IconChevronRight,
@@ -36,7 +33,10 @@ import {
   setLearnedSkillOpenMutationOptions,
   setLearningSharingModeMutationOptions,
 } from "@/lib/learning/mutations";
-import { personalLearningQueryOptions } from "@/lib/learning/queries";
+import {
+  type PersonalLearningSharing,
+  personalLearningQueryOptions,
+} from "@/lib/learning/queries";
 import { queryClient } from "@/query-client";
 
 /** The three choices, each with the one plain line that says who sees what. */
@@ -56,14 +56,14 @@ export const SHARING_CHOICES: {
     mode: "open",
     icon: IconUsersGroup,
     title: "Everyone's Bots",
-    description: "Every Bot on OpenBot draws on all of your skills.",
+    description: "Every Bot in your organization draws on all of your skills.",
   },
   {
     mode: "choose",
     icon: IconListCheck,
     title: "The skills I choose",
     description:
-      "Every Bot draws on the skills you open below; your own Bots use all of them.",
+      "Every Bot in your organization draws on the skills you open below. Your own Bots use all of them.",
   },
 ];
 
@@ -89,13 +89,13 @@ function emptySentence(
 ): string {
   if (personal) {
     return data.skills === null
-      ? "Couldn't read your Skills from the backend just now. Reload the page to try again."
+      ? "Couldn't read your Skills from the backend just now. Try again in a moment."
       : "No skills learned from your recordings and conversations yet. Once there are, they show up here.";
   }
   if (data.unavailable === "off")
     return "An admin has turned off automatic learning, so no skills are learned from your recordings.";
   if (data.skills === null)
-    return "Couldn't read your Skills from the backend just now. Your choice above still applies to them.";
+    return "Couldn't read your skills just now. Your choice below still applies to them.";
   return mode === "choose"
     ? "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot."
     : "No Skills learned from your recordings yet. Once there are, they show up here.";
@@ -104,8 +104,8 @@ function emptySentence(
 /** What the Your Skills section says about who draws on them, in the mode chosen. */
 const SKILLS_DESCRIPTION: Record<LearningSharingMode, string> = {
   closed: "Only the Bots you use draw on these skills.",
-  open: "Every Bot on OpenBot draws on these skills.",
-  choose: "Open a skill to let every Bot on OpenBot use it.",
+  open: "Every Bot in your organization draws on these skills.",
+  choose: "Open a skill to let every Bot in your organization use it.",
 };
 
 /** How a skill was made, beside its title on the Skills page's one list. */

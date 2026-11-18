@@ -27,10 +27,10 @@ import {
 } from "@/components/ui/item";
 import { IDENTITY_SUMMARIES, isBrokeredGithub } from "@/lib/connections/rows";
 import { linkedAccountsQueryOptions } from "@/lib/identity/queries";
+import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 import {
   connectionsQueryOptions,
   personalConnections,
-  pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 
 /**
@@ -104,10 +104,11 @@ export function IdentityConnectionPage({
  * which makes this the way to it.
  */
 function GithubTools() {
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
+  const apps = useQuery(appsQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
-  const app = plugins.data?.composioConfigured
-    ? plugins.data.servers.find(
+  const app = setup.data?.directoryAvailable
+    ? apps.data?.find(
         (server) => isBrokeredGithub(server) && server.accountMode !== "shared",
       )
     : undefined;

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -114,18 +114,29 @@ async function stylesheet(page: string): Promise<string> {
   return compiler.build(classes);
 }
 
+/**
+ * The page, its stylesheet and the browser, ready before any test starts. This waits for Tailwind
+ * to build the stylesheet and for Chromium to say it has started (Playwright's own launch timeout
+ * bounds that), not on a hook's clock: a `beforeAll` gets 5 s, and on a cold runner the two can
+ * take longer.
+ */
+async function ready(): Promise<{
+  page: string;
+  css: string;
+  browser: Browser;
+}> {
+  const page = markup();
+  const css = await stylesheet(page);
+  const { chromium } = await import("playwright-core");
+  // The CI job installs full Chromium without the headless shell.
+  const browser = await chromium.launch({ channel: "chromium" });
+  return { page, css, browser };
+}
+
 let browser: Browser;
 let page: string;
 let css: string;
-
-beforeAll(async () => {
-  if (!asked) return;
-  page = markup();
-  css = await stylesheet(page);
-  const { chromium } = await import("playwright-core");
-  // The CI job installs full Chromium without the headless shell.
-  browser = await chromium.launch({ channel: "chromium" });
-});
+if (asked) ({ page, css, browser } = await ready());
 
 afterAll(async () => {
   await browser?.close();

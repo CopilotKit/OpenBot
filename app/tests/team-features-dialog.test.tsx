@@ -122,12 +122,12 @@ describe("the team features dialog", () => {
       ]),
     ).toEqual([
       [
-        "For your whole team",
+        "For your whole organization",
         [
           "Sign-in with Google, Microsoft or custom SSO",
           "People, roles and admins",
-          "Bots shared with your whole team",
-          "Learning shared across the team",
+          "Bots shared with your whole organization",
+          "Learning shared across your organization",
         ],
       ],
       [

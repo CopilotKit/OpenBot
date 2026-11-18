@@ -448,17 +448,21 @@ export function StartJourney({
     >
       <div className="journey-head">
         <span className="step-spinner" aria-hidden="true" />
-        <span className="journey-said">{said}</span>
-        <span className="journey-time">
-          {leftSaid(view.left)}
-          {/* A download's own measure, so a slow line can be told from a stuck one. On the same
-              line, so nothing under the journey moves as a download comes and goes. */}
-          {view.bytes && (
+        <span className="journey-said">
+          {said}
+          {/* A download's own measure, so a slow line can be told from a stuck one: said with the
+              download it counts. The time line and the bar count the whole Start. On Windows K the
+              time line read "About 2 minutes left · 304.0 MB of 317.0 MB" beside a bar a third full,
+              and the bytes read as the bar's. */}
+          {view.bytes && happening === null && (
             <span className="journey-bytes">
               {" · "}
               {view.bytes}
             </span>
           )}
+        </span>
+        <span className="journey-time">
+          {leftSaid(view.left)}
           {/* Not beside "Taking longer than usual, still working": the line stays one line. */}
           {view.left !== null && (
             <span aria-hidden="true">

@@ -2961,10 +2961,22 @@
           "markdownDescription": "Enables the change_ai_connection command without any pre-configured scope."
         },
         {
+          "description": "Enables the change_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-change-connection",
+          "markdownDescription": "Enables the change_connection command without any pre-configured scope."
+        },
+        {
           "description": "Enables the check_update command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-check-update",
           "markdownDescription": "Enables the check_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-connection",
+          "markdownDescription": "Enables the connection command without any pre-configured scope."
         },
         {
           "description": "Enables the dismiss_update command without any pre-configured scope.",
@@ -3009,10 +3021,22 @@
           "markdownDescription": "Enables the restart command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_organization command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-organization",
+          "markdownDescription": "Enables the set_organization command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_usage_data command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-set-usage-data",
           "markdownDescription": "Enables the set_usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-sign-out",
+          "markdownDescription": "Enables the sign_out command without any pre-configured scope."
         },
         {
           "description": "Enables the speech_abort command without any pre-configured scope.",
@@ -3087,10 +3111,22 @@
           "markdownDescription": "Denies the change_ai_connection command without any pre-configured scope."
         },
         {
+          "description": "Denies the change_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-change-connection",
+          "markdownDescription": "Denies the change_connection command without any pre-configured scope."
+        },
+        {
           "description": "Denies the check_update command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-check-update",
           "markdownDescription": "Denies the check_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-connection",
+          "markdownDescription": "Denies the connection command without any pre-configured scope."
         },
         {
           "description": "Denies the dismiss_update command without any pre-configured scope.",
@@ -3135,10 +3171,22 @@
           "markdownDescription": "Denies the restart command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_organization command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-organization",
+          "markdownDescription": "Denies the set_organization command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_usage_data command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-set-usage-data",
           "markdownDescription": "Denies the set_usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-sign-out",
+          "markdownDescription": "Denies the sign_out command without any pre-configured scope."
         },
         {
           "description": "Denies the speech_abort command without any pre-configured scope.",

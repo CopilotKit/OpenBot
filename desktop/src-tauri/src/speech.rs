@@ -662,6 +662,52 @@ mod tests {
         assert!(log.contains("session=4343 the page stopped hearing"));
     }
 
+    /// FOUND LIVE. A teammate whose computer said "This computer can't take dictation in your
+    /// language" sent the troubleshooting logs, and they had no speech lines at all: the speech log
+    /// is a file of its own, and Get Troubleshooting Logs never read it. It now goes in, redacted
+    /// like the rest, and still without a word of what was said.
+    #[test]
+    fn the_troubleshooting_logs_carry_the_speech_log_and_never_the_words() {
+        let (mut out, _) = recorder();
+        diagnostics::for_session(5151);
+        out.start();
+        out.words(0, "the vault code is marmalade");
+        out.finish(0, Some("the vault code is marmalade, twice"));
+        out.end();
+        assert_eq!(
+            available("not a language, asked by the troubleshooting test"),
+            Availability::Unavailable
+        );
+
+        let text = crate::troubleshooting::gather(crate::troubleshooting::Sources {
+            desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-18 06:40 UTC from 52ea4b5)".into(),
+            failure: None,
+            log_folder: None,
+            home: None,
+            engine: None,
+            server_log: None,
+        });
+        let section = text
+            .split("## Speech log (end)\n\n")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no speech log section in\n{text}"));
+        for expected in [
+            "session=5151 listening",
+            "session=5151 phrase 0: final, 34 characters",
+            "session=5151 end",
+            "session=0 available((not a language tag)) = Unavailable",
+        ] {
+            assert!(
+                section.contains(expected),
+                "missing {expected:?} in\n{section}"
+            );
+        }
+        assert!(
+            !text.contains("marmalade") && !text.contains("twice") && !text.contains("vault"),
+            "{text}"
+        );
+    }
+
     #[test]
     fn loudness_reads_in_dbfs() {
         assert_eq!(diagnostics::dbfs(1.0), 0);

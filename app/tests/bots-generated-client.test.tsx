@@ -25,7 +25,6 @@ import {
   getCreateBotMockHandler,
   getCreateBotResponseMock,
 } from "@/lib/api/generated/bots/bots.msw";
-import { todayRoutes } from "@/lib/api/served-today";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -34,24 +33,23 @@ import { settleReactWork } from "./settle-react-work";
  *
  * The server here is the spec's own: the MSW handlers Orval generates beside the client, answering
  * at the API's addresses (`/api/v2/organizations/{organizationId}/bots`) with the spec's examples.
- * The table that sends those operations to today's `/api/agents` routes is off, so this is the
- * screen talking to the API as the server will serve it. A request to `/api/agents` is recorded and
- * fails the test, so a hand-written fetch left behind in the screen cannot pass.
+ * This is the screen talking to the API as the server serves it. A request to `/api/agents` or
+ * `/api/bots` is recorded and fails the test, so a hand-written fetch or an old address left behind
+ * cannot pass.
  */
 
 const requests: string[] = [];
 const server = setupServer(
   ...getBotsMock(),
   // What else the roster reads. None of it is a Bots operation, so none of it is in the spec yet.
-  http.get("*/api/bots/attention", () =>
-    HttpResponse.json({ bots: [], lastPingId: null }),
+  http.get("*/api/v2/organizations/default/check-in-items", () =>
+    HttpResponse.json({ checkInItems: [], nextCursor: null }),
   ),
-  http.get("*/api/proactive/suggestions", () =>
-    HttpResponse.json({ suggestions: [] }),
+  http.get("*/api/v2/organizations/:organizationId/tasks", () =>
+    HttpResponse.json({ tasks: [], nextCursor: null }),
   ),
-  http.get("*/api/tasks", () => HttpResponse.json({ tasks: [] })),
-  http.get("*/api/channels", () =>
-    HttpResponse.json({ channels: [], nextCursor: null }),
+  http.get("*/api/v2/organizations/:organizationId/conversations", () =>
+    HttpResponse.json({ conversations: [], nextCursor: null }),
   ),
   // Everything else the page around it asks for is not this test's business, and is not found.
   http.all("*", () => new HttpResponse(null, { status: 404 })),
@@ -64,7 +62,6 @@ server.events.on("request:start", ({ request }) => {
 beforeAll(() => {
   // An address for the page, so the app's relative requests resolve as they do in a browser.
   GlobalRegistrator.register({ url: "http://openbot.invalid/" });
-  todayRoutes.on = false;
   server.listen({ onUnhandledRequest: "error" });
 });
 afterEach(() => {
@@ -74,7 +71,6 @@ afterEach(() => {
 });
 afterAll(async () => {
   server.close();
-  todayRoutes.on = true;
   await settleReactWork();
   GlobalRegistrator.unregister();
 });
@@ -120,7 +116,13 @@ test("the Bots roster lists the Bots the API returns, read at the API's address"
   expect(bots).toContain(
     "GET /api/v2/organizations/default/bots?hidden=true&limit=100",
   );
-  expect(requests.filter((line) => line.includes("/api/agents"))).toEqual([]);
+  // What each Bot has waiting on the person is the API's too.
+  expect(requests).toContain(
+    "GET /api/v2/organizations/default/people/me/bot-attention?limit=100",
+  );
+  expect(
+    requests.filter((line) => /\/api\/(agents|bots)\b/.test(line)),
+  ).toEqual([]);
 });
 
 test("creating and deleting a Bot are writes at the API's address, each with its own Idempotency-Key", async () => {

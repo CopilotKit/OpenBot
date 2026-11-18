@@ -3,9 +3,9 @@ import { calledTooEarly } from "@openbot/shared/tool-steps";
 import { useMemo, useSyncExternalStore } from "react";
 import { readOutcome } from "@/lib/computers/activity";
 import {
-  type PublishedSandboxed,
-  sandboxedKeys,
-} from "@/lib/sandboxed/queries";
+  componentKeys,
+  type PublishedPlayground,
+} from "@/lib/components/queries";
 import { queryClient } from "@/query-client";
 import { GALLERY_COMPONENTS } from "./gallery-registry";
 
@@ -31,7 +31,7 @@ type StepMessage = {
  * Read from the gallery each time, not once: the registry is filled when its modules load.
  */
 export function componentTest(
-  published: readonly Pick<PublishedSandboxed, "name">[] = [],
+  published: readonly Pick<PublishedPlayground, "name">[] = [],
 ): (name: string) => boolean {
   const authored = new Set(published.map((component) => component.name));
   return (name) =>
@@ -48,7 +48,9 @@ export function useComponentTest(): (name: string) => boolean {
   const published = useSyncExternalStore(
     (changed) => queryClient.getQueryCache().subscribe(changed),
     () =>
-      queryClient.getQueryData<PublishedSandboxed[]>(sandboxedKeys.published()),
+      queryClient.getQueryData<PublishedPlayground[]>(
+        componentKeys.published(),
+      ),
   );
   return useMemo(() => componentTest(published), [published]);
 }
@@ -56,7 +58,7 @@ export function useComponentTest(): (name: string) => boolean {
 /** The same test, from what the page has loaded of the published components when a call arrives. */
 export function componentTestNow(): (name: string) => boolean {
   return componentTest(
-    queryClient.getQueryData<PublishedSandboxed[]>(sandboxedKeys.published()),
+    queryClient.getQueryData<PublishedPlayground[]>(componentKeys.published()),
   );
 }
 

@@ -28,6 +28,20 @@ import userEvent from "@testing-library/user-event";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
+import {
+  ME_PATH,
+  meResponse,
+  ONBOARDING_ADVANCE_PATH,
+  ONBOARDING_COMPLETE_PATH,
+  personBody,
+} from "./accounts-api";
+import { DEPLOYMENT_PATH, SETUP_CHECKLIST_PATH } from "./admin-settings-api";
+import {
+  APPROVAL_PREFERENCES_PATH,
+  approvalInboxResponse,
+  approvalPreferencesBody,
+} from "./approvals-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Book a call opens the OpenBot for Business page, with its booking calendar, never CopilotKit's generic one. */
@@ -92,12 +106,12 @@ let completed: boolean;
 let completeFail: boolean;
 let named: string | null;
 let localEvaluation: boolean;
-/** What `GET /api/setup` answers. */
+/** What the API's `setup-checklist` answers. */
 let checklist: { audience: string; rows: unknown[] };
-/** Ask before making changes, as `GET /api/approvals` says it, and every change asked for. */
+/** Ask before making changes, as the approval preferences say it, and every change asked for. */
 let askFirst: boolean;
 let askFirstChanges: unknown[];
-/** Whether `/api/capabilities` answers, and how many times it was asked. */
+/** Whether the API's `deployment` answers, and how many times it was asked. */
 let capabilitiesFail: boolean;
 let capabilitiesAsked: number;
 const defaults = queryClient.getDefaultOptions();
@@ -128,8 +142,8 @@ beforeEach(() => {
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       const method = init?.method ?? "GET";
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH && method === "GET")
+        return meResponse({
           user: {
             id: "person-1",
             email: "maya@example.com",
@@ -142,23 +156,27 @@ beforeEach(() => {
             },
           },
         });
-      if (path === "/api/me/profile" && method === "PATCH") {
+      if (path === ME_PATH && method === "PATCH") {
         named = (JSON.parse(String(init?.body)) as { name: string }).name;
-        return Response.json({ profile: { name: named, needsName: false } });
+        return Response.json({
+          person: personBody({
+            id: "person-1",
+            email: "maya@example.com",
+            name: named,
+            role: "admin",
+          }),
+        });
       }
-      if (path === "/api/me/onboarding" && method === "POST") {
-        const body = JSON.parse(String(init?.body)) as {
-          step?: number;
-          completed?: boolean;
-        };
-        if (body.completed) {
-          if (completeFail)
-            return Response.json({ error: "down" }, { status: 503 });
-          completed = true;
-          return Response.json({
-            onboarding: { step: saved, completedAt: "2026-10-23T00:00:00Z" },
-          });
-        }
+      if (path === ONBOARDING_COMPLETE_PATH && method === "POST") {
+        if (completeFail)
+          return Response.json({ error: "down" }, { status: 503 });
+        completed = true;
+        return Response.json({
+          onboarding: { step: saved, completedAt: "2026-10-23T00:00:00Z" },
+        });
+      }
+      if (path === ONBOARDING_ADVANCE_PATH && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { step?: number };
         if (body.step === undefined) throw new Error("Missing onboarding step");
         saves.push(body.step);
         saved = body.step;
@@ -166,22 +184,24 @@ beforeEach(() => {
           onboarding: { step: saved, completedAt: null },
         });
       }
-      if (path === "/api/capabilities") {
+      if (path === DEPLOYMENT_PATH) {
         capabilitiesAsked += 1;
         return capabilitiesFail
           ? Response.json({ error: "down" }, { status: 503 })
           : Response.json({ localEvaluation });
       }
-      if (path.startsWith("/api/agents"))
-        return Response.json({ agents: [BOT] });
-      if (path === "/api/setup") return Response.json({ checklist });
-      if (path === "/api/approvals")
-        return Response.json({ enabled: askFirst, rules: [], pending: [] });
-      if (path === "/api/approvals/preferences" && method === "PATCH") {
+      const bots = answerBotsList(path, init, { visible: [BOT] });
+      if (bots) return bots;
+      if (path === SETUP_CHECKLIST_PATH) return Response.json(checklist);
+      if (path === APPROVAL_PREFERENCES_PATH && method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as { enabled?: boolean };
         askFirstChanges.push(body);
         if (body.enabled !== undefined) askFirst = body.enabled;
-        return Response.json({ enabled: askFirst });
+        return Response.json(approvalPreferencesBody({ enabled: askFirst }));
+      }
+      {
+        const approvals = approvalInboxResponse(path, { enabled: askFirst });
+        if (approvals) return approvals;
       }
       return Response.json({});
     },

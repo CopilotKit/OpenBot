@@ -112,7 +112,7 @@ export function TeamApprovalSettings() {
         </p>
       ) : null}
       {settings ? (
-        <PageSection title="Team settings">
+        <PageSection title="Organization settings">
           <PageRows>
             <Item size="sm">
               <ItemMedia variant="icon">
@@ -236,10 +236,10 @@ export function TeamApprovalSettings() {
       ) : null}
       <PageSection
         description="These apply to every member's Bots. Members can't change them."
-        title="Team rules"
+        title="Organization rules"
       >
         {teamRules.length === 0 ? (
-          <PageEmpty icon={IconChecklist} title="No team rules" />
+          <PageEmpty icon={IconChecklist} title="No organization rules" />
         ) : null}
         <PageRows>
           {teamRules.map((rule) => (
@@ -271,7 +271,7 @@ export function TeamApprovalSettings() {
             </ItemActions>
           </Item>
           <Separator />
-          <RuleForm label="Add a team rule" save={addTeamRule} />
+          <RuleForm label="Add an organization rule" save={addTeamRule} />
         </PageRows>
       </PageSection>
       <SharedUseRequests />

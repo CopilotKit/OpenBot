@@ -10,13 +10,42 @@
 /** What the model is offered. One name, so a transcript can find every subagent by searching for it. */
 export const SUBAGENT_TOOL = "run_subagent";
 
-/** How many subagents one answer may start. The next one is refused with a sentence. */
-export const SUBAGENTS_PER_ANSWER = 5;
+/**
+ * How many of one answer's subagents run at the same time, by default. One more waits for a free
+ * place rather than being refused, so a Bot working through a long list of independent parts gets
+ * every one of them done, this many at a time. A deployment sets its own number.
+ */
+export const SUBAGENTS_AT_ONCE = 10;
 
-/** What a subagent hands back to the Bot that started it, and what its card is drawn from. */
+/**
+ * How many subagents one answer may start in all, by default: the guard against a run that never
+ * stops starting them, not a budget a long job is expected to reach. The next one is refused with a
+ * sentence telling the Bot to do the rest itself. A deployment sets its own number.
+ */
+export const SUBAGENTS_PER_ANSWER = 100;
+
+/**
+ * What a subagent that answered without calling a tool is said to have done, to the Bot that started
+ * it and on its line. Its run is real work with no step to count, so it is never "0 steps".
+ */
+export const ANSWERED_DIRECTLY = "Answered directly";
+
+/**
+ * What a subagent hands back to the Bot that started it, and what its card is drawn from.
+ *
+ * `steps` is how many tools it called. A subagent that called none hands back no count: a finished
+ * one says it answered directly (`worked`), so the Bot never reports "0 steps" for work that was
+ * done. A result from before that still says `steps: 0`, and is read the same way.
+ */
 export type SubagentResult =
   /** It finished: its answer, and where its steps are. */
-  | { answer: string; threadId: string; steps: number }
+  | {
+      answer: string;
+      threadId: string;
+      steps?: number;
+      /** Said in place of a count when it called no tool: {@link ANSWERED_DIRECTLY}. */
+      worked?: string;
+    }
   /**
    * It stopped before an action that needs the person's yes. Nothing was done and nobody was asked;
    * `next` tells the Bot to do it itself, in the conversation, where the person is asked as usual.
@@ -33,10 +62,10 @@ export type SubagentResult =
       };
       next: string;
       threadId: string;
-      steps: number;
+      steps?: number;
     }
   /** It ran and did not finish. */
-  | { error: string; threadId: string; steps: number };
+  | { error: string; threadId: string; steps?: number };
 
 /** The result, read back from the text a tool call carries, or null when it is not one. */
 export function readSubagentResult(text: string): SubagentResult | null {
@@ -51,7 +80,10 @@ export function readSubagentResult(text: string): SubagentResult | null {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     return null;
   const result = parsed as Record<string, unknown>;
-  if (typeof result.threadId !== "string" || typeof result.steps !== "number")
+  if (
+    typeof result.threadId !== "string" ||
+    (result.steps !== undefined && typeof result.steps !== "number")
+  )
     return null;
   if (typeof result.answer === "string") return result as SubagentResult;
   if (typeof result.error === "string") return result as SubagentResult;

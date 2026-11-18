@@ -17,17 +17,24 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ModelSource } from "@/lib/models/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import type { ModelSource } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
+import {
+  capabilityPath,
+  MODEL_USAGE_PATH,
+  overviewResponse,
+  SETTINGS_PATH,
+} from "./admin-settings-api";
+import { MODEL_CATALOGUE_PATH } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
 /*
  * Admin, Providers and Permissions: the pages Enterprise controls was split into. The server is
- * faked at the fetch boundary with the shapes `GET /api/admin/enterprise` and
- * `GET /api/models/available` answer with, and the writes are the enterprise routes' own. Marks
- * resolve as the app resolves them, from the files vendored in `shared/marks`.
+ * faked at the fetch boundary with the API's answers for the settings, the switches and model
+ * usage, and the model catalogue's view of every model listed; the writes are the API's own. Marks resolve as the app
+ * resolves them, from the files vendored in `shared/marks`.
  */
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
 
@@ -58,48 +65,56 @@ let settings: Record<string, unknown>;
 let source: ModelSource;
 /** One person (`all`) or a team whose admin allows models (`allowed`). */
 let exposure: "all" | "allowed";
+/** The Usage section's rows, as `/models/usage` summarises them. */
+let usage: {
+  model: string;
+  source: string;
+  runs: number;
+  people: number;
+  refused: number;
+  lastUsedAt: string;
+}[] = [];
 const writes: { path: string; body: unknown }[] = [];
 
 function serving() {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if ((init?.method ?? "GET") === "PUT") {
+    if ((init?.method ?? "GET") === "PATCH") {
       const body = JSON.parse(String(init?.body));
       writes.push({ path, body });
-      const key = path.split("/").pop() as string;
-      settings = { ...settings, [key]: body.value };
-      return Response.json({ key, value: body.value });
+      if (path === SETTINGS_PATH) settings = { ...settings, ...body };
+      return Response.json({});
     }
-    if (path === "/api/admin/enterprise")
-      return Response.json({
-        capabilities: [
-          {
-            capability: "useBots",
-            title: "Use Bots",
-            description: "Talk to Bots and let them run work.",
-            default: true,
-            organization: null,
-            roles: {},
-            groups: {},
-          },
-        ],
-        settings,
-        groups: [],
-        network: [],
-        defaultDestinations: [],
-        mcpServers: [],
-        builtInModel: "openai/gpt-5.6-terra",
-        scim: {
-          configured: false,
-          connectionId: "directory",
-          baseUrl: null,
-          rotating: false,
+    const overview = overviewResponse(path, {
+      capabilities: [
+        {
+          capability: "useBots",
+          title: "Use Bots",
+          description: "Talk to Bots and let them run work.",
+          default: true,
+          organization: null,
+          roles: {},
+          groups: {},
         },
-        otel: { configured: false },
-        actionRecordRetentionDays: 90,
-      });
-    if (path === "/api/models/available")
+      ],
+      settings,
+      groups: [],
+      network: [],
+      defaultDestinations: [],
+      mcpServers: [],
+      builtInModel: "openai/gpt-5.6-terra",
+      scim: {
+        configured: false,
+        connectionId: "directory",
+        baseUrl: null,
+        rotating: false,
+      },
+      otel: { configured: false },
+      actionRecordRetentionDays: 90,
+    });
+    if (overview) return overview;
+    if (path === `${MODEL_CATALOGUE_PATH}?view=all`)
       return Response.json({
         provider: "openai",
         source,
@@ -123,8 +138,8 @@ function serving() {
           { id: "gpt-4o", label: "GPT-4o", vendor: "openai" },
         ],
       });
-    if (path.startsWith("/api/admin/enterprise/models/usage"))
-      return Response.json({ days: 30, summary: [], recent: [] });
+    if (path.startsWith(MODEL_USAGE_PATH))
+      return Response.json({ days: 30, summary: usage, recent: [] });
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
@@ -152,6 +167,7 @@ beforeEach(() => {
   };
   source = "openai";
   exposure = "allowed";
+  usage = [];
   queryClient.clear();
   seedTeamEdition();
   serving();
@@ -220,6 +236,41 @@ test("one person on their own machine is offered every model, and nothing can na
     await view.findByText("Runs on each model in the last 30 days."),
   ).toBeTruthy();
   expect(view.queryByText(/allowlist refused/)).toBeNull();
+});
+
+test("Usage says how each model is known, and why one is missing, never the server's bare words", async () => {
+  // The Mac pass listed the picked harness as "remote:picked-harness · unknown".
+  usage = [
+    {
+      model: "anthropic/claude-sonnet-5-5",
+      source: "configured",
+      runs: 8,
+      people: 1,
+      refused: 0,
+      lastUsedAt: "2026-11-12T00:00:00.000Z",
+    },
+    {
+      model: "remote:sales-agent",
+      source: "unknown",
+      runs: 2,
+      people: 1,
+      refused: 0,
+      lastUsedAt: "2026-11-12T00:00:00.000Z",
+    },
+  ];
+  const view = await draw(ProvidersPage);
+  expect(await view.findByText("anthropic/claude-sonnet-5-5")).toBeTruthy();
+  expect(
+    view.getByText(/8 runs by 1 person\s+· chosen by OpenBot/),
+  ).toBeTruthy();
+  expect(view.getByText("Model not reported")).toBeTruthy();
+  expect(
+    view.getByText(
+      /2 runs by 1 person\s+· sales-agent picks its own model and didn't say which/,
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("remote:sales-agent")).toBeNull();
+  expect(view.queryByText(/· unknown$/)).toBeNull();
 });
 
 test("Providers names what actually serves the models, with a vendor's mark only where one is vendored", async () => {
@@ -295,9 +346,9 @@ test("the allowlist is picked from the provider's models, and takes one it doesn
   fireEvent.click(view.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/settings/modelAllowlist",
+      path: SETTINGS_PATH,
       body: {
-        value: {
+        modelAllowlist: {
           enabled: true,
           models: [
             "openai/gpt-5.6-terra",
@@ -328,16 +379,11 @@ test("Permissions holds the organization's switches", async () => {
   fireEvent.click(await view.findByRole("switch", { name: "Use Bots" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/capabilities",
-      body: {
-        scopeKind: "organization",
-        scopeId: "",
-        capability: "useBots",
-        allowed: false,
-      },
+      path: capabilityPath("useBots"),
+      body: { organization: false },
     }),
   );
-  expect(view.getByRole("button", { name: /Role and group overrides/ }));
+  expect(view.getByRole("button", { name: /Role and team overrides/ }));
 });
 
 test("the allowed-models row names the first few models", () => {
@@ -376,8 +422,10 @@ test("cancelling allowlist edits restores the saved choices when reopened", asyn
   fireEvent.click(view.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
-      path: "/api/admin/enterprise/settings/modelAllowlist",
-      body: { value: { enabled: true, models: ["openai/gpt-5.6-terra"] } },
+      path: SETTINGS_PATH,
+      body: {
+        modelAllowlist: { enabled: true, models: ["openai/gpt-5.6-terra"] },
+      },
     }),
   );
 });

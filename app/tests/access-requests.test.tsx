@@ -20,6 +20,14 @@ import type { ReactNode } from "react";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
 import type { AppAccessRequest } from "@/lib/app-access/queries";
 import { Route as PluginsIndexRoute } from "@/routes/_authed/admin/plugins/index";
+import { answerAppsApi } from "./apps-api";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessApprovalResponse,
+  appAccessRequestBody,
+  appAccessRequestPath,
+  appAccessRequestResponse,
+} from "./bot-grants-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -65,6 +73,8 @@ const request = (
 function serving(options: {
   requests: AppAccessRequest[];
   approve?: { status: number; body: unknown };
+  /** How many requests the list answers on one page; every one on the first page unless given. */
+  pageSize?: number;
 }) {
   const sent: string[] = [];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -72,49 +82,54 @@ function serving(options: {
     const method = init?.method ?? "GET";
     sent.push(`${method} ${url}`);
     if (method === "POST" && url.endsWith("/approve"))
-      return Response.json(options.approve?.body ?? { request: {} }, {
-        status: options.approve?.status ?? 200,
-      });
+      return options.approve
+        ? Response.json(options.approve.body, {
+            status: options.approve.status,
+          })
+        : appAccessApprovalResponse({
+            request: request({ status: "approved" }),
+          });
     if (method === "POST" && url.endsWith("/dismiss"))
-      return Response.json({ request: {} });
-    if (url.startsWith("/api/plugins/access-requests")) {
-      const app = new URL(url, "http://x").searchParams.get("app");
-      const byApp: Record<string, number> = {};
-      for (const each of options.requests)
-        byApp[each.appKey] = (byApp[each.appKey] ?? 0) + 1;
+      return appAccessRequestResponse(request({ status: "dismissed" }));
+    if (url.startsWith(APP_ACCESS_REQUESTS_PATH)) {
+      const query = new URL(url, "http://x").searchParams;
+      const app = query.get("appId");
+      const listed = app
+        ? options.requests.filter((each) => each.appKey === app)
+        : options.requests;
+      // Pages of `pageSize`, the cursor saying where the next one starts.
+      const start = Number(query.get("cursor") ?? 0);
+      const size = options.pageSize ?? listed.length;
+      const page = listed.slice(start, start + size);
+      const next = start + size < listed.length ? String(start + size) : null;
       return Response.json({
-        requests: app
-          ? options.requests.filter((each) => each.appKey === app)
-          : options.requests,
-        counts: { total: options.requests.length, byApp },
+        appAccessRequests: page.map(appAccessRequestBody),
+        nextCursor: next,
       });
     }
     if (url === "/api/plugins/connections")
       return Response.json({ connections: [], redirectUri: null });
-    if (url === "/api/plugins")
-      return Response.json({
-        catalogue: [],
-        servers: [
-          {
-            id: "composio-gmail",
-            title: "Gmail",
-            summary: "Mail.",
-            tools: [],
-            lastError: null,
-          },
-          {
-            id: "notion",
-            title: "Notion",
-            summary: "Docs.",
-            tools: [],
-            lastError: null,
-          },
-        ],
-        composioConfigured: true,
-        botsMayCallBack: true,
-        redirectUri: null,
-        skills: [],
-      });
+    const apps = answerAppsApi(input, init, {
+      servers: [
+        {
+          id: "composio-gmail",
+          title: "Gmail",
+          summary: "Mail.",
+          tools: [],
+          lastError: null,
+        },
+        {
+          id: "notion",
+          title: "Notion",
+          summary: "Docs.",
+          tools: [],
+          lastError: null,
+        },
+      ],
+      composioConfigured: true,
+      botsMayCallBack: true,
+    });
+    if (apps) return apps;
     return Response.json({});
   }) as unknown as typeof fetch;
   return sent;
@@ -183,7 +198,7 @@ test("approve does what was asked through the approve route", async () => {
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   fireEvent.click(await view.findByRole("button", { name: "Approve" }));
   await waitFor(() =>
-    expect(sent).toContain("POST /api/plugins/access-requests/req_1/approve"),
+    expect(sent).toContain(`POST ${appAccessRequestPath("req_1")}/approve`),
   );
 });
 
@@ -274,7 +289,7 @@ test("dismiss goes to the dismiss route", async () => {
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   fireEvent.click(await view.findByRole("button", { name: "Dismiss" }));
   await waitFor(() =>
-    expect(sent).toContain("POST /api/plugins/access-requests/req_1/dismiss"),
+    expect(sent).toContain(`POST ${appAccessRequestPath("req_1")}/dismiss`),
   );
 });
 
@@ -283,7 +298,7 @@ test("nothing waiting draws no section at all", async () => {
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
   await waitFor(() =>
     expect(sent).toContain(
-      "GET /api/plugins/access-requests?app=composio-gmail",
+      `GET ${APP_ACCESS_REQUESTS_PATH}?limit=100&appId=composio-gmail`,
     ),
   );
   await settleReactWork();
@@ -312,4 +327,20 @@ test("the Plugins list puts every request first and counts them on each app's ro
   expect(gmail.getByText("2 requests")).toBeTruthy();
   const notion = within(view.getByTestId("plugin-notion"));
   expect(notion.queryByText(/request/)).toBeNull();
+});
+
+test("the inbox reads every page of waiting requests, and counts them all", async () => {
+  serving({
+    requests: [
+      request(),
+      request({ id: "req_2", kind: "enable" }),
+      request({ id: "req_3", appKey: "notion", appTitle: "Notion" }),
+    ],
+    pageSize: 1,
+  });
+  const Page = PluginsIndexRoute.options.component as () => ReactNode;
+  const view = draw(Page);
+  expect(await view.findByText("Give Notion to Expenses")).toBeTruthy();
+  const gmail = within(await view.findByTestId("plugin-composio-gmail"));
+  expect(gmail.getByText("2 requests")).toBeTruthy();
 });

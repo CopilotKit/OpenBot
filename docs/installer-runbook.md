@@ -37,7 +37,7 @@ An installer is made from one commit. It contains:
 | The app | The commit | `build-version.json`: `version`, `sourceSha` |
 | The bundled Intelligence CLI | `desktop/intelligence-cli.json` (`cli`) | `build-version.json`: `cli` (name, exact version, integrity, `lockfileSha256`) |
 | The bundled Node runtime | `desktop/intelligence-cli.json` (`node`), checked by SHA-256 | `build-version.json`: `node` |
-| The deployment and its images (internal builds and candidates only) | The images built from the same commit, tagged `sha-<commit>`, pinned by digest | Compiled into the app; written to `~/OpenBot/.openbot-deployment` and `~/OpenBot/container-images.json` on install |
+| The deployment and its images (internal builds and candidates only) | The Bot images built from the same commit, tagged `sha-<commit>`, and the published OpenBot images at the build's tag, all pinned by digest | Compiled into the app; written to `~/OpenBot/.openbot-deployment` and `~/OpenBot/container-images.json` on install |
 
 There are three kinds of build:
 
@@ -80,6 +80,9 @@ is older than those workflows, merge `main` into it first.
      gh workflow run internal-build.yml -R CopilotKit/OpenBot --ref <branch>
      ```
 
+   The OpenBot images are the published ones at `main`. To use another tag, such as a version, set
+   `backend_tag` (`-f backend_tag=v1.0.3`).
+
 2. Find the run and watch it:
 
    ```sh
@@ -119,17 +122,17 @@ The script:
 1. pushes the branch to origin (never `main`, never forced), because a pinned app downloads its
    deployment from `https://github.com/CopilotKit/OpenBot/archive/<commit>.tar.gz`;
 2. starts a registry container, `openbot-local-registry`, on `127.0.0.1:5050`;
-3. builds `server`, `supervisor`, `agent-computer` and `agent-claude-sdk` from the commit for
-   linux/arm64 and pushes them there;
+3. builds `agent-claude-sdk` from the commit for linux/arm64 and pushes it there;
 4. writes `container-images.json` with version `local-<first 12 characters of the commit>`: the
-   images it built by their local digest, every other image at the latest release's digest;
+   image it built by its local digest, the OpenBot images at the digest of the tag in
+   `backend-images.env`, every other image at the latest release's digest;
 5. builds `OpenBot.app` pinned to that manifest, with the bundled CLI, ad-hoc signed.
 
 **Expected:** it ends by printing each stage's time, the manifest, and the app's path under
 `~/.openbot-local-build/apps/`. To install it, quit OpenBot and copy the app into `/Applications`.
 
-Set `OPENBOT_LOCAL_IMAGES` to build other images (`OPENBOT_LOCAL_IMAGES="server"`), or to an empty
-string to take every image from the release. The other settings are at the top of the script.
+Set `OPENBOT_LOCAL_IMAGES` to build other Bot images (`OPENBOT_LOCAL_IMAGES="agent-mastra"`), or to
+an empty string to build none. The other settings are at the top of the script.
 
 A local build is for Docker only. Podman cannot pull from a registry on the Mac's own `127.0.0.1`.
 Like any build without the update key, it never checks for a newer version, so it shows no update bar.
@@ -155,9 +158,10 @@ Use a candidate to test what will become a release. The details are in
    because the line has shipped (a patch such as `1.0.1`), run from that branch with `bump=patch`
    instead. See [Release candidates and betas](releasing.md#release-candidates-and-betas).
 
-4. Review and merge the release PR. Merging publishes the candidate.
+4. Review and merge the release PR. The OpenBot images must be published at `vX.Y.Z-rc.1`, the
+   tag the PR writes into `backend-images.env`, before it merges. Merging publishes the candidate.
    **Expected:** a GitHub prerelease `vX.Y.Z-rc.1` with `container-images.json`, the source
-   archive, the chart, the release manifest, and the Mac and Windows installers.
+   archive, the release manifest, and the Mac and Windows installers.
 5. Approve **Desktop macOS signing** and **Desktop Windows signing** when they ask. These need a
    `macos-signing` and a `windows-signing` approver. For a stable release, Desktop Windows signing
    asks a second time, for `macos-signing`, once its installer is signed: that job signs the
@@ -330,6 +334,7 @@ results in the PR or the issue for the build.
 |---|---|
 | **Internal build** is not in the Actions list, or `gh workflow run` says the workflow is not found | The workflow is not on `main` yet. Merge the build workflows first. |
 | An image job fails | Open the failed job's log and read the first error. A Dockerfile error is a code problem on the branch. Do not run it again until you know the cause. |
+| The **OpenBot images** job fails | The OpenBot images are not published at the tag the build asked for: `backend_tag` for an internal build, the release's version for a release. Publish them at that tag, then run it again. |
 | The build fails with `the pinned deployment manifest ... has commit ..., but this build compiles ...` | The installer is being built from a different commit than its images. Build both from the same commit. |
 | A signing run waits | It needs an approver from the table in [Before you start](#before-you-start). |
 | A stable release is published but is not Latest | It becomes Latest once both Mac and Windows signing have attached their signed installers. The attach step of the run that finished says which installers it still needs. Approve the other run. If a run failed, run it again from the release tag with `release-tag` set and `make-latest` on. |

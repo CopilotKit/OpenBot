@@ -154,6 +154,13 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
   const discardKept = () => act({ type: "page.kept.discard" });
+  /** A page of an OpenBot, opened by the service worker: OpenBot Desktop's own through the entry address its native host
+   * answers, since the personal edition only admits requests carrying its install's token, and any other as it is. */
+  const openOpenBot = async (url: string) => {
+    setError(null);
+    const answer = await ask({ type: "page.openbot.open", url });
+    if (!answer.ok) setError(answer.error);
+  };
 
   if (!view) {
     return (
@@ -188,7 +195,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
               size="lg"
               onClick={() => {
                 const origin = new URL(openAddress);
-                openTab(`${origin.origin}/settings/browsers`);
+                void openOpenBot(`${origin.origin}/settings/browsers`);
               }}
             >
               Open {new URL(openAddress).host}
@@ -272,6 +279,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           state={state}
           connected
           openbotUrl={connection.openbotUrl}
+          onOpenOpenBot={openOpenBot}
           onDiscard={discardKept}
         />
       ) : (

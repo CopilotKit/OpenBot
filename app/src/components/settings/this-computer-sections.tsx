@@ -355,7 +355,7 @@ function MachineSection({
  * Where the desktop app keeps its log, with Open log folder, so a person can share the file when
  * they ask for help. The desktop app opens its own folder; nothing here names a path to open.
  */
-function LogsRow({ folder }: { folder: string }) {
+export function LogsRow({ folder }: { folder: string }) {
   const open = useMutation(openLogFolderMutationOptions());
   return (
     <Item size="sm">
@@ -405,7 +405,7 @@ function LogsRow({ folder }: { folder: string }) {
  * A newer version found says how ready it is, as the banner does: downloading in the background
  * while this version keeps running, then ready to install in a few minutes.
  */
-function VersionRow({ status }: { status: DesktopStatus }) {
+export function VersionRow({ status }: { status: DesktopStatus }) {
   const check = useMutation(checkAppUpdateMutationOptions(queryClient));
   const install = useMutation(installAppUpdateMutationOptions(queryClient));
   // The download's progress, asked twice a second from the click on, as the banner asks once it

@@ -12,7 +12,10 @@
 //!
 //! Unix has no equivalent problem and no equivalent flag, so there the wrapper is the identity.
 
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// `CREATE_NO_WINDOW`: run the console application without giving it a console.
 ///
@@ -34,6 +37,101 @@ pub fn command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     command
+}
+
+/**
+`Command::output`, to the command's end or `limit`, whichever comes first.
+
+A command still running at `limit` is killed through its own handle and answers
+`ErrorKind::TimedOut`, so the caller can tell "it did not say in time" apart from "it said no" or
+"it could not start". Both streams are kept, as `output` keeps them, because a probe's diagnostic
+is often on the one its answer is not.
+
+`local_images::run_within` is the same wait for engine commands, but it drops stderr and caps
+stdout, which is right for `kubectl` output and wrong for a probe whose failure has to be shown.
+*/
+pub fn output_within(command: &mut Command, limit: Duration) -> std::io::Result<Output> {
+    output_watching(command, limit, None)
+}
+
+/// `output_within`, also calling `slow.1` once if the command is still running after `slow.0`, so
+/// the person waiting can be told why.
+pub fn output_watching(
+    command: &mut Command,
+    limit: Duration,
+    mut slow: Option<(Duration, &dyn Fn())>,
+) -> std::io::Result<Output> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    // Read both pipes while waiting: a child that fills one pipe's buffer would otherwise wait on
+    // us as we wait on it.
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let started = Instant::now();
+    let until = started + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("still running after {limit:?}, so it was stopped"),
+            ));
+        }
+        if let Some((after, said)) = slow {
+            if started.elapsed() >= after {
+                said();
+                slow = None;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // A grandchild can hold a pipe open after its parent exits. The answer is then incomplete,
+    // which is no answer.
+    let streams_closed = Duration::from_secs(5);
+    let stdout = stdout.recv_timeout(streams_closed);
+    let stderr = stderr.recv_timeout(streams_closed);
+    match (stdout, stderr) {
+        (Ok(stdout), Ok(stderr)) => Ok(Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("exited with {status} but its output stayed open"),
+        )),
+    }
+}
+
+/// Everything `pipe` says until it closes, read on a thread of its own.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
+    let (sender, received) = mpsc::channel();
+    match pipe {
+        Some(mut pipe) => {
+            std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                let _ = pipe.read_to_end(&mut bytes);
+                let _ = sender.send(bytes);
+            });
+        }
+        None => {
+            let _ = sender.send(Vec::new());
+        }
+    }
+    received
 }
 
 /// What a command said, fit to put in front of somebody.
@@ -89,7 +187,38 @@ pub fn said(stderr: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::command;
+    use super::{command, output_within};
+    use std::time::Duration;
+
+    /// A probe that hangs is stopped at its limit, through its own handle, and says so as a
+    /// timeout rather than as an answer, so a caller waiting on it waits no longer than it chose.
+    #[test]
+    fn a_command_still_running_at_its_limit_is_stopped_and_says_it_timed_out() {
+        let cli = crate::test_support::probe_cli("output-within-hang");
+        let marker = cli.with_file_name("outlived");
+        // Unbounded, this would answer Ok after the fixture's two seconds.
+        let error = output_within(
+            command(&cli).arg("hang").arg(&marker),
+            Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut, "{error}");
+        // Past the moment it would have finished: killed, not abandoned to run on.
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!marker.exists(), "the probe ran on after its limit");
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
+
+    /// One that finishes in time answers exactly as `output` does: status and both streams.
+    #[test]
+    fn a_command_that_finishes_in_time_answers_as_output_does() {
+        let cli = crate::test_support::probe_cli("output-within-say");
+        let output = output_within(command(&cli).arg("say"), Duration::from_secs(30)).unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(output.stdout, b"said on stdout");
+        assert_eq!(output.stderr, b"said on stderr");
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
 
     /// The failure this was written for: Podman underlines its provider notice, and the card
     /// rendered the escape bytes as text in front of the real message.

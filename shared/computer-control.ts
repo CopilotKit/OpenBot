@@ -33,6 +33,12 @@ export type HandoffRequest = {
    */
   keepsPage?: boolean;
 };
+export type SecretEnding = {
+  id: string;
+  supplied: boolean;
+  /** Why nothing was typed, said to the Bot. Absent on a value that was typed. */
+  reason?: string;
+};
 export type ComputerControlState = {
   holder: "bot" | "human";
   since: string;
@@ -43,9 +49,17 @@ export type ComputerControlState = {
   resumeSnapshotRequired: boolean;
   /** A person had the page when the computer stopped, so they must check it before the Bot acts. */
   recoveryRequired: boolean;
+  /** The open secret request, while the Bot waits for a value a person types (`computer_request_secret`). */
+  secretId?: string;
   secretWanted?: string;
   secretRef?: string;
   secretSnapshotId?: number;
+  /**
+   * How the last secret request ended: its value typed into the field (`supplied`), or ended without
+   * one and why. The request going away does not say which, and a Bot that read every ending as typed
+   * submitted forms with the field empty.
+   */
+  secretEnded?: SecretEnding;
   /**
    * The user id of the person holding the wheel, while `holder` is `human` and they took it with `by`. Recording in a
    * Bot's browser and its bar are theirs alone (`shared/bot-browser.ts`).

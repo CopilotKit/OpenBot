@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { SkillFields } from "@/components/skills/skill-fields";
-import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
+import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import { emptySkillForm } from "@/lib/skills/form";
 
 /**

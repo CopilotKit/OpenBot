@@ -172,8 +172,8 @@ function useBookDemoStep(): OnboardingStep {
     intro: () => (
       <StepIntro>
         <p>
-          Bring {PRODUCT} to your whole team, on your own servers. Everyone
-          signs in with their work account and shares Bots in Slack and
+          Bring {PRODUCT} to your whole organization, on your own servers.
+          Everyone signs in with their work account and shares Bots in Slack and
           Microsoft Teams. Admins get the controls and audit trail your company
           needs.
         </p>

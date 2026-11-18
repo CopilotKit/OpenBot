@@ -16,6 +16,7 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
+import { useQuery } from "@tanstack/react-query";
 import type * as React from "react";
 import { useMemo, useState } from "react";
 import { PageEmpty } from "@/components/layout/page-shell";
@@ -37,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { cn } from "@/lib/utils";
 import {
   type AuditEvent,
@@ -130,9 +132,11 @@ export function AuditTable({
 }) {
   const [sorting, setSorting] = useState<SortingState>(INITIAL_SORT);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  // The person reading the page: a row they started says "you", not their email.
+  const viewer = useQuery(currentUserQueryOptions()).data?.email ?? null;
   const columns = useMemo(
-    () => auditColumns(nameFor, storedNames, deploymentName, rowAction),
-    [nameFor, storedNames, deploymentName, rowAction],
+    () => auditColumns(nameFor, storedNames, deploymentName, viewer, rowAction),
+    [nameFor, storedNames, deploymentName, viewer, rowAction],
   );
   const table = useTable({
     features,
@@ -365,6 +369,7 @@ function auditColumns(
   nameFor: NameFor,
   storedNames: boolean,
   deployment: string,
+  viewer: string | null,
   rowAction?: (event: AuditEvent) => React.ReactNode,
 ): ColumnDef<typeof features, AuditEvent>[] {
   return [
@@ -429,13 +434,14 @@ function auditColumns(
           deployment={deployment}
           event={row.original}
           nameFor={nameFor}
+          viewer={viewer}
         />
       ),
       enableSorting: false,
     },
     {
       id: "startedBy",
-      accessorFn: (event) => startedByText(event, nameFor, deployment),
+      accessorFn: (event) => startedByText(event, nameFor, deployment, viewer),
       filterFn: anyOf,
       header: () => null,
       cell: () => null,
@@ -454,7 +460,7 @@ function auditColumns(
     },
     {
       id: "search",
-      accessorFn: (event) => searchTextOf(event, nameFor, deployment),
+      accessorFn: (event) => searchTextOf(event, nameFor, deployment, viewer),
       header: () => null,
       cell: () => null,
       enableSorting: false,

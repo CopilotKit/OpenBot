@@ -46,6 +46,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   saveComponentDraftMutationOptions,
@@ -55,9 +56,10 @@ import {
 } from "@/lib/components/mutations";
 import {
   type ComponentRecord,
+  componentFunctionsQueryOptions,
   componentListQueryOptions,
   type DataFunctionSummary,
-  dataFunctionsQueryOptions,
+  PLAYGROUND_KIND,
 } from "@/lib/components/queries";
 import { RENDERABLE_NAMES } from "@/lib/copilot/gallery-registry";
 import { queryClient } from "@/query-client";
@@ -79,8 +81,8 @@ export const Route = createFileRoute("/_authed/admin/components/$name")({
 function RouteComponent() {
   const { name } = Route.useParams();
   const components = useQuery(componentListQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
-  const dataFunctions = useQuery(dataFunctionsQueryOptions());
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
+  const dataFunctions = useQuery(componentFunctionsQueryOptions(name));
 
   const setGrant = useMutation(setComponentGrantMutationOptions(queryClient));
   const setFunction = useMutation(
@@ -107,7 +109,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Reload the page.
+          Couldn't load components. Try again in a moment.
         </p>
       </PageShell>
     );
@@ -155,7 +157,9 @@ function RouteComponent() {
       dataFunctions={dataFunctions.data ?? []}
       key={component.name}
       onPublish={(published) => setPublished.mutate({ name, published })}
-      onSaveDraft={(description) => saveDraft.mutate({ description, name })}
+      onSaveDraft={(description) =>
+        saveDraft.mutate({ component, description })
+      }
       onSetFunction={(functionName, granted) =>
         setFunction.mutate({ functionName, granted, name })
       }
@@ -266,7 +270,7 @@ function ComponentDetail({
   const withheld = new Set(component.withheldFrom);
   const heldFunctions = new Set(component.functions);
   const renderable =
-    RENDERABLE_NAMES.has(component.name) || component.kind === "sandboxed";
+    RENDERABLE_NAMES.has(component.name) || component.kind === PLAYGROUND_KIND;
 
   const granted = bots.filter((bot) => !withheld.has(bot.id));
   const held = dataFunctions.filter((fn) => heldFunctions.has(fn.name));

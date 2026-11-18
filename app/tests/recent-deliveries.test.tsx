@@ -3,6 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { RecentDeliveries } from "@/components/settings/devices";
+import {
+  notificationsResponse,
+  type TodayReachability,
+} from "./notifications-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -23,7 +27,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** One `delivery_outbox` row as `/api/delivery` returns it. */
+/** One `delivery_outbox` row, as the API lists what was sent. */
 const delivery = (
   id: string,
   transport: string,
@@ -50,15 +54,10 @@ const delivery = (
 });
 
 function draw(deliveries: ReturnType<typeof delivery>[]) {
-  global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).endsWith("/api/delivery")
-      ? Response.json({
-          bindings: [],
-          devices: [],
-          deliveries,
-          available: { slack: true, teams: true, sms: true, push: true },
-        })
-      : new Response(null, { status: 404 })) as unknown as typeof fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    notificationsResponse(init?.method ?? "GET", String(input), {
+      deliveries: deliveries as TodayReachability["deliveries"],
+    }) ?? new Response(null, { status: 404 })) as unknown as typeof fetch;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });

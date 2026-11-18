@@ -1,6 +1,5 @@
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import type { AgentProfile } from "@/lib/agents/queries";
-import type { ApprovalInboxData } from "@/lib/approvals";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
 
@@ -120,13 +119,4 @@ export function statusLine(input: {
   }
   if (attention?.paused) return "Paused";
   return "Ready when you are";
-}
-
-/** Approvals and questions the person has not answered yet, across every Bot. */
-export function waitingOnYou(inbox: ApprovalInboxData | undefined) {
-  const requests = (inbox?.requests ?? []).filter(
-    (request) => request.status === "pending",
-  );
-  const questions = inbox?.questions ?? [];
-  return { requests, questions, count: requests.length + questions.length };
 }

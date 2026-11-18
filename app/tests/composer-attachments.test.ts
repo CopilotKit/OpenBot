@@ -4,7 +4,11 @@ import {
   FILE_PICKER_ACCEPT,
   uploadToChannel,
 } from "@/components/channels/composer/attachments";
-import { MAX_IMAGE_BYTES } from "@/lib/channels/attachments";
+import {
+  DEFAULT_ATTACHMENT_LIMITS,
+  MAX_IMAGE_BYTES,
+} from "@/lib/channels/attachments";
+import { problemBody } from "./conversations-api";
 
 /**
  * `uploadToChannel` is the SDK's `onUpload`, called with a raw `File`; `attachmentsConfigFor`
@@ -22,7 +26,11 @@ afterEach(() => {
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: {
+      // A refusal is a problem document; an upload taken is plain JSON.
+      "content-type":
+        status >= 400 ? "application/problem+json" : "application/json",
+    },
   });
 }
 
@@ -41,7 +49,12 @@ describe("uploadToChannel", () => {
     global.fetch = (async (path: string, init: RequestInit) => {
       requests.push({ path, init });
       return jsonResponse(
-        { id: "att_1", name: "receipt.png", mimeType: "image/png" },
+        {
+          id: "att_1",
+          name: "receipt.png",
+          mimeType: "image/png",
+          sizeBytes: 10,
+        },
         201,
       );
     }) as typeof fetch;
@@ -55,8 +68,12 @@ describe("uploadToChannel", () => {
     const [sent] = requests;
     const body = sent?.init.body;
 
-    expect(sent?.path).toBe("/api/channels/chan_1/attachments");
+    expect(sent?.path).toBe(
+      "/api/v2/organizations/default/conversations/chan_1/attachments",
+    );
     expect(sent?.init.method).toBe("POST");
+    // One key for this upload, so a retry of it is recognised as the same upload.
+    expect(new Headers(sent?.init.headers).get("Idempotency-Key")).toBeTruthy();
     expect(sent?.init.credentials).toBe("include");
     expect(body).toBeInstanceOf(FormData);
     expect((body as FormData).get("file")).toBeInstanceOf(File);
@@ -77,9 +94,10 @@ describe("uploadToChannel", () => {
   test("a 415 refusal throws the server's reason, not a generic string", async () => {
     global.fetch = (async () =>
       jsonResponse(
-        {
-          error: "'icon.svg' can't be attached. SVG files aren't accepted.",
-        },
+        problemBody(
+          415,
+          "'icon.svg' can't be attached. SVG files aren't accepted.",
+        ),
         415,
       )) as unknown as typeof fetch;
 
@@ -103,7 +121,7 @@ describe("uploadToChannel", () => {
     ).rejects.not.toThrow(/JSON/);
   });
 
-  test("a JSON error body with no `error` key throws the named fallback, not an empty message", async () => {
+  test("a JSON error body with no `detail` throws the named fallback, not an empty message", async () => {
     global.fetch = (async () =>
       jsonResponse({}, 500)) as unknown as typeof fetch;
 
@@ -112,20 +130,26 @@ describe("uploadToChannel", () => {
     ).rejects.toThrow('Couldn\'t upload "receipt.png". Try again.');
   });
 
-  test("a refusal whose `error` is empty throws the named fallback, not an empty refusal", async () => {
-    // `??` only steps in for `null` and `undefined`, so an `error` of `""` was preferred over the
+  test("a refusal whose `detail` is empty throws the named fallback, not an empty refusal", async () => {
+    // `??` only steps in for `null` and `undefined`, so a sentence of `""` was preferred over the
     // fallback and reached the strip as a file refused with no reason beside it at all.
     global.fetch = (async () =>
-      jsonResponse({ error: "   " }, 415)) as unknown as typeof fetch;
+      jsonResponse(
+        { ...problemBody(415, "x"), detail: "   " },
+        415,
+      )) as unknown as typeof fetch;
 
     await expect(
       uploadToChannel("chan_1", "group_1")(file("receipt.png", "image/png")),
     ).rejects.toThrow('Couldn\'t upload "receipt.png". Try again.');
   });
 
-  test("a refusal whose `error` is not a string throws the named fallback", async () => {
+  test("a refusal whose `detail` is not a string throws the named fallback", async () => {
     global.fetch = (async () =>
-      jsonResponse({ error: 415 }, 415)) as unknown as typeof fetch;
+      jsonResponse(
+        { ...problemBody(415, "x"), detail: 415 },
+        415,
+      )) as unknown as typeof fetch;
 
     await expect(
       uploadToChannel("chan_1", "group_1")(file("receipt.png", "image/png")),
@@ -173,14 +197,28 @@ describe("uploadToChannel", () => {
 });
 
 describe("attachmentsConfigFor", () => {
-  test("maxSize is MAX_IMAGE_BYTES", () => {
+  test("maxSize is the largest of the limits the screen used", () => {
     const config = attachmentsConfigFor(
       "chan_1",
       "group_1",
       () => {},
       () => {},
+      DEFAULT_ATTACHMENT_LIMITS,
     );
     expect(config.maxSize).toBe(MAX_IMAGE_BYTES);
+
+    const larger = attachmentsConfigFor(
+      "chan_1",
+      "group_1",
+      () => {},
+      () => {},
+      {
+        imageBytes: 100 * 1024 * 1024,
+        documentBytes: 100 * 1024 * 1024,
+        fileBytes: 1024 * 1024,
+      },
+    );
+    expect(larger.maxSize).toBe(100 * 1024 * 1024);
   });
 
   /**
@@ -199,6 +237,7 @@ describe("attachmentsConfigFor", () => {
       "group_1",
       () => {},
       () => {},
+      DEFAULT_ATTACHMENT_LIMITS,
     );
 
     expect(config.accept).toBe("*/*");

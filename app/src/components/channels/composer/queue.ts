@@ -480,3 +480,23 @@ function joinQueued(
     dropped,
   };
 }
+
+/**
+ * A send refused because the Bot already has the turn: nothing was asked of the server.
+ *
+ * Not a failed run, and the drain must not treat it as one. The conversation reads idle a render
+ * behind the agent itself: a run can be under way on the agent (joined as the page opened, say)
+ * while the screen still says nothing is. A drain in that gap was refused here, held back as if
+ * the server had failed it, and waited for a turn the person would have to start: the message
+ * they typed sat parked with nothing said, and never ran. FOUND LIVE, a steer typed into a task's
+ * thread just after the task finished. Refused this way, what was parked goes back and is tried
+ * again shortly, until the Bot is free and it goes; it costs no request while the Bot is busy.
+ */
+export class StillWorkingError extends Error {
+  constructor() {
+    super(
+      "This Bot is still working on something. Wait for it, or stop it first.",
+    );
+    this.name = "StillWorkingError";
+  }
+}

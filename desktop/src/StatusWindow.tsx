@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SECURITY_FLOOR_SENTENCE } from "../../shared/security-floor";
 import { type LocalReadiness, runLocalEval } from "./localEvalCli";
-import { type PartGroup, partLabel } from "./partNames";
 import { TroubleshootingLogs } from "./Problem";
+import { type PartGroup, partLabel } from "./partNames";
+import { useBelowSecurityFloor } from "./SecurityFloor";
 import { StatusLine } from "./SetupProgress";
 
 /** The Status window is the setup page at this hash, in a window of its own. */
@@ -116,7 +118,7 @@ const BUSY_SAID: Record<Busy, string> = {
  * What OpenBot is running, what each part costs, and Restart and Stop for each.
  *
  * Memory is read every few seconds while the window shows; it is Docker's figure per container,
- * OpenBot's own server and worker among them. Intelligence's readiness is the CLI's, asked only on
+ * OpenBot's own server among them. Intelligence's readiness is the CLI's, asked only on
  * opening, on Refresh and after an action here: the main window's own Intelligence calls take the
  * same lock, and a status window polling it would make them fail as busy.
  */
@@ -127,6 +129,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
   const [said, setSaid] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const stack = useRef<string | null>(null);
+  // Below the security floor nothing starts here: Start and Restart are not offered, and the
+  // window says why (`security_floor.rs`).
+  const belowFloor = useBelowSecurityFloor() === true;
 
   const read = useCallback(async () => {
     try {
@@ -233,8 +238,8 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               />
               {status.openbotRunning && (
                 <div className="row">
-                  {/* Restart is Compose restarting the server and worker containers this session started. */}
-                  {status.openbotHeld && (
+                  {/* Restart is Compose restarting the server's container this session started. */}
+                  {status.openbotHeld && !belowFloor && (
                     <button
                       type="button"
                       className="quiet"
@@ -286,7 +291,20 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                   parts={status.intelligenceContainers}
                 />
                 <div className="row">
-                  {intelligenceRunning ? (
+                  {belowFloor ? (
+                    intelligenceRunning && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          act("intelligence-stop", () => intelligence("stop"))
+                        }
+                      >
+                        Stop
+                      </button>
+                    )
+                  ) : intelligenceRunning ? (
                     <>
                       <button
                         type="button"
@@ -325,11 +343,15 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                     </button>
                   )}
                 </div>
-                {status.openbotRunning && (
-                  <p className="footnote">
-                    OpenBot needs these services while it runs. Stopping them
-                    frees memory until you start them again here.
-                  </p>
+                {belowFloor ? (
+                  <p className="footnote">{SECURITY_FLOOR_SENTENCE}</p>
+                ) : (
+                  status.openbotRunning && (
+                    <p className="footnote">
+                      OpenBot needs these services while it runs. Stopping them
+                      frees memory until you start them again here.
+                    </p>
+                  )
                 )}
               </section>
             )}

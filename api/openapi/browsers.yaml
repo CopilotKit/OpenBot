@@ -1,0 +1,1563 @@
+# Browsers: a Bot's browser and a person's own OpenBot browser, with their tabs, recording and narration.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    get:
+      tags: [Browsers]
+      operationId: getBotBrowser
+      summary: Read a Bot's browser
+      description: >-
+        Return the browser on a Bot's computer as the caller sees it: whether it
+        is open, its tabs, what the Recorder in it is doing, whether the caller
+        holds control of it, and whether a recording running there is theirs. Of
+        somebody else's recording it says only that one is running. Reading it
+        never starts the computer or opens the browser.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [computers:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Bot's browser.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/tabs:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Browsers]
+      operationId: changeBotBrowserTabs
+      summary: Open, switch to or close a tab in a Bot's browser
+      description: >-
+        Open a new tab, switch to a tab or close one in a Bot's browser. Only
+        the person holding control of the Bot's computer may; anybody else is
+        refused with a conflict. Only web addresses open.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserTabsRequest'
+            examples:
+              newTab:
+                value:
+                  action: new
+                  url: https://www.salesforce.com
+              switch:
+                value:
+                  action: activate
+                  tabId: tab_2
+      responses:
+        '200':
+          description: The Bot's browser after the change.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/navigate:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Browsers]
+      operationId: navigateBotBrowser
+      summary: Go to an address in a Bot's browser
+      description: >-
+        Open an address in the tab the person is on in a Bot's browser, or go
+        back, forward or reload. Only the person holding control of the Bot's
+        computer may; anybody else is refused with a conflict. Only web
+        addresses open.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserNavigateRequest'
+            examples:
+              address:
+                value:
+                  url: salesforce.com/reports
+              back:
+                value:
+                  action: back
+      responses:
+        '200':
+          description: The Bot's browser after it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/recording:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Browsers]
+      operationId: recordInBotBrowser
+      summary: Start or stop recording in a Bot's browser
+      description: >-
+        Start recording what the caller does in a Bot's browser, or stop their
+        recording. Only the person is recorded, never the Bot: a start is for
+        the person holding control, while nothing else records there, and the
+        recording ends when control goes back to the Bot. Only the person who
+        started a recording can stop it. Where Bots share one computer nothing
+        can be recorded in a Bot's browser, and a start is refused. Whether the
+        person narrates is not read here: a Bot's browser is narrated from the
+        page.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserRecordingRequest'
+            examples:
+              start:
+                value:
+                  action: start
+                  title: File the weekly pipeline report
+                  language: en-US
+              stop:
+                value:
+                  action: stop
+      responses:
+        '200':
+          description: The Bot's browser, with the recording started or stopped.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '429':
+          $ref: '#/components/responses/BrowserTooManyConnections'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/narration:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Browsers]
+      operationId: narrateInBotBrowser
+      summary: Add narration to a recording in a Bot's browser
+      description: >-
+        Send one thing the caller said while recording in a Bot's browser: a
+        finished phrase with when it started and ended, or that they began or
+        stopped speaking. Times are the sender's clock; the server moves them
+        onto its own from when the request arrived and sentAt. Only the person
+        whose recording is running may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserNarrationRequest'
+            examples:
+              phrase:
+                value:
+                  text: Now I open last week's report.
+                  startedAt: 1794650400000
+                  endedAt: 1794650403500
+                  sentAt: 1794650403600
+              startedSpeaking:
+                value:
+                  speaking: true
+                  since: 1794650405000
+                  sentAt: 1794650405100
+      responses:
+        '200':
+          description: The narration was taken.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserNarrationTaken'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BrowserNarrationTakenExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/computers/{botId}/browser/clear:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/BotId'
+    post:
+      tags: [Browsers]
+      operationId: clearBotBrowser
+      summary: Clear a Bot's browser
+      description: >-
+        Wipe a Bot's browser: its cookies, saved passwords, history and site
+        storage, which signs it out of everything. A recording running there
+        ends first. The browser starts again, fresh, under the person holding
+        control, who is the only one who may clear it. The audit trail records
+        it.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The fresh browser.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BotBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Browsers]
+      operationId: getPersonBrowser
+      summary: Read a person's own browser
+      description: >-
+        Return the browser OpenBot runs for a person: whether this OpenBot can
+        run one at all, where it shows, whether it is open, its tabs, what the
+        Recorder in it is doing, and what any of the person's Recorders is
+        recording. It is the person's alone: nobody else, an administrator
+        included, may read it. Reading it never starts a computer or opens the
+        browser.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [computers:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's browser.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/open:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Browsers]
+      operationId: openPersonBrowser
+      summary: Open a person's own browser
+      description: >-
+        Open the caller's browser, or bring it forward when it is already open,
+        with the Recorder in it connected as them. On OpenBot Desktop it may
+        instead bring the person's everyday Chrome or Edge forward, or open the
+        Recorder's store page in it; the answer says which. Only the person
+        themselves may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: What opened.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonBrowserOpened'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonBrowserOpenedExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '429':
+          $ref: '#/components/responses/BrowserTooManyConnections'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/tabs:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Browsers]
+      operationId: changePersonBrowserTabs
+      summary: Open, switch to or close a tab in a person's own browser
+      description: >-
+        Open a new tab, switch to a tab or close one in the caller's browser.
+        Only web addresses open. Only the person themselves may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserTabsRequest'
+            examples:
+              newTab:
+                value:
+                  action: new
+                  url: https://www.salesforce.com
+              switch:
+                value:
+                  action: activate
+                  tabId: tab_2
+      responses:
+        '200':
+          description: The person's browser after the change.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/navigate:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Browsers]
+      operationId: navigatePersonBrowser
+      summary: Go to an address in a person's own browser
+      description: >-
+        Open an address in the tab the caller is on in their browser, or go
+        back, forward or reload. Only web addresses open. Only the person
+        themselves may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserNavigateRequest'
+            examples:
+              address:
+                value:
+                  url: salesforce.com/reports
+              back:
+                value:
+                  action: back
+      responses:
+        '200':
+          description: The person's browser after it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/recording:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Browsers]
+      operationId: recordInPersonBrowser
+      summary: Start or stop recording in a person's own browser
+      description: >-
+        Start recording what the caller does in their browser, named for the
+        task, or stop the recording. A start connects the Recorder again first
+        when its connection has gone. Only the person themselves may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserRecordingRequest'
+            examples:
+              start:
+                value:
+                  action: start
+                  title: File the weekly pipeline report
+                  language: en-US
+              stop:
+                value:
+                  action: stop
+      responses:
+        '200':
+          description: The person's browser, with the recording started or stopped.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '429':
+          $ref: '#/components/responses/BrowserTooManyConnections'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/narration:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Browsers]
+      operationId: narrateInPersonBrowser
+      summary: Add narration to a recording in a person's own browser
+      description: >-
+        Send one thing the caller said while recording in their browser: a
+        finished phrase with when it started and ended, or that they began or
+        stopped speaking. Times are the sender's clock; the server moves them
+        onto its own from when the request arrived and sentAt. Only the person
+        themselves may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserNarrationRequest'
+            examples:
+              phrase:
+                value:
+                  text: Now I open last week's report.
+                  startedAt: 1794650400000
+                  endedAt: 1794650403500
+                  sentAt: 1794650403600
+              startedSpeaking:
+                value:
+                  speaking: true
+                  since: 1794650405000
+                  sentAt: 1794650405100
+      responses:
+        '200':
+          description: The narration was taken.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserNarrationTaken'
+              examples:
+                answer:
+                  $ref: '#/components/examples/BrowserNarrationTakenExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/BrowserRequestNotJson'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/browser/clear:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Browsers]
+      operationId: clearPersonBrowser
+      summary: Clear a person's own browser
+      description: >-
+        Wipe the caller's browser: its cookies, saved passwords, history and
+        site storage, which signs it out of everything, and ends the Recorder's
+        connection there. One that was open opens again, fresh. The audit trail
+        records it. Only the person themselves may.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The person's browser after it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonBrowser'
+              examples:
+                answer:
+                  $ref: '#/components/examples/PersonBrowserExample'
+        '400':
+          $ref: '#/components/responses/BrowserInvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/BrowserForbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/BrowserConflict'
+        '429':
+          $ref: '#/components/responses/BrowserTooManyConnections'
+        '500':
+          $ref: '#/components/responses/BrowserUnfinished'
+        '502':
+          $ref: '#/components/responses/BrowserUnreachable'
+        '503':
+          $ref: '#/components/responses/BrowserUnavailable'
+        '504':
+          $ref: '#/components/responses/BrowserNotAnswering'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  schemas:
+    BrowserTab:
+      type: object
+      description: One tab in a browser.
+      required: [id, url, title, active]
+      properties:
+        id:
+          type: string
+          description: The tab's id, for switching to it or closing it.
+        url:
+          type: string
+          description: The address the tab is on.
+        title:
+          type: string
+          description: The page's title.
+        active:
+          type: boolean
+          description: Whether it is the tab in front.
+    BrowserRecorderPhase:
+      type: string
+      enum: [idle, starting, recording, stopping]
+      description: What the Recorder is doing. idle means nothing is being recorded.
+    BrowserNarrationSource:
+      type: string
+      enum: [own, external]
+      description: >-
+        Who hears the person. own: the Recorder listens to the person's
+        microphone itself. external: the browser has no microphone, so the
+        page hears the person and sends each phrase as narration.
+    BrowserWindow:
+      type: string
+      enum: [native, screen]
+      description: >-
+        Where a person's browser shows. native: a window on the person's own
+        desktop. screen: a browser the page shows through the live screen.
+    BrowserProduct:
+      type: string
+      enum: [chrome, msedge, chromium]
+      description: Which browser it is.
+    RealBrowser:
+      type: string
+      enum: [chrome, msedge]
+      description: One of the person's own everyday browsers.
+    BrowserRecorderLastStopped:
+      type: object
+      description: >-
+        The recording that was stopped last, so the person can be told
+        whether it reached their Learning space.
+      required: [recordingId, title, stoppedAt, actions, phrases]
+      properties:
+        recordingId:
+          type: string
+        title:
+          type: string
+        stoppedAt:
+          type: number
+          description: When it stopped, in milliseconds since 1970.
+        actions:
+          type: number
+          description: How many of the person's actions it held.
+        phrases:
+          type: number
+          description: How many narrated phrases it held.
+        sending:
+          type: boolean
+          description: True while some of it is still being saved.
+        retrying:
+          type: string
+          description: While sending, why none of it is going out right now.
+        kept:
+          type: string
+          enum: [refused, signed-out]
+          description: >-
+            Some of it is kept in the browser instead of saved: refused
+            when saving was turned away and will be tried again, signed-out
+            when it waits for the person to connect the browser again.
+        discarded:
+          type: boolean
+          description: The person discarded it rather than saving it.
+    BrowserRecorderReport:
+      type: object
+      description: The Recorder's own report from inside a browser.
+      required: [connected, phase, actions, narration]
+      properties:
+        connected:
+          type: boolean
+          description: Whether the Recorder is connected to OpenBot as a person.
+        userId:
+          type: string
+          description: The connected person's id.
+        connectionId:
+          type: string
+          description: The id of the connection it holds. Never its token.
+        openbotUrl:
+          type: string
+          description: The address it reaches OpenBot at.
+        phase:
+          $ref: '#/components/schemas/BrowserRecorderPhase'
+        recordingId:
+          type: string
+        title:
+          type: string
+          description: What the recording is named.
+        startedAt:
+          type: number
+          description: When the recording started, in milliseconds since 1970.
+        actions:
+          type: number
+          description: The person's actions so far in this recording.
+        narration:
+          $ref: '#/components/schemas/BrowserNarrationSource'
+        voice:
+          type: string
+          enum: ['off', listening, muted, unavailable]
+          description: >-
+            Whether the Recorder is hearing the person itself. Absent when
+            the page hears them instead.
+        lastStopped:
+          $ref: '#/components/schemas/BrowserRecorderLastStopped'
+    BrowserRecorderActivity:
+      type: object
+      description: What one of a person's Recorders is recording, wherever it records.
+      required: [phase, actions]
+      properties:
+        phase:
+          $ref: '#/components/schemas/BrowserRecorderPhase'
+        recordingId:
+          type: string
+        title:
+          type: string
+        startedAt:
+          type: number
+          description: When the recording started, in milliseconds since 1970.
+        actions:
+          type: number
+          description: The person's actions so far in this recording.
+    BotBrowser:
+      type: object
+      description: >-
+        The browser on a Bot's computer, as the caller sees it. Of somebody
+        else's recording it says only that one is running.
+      required: [open, tabs, mine, recordingIsMine]
+      properties:
+        open:
+          type: boolean
+          description: Whether the browser is running. A closed one has no tabs.
+        tabs:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserTab'
+        recorder:
+          $ref: '#/components/schemas/BrowserRecorderReport'
+        recordingBy:
+          type: string
+          description: The id of the person a running recording belongs to.
+        lastStoppedBy:
+          type: string
+          description: >-
+            The id of the person the last stopped recording belonged to.
+            Shown only to that person.
+        mine:
+          type: boolean
+          description: Whether the caller holds control of the Bot's computer.
+        recordingIsMine:
+          type: boolean
+          description: Whether the running recording, if any, is the caller's.
+        recordRefused:
+          type: string
+          description: >-
+            Why nothing can be recorded in this Bot's browser here, in one
+            sentence. Absent where recording can run.
+    PersonBrowserReal:
+      type: object
+      description: >-
+        On OpenBot Desktop, the person's own everyday browsers and whether a
+        Recorder in one of them is connected.
+      required: [connected, browsers]
+      properties:
+        connected:
+          type: boolean
+        browsers:
+          type: array
+          items:
+            $ref: '#/components/schemas/RealBrowser'
+    PersonBrowser:
+      type: object
+      description: The browser OpenBot runs for a person.
+      required: [open, tabs, available, computerId]
+      properties:
+        open:
+          type: boolean
+          description: Whether the browser is open. A closed one has no tabs.
+        tabs:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserTab'
+        browser:
+          $ref: '#/components/schemas/BrowserProduct'
+        window:
+          $ref: '#/components/schemas/BrowserWindow'
+        recorder:
+          $ref: '#/components/schemas/BrowserRecorderReport'
+        real:
+          $ref: '#/components/schemas/PersonBrowserReal'
+        activity:
+          $ref: '#/components/schemas/BrowserRecorderActivity'
+        available:
+          type: boolean
+          description: False when this OpenBot has no way to run a person's browser.
+        note:
+          type: string
+          description: Why this OpenBot cannot run the person's browser, in one sentence.
+        problem:
+          type: string
+          description: >-
+            The browser is there and is not answering, said in one sentence.
+            Absent while it answers.
+        shows:
+          $ref: '#/components/schemas/BrowserWindow'
+        computerId:
+          type: string
+          description: The id of the computer the browser runs on, which its live screen is read from.
+        narration:
+          $ref: '#/components/schemas/BrowserNarrationSource'
+    PersonBrowserWindowOpened:
+      type: object
+      description: The person's OpenBot browser opened, or came forward.
+      required: [ok, computerId, browser, window, narration]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        computerId:
+          type: string
+          description: The id of the computer the browser runs on.
+        browser:
+          $ref: '#/components/schemas/BrowserProduct'
+        window:
+          $ref: '#/components/schemas/BrowserWindow'
+        narration:
+          $ref: '#/components/schemas/BrowserNarrationSource'
+    PersonRealBrowserOpened:
+      type: object
+      description: >-
+        On OpenBot Desktop, what happened in the person's own everyday
+        browser instead.
+      required: [ok, opened, browser]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        opened:
+          type: string
+          enum: [real, store]
+          description: >-
+            real: their browser came forward, its Recorder connected. store:
+            the Recorder's store page opened in it, for them to add it.
+        browser:
+          $ref: '#/components/schemas/RealBrowser'
+    PersonBrowserOpened:
+      description: What an open did.
+      oneOf:
+        - $ref: '#/components/schemas/PersonBrowserWindowOpened'
+        - $ref: '#/components/schemas/PersonRealBrowserOpened'
+    BrowserNewTab:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          const: new
+        url:
+          type: string
+          maxLength: 2000
+          description: The web address to open in it. Left out, the tab opens empty.
+    BrowserActivateTab:
+      type: object
+      additionalProperties: false
+      required: [action, tabId]
+      properties:
+        action:
+          type: string
+          const: activate
+        tabId:
+          type: string
+          minLength: 1
+          maxLength: 200
+    BrowserCloseTab:
+      type: object
+      additionalProperties: false
+      required: [action, tabId]
+      properties:
+        action:
+          type: string
+          const: close
+        tabId:
+          type: string
+          minLength: 1
+          maxLength: 200
+    BrowserTabsRequest:
+      description: A new tab, or switching to or closing one.
+      oneOf:
+        - $ref: '#/components/schemas/BrowserNewTab'
+        - $ref: '#/components/schemas/BrowserActivateTab'
+        - $ref: '#/components/schemas/BrowserCloseTab'
+      discriminator:
+        propertyName: action
+        mapping:
+          new: '#/components/schemas/BrowserNewTab'
+          activate: '#/components/schemas/BrowserActivateTab'
+          close: '#/components/schemas/BrowserCloseTab'
+    BrowserGoToAddress:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: A web address, as a person types one.
+    BrowserHistoryMove:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [back, forward, reload]
+    BrowserNavigateRequest:
+      description: An address to open, or back, forward or reload.
+      oneOf:
+        - $ref: '#/components/schemas/BrowserGoToAddress'
+        - $ref: '#/components/schemas/BrowserHistoryMove'
+    BrowserRecordingStart:
+      type: object
+      additionalProperties: false
+      required: [action, title]
+      properties:
+        action:
+          type: string
+          const: start
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: What the person is about to do.
+        language:
+          type: string
+          maxLength: 35
+          description: The language narration is heard in, such as en-US.
+        narrate:
+          type: boolean
+          description: >-
+            Whether the person narrates this recording, in their own browser.
+            A Bot's browser is narrated from the page and does not read it.
+    BrowserRecordingStop:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          const: stop
+    BrowserRecordingRequest:
+      description: Start a recording, or stop the one that is running.
+      oneOf:
+        - $ref: '#/components/schemas/BrowserRecordingStart'
+        - $ref: '#/components/schemas/BrowserRecordingStop'
+      discriminator:
+        propertyName: action
+        mapping:
+          start: '#/components/schemas/BrowserRecordingStart'
+          stop: '#/components/schemas/BrowserRecordingStop'
+    BrowserNarrationTime:
+      type: integer
+      minimum: 1
+      maximum: 8640000000000000
+      description: A moment on the sender's clock, in milliseconds since 1970.
+    BrowserNarrationPhrase:
+      type: object
+      additionalProperties: false
+      required: [text, startedAt, endedAt, sentAt]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          pattern: \S
+          description: What the person said.
+        startedAt:
+          $ref: '#/components/schemas/BrowserNarrationTime'
+        endedAt:
+          $ref: '#/components/schemas/BrowserNarrationTime'
+        sentAt:
+          $ref: '#/components/schemas/BrowserNarrationTime'
+    BrowserNarrationSpeaking:
+      type: object
+      additionalProperties: false
+      required: [speaking, since, sentAt]
+      properties:
+        speaking:
+          type: boolean
+          const: true
+        since:
+          $ref: '#/components/schemas/BrowserNarrationTime'
+        sentAt:
+          $ref: '#/components/schemas/BrowserNarrationTime'
+    BrowserNarrationSilent:
+      type: object
+      additionalProperties: false
+      required: [speaking, sentAt]
+      properties:
+        speaking:
+          type: boolean
+          const: false
+        sentAt:
+          $ref: '#/components/schemas/BrowserNarrationTime'
+    BrowserNarrationRequest:
+      description: >-
+        A finished phrase, or the person starting or stopping a phrase.
+        sentAt is the sender's clock as the request leaves.
+      oneOf:
+        - $ref: '#/components/schemas/BrowserNarrationPhrase'
+        - $ref: '#/components/schemas/BrowserNarrationSpeaking'
+        - $ref: '#/components/schemas/BrowserNarrationSilent'
+    BrowserNarrationTaken:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+  responses:
+    BrowserInvalidRequest:
+      description: >-
+        The body does not match, the address is not a web address, a narration
+        time does not fit the recording, or the Idempotency-Key is missing.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notWeb:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Only web addresses open here.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            phraseTimes:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That phrase's times do not fit the recording, so it was not added.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BrowserForbidden:
+      description: >-
+        The sign-in does not allow this, the browser is somebody else's own, or
+        nothing can be recorded in a Bot's browser here.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can use their browser.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            sharedComputer:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Recording isn't available in a Bot's browser here, because the Bots share one computer.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BrowserConflict:
+      description: >-
+        The caller does not hold control of the Bot's computer, the recording is
+        not theirs or not running, the browser is not open, or the Idempotency-
+        Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            takeControl:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Take control of the Bot's browser first.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            someoneElses:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: Someone else is recording in this Bot's browser, so only they can do that.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            keyReused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request. Use a new key for a new write.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BrowserRequestNotJson:
+      description: >-
+        The body was not sent as JSON.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notJson:
+              value:
+                type: https://open.bot/errors/unsupported-media-type
+                title: Unsupported media type.
+                status: 415
+                detail: Send the request as JSON.
+                code: UNSUPPORTED_MEDIA_TYPE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BrowserTooManyConnections:
+      description: >-
+        Too many Recorder connections were asked for at once.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            tooMany:
+              value:
+                type: https://open.bot/errors/rate-limited
+                title: Too many requests.
+                status: 429
+                detail: Too many recordings were started at once. Wait a few minutes and try again.
+                code: RATE_LIMITED
+                category: rate_limit
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    BrowserUnfinished:
+      description: >-
+        The server could not complete the request, or did part of it: a browser
+        that was cleared whose record could not be written, or a Recorder that
+        could not be connected.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            cleared:
+              value:
+                type: https://open.bot/errors/browser-unfinished
+                title: The browser couldn't finish.
+                status: 500
+                detail: Your browser was cleared, but OpenBot couldn't finish. Clear it again.
+                code: BROWSER_UNFINISHED
+                category: internal
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+            internal:
+              value:
+                type: https://open.bot/errors/internal-server-error
+                title: Unexpected server error.
+                status: 500
+                detail: Unexpected server error.
+                code: INTERNAL_SERVER_ERROR
+                category: internal
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    BrowserUnreachable:
+      description: >-
+        The browser's computer could not be reached, or the browser failed and
+        said why.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unreachable:
+              value:
+                type: https://open.bot/errors/browser-unreachable
+                title: The browser couldn't be reached.
+                status: 502
+                detail: The Bot's browser could not be reached. Try again.
+                code: BROWSER_UNREACHABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    BrowserUnavailable:
+      description: >-
+        This OpenBot cannot run the browser: it has no way to run a person's
+        browser, or its setup stops one opening.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/browser-unavailable
+                title: This OpenBot can't run that browser.
+                status: 503
+                detail: This OpenBot cannot open a browser for you.
+                code: BROWSER_UNAVAILABLE
+                category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    BrowserNotAnswering:
+      description: >-
+        The browser, or its computer, took too long to answer. The page may
+        still be loading.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            slow:
+              value:
+                type: https://open.bot/errors/browser-not-answering
+                title: The browser is taking too long to answer.
+                status: 504
+                detail: The Bot's browser is taking too long to answer. The page may still be loading.
+                code: BROWSER_NOT_ANSWERING
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    BotBrowserExample:
+      summary: A Bot's browser the caller holds control of, with their recording running.
+      value:
+        open: true
+        tabs:
+          - id: tab_1
+            url: https://www.salesforce.com/reports
+            title: Reports
+            active: true
+        recorder:
+          connected: true
+          userId: user_2b8kq4
+          connectionId: conn_7d1f
+          phase: recording
+          recordingId: rec_4c2a
+          title: File the weekly pipeline report
+          startedAt: 1794650400000
+          actions: 12
+          narration: external
+        recordingBy: user_2b8kq4
+        mine: true
+        recordingIsMine: true
+    PersonBrowserExample:
+      summary: A person's browser, open on one page, with nothing recording.
+      value:
+        open: true
+        browser: chromium
+        window: screen
+        tabs:
+          - id: tab_1
+            url: https://www.salesforce.com/reports
+            title: Reports
+            active: true
+        recorder:
+          connected: true
+          userId: user_2b8kq4
+          connectionId: conn_7d1f
+          phase: idle
+          actions: 0
+          narration: external
+        available: true
+        shows: screen
+        computerId: person-0f3a9c1b7d2e4f5a8b6c9d0e1f2a3b4c
+        narration: external
+    PersonBrowserOpenedExample:
+      summary: The person's browser opened in the page.
+      value:
+        ok: true
+        computerId: person-0f3a9c1b7d2e4f5a8b6c9d0e1f2a3b4c
+        browser: chromium
+        window: screen
+        narration: external
+    BrowserNarrationTakenExample:
+      summary: Taken.
+      value:
+        ok: true

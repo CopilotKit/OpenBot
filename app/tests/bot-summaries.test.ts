@@ -19,9 +19,12 @@ test("counts read as words", () => {
 
 test("sharing names the audience", () => {
   expect(sharingSummary(undefined, "private")).toBe("Not shared");
-  expect(sharingSummary({ audience: "team" }, "private")).toBe("Whole team");
+  // The wire's `team` is everybody: a person reads "organization", never "team", for it.
+  expect(sharingSummary({ audience: "team" }, "private")).toBe(
+    "Everyone in the organization",
+  );
   expect(sharingSummary({ audience: "people" }, "private")).toBe(
-    "Specific people and groups",
+    "Specific people and teams",
   );
 });
 

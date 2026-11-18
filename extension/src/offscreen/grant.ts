@@ -130,8 +130,9 @@ export function classifyGrantError(
     return stop("park", "INTELLIGENCE_RUNTIME_REQUIRED");
   }
   if (code === "CONNECTION_FAILED") {
-    // Row 8.
-    if (message.includes("Could not connect to OpenBot's back end")) {
+    // Row 8. The sentence is the CopilotKit runtime's own, word for word: it is matched here and
+    // never shown, so it keeps the runtime's words while what a person reads says "backend".
+    if (message.includes("Could not connect to Intelligence")) {
       return retry(BUSY);
     }
     // Row 9.

@@ -83,8 +83,10 @@ import {
   ArrowDataTransferHorizontalIcon,
   ArrowDown01Icon,
   ArrowDown02Icon,
+  ArrowExpandIcon,
   ArrowLeft01Icon,
   ArrowLeft02Icon,
+  ArrowMoveDownRightIcon,
   ArrowRight01Icon,
   ArrowRight02Icon,
   ArrowUp01Icon,
@@ -108,15 +110,19 @@ import {
   CheckmarkBadge01Icon,
   CheckmarkCircle02Icon,
   CheckmarkSquare02Icon,
+  CircleDashedIcon,
   Clock01Icon,
   Clock03Icon,
   CloudIcon,
+  CloudOffIcon,
   ComputerIcon,
   ComputerPhoneSyncIcon,
+  ComputerRemoveIcon,
   ComputerTerminal01Icon,
   Copy01Icon,
   CpuIcon,
   CreditCardIcon,
+  Csv01Icon,
   CubeIcon,
   Cursor01Icon,
   DashboardSpeed01Icon,
@@ -124,12 +130,15 @@ import {
   DashboardSquareRemoveIcon,
   Database01Icon,
   Delete02Icon,
+  Doc01Icon,
   Download01Icon,
   Eraser01Icon,
   File01Icon,
   File02Icon,
   FileAddIcon,
+  FileBracesIcon,
   FileRemoveIcon,
+  FileScriptIcon,
   FileValidationIcon,
   FilterIcon,
   FingerPrintIcon,
@@ -146,14 +155,17 @@ import {
   GridViewIcon,
   HandIcon,
   HelpCircleIcon,
+  HierarchyIcon,
   HierarchySquare02Icon,
   HistoryIcon,
   Home01Icon,
   IdIcon,
+  Image01Icon,
   InboxIcon,
   InformationCircleIcon,
   Key01Icon,
   KeyboardIcon,
+  LaptopIcon,
   Layers01Icon,
   LeftToRightListBulletIcon,
   LifebuoyIcon,
@@ -165,6 +177,8 @@ import {
   Login01Icon,
   Logout01Icon,
   Mail01Icon,
+  MailAdd01Icon,
+  MailRemove01Icon,
   Megaphone01Icon,
   Menu01Icon,
   Menu02Icon,
@@ -188,6 +202,7 @@ import {
   PackageIcon,
   PaintBoardIcon,
   PauseIcon,
+  Pdf01Icon,
   PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
@@ -197,6 +212,7 @@ import {
   PlugSocketIcon,
   PlusSignCircleIcon,
   PlusSignIcon,
+  Ppt01Icon,
   PresentationBarChart01Icon,
   Progress01Icon,
   PuzzleIcon,
@@ -225,7 +241,9 @@ import {
   SourceCodeIcon,
   SparklesIcon,
   SquareUnlock02Icon,
+  StarIcon,
   StopIcon,
+  SunMoonIcon,
   Table01Icon,
   Tag01Icon,
   Target01Icon,
@@ -251,6 +269,7 @@ import {
   WebhookIcon,
   WindowsNewIcon,
   Wrench01Icon,
+  Xls01Icon,
 } from "@hugeicons/core-free-icons";
 
 export const IconAdjustments = defineIcon("adjustments", SlidersHorizontalIcon);
@@ -269,6 +288,10 @@ export const IconArrowUpRight = defineIcon(
 export const IconArrowsExchange = defineIcon(
   "arrows-exchange",
   ArrowDataTransferHorizontalIcon,
+);
+export const IconArrowsMaximize = defineIcon(
+  "arrows-maximize",
+  ArrowExpandIcon,
 );
 export const IconArrowsVertical = defineIcon(
   "arrows-vertical",
@@ -318,20 +341,31 @@ export const IconCircleCheck = defineIcon(
   "circle-check",
   CheckmarkCircle02Icon,
 );
+export const IconCircleDashed = defineIcon("circle-dashed", CircleDashedIcon);
 export const IconCircleMinus = defineIcon("circle-minus", MinusSignCircleIcon);
 export const IconCirclePlus = defineIcon("circle-plus", PlusSignCircleIcon);
 export const IconClock = defineIcon("clock", Clock01Icon);
 export const IconClockHour3 = defineIcon("clock-hour-3", Clock03Icon);
 export const IconClockPlay = defineIcon("clock-play", TimeScheduleIcon);
 export const IconCloud = defineIcon("cloud", CloudIcon);
+export const IconCloudOff = defineIcon("cloud-off", CloudOffIcon);
 export const IconCode = defineIcon("code", SourceCodeIcon);
 export const IconCopy = defineIcon("copy", Copy01Icon);
+export const IconCornerDownRight = defineIcon(
+  "corner-down-right",
+  ArrowMoveDownRightIcon,
+);
 export const IconCpu = defineIcon("cpu", CpuIcon);
 export const IconCreditCard = defineIcon("credit-card", CreditCardIcon);
 export const IconCube = defineIcon("cube", CubeIcon);
 export const IconDatabase = defineIcon("database", Database01Icon);
 export const IconDeviceDesktop = defineIcon("device-desktop", ComputerIcon);
+export const IconDeviceDesktopOff = defineIcon(
+  "device-desktop-off",
+  ComputerRemoveIcon,
+);
 export const IconDeviceFloppy = defineIcon("device-floppy", FloppyDiskIcon);
+export const IconDeviceLaptop = defineIcon("device-laptop", LaptopIcon);
 export const IconDeviceMobile = defineIcon("device-mobile", SmartPhone01Icon);
 export const IconDeviceMobileMessage = defineIcon(
   "device-mobile-message",
@@ -350,6 +384,11 @@ export const IconFileCheck = defineIcon("file-check", FileValidationIcon);
 export const IconFileOff = defineIcon("file-off", FileRemoveIcon);
 export const IconFilePlus = defineIcon("file-plus", FileAddIcon);
 export const IconFileText = defineIcon("file-text", File02Icon);
+export const IconFileTypeCsv = defineIcon("file-type-csv", Csv01Icon);
+export const IconFileTypeDocx = defineIcon("file-type-docx", Doc01Icon);
+export const IconFileTypePdf = defineIcon("file-type-pdf", Pdf01Icon);
+export const IconFileTypePpt = defineIcon("file-type-ppt", Ppt01Icon);
+export const IconFileTypeXls = defineIcon("file-type-xls", Xls01Icon);
 export const IconFilter = defineIcon("filter", FilterIcon);
 export const IconFingerprint = defineIcon("fingerprint", FingerPrintIcon);
 export const IconFlag = defineIcon("flag", Flag01Icon);
@@ -366,6 +405,7 @@ export const IconHome = defineIcon("home", Home01Icon);
 export const IconId = defineIcon("id", IdIcon);
 export const IconInbox = defineIcon("inbox", InboxIcon);
 export const IconInfoCircle = defineIcon("info-circle", InformationCircleIcon);
+export const IconJson = defineIcon("json", FileBracesIcon);
 export const IconKey = defineIcon("key", Key01Icon);
 export const IconKeyboard = defineIcon("keyboard", KeyboardIcon);
 export const IconLayoutGrid = defineIcon("layout-grid", GridViewIcon);
@@ -387,6 +427,9 @@ export const IconLockOff = defineIcon("lock-off", SquareUnlock02Icon);
 export const IconLogin2 = defineIcon("login-2", Login01Icon);
 export const IconLogout = defineIcon("logout", Logout01Icon);
 export const IconMail = defineIcon("mail", Mail01Icon);
+export const IconMailOff = defineIcon("mail-off", MailRemove01Icon);
+export const IconMailPlus = defineIcon("mail-plus", MailAdd01Icon);
+export const IconMarkdown = defineIcon("markdown", FileScriptIcon);
 export const IconMenu2 = defineIcon("menu-2", Menu02Icon);
 export const IconMessage = defineIcon("message", Message01Icon);
 export const IconMessageChatbot = defineIcon("message-chatbot", BotIcon);
@@ -404,6 +447,7 @@ export const IconNetwork = defineIcon("network", NetworkIcon);
 export const IconNotes = defineIcon("notes", Note01Icon);
 export const IconPalette = defineIcon("palette", PaintBoardIcon);
 export const IconPencil = defineIcon("pencil", PencilEdit02Icon);
+export const IconPhoto = defineIcon("photo", Image01Icon);
 export const IconPin = defineIcon("pin", PinIcon);
 export const IconPinFilled = defineIcon("pin-filled", PinIcon, {
   filled: true,
@@ -447,6 +491,7 @@ export const IconShare = defineIcon("share", Share08Icon);
 export const IconShieldCheck = defineIcon("shield-check", SecurityCheckIcon);
 export const IconShieldLock = defineIcon("shield-lock", SecurityLockIcon);
 export const IconShieldX = defineIcon("shield-x", SecurityBlockIcon);
+export const IconSitemap = defineIcon("sitemap", HierarchyIcon);
 export const IconSparkles = defineIcon("sparkles", SparklesIcon);
 export const IconSpeakerphone = defineIcon("speakerphone", Megaphone01Icon);
 export const IconSquareCheck = defineIcon(
@@ -454,7 +499,9 @@ export const IconSquareCheck = defineIcon(
   CheckmarkSquare02Icon,
 );
 export const IconStack2 = defineIcon("stack-2", Layers01Icon);
+export const IconStar = defineIcon("star", StarIcon);
 export const IconSubtask = defineIcon("subtask", HierarchySquare02Icon);
+export const IconSunMoon = defineIcon("sun-moon", SunMoonIcon);
 export const IconTable = defineIcon("table", Table01Icon);
 export const IconTag = defineIcon("tag", Tag01Icon);
 export const IconTarget = defineIcon("target", Target01Icon);

@@ -141,7 +141,7 @@ export function CheckInsPage() {
         </PageSection>
       ) : overview.isPending ? null : overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in settings. Reload the page.
+          Couldn't load check-in settings. Try again in a moment.
         </p>
       ) : (
         <CheckInSettings data={overview.data} />
@@ -266,7 +266,7 @@ function Activity({
   onDays: (days: Days) => void;
 }) {
   const [openBot, setOpenBot] = useState<string | undefined>();
-  const bot = metrics.data?.bots.find((row) => row.agentId === openBot);
+  const bot = metrics.data?.bots.find((row) => row.botId === openBot);
 
   return (
     <PageSection
@@ -291,7 +291,7 @@ function Activity({
     >
       {metrics.isPending ? null : metrics.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in activity. Reload the page.
+          Couldn't load check-in activity. Try again in a moment.
         </p>
       ) : (
         <>
@@ -322,9 +322,9 @@ function Activity({
           ) : (
             <PageRows>
               {metrics.data.bots.map((row, index) => (
-                <Fragment key={row.agentId}>
+                <Fragment key={row.botId}>
                   {index > 0 ? <Separator /> : null}
-                  <BotRow bot={row} onOpen={() => setOpenBot(row.agentId)} />
+                  <BotRow bot={row} onOpen={() => setOpenBot(row.botId)} />
                 </Fragment>
               ))}
             </PageRows>

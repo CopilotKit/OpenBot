@@ -53,7 +53,7 @@ export function GoalSchedules({
     return (
       <PageSection title="Schedules">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this goal's schedules. Reload the page.
+          Couldn't load this goal's schedules. Try again in a moment.
         </p>
       </PageSection>
     );

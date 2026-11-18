@@ -43,6 +43,12 @@ export type AuditEvent = {
    * ("Write a skill" for `skill-creator`). Not part of the stored row, so older rows read it too.
    */
   subjectTitle?: string;
+  /**
+   * The address of the person the page found for the row's `actorUserId`, where the row records
+   * none of its own: a Bot's action, run on its person's authority. Not part of the stored row
+   * (components/manage/audit-page.tsx, `withPeopleNamed`).
+   */
+  startedBy?: string;
 };
 
 type NameFor = (botId: string) => string;
@@ -144,11 +150,14 @@ export function WhoCell({
   deployment,
   event,
   nameFor,
+  viewer,
 }: {
   /** What OpenBot itself is called here; see {@link startedByText}. */
   deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
+  /** The signed-in person's email, read as "you"; see {@link startedByText}. */
+  viewer?: string | null;
 }) {
   return (
     <>
@@ -160,6 +169,7 @@ export function WhoCell({
           deployment={deployment}
           event={event}
           nameFor={nameFor}
+          viewer={viewer}
         />
       </div>
     </>
@@ -456,14 +466,28 @@ function initiatorKindOf(event: AuditEvent): string | undefined {
 }
 
 /**
+ * The person a row says started it, by the email the server records in `payload.by`, else the
+ * address the page found for the person whose authority it ran on (`startedBy`). The row carries no
+ * name, so the email is what every row can name. Undefined when the row names nobody.
+ */
+function personOf(event: AuditEvent): string | undefined {
+  const by = event.payload?.by;
+  if (typeof by === "string" && by.trim()) return by.trim();
+  return event.startedBy?.trim() || undefined;
+}
+
+/**
  * Who started a row, as the row's Started by filter and its line under the Bot both say it.
  * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
- * "OpenBot" in the personal edition's Activity, which is anybody's page.
+ * "OpenBot" in the personal edition's Activity, which is anybody's page. A person is named where
+ * the row or the page says who ({@link personOf}), "You" where that is `viewer` (the signed-in
+ * person's email), and is "A person" where nobody can.
  */
 export function startedByText(
   event: AuditEvent,
   nameFor: NameFor,
   deployment = "this deployment",
+  viewer?: string | null,
 ): string {
   switch (initiatorKindOf(event)) {
     case "routine":
@@ -478,8 +502,13 @@ export function startedByText(
       return "A goal";
     case "deployment":
       return atStart(deployment);
-    default:
-      return "A person";
+    default: {
+      const person = personOf(event);
+      if (!person) return "A person";
+      return viewer && person.toLowerCase() === viewer.trim().toLowerCase()
+        ? "You"
+        : person;
+    }
   }
 }
 
@@ -887,6 +916,7 @@ export function searchTextOf(
   event: AuditEvent,
   nameFor: NameFor,
   deployment?: string,
+  viewer?: string | null,
 ): string {
   return [
     whatText(event),
@@ -898,7 +928,9 @@ export function searchTextOf(
     subjectText(event, false),
     hostText(event),
     botText(event, nameFor),
-    startedByText(event, nameFor, deployment),
+    startedByText(event, nameFor, deployment, viewer),
+    // Who did it, by email, on any row that says so, whatever started it, "you" included.
+    personOf(event) ?? "",
     decisionText(event),
     decisionText(event, false),
     // Both ways a reason is said, as for the subject above.
@@ -982,10 +1014,12 @@ export function StartedByCell({
   deployment,
   event,
   nameFor,
+  viewer,
 }: {
   deployment?: string;
   event: AuditEvent;
   nameFor: NameFor;
+  viewer?: string | null;
 }) {
   // Anything that ran with nobody watching is the colour of a warning; a person or the deployment is not.
   const unattended =
@@ -1001,19 +1035,20 @@ export function StartedByCell({
           : "text-muted-foreground"
       }
     >
-      {startedByLine(startedByText(event, nameFor, deployment))}
+      {startedByLine(startedByText(event, nameFor, deployment, viewer))}
     </span>
   );
 }
 
 /**
  * Under the Bot's name, so it says what it is: "Started by a routine", "Handed on by Scout",
- * "Started by OpenBot". Only a leading "A" or "This" is lowered; a name keeps its capitals.
+ * "Started by OpenBot", "Started by you". Only a leading "A" or "This", or "You" on its own, is
+ * lowered; a name keeps its capitals.
  */
 export function startedByLine(text: string): string {
   return text.startsWith("Handed on")
     ? text
-    : `Started by ${text.replace(/^(A|This) /, (word) => word.toLowerCase())}`;
+    : `Started by ${text.replace(/^(?:(?:A|This) |You$)/, (word) => word.toLowerCase())}`;
 }
 
 export function DecisionCell({
@@ -1178,6 +1213,9 @@ const DECISIONS: Record<string, string> = {
   "computer.browser_cleared": "A person cleared the browser",
   "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
+  // Not "Allowed": nobody asked. The computer was idle, and its files and sign-ins are kept.
+  "computer.suspended": "Turned off while idle",
+  "computer.resumed": "Started again",
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",

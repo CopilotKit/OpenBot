@@ -9,24 +9,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useEdition } from "@/components/edition/for-a-team";
 import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
-import { openingOf } from "@/lib/voice/cut";
-
-/** How much of a conversation's name the question quotes before it is cut. */
-const TITLE_LIMIT = 60;
+import { deleteQuestion } from "@/lib/delete-question";
 
 /**
  * The question, naming the conversation by what the sidebar calls it (`conversationTitle`). A
  * conversation nobody has used yet has no name to quote.
  */
 export function deleteConversationQuestion(title: string): string {
-  const trimmed = title.trim();
-  if (!trimmed) return "Delete this conversation?";
-  const shown =
-    trimmed.length > TITLE_LIMIT
-      ? `${openingOf(trimmed, TITLE_LIMIT).trimEnd()}…`
-      : trimmed;
-  return `Delete “${shown}”?`;
+  return deleteQuestion(title, "Delete this conversation?");
+}
+
+/**
+ * What deleting it does. Only a team has other people in a conversation, so only a team is told it
+ * goes for everyone. The personal edition has one person, and an edition not known yet is told
+ * nothing that could be wrong for either.
+ */
+export function deleteConversationOutcome(
+  edition: "team" | "personal" | undefined,
+): string {
+  return edition === "team"
+    ? "It disappears for everyone in the conversation."
+    : "It's deleted, with all its messages.";
 }
 
 /**
@@ -58,6 +63,7 @@ export function DeleteConversationDialog({
   title: string;
 }) {
   const queryClient = useQueryClient();
+  const edition = useEdition();
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
   const { reset } = deleteChannel;
 
@@ -83,7 +89,7 @@ export function DeleteConversationDialog({
         <DialogHeader>
           <DialogTitle>{deleteConversationQuestion(title)}</DialogTitle>
           <DialogDescription>
-            It disappears for everyone in the conversation.
+            {deleteConversationOutcome(edition)}
           </DialogDescription>
         </DialogHeader>
         {deleteChannel.error ? (

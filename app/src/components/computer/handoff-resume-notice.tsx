@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { readControl } from "@/lib/computers/control";
+import { BOT_GONE, readControlOrGone } from "@/lib/computers/control";
 import {
   forgetHandoff,
   hasActiveHandoff,
@@ -13,6 +13,7 @@ import {
   type HandoffAgent,
   resumeHandoffTask,
 } from "@/lib/copilot/handoff-resume";
+import { useNoBotComputers } from "@/lib/deployment/queries";
 
 /** SDK reconnect replays human-in-the-loop tools only; ordinary frontend handlers need this action. */
 export function HandoffResumeNotice({
@@ -30,14 +31,30 @@ export function HandoffResumeNotice({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
+  /*
+   * An OpenBot with no computers for Bots has no wheel to read, and the server refuses the read:
+   * once a second, for as long as a conversation is open. A handoff this tab remembers is still
+   * looked at, since that needs no computer. Until the deployment has answered, and when it can't
+   * be read, the wheel is read as before.
+   */
+  const noComputers = useNoBotComputers() === true;
   useEffect(() => {
     if (!ready) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const check = async () => {
       let stored = pendingHandoff(botId);
-      if (!stored) {
-        const state = await readControl(botId).catch(() => null);
+      /*
+       * The Bot is not one this person can use any more (deleted, or shared with a team they were
+       * taken out of while this conversation was open): the read answers "not found", and would
+       * again every second for as long as the conversation stays open. It is the last read this
+       * conversation makes; opening it again asks once more.
+       */
+      let gone = false;
+      if (!stored && !noComputers) {
+        const answer = await readControlOrGone(botId).catch(() => null);
+        gone = answer === BOT_GONE;
+        const state = answer === BOT_GONE ? null : answer;
         const request = state?.request;
         if (request?.toolCallId) {
           const candidate = {
@@ -74,7 +91,7 @@ export function HandoffResumeNotice({
           ? stored
           : null,
       );
-      timer = setTimeout(() => void check(), 1000);
+      if (!gone) timer = setTimeout(() => void check(), 1000);
     };
     void check();
     return () => {
@@ -82,7 +99,7 @@ export function HandoffResumeNotice({
       clearTimeout(timer);
       controller.current?.abort("detached");
     };
-  }, [botId, agent, ready]);
+  }, [botId, agent, ready, noComputers]);
 
   const resume = async () => {
     if (!pending || busy) return;

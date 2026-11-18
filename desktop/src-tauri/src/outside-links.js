@@ -14,12 +14,18 @@
     host === "[::1]" ||
     host.endsWith(".localhost");
 
+  // Connected to an OpenBot that runs elsewhere (the shell sets this before the shim on the relay's
+  // pages): only this page's own origin is OpenBot in the window. That OpenBot's own address can be
+  // on this computer too (127.0.0.1 behind a port forward), and a link to it is for the browser.
+  const connected = () => window.__openbotConnected === true;
+
   const leaves = (href) => {
     try {
       const url = new URL(href, window.location.href);
       return (
         (url.protocol === "http:" || url.protocol === "https:") &&
-        !loopback(url.hostname)
+        (!loopback(url.hostname) ||
+          (connected() && url.origin !== window.location.origin))
       );
     } catch {
       return false;

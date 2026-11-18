@@ -54,16 +54,24 @@ export function ComputerControlButton({
  */
 export function ComputerChatControls({
   computerId,
+  noComputers = false,
   open,
   onOpenChange,
 }: {
   computerId?: string;
+  /**
+   * This OpenBot has no computers for Bots (`useNoBotComputers`). The icon stays, because the
+   * Computer it opens is where a person is told so, but nobody can hold a wheel that isn't there,
+   * so who has control is not read: the server refuses it, once a second, for as long as a
+   * conversation is open.
+   */
+  noComputers?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const { control, someoneElse } = useComputerControl(
     computerId ?? "",
-    Boolean(computerId),
+    Boolean(computerId) && !noComputers,
   );
   const needsYou = Boolean(
     control &&

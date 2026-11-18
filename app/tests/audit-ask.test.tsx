@@ -17,6 +17,7 @@ import {
   eventTypeFilter,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
+import { AUDIT_ASK_PATH, AUDIT_PATH, auditPage } from "./audit-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -69,7 +70,7 @@ const CLICK = {
   createdAt: "2026-11-07T15:20:00.000Z",
 };
 
-/** What `POST /api/admin/audit-events/ask` answered on the real page for the same question. */
+/** What `askAuditEvents` answered on the real page for the same question. */
 const ANSWERED = {
   answerable: "yes",
   unanswered: null,
@@ -96,18 +97,21 @@ const UNANSWERABLE = {
 function renderAsk(answers: unknown[]) {
   const listed: URL[] = [];
   const asked: unknown[] = [];
+  const keys: (string | null)[] = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://127.0.0.1");
-      if (url.pathname === "/api/admin/audit-events/ask") {
+      if (url.pathname === AUDIT_ASK_PATH) {
         asked.push(JSON.parse(String(init?.body)));
+        keys.push(new Headers(init?.headers).get("idempotency-key"));
         return Response.json(answers.shift());
       }
-      if (url.pathname === "/api/admin/audit-events") {
+      if (url.pathname === AUDIT_PATH) {
         listed.push(url);
         // The server's answer: the Gmail send matches the app filter, the click does not.
-        const events = url.searchParams.get("app") ? [GMAIL] : [GMAIL, CLICK];
-        return Response.json({ events });
+        return auditPage(
+          url.searchParams.get("app") ? [GMAIL] : [GMAIL, CLICK],
+        );
       }
       return Response.json({ error: "not served" }, { status: 404 });
     },
@@ -131,7 +135,7 @@ function renderAsk(answers: unknown[]) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { view, listed, asked };
+  return { view, listed, asked, keys };
 }
 
 async function askQuestion(view: ReturnType<typeof render>, question: string) {
@@ -143,7 +147,7 @@ async function askQuestion(view: ReturnType<typeof render>, question: string) {
 }
 
 test("an answer becomes chips over the rows the server returns for them, read back in a line", async () => {
-  const { view, listed, asked } = renderAsk([ANSWERED]);
+  const { view, listed, asked, keys } = renderAsk([ANSWERED]);
   await view.findByText("2 events");
 
   await askQuestion(view, "Show me every Gmail write by a routine last week");
@@ -152,6 +156,8 @@ test("an answer becomes chips over the rows the server returns for them, read ba
   expect(asked[0]).toMatchObject({
     question: "Show me every Gmail write by a routine last week",
   });
+  // Asking is a write to the API, so it carries a key of its own.
+  expect(keys[0]).toMatch(/^[0-9a-f]{32}$/);
   // The chips are the filters the rows were asked with, asked of the server, not the loaded rows.
   const chips = [...view.container.querySelectorAll("[data-audit-chip]")].map(
     (chip) => chip.textContent,

@@ -1,0 +1,1393 @@
+# Notifications and devices: a person's phones for push notifications, the Slack, Teams and phone
+# destinations their conversations continue in, what Bots sent them outside OpenBot, where each kind
+# of update goes, how much each Bot may send, and which ways this deployment can reach people.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+paths:
+  /api/v2/organizations/{organizationId}/people/{personId}/devices:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      summary: List a person's devices
+      description: >-
+        Return one page of the phones a person registered for push
+        notifications, the first registered first. Never a device's push
+        token. Only the person themselves may list them; there is no
+        administrator view. A missing cursor starts at the first page and
+        nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [devices:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of devices.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DevicePage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/DevicePageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/devices/{deviceId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/DeviceId'
+    put:
+      tags: [Devices]
+      operationId: registerDevice
+      summary: Register a device for push notifications
+      description: >-
+        Register one of the person's phones for push notifications under the
+        id the app made for it, or replace what that id holds. The app sends
+        its current push token every time it starts, so a token that changed
+        replaces the old one and the device is never registered twice.
+        Answers 200 whether the id was new or held a registration already.
+        A token another account holds moves only once that
+        account signed out on the phone. Only the person themselves may
+        register their devices, and only where this deployment sends push
+        notifications (listNotificationTransports).
+      security:
+        - webSession: []
+        - appOAuth: [devices:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+            examples:
+              iphone:
+                value:
+                  token: ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]
+                  projectId: 1f0e6c3a-5b2d-4e8f-9a71-3c4d5e6f7a8b
+                  platform: ios
+      responses:
+        '200':
+          description: The device, registered.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+              examples:
+                device:
+                  $ref: '#/components/examples/DeviceResponseExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/TransportUnavailable'
+        '409':
+          $ref: '#/components/responses/DeviceConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Devices]
+      operationId: deleteDevice
+      summary: Stop push notifications to a device
+      description: >-
+        Stop sending push notifications to one of the person's phones. The
+        app does this when the person signs out on it, so another account
+        can register the phone after them. Only the person themselves may
+        remove their devices. A device already removed is not found, which a
+        client can read as done.
+      security:
+        - webSession: []
+        - appOAuth: [devices:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The device gets no more push notifications.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/DeviceNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Destinations]
+      operationId: listDestinations
+      summary: List where a person's Bots reach them
+      description: >-
+        Return one page of the places outside OpenBot a person continues
+        their conversations with Bots: a Slack or Microsoft Teams chat, or a
+        phone number for text messages, each tied to one conversation with
+        one Bot. A Slack account, a Teams account or a phone number is
+        connected in one organization at a time: connecting one that is
+        connected in another organization answers 400 until it is
+        disconnected there. The first connected first. Only the person
+        themselves may
+        list them; there is no administrator view. A missing cursor starts at
+        the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [destinations:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of destinations.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/DestinationPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/link-chat:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Destinations]
+      operationId: linkChatDestination
+      summary: Start continuing a conversation in Slack or Teams
+      description: >-
+        Make a one-time code that ties the person's Slack or Microsoft Teams
+        account to one of their conversations with one Bot. The person sends
+        the command it answers to the OpenBot app in Slack or Teams, and the
+        account they send it from becomes the destination; nothing is
+        connected here. The conversation must be the person's and the Bot one
+        of its own. Only the person themselves may link, only where this
+        deployment is paired with Slack and Teams, and only when an
+        administrator lets them add Bots to Slack and Teams.
+      security:
+        - webSession: []
+        - appOAuth: [destinations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkChatDestinationRequest'
+            examples:
+              slack:
+                value:
+                  platform: slack
+                  conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+      responses:
+        '200':
+          description: The code, and the command to send with it.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatLinkCode'
+              examples:
+                slack:
+                  $ref: '#/components/examples/ChatLinkCodeExample'
+        '400':
+          $ref: '#/components/responses/InvalidDestination'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/DestinationForbidden'
+        '404':
+          $ref: '#/components/responses/TransportUnavailable'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/verify-phone:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Destinations]
+      operationId: verifyPhoneDestination
+      summary: Text a code to a phone to connect it
+      description: >-
+        Text a verification code to a phone number, to tie that number to one
+        of the person's conversations with one Bot. Nothing is connected
+        until the code comes back through confirmPhoneDestination within ten
+        minutes. The conversation must be the person's and the Bot one of its
+        own. Only the person themselves may connect a phone, and only where
+        this deployment sends text messages.
+      security:
+        - webSession: []
+        - appOAuth: [destinations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyPhoneDestinationRequest'
+            examples:
+              phone:
+                value:
+                  phone: '+14155550123'
+                  conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+                  botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+      responses:
+        '200':
+          description: The code is on its way; confirm it under this verification.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneVerification'
+              examples:
+                sent:
+                  $ref: '#/components/examples/PhoneVerificationExample'
+        '400':
+          $ref: '#/components/responses/InvalidDestination'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/TransportUnavailable'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/TextMessagesUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/confirm-phone:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [Destinations]
+      operationId: confirmPhoneDestination
+      summary: Connect a phone with the code it was texted
+      description: >-
+        Connect the phone a verification was texted to, with the code it
+        received, as a destination for the conversation and Bot the
+        verification named. A verification works once, for ten minutes, and
+        only for the person who started it. Only the person themselves may
+        confirm, and only where this deployment sends text messages.
+      security:
+        - webSession: []
+        - appOAuth: [destinations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmPhoneDestinationRequest'
+            examples:
+              code:
+                value:
+                  verificationId: 7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+                  code: '482913'
+      responses:
+        '201':
+          description: The phone, connected.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationResponse'
+              examples:
+                phone:
+                  $ref: '#/components/examples/DestinationResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidDestination'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/TransportUnavailable'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/TextMessagesUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/destinations/{destinationId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/DestinationId'
+    delete:
+      tags: [Destinations]
+      operationId: deleteDestination
+      summary: Disconnect a destination
+      description: >-
+        Stop continuing a conversation in that Slack or Teams chat, or by
+        text to that phone. Only the person themselves may disconnect their
+        destinations. A destination already disconnected is not found, which
+        a client can read as done.
+      security:
+        - webSession: []
+        - appOAuth: [destinations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The destination was disconnected.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/DestinationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/deliveries:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Deliveries]
+      operationId: listDeliveries
+      summary: List what was sent to a person outside OpenBot
+      description: >-
+        Return one page of the updates Bots sent a person by push
+        notification, Slack, Microsoft Teams or text message, the newest
+        first, each with where it got to and why it failed if it did. Only
+        the person themselves may list them; there is no administrator view.
+        A missing cursor starts at the first page and nextCursor null ends
+        the list.
+      security:
+        - webSession: []
+        - appOAuth: [deliveries:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of deliveries.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryPage'
+              examples:
+                lastPage:
+                  $ref: '#/components/examples/DeliveryPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/notification-settings:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [Notification settings]
+      operationId: getNotificationSettings
+      summary: Read where a person's updates go
+      description: >-
+        Return which ways of reaching the person each kind of update may use,
+        for every one of their Bots at once: progress, decisions, questions,
+        and what their Bots' check-ins found. A kind the person never chose
+        for goes every way they can be reached. Only the person themselves
+        may read them.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [notification-settings:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The person's notification settings.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationSettings'
+              examples:
+                settings:
+                  $ref: '#/components/examples/NotificationSettingsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Notification settings]
+      operationId: updateNotificationSettings
+      summary: Change where a person's updates go
+      description: >-
+        Change where the kinds of update sent go and keep the rest, so two
+        devices saving different kinds at once both keep theirs. At least one
+        kind is required. Only the person themselves may change them.
+      security:
+        - webSession: []
+        - appOAuth: [notification-settings:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNotificationSettingsRequest'
+            examples:
+              questions:
+                value:
+                  routing:
+                    question: [push, slack]
+      responses:
+        '200':
+          description: The person's notification settings, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationSettings'
+              examples:
+                settings:
+                  $ref: '#/components/examples/NotificationSettingsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/bot-notification-settings/{botId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: './bots.yaml#/components/parameters/BotId'
+    get:
+      tags: [Notification settings]
+      operationId: getBotNotificationSettings
+      summary: Read how much one Bot may reach a person
+      description: >-
+        Return how much one Bot may reach the person outside OpenBot:
+        everything, only what needs them, or nothing. A Bot they never set
+        may send everything. Badges in OpenBot always show. Only the person
+        themselves may read it, about a Bot they can see.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [notification-settings:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: How much the Bot may reach the person.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotNotificationSettings'
+              examples:
+                needsInput:
+                  $ref: '#/components/examples/BotNotificationSettingsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './bots.yaml#/components/responses/BotNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    patch:
+      tags: [Notification settings]
+      operationId: updateBotNotificationSettings
+      summary: Change how much one Bot may reach a person
+      description: >-
+        Set how much one Bot may reach the person outside OpenBot. The audit
+        trail records the change. Only the person themselves may change it,
+        about a Bot they can see.
+      security:
+        - webSession: []
+        - appOAuth: [notification-settings:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBotNotificationSettingsRequest'
+            examples:
+              needsInput:
+                value:
+                  notify: needs_input
+      responses:
+        '200':
+          description: How much the Bot may reach the person, as saved.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotNotificationSettings'
+              examples:
+                needsInput:
+                  $ref: '#/components/examples/BotNotificationSettingsExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './bots.yaml#/components/responses/BotNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/notification-transports:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Notification settings]
+      operationId: listNotificationTransports
+      summary: List the ways OpenBot can reach people here
+      description: >-
+        Return the ways this deployment can reach a person outside OpenBot.
+        One appears only once it is set up where OpenBot runs: push needs the
+        OpenBot phone app's project, Slack and Microsoft Teams need the
+        OpenTag pairing, and text messages need Twilio. A person's settings
+        keep their choice for one that is not, for when it is. A missing
+        cursor starts at the first page and nextCursor null ends the list.
+      security:
+        - webSession: []
+        - appOAuth: [notification-settings:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of the ways this deployment can reach people.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTransportPage'
+              examples:
+                pushAndSlack:
+                  $ref: '#/components/examples/NotificationTransportPageLast'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      description: >-
+        The device's id: a UUID the OpenBot app makes once on the phone and
+        keeps, so registering again replaces rather than adds.
+      schema:
+        type: string
+        format: uuid
+      example: 2b7c4d1e-9f3a-4e6b-8c5d-1a2b3c4d5e6f
+    DestinationId:
+      name: destinationId
+      in: path
+      required: true
+      description: The destination's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: \S
+  schemas:
+    DevicePlatform:
+      type: string
+      enum: [ios, android]
+      description: The phone's operating system.
+    Device:
+      type: object
+      description: >-
+        A phone that gets push notifications for the person, from every one
+        of their Bots. Never its push token.
+      required: [id, platform, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the OpenBot app made for the phone.
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+        createdAt:
+          type: string
+          format: date-time
+          description: When OpenBot first registered the phone.
+    DevicePage:
+      type: object
+      required: [devices, nextCursor]
+      properties:
+        devices:
+          type: array
+          description: The first registered first, then by id.
+          items:
+            $ref: '#/components/schemas/Device'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    DeviceResponse:
+      type: object
+      required: [device]
+      properties:
+        device:
+          $ref: '#/components/schemas/Device'
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [token, projectId, platform]
+      properties:
+        token:
+          type: string
+          maxLength: 256
+          pattern: ^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$
+          description: >-
+            The phone's Expo push token, as the OpenBot app read it when it
+            started. It is a credential: OpenBot never sends it back.
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            The OpenBot app's project, which must be the one this deployment
+            sends push notifications through.
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+    DestinationTransport:
+      type: string
+      enum: [slack, teams, sms]
+      description: Slack, Microsoft Teams, or text messages.
+    Destination:
+      type: object
+      description: >-
+        Somewhere outside OpenBot a person continues one conversation with one
+        Bot: a Slack or Microsoft Teams chat, or a phone number.
+      required: [id, transport, conversationId, botId, address, optedOutAt, createdAt]
+      properties:
+        id:
+          type: string
+          description: The destination's id.
+        transport:
+          $ref: '#/components/schemas/DestinationTransport'
+        conversationId:
+          type: string
+          description: The conversation it continues.
+        botId:
+          type: string
+          description: The Bot that answers there.
+        address:
+          type: string
+          description: >-
+            Where the Bot sends: the phone number for text messages, or the
+            chat's own id in Slack or Teams.
+        optedOutAt:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            Text messages only: when the person texted STOP. Nothing is texted
+            until they text START. Null while they can be texted.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was connected.
+    DestinationPage:
+      type: object
+      required: [destinations, nextCursor]
+      properties:
+        destinations:
+          type: array
+          description: The first connected first, then by id.
+          items:
+            $ref: '#/components/schemas/Destination'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    DestinationResponse:
+      type: object
+      required: [destination]
+      properties:
+        destination:
+          $ref: '#/components/schemas/Destination'
+    DestinationConversationId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: One of the person's conversations, by its id.
+    DestinationBotId:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: \S
+      description: A Bot in that conversation, by its id.
+    LinkChatDestinationRequest:
+      type: object
+      additionalProperties: false
+      required: [platform, conversationId, botId]
+      properties:
+        platform:
+          type: string
+          enum: [slack, teams]
+          description: Slack or Microsoft Teams.
+        conversationId:
+          $ref: '#/components/schemas/DestinationConversationId'
+        botId:
+          $ref: '#/components/schemas/DestinationBotId'
+    ChatLinkCode:
+      type: object
+      description: A one-time code the person sends the OpenBot app in Slack or Teams.
+      required: [platform, code, command, expiresAt]
+      properties:
+        platform:
+          type: string
+          enum: [slack, teams]
+        code:
+          type: string
+          description: The code. It works once, and only for the person it was made for.
+        command:
+          type: string
+          description: The message to send the OpenBot app, the code in it.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the code stops working.
+    VerifyPhoneDestinationRequest:
+      type: object
+      additionalProperties: false
+      required: [phone, conversationId, botId]
+      properties:
+        phone:
+          type: string
+          pattern: ^\+[1-9]\d{7,14}$
+          description: The phone number in international form, such as +14155550123.
+        conversationId:
+          $ref: '#/components/schemas/DestinationConversationId'
+        botId:
+          $ref: '#/components/schemas/DestinationBotId'
+    PhoneVerification:
+      type: object
+      description: A code on its way to a phone, to confirm under this verification.
+      required: [verificationId, expiresAt]
+      properties:
+        verificationId:
+          type: string
+          format: uuid
+          description: Send this with the code to confirmPhoneDestination.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the verification stops working.
+    ConfirmPhoneDestinationRequest:
+      type: object
+      additionalProperties: false
+      required: [verificationId, code]
+      properties:
+        verificationId:
+          type: string
+          format: uuid
+          description: The verification verifyPhoneDestination answered.
+        code:
+          type: string
+          pattern: ^\d{4,10}$
+          description: The code the phone was texted.
+    NotificationTransport:
+      type: string
+      enum: [push, slack, teams, sms]
+      description: >-
+        A way OpenBot reaches a person outside it: push notifications to their
+        phones, Slack, Microsoft Teams, or text messages.
+    DeliveryKind:
+      type: string
+      enum: [reply, question, approval, attention]
+      description: >-
+        What was sent: a Bot's reply, a question it asked, an approval it
+        needs, or what the person's Bots' check-ins found that needs them.
+    DeliveryState:
+      type: string
+      x-extensible-enum: [queued, running, accepted, sent, delivered, failed, unknown, opted_out]
+      description: >-
+        Where it got to. accepted is the provider taking it without saying yet
+        that it arrived. unknown is a send that may or may not have gone.
+        opted_out is a text message not sent because the person texted STOP.
+    Delivery:
+      type: object
+      description: One update a Bot sent a person outside OpenBot.
+      required: [id, transport, kind, state, error, conversationId, botId, createdAt]
+      properties:
+        id:
+          type: string
+          description: The delivery's id.
+        transport:
+          $ref: '#/components/schemas/NotificationTransport'
+        kind:
+          $ref: '#/components/schemas/DeliveryKind'
+        state:
+          $ref: '#/components/schemas/DeliveryState'
+        error:
+          type: [string, 'null']
+          description: Why it failed or may not have arrived, as the provider said. Null otherwise.
+        conversationId:
+          type: string
+          description: The conversation it was about.
+        botId:
+          type: string
+          description: The Bot that sent it.
+        createdAt:
+          type: string
+          format: date-time
+          description: When it was sent.
+    DeliveryPage:
+      type: object
+      required: [deliveries, nextCursor]
+      properties:
+        deliveries:
+          type: array
+          description: The newest first, then by id.
+          items:
+            $ref: '#/components/schemas/Delivery'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+    UpdateRoute:
+      description: >-
+        Where one kind of update may go. all: every way the person can be
+        reached, now and any set up later. A list: only those ways; an empty
+        list keeps that kind in OpenBot.
+      oneOf:
+        - type: string
+          enum: [all]
+        - type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/NotificationTransport'
+    UpdateRouting:
+      type: object
+      description: Where each kind of update may go.
+      required: [progress, decision, question, attention]
+      properties:
+        progress:
+          $ref: '#/components/schemas/UpdateRoute'
+        decision:
+          $ref: '#/components/schemas/UpdateRoute'
+        question:
+          $ref: '#/components/schemas/UpdateRoute'
+        attention:
+          $ref: '#/components/schemas/UpdateRoute'
+    NotificationSettings:
+      type: object
+      description: >-
+        Where a person's updates go, for every one of their Bots at once.
+        progress: replies and results from work they weren't watching.
+        decision: approvals a Bot needs before it acts. question: what a Bot
+        asked and waits on. attention: what their Bots' check-ins found, at
+        most once an hour, every Bot in one message.
+      required: [routing]
+      properties:
+        routing:
+          $ref: '#/components/schemas/UpdateRouting'
+    UpdateNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [routing]
+      properties:
+        routing:
+          type: object
+          description: The kinds of update to change. At least one.
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            progress:
+              $ref: '#/components/schemas/UpdateRoute'
+            decision:
+              $ref: '#/components/schemas/UpdateRoute'
+            question:
+              $ref: '#/components/schemas/UpdateRoute'
+            attention:
+              $ref: '#/components/schemas/UpdateRoute'
+    BotNotifyLevel:
+      type: string
+      enum: [all, needs_input, none]
+      description: >-
+        How much one Bot may reach the person outside OpenBot: all of it,
+        only what needs them (its questions and approvals), or nothing.
+    BotNotificationSettings:
+      type: object
+      required: [botId, notify]
+      properties:
+        botId:
+          type: string
+          description: The Bot.
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    UpdateBotNotificationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [notify]
+      properties:
+        notify:
+          $ref: '#/components/schemas/BotNotifyLevel'
+    NotificationTransportOption:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          $ref: '#/components/schemas/NotificationTransport'
+        title:
+          type: string
+          description: Its name, as a person reads it.
+    NotificationTransportPage:
+      type: object
+      required: [notificationTransports, nextCursor]
+      properties:
+        notificationTransports:
+          type: array
+          description: Push, then Slack, Microsoft Teams and text messages, as set up.
+          items:
+            $ref: '#/components/schemas/NotificationTransportOption'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 4096
+          pattern: ^[A-Za-z0-9_-]+$
+          description: >-
+            Pass as cursor for the next page. Null ends the list. Written in
+            URL-safe base64, the only form the cursor parameter accepts.
+  responses:
+    TransportUnavailable:
+      description: >-
+        This deployment hasn't set up that way of reaching people: push
+        notifications, the Slack and Teams pairing, or text messages. Or the
+        organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            sms:
+              value:
+                type: https://open.bot/errors/transport-unavailable
+                title: That way of reaching people isn't set up here.
+                status: 404
+                detail: SMS is not configured on this deployment.
+                code: TRANSPORT_UNAVAILABLE
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DeviceConflict:
+      description: >-
+        Another account has the phone registered and hasn't signed out on it.
+        Or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            anotherAccount:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This device is already registered to another account. Sign out of OpenBot on it first.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DeviceNotFound:
+      description: >-
+        The person has no such device: it was removed already, or never
+        registered. Or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/device-not-found
+                title: Device not found.
+                status: 404
+                detail: Device not found.
+                code: DEVICE_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    DestinationNotFound:
+      description: >-
+        The person has no such destination: it was disconnected already, or
+        never connected. Or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/destination-not-found
+                title: Destination not found.
+                status: 404
+                detail: Connection not found.
+                code: DESTINATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidDestination:
+      description: >-
+        The request doesn't match the API, the conversation isn't the
+        person's or the Bot isn't in it, a phone's verification expired, was
+        used already or its code was wrong, the phone is connected to
+        another person, or the Slack account, Teams account or phone is
+        connected in another organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            connectedInAnotherOrganization:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: That account is already connected to OpenBot in another organization. Disconnect it there, then connect it here.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            notTheirs:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Choose an accessible Bot in your conversation.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            wrongCode:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: The verification code was not approved.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TextMessagesUnavailable:
+      description: >-
+        The text message provider didn't answer, so no code was sent or
+        checked. Trying again can work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            provider:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: Delivery is unavailable. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    DestinationForbidden:
+      description: >-
+        The caller asked to link somebody else's account, or an administrator
+        hasn't let them add Bots to Slack and Teams.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notYours:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can see or change where their Bots reach them.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            switchedOff:
+              value:
+                type: https://open.bot/errors/capability-required
+                title: An admin hasn't turned this on for you.
+                status: 403
+                detail: An admin has turned off "Add Bots to Slack and Teams" for you, so that wasn't done.
+                code: CAPABILITY_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                capability: slackTeams
+  examples:
+    DevicePageLast:
+      summary: A person's iPhone, on one page.
+      value:
+        devices:
+          - id: 2b7c4d1e-9f3a-4e6b-8c5d-1a2b3c4d5e6f
+            platform: ios
+            createdAt: '2026-11-08T09:12:44.000Z'
+        nextCursor: null
+    DeviceResponseExample:
+      summary: An iPhone, registered.
+      value:
+        device:
+          id: 2b7c4d1e-9f3a-4e6b-8c5d-1a2b3c4d5e6f
+          platform: ios
+          createdAt: '2026-11-08T09:12:44.000Z'
+    DestinationPageLast:
+      summary: A Slack chat and a phone, on one page.
+      value:
+        destinations:
+          - id: 3e1f6a2b-8c4d-4b7e-9a1c-5d2e8f0b7a64
+            transport: slack
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            address: D07QK3M2LTB
+            optedOutAt: null
+            createdAt: '2026-11-09T16:40:02.000Z'
+          - id: 8a4c2e6f-0b1d-4f3a-9e7c-2d5b8f1a6c30
+            transport: sms
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            address: '+14155550123'
+            optedOutAt: null
+            createdAt: '2026-11-10T08:03:19.000Z'
+        nextCursor: null
+    DestinationResponseExample:
+      summary: A phone, connected.
+      value:
+        destination:
+          id: 8a4c2e6f-0b1d-4f3a-9e7c-2d5b8f1a6c30
+          transport: sms
+          conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          address: '+14155550123'
+          optedOutAt: null
+          createdAt: '2026-11-10T08:03:19.000Z'
+    ChatLinkCodeExample:
+      summary: A code to send in Slack.
+      value:
+        platform: slack
+        code: 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b
+        command: link 6f2b9d4e-1a3c-4e5f-8b7a-0c9d2e1f3a4b
+        expiresAt: '2026-11-14T09:15:00.000Z'
+    PhoneVerificationExample:
+      summary: A code on its way.
+      value:
+        verificationId: 7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+        expiresAt: '2026-11-14T09:15:00.000Z'
+    DeliveryPageLast:
+      summary: A push notification and a text message.
+      value:
+        deliveries:
+          - id: 0f3a7c2e-5b1d-4e8a-9c6f-2d4b7e1a3c58
+            transport: push
+            kind: approval
+            state: delivered
+            error: null
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            createdAt: '2026-11-14T08:41:07.000Z'
+          - id: 9b2d4f6a-8c0e-4a1b-b3d5-7e9f1a2c4e60
+            transport: sms
+            kind: reply
+            state: failed
+            error: '30006'
+            conversationId: 5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10
+            botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+            createdAt: '2026-11-13T17:22:51.000Z'
+        nextCursor: null
+    NotificationSettingsExample:
+      summary: Questions by push and Slack, everything else every way.
+      value:
+        routing:
+          progress: all
+          decision: all
+          question: [push, slack]
+          attention: all
+    BotNotificationSettingsExample:
+      summary: Only what needs the person.
+      value:
+        botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+        notify: needs_input
+    NotificationTransportPageLast:
+      summary: Push, Slack and Microsoft Teams, set up.
+      value:
+        notificationTransports:
+          - id: push
+            title: Push
+          - id: slack
+            title: Slack
+          - id: teams
+            title: Microsoft Teams
+        nextCursor: null

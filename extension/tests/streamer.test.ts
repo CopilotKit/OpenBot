@@ -430,7 +430,7 @@ const notEnabledPass = () =>
 const busyPass = () =>
   classifyGrantError(502, {
     code: "CONNECTION_FAILED",
-    message: "Could not connect to OpenBot's back end",
+    message: "Could not connect to Intelligence",
   });
 
 async function streaming(h: Harness) {

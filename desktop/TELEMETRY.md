@@ -40,10 +40,12 @@ All desktop event names begin with `oss.desktop.`. The Rust `EventData` enum and
 | `engine_detected` | Engine enum; responding boolean |
 | `engine_installed` | Engine and installer-outcome enums |
 | `windows_stage` | Windows prerequisite outcome enum |
+| `windows_probe` | Windows readiness probe enum; outcome enum (`slow` or `timed_out`); milliseconds |
 | `image_pull` | Outcome enum, milliseconds, optional observed download bytes |
 | `setup_failed` | Setup step and error-class enums; optional failing-step, CLI-reason and CLI-failure enums; optional resources (booleans and numbers) |
 | `activated` | No properties; OpenBot started successfully |
 | `setup_abandoned` | Last setup step enum |
+| `setup_restart_required` | Last setup step enum |
 | `sign_in` | Sign-in outcome enum; optional milliseconds; optional CLI-failure enum |
 | `setup_stalled` | Journey enum and timed-step enum; typical and elapsed seconds |
 | `ui_stalled` | Setup step enum; seconds the window did not answer |
@@ -58,6 +60,10 @@ For `model_chosen`, providers are `openai`, `anthropic`, `google`, `xai`, `compa
 
 `ui_stalled` is a setup window that stopped taking what the desktop sends it. While the setup, start or update screens show, the page invokes `setup_heartbeat` every five seconds, and as soon as a row's progress reaches it, with the highest progress number it has taken (`setup:progress` carries one). The heartbeat is never awaited and runs off the window's thread. Progress left untaken for over 30 seconds while the window is shown, not minimised and, on macOS, not covered is a stall. The Desktop log says `[ui] the window has not answered for 31s during start_machine` when it is noticed and `[ui] the window stopped answering for 42s during start_machine` when it ends, and that end sends one `ui_stalled` with `stalled_seconds` and `step`, the setup row the desktop was reporting, by the same names as `failing_step`. It ends when the page catches up, the window leaves the screen, the window loads another page, or OpenBot quits. A page that has just loaded counts what was sent before it listened as taken, and a page that sends no heartbeat (OpenBot itself) is not watched.
 
+`setup_abandoned` is setup ending before activation: Quit during setup, or, on the next launch, a crash. `setup_restart_required` is setup ending for the Windows restart that turning on Windows Subsystem for Linux needs, at the step it was on: Restart now, or Windows ending the app while that restart is owed (a restart from the Start menu). It is saved before Windows ends the app and sent by the launch after the restart, which carries on the same setup under the same installation UUID; that exit is never a `setup_abandoned`. A Quit while the restart is owed is still `setup_abandoned`.
+
+`windows_probe` is one of the Windows readiness check's probes, which the setup window waits on before it shows its first screen, that ran long or was stopped at its limit. Sent by the desktop itself, once per such probe, on Windows only. `probe` is which one, by what it asks: `virtualization`, `administrator`, `wsl_feature`, `wsl_service`, `virtual_machine_platform_feature`, `default_wsl_version`, `wsl_version`, `wsl_system_start` (`wsl.exe --system`, which starts WSL's own VM) or `docker`. `outcome` is `slow` (it answered, after the probe's slow mark) or `timed_out` (it was stopped at its limit and counted as no answer). `duration_ms` is how long it ran. Slow marks are well under the limits: 5 seconds for the PowerShell probes and `wsl_version` (limit 30), 3 for `docker` (limit 10), and 20 for `wsl_system_start` (limit 60; a cold start measured about 6). A probe that answers in good time sends nothing. Never the command, its output, its error or a path.
+
 `sign_in` is the Account step's CopilotKit sign-in: `started`, then `completed`, `failed` or `cancelled` with how long it took, and `restored` once a launch when the account check finds this computer already signed in without a sign-in.
 
 Every event, the two stall events among them, carries desktop distribution, app version (numeric, with a release candidate's closed label such as `1.0.0-rc.5`), platform, architecture, numeric OS version when available, and engine. The runtime receives the same desktop metadata through its existing `telemetryProperties` hook, where the app version accepts only the same closed pre-release labels. No prompt, answer, credential, file name, path, hostname, email, model name, YAML value, or custom URL is accepted by the desktop schema.
@@ -70,11 +76,10 @@ Events persist before sending and keep their event IDs across retries. The queue
 
 The ingest must accept the new `oss.desktop.*` namespace: [oss-path-to-production #290](https://github.com/CopilotKit/oss-path-to-production/pull/290), merged on 2026-09-12. A successful HTTP response alone does not prove downstream acceptance; production ingest acknowledges filtered events too. Production desktop delivery depends on that change being deployed.
 
-Regression tests live in the native telemetry, stall (`stall.rs`, `desktop_stall.rs`) and pull-metrics modules, frontend telemetry, heartbeat and journey-timing tests, and server metadata tests. For an actual local HTTP and installed-runtime check, build the native probe and run the driver from the repository root:
+Regression tests live in the native telemetry, stall (`stall.rs`, `desktop_stall.rs`) and pull-metrics modules, frontend telemetry, heartbeat and journey-timing tests. For an actual local HTTP check, build the native probe and point it at a loopback receiver:
 
 ```sh
 cargo build --manifest-path desktop/src-tauri/Cargo.toml --release --example telemetry_probe
-bun desktop/scripts/validate-telemetry.ts desktop/src-tauri/target/release/examples/telemetry_probe
 ```
 
 The probe also accepts `provider-canary` to send three synthetic `model_chosen` events: Google OAuth, xAI OAuth, and a keyless compatible endpoint. It keeps `runtime_env=test`, uses a random installation UUID in the supplied data directory, and accepts only a loopback HTTP receiver. No credentials, model names, or endpoint values are included:
@@ -83,14 +88,4 @@ The probe also accepts `provider-canary` to send three synthetic `model_chosen` 
 telemetry_probe /path/to/fresh-data-dir http://127.0.0.1:PORT/ingest provider-canary
 ```
 
-The driver uses temporary data and a loopback receiver. It exercises separate-process persistence/replay, quit, activation deduplication, opt-out, and the installed runtime's identity/metadata handoff. It does not require AI credentials or send validation events to production. Windows and Linux execution remain covered by the platform CI runs; a Mac run is not proof of their native UI behavior.
-
-Local HTTP validation is reusable through `desktop/scripts/validate-telemetry.ts` with the separately built `telemetry_probe` example. It checks offline queue replay with stable installation/event IDs, recovered abandonment, quit flushing, activation once across process restarts, native/runtime metadata, and both `true`/`1` values of `COPILOTKIT_TELEMETRY_DISABLED` and `DO_NOT_TRACK`. Opt-out must remove queued state and identity and produce zero HTTP sends.
-
-The September 12 local run used installed runtime 1.70.1 and its public ESM Hono factory, following the production `eventsource` preload. Its existing Bun dependency layout needed an explicit `NODE_PATH` pointing at the existing hoist directory so a cached `gaxios` module could resolve `extend`. No dependency was installed or modified. Reproduce that adapter from the repository root:
-
-```sh
-NODE_PATH="$PWD/node_modules/.bun/node_modules" bun --no-env-file --no-install desktop/scripts/validate-telemetry.ts /absolute/path/to/telemetry_probe
-```
-
-The final loopback report recorded five native requests and one runtime request with matching installation identity, with all four opt-out cases passing. This covers the emitter and installed-runtime HTTP contract; fresh dependency installation and final PostHog delivery still require their own validation.
+It does not require AI credentials or send validation events to production. Windows and Linux execution remain covered by the platform CI runs; a Mac run is not proof of their native UI behavior.

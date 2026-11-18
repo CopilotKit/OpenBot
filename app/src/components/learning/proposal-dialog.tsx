@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { skillTitle } from "@/lib/learning/display";
+import { proposalReason, skillTitle } from "@/lib/learning/display";
 
 /** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
 function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
@@ -73,6 +73,26 @@ function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
 }
 
 /**
+ * What the dialog says once a proposal is decided. Nothing while it waits, and nothing for a status a
+ * newer server sends that this app doesn't know.
+ */
+export function decidedNote(
+  status: string,
+  removal: boolean,
+  publishedNote: string,
+): string | null {
+  if (status === "approved")
+    return removal
+      ? "Removed. Bots stop using it from their next conversation."
+      : publishedNote;
+  if (status === "rejected")
+    return removal
+      ? "Rejected. The skill stays."
+      : "Rejected. It won't be published.";
+  return null;
+}
+
+/**
  * One proposed skill: the SKILL.md it publishes, why, and the evidence. With
  * `onDecide` it carries Approve and Reject while the proposal is pending review;
  * without it the dialog is read-only.
@@ -94,7 +114,8 @@ export function ProposalDialog<TKey extends QueryKey>({
   >;
   onDecide?: (decision: "approve" | "reject") => void;
   deciding: boolean;
-  decided?: "approved" | "rejected";
+  /** The status the decision left it in, as the server answered it. */
+  decided?: string;
   error?: Error | null;
   /** What the dialog says once the skill is published; the default is written for Admin. */
   publishedNote?: string;
@@ -104,6 +125,8 @@ export function ProposalDialog<TKey extends QueryKey>({
   const proposal = detail.data;
   const status = decided ?? proposal?.status;
   const removal = proposal?.operation === "remove";
+  // Left out where Learning's reason only names the insights shown under Learned from.
+  const reason = proposal ? proposalReason(proposal.reason) : null;
   return (
     <Dialog onOpenChange={(next) => (next ? undefined : onClose())} open>
       <DialogContent>
@@ -124,10 +147,12 @@ export function ProposalDialog<TKey extends QueryKey>({
             </p>
           ) : (
             <>
-              <section className="grid gap-1.5">
-                <h3 className="font-medium text-sm">Why</h3>
-                <p className="text-pretty text-sm">{proposal?.reason}</p>
-              </section>
+              {reason ? (
+                <section className="grid gap-1.5">
+                  <h3 className="font-medium text-sm">Why</h3>
+                  <p className="text-pretty text-sm">{reason}</p>
+                </section>
+              ) : null}
               {proposal && (
                 <SkillFiles
                   files={proposal.files.map((file) => ({
@@ -182,18 +207,12 @@ export function ProposalDialog<TKey extends QueryKey>({
             </>
           ) : (
             <>
-              {status && status !== "pending_review" && (
+              {status && decidedNote(status, removal, publishedNote) && (
                 <span
                   className="mr-auto text-muted-foreground text-sm"
                   role="status"
                 >
-                  {status === "approved"
-                    ? removal
-                      ? "Removed. Bots stop using it from their next conversation."
-                      : publishedNote
-                    : removal
-                      ? "Rejected. The skill stays."
-                      : "Rejected. It won't be published."}
+                  {decidedNote(status, removal, publishedNote)}
                 </span>
               )}
               <Button onClick={onClose} size="sm" type="button">

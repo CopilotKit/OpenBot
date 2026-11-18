@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { SidebarInset } from "@/components/ui/sidebar";
@@ -13,6 +14,7 @@ function RouteComponent() {
     <SidebarShell className="h-svh overflow-hidden">
       <SettingsSidebar />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
+        <ConnectionBanner />
         <Outlet />
       </SidebarInset>
     </SidebarShell>

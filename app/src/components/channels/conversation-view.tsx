@@ -22,9 +22,20 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
-import { NotifyPrompt } from "@/components/notifications/notify-prompt";
-import { attachmentUrl } from "@/lib/channels/attachments";
+import { StillWorkingError } from "@/components/channels/composer/queue";
+import {
+  NotifyPrompt,
+  notifyPromptAnswered,
+} from "@/components/notifications/notify-prompt";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
+import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import { useNotificationPermission } from "@/lib/notifications/permission";
 import { newId } from "../../lib/new-id";
+
+/** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
+export const STILL_WORKING_RETRY_MS = 500;
 
 export function ConversationView({
   messages,
@@ -36,6 +47,7 @@ export function ConversationView({
   commands,
   channelId,
   holdsFilesUntilSent = false,
+  attachmentLimits,
   disabled = false,
   onSendHeld,
   pending = false,
@@ -79,6 +91,8 @@ export function ConversationView({
    * creates the conversation. See `Composer`.
    */
   holdsFilesUntilSent?: boolean;
+  /** How large a picked file may be, forwarded to the composer (`useAttachmentLimits`). */
+  attachmentLimits?: ComposerAttachmentLimits;
   disabled?: boolean;
   /** Writing is open and sending waits on the caller; forwarded to the composer. */
   onSendHeld?: () => void;
@@ -194,6 +208,7 @@ export function ConversationView({
    * for the same fact.
    */
   const [running, setRunning] = useState(false);
+  const notificationPermission = useNotificationPermission();
   const inFlight = pending || running;
 
   /**
@@ -304,15 +319,26 @@ export function ConversationView({
    * The one answer to a failed send, used by both paths that can produce a run. See the drain's
    * `catch` for why restoring rather than releasing, and `heldBack` for why the hold.
    */
+  /**
+   * A drain refused because the Bot still had the turn (`StillWorkingError`) asked nothing of the
+   * server, so it is not held back: it goes again on this tick, until the Bot is free.
+   */
+  const [busyRetry, setBusyRetry] = useState(0);
   const restoreFailedRun = useCallback(
-    (messages: readonly QueuedMessage[]) => {
+    (messages: readonly QueuedMessage[], error?: unknown) => {
       if (messages.length === 0) {
         return;
       }
+      const stillWorking = error instanceof StillWorkingError;
       // Before the restore, not after: the effect reads both off refs, and the guard has to be
       // true by the moment the queue is non-empty again rather than one statement later.
-      heldBack.current = true;
+      heldBack.current = !stillWorking;
       apply({ messages, type: "restore" });
+      if (stillWorking)
+        setTimeout(
+          () => setBusyRetry((tick) => tick + 1),
+          STILL_WORKING_RETRY_MS,
+        );
     },
     [apply],
   );
@@ -366,8 +392,8 @@ export function ConversationView({
        */
       if (next.restoreIfRunFails.length > 0) {
         const carried = next.restoreIfRunFails;
-        void started.catch(() => {
-          restoreFailedRun(carried);
+        void started.catch((error: unknown) => {
+          restoreFailedRun(carried, error);
         });
       }
       return started;
@@ -396,8 +422,10 @@ export function ConversationView({
    * said is finished. The cost is that anything parked when that happens stays on screen unrun,
    * under a notice that explains why, which is the honest half of the trade.
    *
-   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`.
+   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`. A drain the Bot
+   * was only too busy for is no failure: it goes again on `busyRetry`.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `busyRetry` is the trigger to try a drain the Bot was too busy for again.
   useEffect(() => {
     if (inFlight) {
       /*
@@ -417,7 +445,7 @@ export function ConversationView({
       return;
     }
     const carried = next.restoreIfRunFails;
-    void startRef.current(next.run).catch(() => {
+    void startRef.current(next.run).catch((error: unknown) => {
       /*
        * Swallowed on purpose, and only here. A failed send from the composer throws so the composer
        * can put the words back in the box; the box for these is the queue they came out of, and the
@@ -449,9 +477,9 @@ export function ConversationView({
        * are back in the box, so the decision belongs to the call sites — this one, and the join in
        * `submit`, which answers the same question from the same list.
        */
-      restoreFailedRun(carried);
+      restoreFailedRun(carried, error);
     });
-  }, [apply, disabled, inFlight, restoreFailedRun]);
+  }, [apply, disabled, inFlight, restoreFailedRun, busyRetry]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -507,6 +535,25 @@ export function ConversationView({
           <NotifyPrompt />
         ) : null}
         {/*
+         * The ask to star OpenBot on GitHub, when the server says it is due (`StarPrompt`), and never
+         * beside the notifications offer: one card above the composer at a time, and the offer that
+         * is useful to this person goes first.
+         *
+         * Never right after an error: not while the last turn here ended without an answer
+         * (`stopped`, where a failed run is said). Not read off `notice`: a conversation passes one
+         * every time, mostly empty, so its presence says nothing. It also waits while OpenBot Desktop has not yet
+         * said whether notifications are on (`checking`), or the card could draw, be counted as
+         * shown, and vanish when the answer is "not asked yet". And never in a conversation that
+         * cannot take a message: the brief "Picking a Bot" screen, or one whose Bot was deleted.
+         */}
+        {disabled ||
+        stopped ||
+        notificationPermission === "checking" ||
+        (notificationPermission === "default" &&
+          !notifyPromptAnswered()) ? null : (
+          <StarPrompt />
+        )}
+        {/*
          * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
          *
          * It is tucked under the composer (`-mb-4`, no bottom border), so anything drawn between the
@@ -535,6 +582,7 @@ export function ConversationView({
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
           holdsFilesUntilSent={holdsFilesUntilSent}
+          {...(attachmentLimits ? { attachmentLimits } : {})}
           {...(commands ? { commands } : {})}
           className="relative w-full mt-auto"
           compact
@@ -630,8 +678,7 @@ function releaseStagedAttachment(attachment: Attachment): void {
   if (typeof metadata?.attachmentId !== "string") {
     return;
   }
-  void fetch(attachmentUrl(metadata.attachmentId), {
-    method: "DELETE",
-    credentials: "include",
+  void deleteAttachment(organizationId(), metadata.attachmentId, {
+    "Idempotency-Key": idempotencyKey(),
   }).catch(() => undefined);
 }

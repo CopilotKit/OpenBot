@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { BotActivitySections } from "@/components/bot-profile/activity";
 import {
@@ -17,8 +17,19 @@ import {
 } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
-import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import {
+  type BotActivity,
+  botLifecycleKeys,
+} from "@/lib/bot-lifecycle/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { taskKeys } from "@/lib/tasks/queries";
+import {
+  activityOf,
+  botOperationPath,
+  noContent,
+  type SentRequest,
+  sentRequest,
+} from "./bots-api";
 import { seedAuditPage } from "./seed-audit-page";
 import { settleReactWork } from "./settle-react-work";
 
@@ -36,6 +47,11 @@ afterAll(async () => {
 
 const BOT = "bot-claude";
 
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
 async function renderWith(
   ui: ReactNode,
   options: {
@@ -43,6 +59,7 @@ async function renderWith(
     role: "admin" | "user";
     audit?: Record<string, unknown[]>;
     ready?: string;
+    activity?: BotActivity;
   },
 ) {
   const queryClient = new QueryClient({
@@ -50,11 +67,12 @@ async function renderWith(
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
     },
   });
-  queryClient.setQueryData(botLifecycleKeys.activity(BOT), {
-    inProgress: [],
-    scheduled: [],
-    completed: [],
-  });
+  queryClient.setQueryData(
+    botLifecycleKeys.activity(BOT),
+    options.activity ?? activityOf(),
+  );
+  // The person's tasks, which the page lists beside the Bot's activity: none here.
+  queryClient.setQueryData(taskKeys.list, []);
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     edition: options.edition,
   });
@@ -77,7 +95,7 @@ async function renderWith(
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  await view.findByText(options.ready ?? "Completed");
+  await view.findByText(options.ready ?? "No activity yet");
   return view;
 }
 
@@ -88,7 +106,9 @@ test("says what it lists, and does not claim the Bot has done nothing", async ()
   });
   expect(view.queryByText("Nothing has finished yet.")).toBeNull();
   expect(
-    view.getByText("No tasks, routines or goals have finished yet."),
+    view.getByText(
+      "Tasks, routines and check-ins show up here once this Bot starts them.",
+    ),
   ).toBeTruthy();
 });
 
@@ -156,4 +176,50 @@ test("the trail opened for one Bot asks the server for that Bot's rows, and says
       name: "Show every Bot, not only Claude Agent SDK",
     }).textContent,
   ).toBe("Only Claude Agent SDK");
+});
+
+test("Stop on work this Bot handed to another stops that handoff, named by its id", async () => {
+  const writes: SentRequest[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const sent = sentRequest(input, init);
+    if (sent.method === "GET")
+      return Response.json({ error: "not served" }, { status: 404 });
+    writes.push(sent);
+    return noContent();
+  }) as unknown as typeof fetch;
+  const view = await renderWith(<BotActivitySections agentId={BOT} />, {
+    edition: "team",
+    role: "user",
+    ready: "Draft the launch post",
+    activity: activityOf({
+      inProgress: [
+        {
+          id: "handoff:task-7",
+          kind: "handoff",
+          title: "Draft the launch post",
+          detail: "Handed to Writer",
+          status: "running",
+          at: "2026-11-06T09:00:00Z",
+          channelId: null,
+          needsYou: false,
+          stoppable: true,
+          cancellable: false,
+        },
+      ],
+    }),
+  });
+  fireEvent.click(view.getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes).toEqual([
+    {
+      method: "POST",
+      path: botOperationPath(BOT, "stop-handoff"),
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: { handoffId: "handoff:task-7" },
+    },
+  ]);
+  await waitFor(() =>
+    expect(view.getByRole("button", { name: "Stop" })).toBeTruthy(),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
 });

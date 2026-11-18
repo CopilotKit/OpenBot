@@ -75,6 +75,13 @@ fn main() {
                     "quit",
                     // The zoom keys no menu carries. See `src/zoom-shortcut.js`.
                     "zoom",
+                    // Where OpenBot runs, and Settings' Sign out, Change and the organisation
+                    // picked, for an app connected to an OpenBot that runs elsewhere. See
+                    // `src/desktop_connected.rs`.
+                    "connection",
+                    "sign_out",
+                    "change_connection",
+                    "set_organization",
                 ]),
             ),
     )

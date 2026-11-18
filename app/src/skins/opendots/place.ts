@@ -106,8 +106,11 @@ export function parsePlace(
       ownsWatch: false,
     };
   }
-  if (path === "/bots" || path === "/agents") {
+  if (path === "/bots") {
     return { section: "bots", label: "All Bots", ownsWatch: false };
+  }
+  if (path === "/agents") {
+    return { section: "bots", label: "Agents", ownsWatch: false };
   }
   if (path === "/s/routines" || path === "/routines") {
     return { section: "routines", label: "Routines", ownsWatch: false };

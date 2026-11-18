@@ -5,6 +5,8 @@ import {
   answerListBots,
   answerReadBot,
 } from "@/lib/agents/answers";
+import { answerBotsList, BOTS_PATH } from "./bots-api";
+import { SKILLS_PATH, skillsResponse, type TodaySkill } from "./skills-api";
 
 /**
  * What the three reading tools say, asked cold.
@@ -57,16 +59,13 @@ const AGENTS = [
   },
 ];
 
-const SKILLS = [
+const SKILLS: TodaySkill[] = [
   {
-    id: "skill_1",
     slug: "find-a-document",
     ownerUserId: null,
     title: "Find a document",
     summary: "Search the connected sources and read what it says.",
     instructions: "Search first, then read the file you found.",
-    origin: "package",
-    installedBy: null,
     grantedTo: [],
     tools: ["google-drive/search_files"],
   },
@@ -80,21 +79,12 @@ afterAll(() => {
 /** How many times the transport was reached, so "it fetched" is asserted rather than assumed. */
 let calls: string[] = [];
 
-globalThis.fetch = (async (input: RequestInfo | URL) => {
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = typeof input === "string" ? input : input.toString();
   calls.push(path);
-  if (path.startsWith("/api/agents")) {
-    return Response.json({ agents: AGENTS });
-  }
-  if (path === "/api/plugins") {
-    return Response.json({
-      catalogue: [],
-      botsMayCallBack: false,
-      servers: [],
-      skills: SKILLS,
-      redirectUri: "",
-    });
-  }
+  const bots = answerBotsList(input, init, { visible: AGENTS });
+  if (bots) return bots;
+  if (path.startsWith(SKILLS_PATH)) return skillsResponse(SKILLS);
   return Response.json({ error: "not found" }, { status: 404 });
 }) as typeof fetch;
 
@@ -107,7 +97,7 @@ function coldClient(): QueryClient {
 test("the roster is fetched when asked, not read off a render", async () => {
   const answer = await answerListBots(coldClient());
 
-  expect(calls.some((path) => path.startsWith("/api/agents"))).toBe(true);
+  expect(calls.some((path) => path.startsWith(BOTS_PATH))).toBe(true);
   expect(answer).toContain("2 coworkers already exist here");
   expect(answer).toContain("General Assistant — Everyday Work");
   // Whose it is and where it runs, which is what stops a duplicate being proposed.
@@ -121,7 +111,7 @@ test("the roster is fetched when asked, not read off a render", async () => {
 test("the skills are fetched when asked, so an unloaded list never reads as an empty one", async () => {
   const answer = await answerListBotSkills(coldClient());
 
-  expect(calls).toContain("/api/plugins");
+  expect(calls.some((path) => path.startsWith(SKILLS_PATH))).toBe(true);
   expect(answer).toContain("/find-a-document — Find a document");
   // The sentence that was wrongly given to a person about a deployment holding nine skills.
   expect(answer).not.toContain("No skills exist here yet");
@@ -153,10 +143,12 @@ test("a coworker that is not here is named rather than guessed at", async () => 
 test("a genuinely empty deployment is described as empty", async () => {
   const client = coldClient();
   const previous = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = typeof input === "string" ? input : input.toString();
     calls.push(path);
-    if (path.startsWith("/api/agents")) return Response.json({ agents: [] });
+    const bots = answerBotsList(input, init, { visible: [] });
+    if (bots) return bots;
+    if (path.startsWith(SKILLS_PATH)) return skillsResponse([]);
     return Response.json({
       catalogue: [],
       botsMayCallBack: false,

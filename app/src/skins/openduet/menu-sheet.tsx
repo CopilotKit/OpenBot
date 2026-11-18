@@ -14,7 +14,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { isUnread, pinnedFirst } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
-import { waitingOnYou } from "@/components/bot-profile/attention";
+import { waitingAcross } from "@/components/bot-profile/attention";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { BrandName } from "@/components/edition/brand-name";
@@ -200,7 +200,7 @@ export function MenuSheet({
                   className="openduet-type-sub px-3 py-2 text-openduet-problem"
                   role="alert"
                 >
-                  Couldn't load your conversations. Reload the page.
+                  Couldn't load your conversations. Try again in a moment.
                 </p>
               ) : conversations.length > 0 ? (
                 /*
@@ -319,7 +319,7 @@ export function MenuSheet({
 function AccentBadge() {
   const attention = useQuery(botAttentionQueryOptions());
   const bots = attention.data ?? [];
-  const waiting = bots.reduce((total, bot) => total + waitingOnYou(bot), 0);
+  const waiting = waitingAcross(bots);
   if (waiting > 0)
     return (
       <span

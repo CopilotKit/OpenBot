@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { Streamdown } from "streamdown";
 import {
   QuestionNotice,
   type WaitingQuestion,
@@ -27,6 +26,7 @@ import {
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
 import {
+  BotMarkdown,
   markdownComponents,
   markdownPlugins,
   replyRemarkPlugins,
@@ -34,6 +34,7 @@ import {
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
+import { SentFileCard } from "./sent-file-card";
 import { Composer, toAgentOptions } from "./composer";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
@@ -59,6 +60,13 @@ export function GroupChat({ channelId }: { channelId: string }) {
   );
   const bots = group.data?.bots ?? [];
   const names = new Map(bots.map((bot) => [bot.id, bot.name]));
+  // The people in it, as its members list names them: a person's line is headed with who sent it.
+  const people = new Map(
+    (group.data?.people ?? []).map((person) => [
+      person.userId,
+      person.name || person.email,
+    ]),
+  );
   const messages = group.data?.messages ?? [];
   const working = messages.some(
     (message) => message.status === "running" || message.status === "queued",
@@ -178,7 +186,8 @@ export function GroupChat({ channelId }: { channelId: string }) {
                   ? (names.get(message.agentId) ?? "A Bot no longer here")
                   : message.ownerUserId === me?.id
                     ? "You"
-                    : "A teammate"
+                    : // Only the people still in it are named: someone taken out is no longer the reader's to see.
+                      people.get(message.ownerUserId) || "Someone who left"
               }
               answeredBy={
                 message.answeredBy
@@ -323,7 +332,7 @@ function GroupLine({
             />
           ) : (
             <p className="text-sm text-muted-foreground">
-              Asked a teammate for permission to use their own{" "}
+              Asked someone else for permission to use their own{" "}
               {message.consent.serverId} account.
             </p>
           )
@@ -332,22 +341,32 @@ function GroupLine({
             {message.text || "This Bot couldn't answer."}
           </p>
         ) : (
-          <Bubble
-            align="start"
-            aria-busy={message.status === "running"}
-            variant="ghost"
-            className="w-full"
-          >
-            <BubbleContent className="w-full">
-              <Streamdown
-                components={markdownComponents}
-                plugins={markdownPlugins}
-                remarkPlugins={replyRemarkPlugins}
-              >
-                {message.text}
-              </Streamdown>
-            </BubbleContent>
-          </Bubble>
+          <>
+            <Bubble
+              align="start"
+              aria-busy={message.status === "running"}
+              variant="ghost"
+              className="w-full"
+            >
+              <BubbleContent className="w-full">
+                <BotMarkdown
+                  components={markdownComponents}
+                  plugins={markdownPlugins}
+                  remarkPlugins={replyRemarkPlugins}
+                >
+                  {message.text}
+                </BotMarkdown>
+              </BubbleContent>
+            </Bubble>
+            {/*
+             * The files the Bot sent from its computer with this reply, each as the card a
+             * conversation of its own draws, under its words: the reply is all a group keeps of a
+             * turn, so without them the file was a name in the words and nothing to open.
+             */}
+            {message.files?.map((file) => (
+              <SentFileCard file={file} key={file.attachmentId} />
+            ))}
+          </>
         )}
       </MessageContent>
     </MessageRow>

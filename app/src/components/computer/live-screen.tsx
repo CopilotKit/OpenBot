@@ -14,7 +14,7 @@ import {
   type ScreenSocket,
 } from "@/lib/computers/screen-connection";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
-import { socketUrl } from "@/lib/socket-url";
+import { apiSocketPath, socketUrl } from "@/lib/socket-url";
 import { currentPageVisible } from "./preview-visibility";
 import { pageCoordinates } from "./take-the-wheel";
 
@@ -381,7 +381,11 @@ export function LiveScreen({
     const connection = connectScreen({
       open: () => {
         const socket = new WebSocket(
-          socketUrl(`/api/computers/${encodeURIComponent(computerId)}/stream`),
+          socketUrl(
+            apiSocketPath(
+              `/computers/${encodeURIComponent(computerId)}/screen`,
+            ),
+          ),
         );
         socketRef.current = socket;
         // Event handlers use only data, so adapt the native event surface without changing the protocol.

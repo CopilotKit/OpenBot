@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import { UpdateRoutingSection } from "@/components/settings/update-routing";
+import { notificationsResponse } from "./notifications-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -30,25 +31,10 @@ function serving(available: {
 }) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.endsWith("/api/bots/routing")) {
-      return Response.json({
-        routing: {
-          progress: "all",
-          decision: "all",
-          question: "all",
-          attention: "all",
-        },
-      });
-    }
-    if (url.endsWith("/api/delivery")) {
-      return Response.json({
-        bindings: [],
-        devices: [],
-        deliveries: [],
-        available,
-      });
-    }
-    return new Response(null, { status: 404 });
+    return (
+      notificationsResponse("GET", url, { available }) ??
+      new Response(null, { status: 404 })
+    );
   }) as unknown as typeof fetch;
 }
 
