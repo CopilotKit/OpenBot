@@ -143,10 +143,13 @@ For a first evaluation, you need a cluster with a **default StorageClass**, `kub
 
 2. **Install** the `openbot-bundle` chart published with the release.
 
+   This evaluation runs **shared computers**: every Bot runs on one computer, and a command one Bot runs can read another person's files. That suits a proof of concept only, and `openbot.computers.sharedModeAcknowledged=true` says you know it. For people, use sandbox mode instead, which gives each person a computer of their own and is more secure: install the agent-sandbox controller in the cluster and set `openbot.computers.mode=sandbox` (the Helm guide has the command).
+
    ```sh
    helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-bundle-0.1.0.tgz \
      --namespace openbot --create-namespace \
      --values openbot-values.yaml \
+     --set openbot.computers.sharedModeAcknowledged=true \
      --timeout 15m
    ```
 

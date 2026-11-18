@@ -8,3 +8,7 @@
 # working directory only, so app/bunfig.toml repeats the declaration for `bun test` run from inside
 # app/. Keep the two preload lists in agreement; tests/bunfig-preload.test.ts fails if they drift.
 preload = ["./tests/support/network-guard.ts", "./app/tests/preload.ts"]
+# The TypeScript LangGraph engine's tests are Node's (`node --test`), against its own lockfile, and
+# run in CI's `typescript langgraph engine` job. Found from here they would run under Bun without
+# the engine's dependencies installed.
+pathIgnorePatterns = ["agent-langgraph-ts/**"]
