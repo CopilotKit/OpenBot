@@ -702,6 +702,7 @@ paths:
     post:
       tags: [Network policies]
       operationId: translateNetworkPolicy
+      deprecated: true
       summary: Write a network list from a description
       description: >-
         Turn a description in English into a list of hosts and addresses Bot
