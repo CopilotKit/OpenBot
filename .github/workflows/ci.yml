@@ -268,6 +268,15 @@ jobs:
           bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx
         env:
           OPENBOT_APP_BROWSER: '1'
+      # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
+      # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
+      # next language the recognizer has, or says which language to add and where. The page's
+      # language and its names for languages are the engine's own.
+      - run: bunx playwright-core install --with-deps webkit
+      - run: bun test app/tests/composer-dictation-language.test.tsx
+        env:
+          OPENBOT_APP_BROWSER: '1'
+          OPENBOT_APP_ENGINES: chromium,webkit
       # The desktop setup window's, for the same reason: the AI step's form holding still while the
       # install behind it comes and goes. It bundles the window from the desktop's own dependencies.
       - run: bun install --frozen-lockfile
