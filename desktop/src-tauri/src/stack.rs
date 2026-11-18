@@ -1770,15 +1770,12 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
 /// screen to stop it from. Stopped rather than removed, because the supervisor starts an existing
 /// owned container back up and the Bot keeps the profile and workspace volumes attached to it.
 /// Quiesce the supervisor before listing so in-flight creates and restarts are included.
-/// Returns false only when the selected root has no installed deployment to take down.
-pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
-    crate::logging::timed("stop Bots' computers", || stop_computers_now(engine, root))
+/// `namespace` is the one `computer_namespace` resolved for this deployment.
+fn stop_computers(engine: &Address, root: &Path, namespace: &str) -> Result<(), String> {
+    crate::logging::timed("stop Bots' computers", || stop_computers_now(engine, root, namespace))
 }
 
-fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
-    let Some(namespace) = computer_namespace(engine, root)? else {
-        return Ok(false);
-    };
+fn stop_computers_now(engine: &Address, root: &Path, namespace: &str) -> Result<(), String> {
     // Validate ownership before stopping anything, then wait for the creator to exit. A list taken
     // while the supervisor is active can miss a new computer or one it restarts after being stopped.
     let supervisor = compose_command(engine, root, &Secrets::new())
@@ -1815,7 +1812,7 @@ fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
         .map(str::to_string)
         .collect();
     if running.is_empty() {
-        return Ok(true);
+        return Ok(());
     }
 
     let stopped = engine
@@ -1825,7 +1822,7 @@ fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
         .output()
         .map_err(|error| format!("could not stop the Bots' computers: {error}"))?;
     if stopped.status.success() {
-        return Ok(true);
+        return Ok(());
     }
     Err(command_said(&stopped.stderr))
 }
@@ -1876,12 +1873,15 @@ fn stop_server_first(engine: &Address, root: &Path) {
 
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     crate::logging::timed("compose down", || {
+        // Which computers are this deployment's is settled before anything is stopped: a namespace
+        // that can't be resolved stops nothing, and no installed deployment has nothing to take down.
+        let Some(namespace) = computer_namespace(engine, root)? else {
+            return Ok(());
+        };
         // The server first, so it can finish what it is doing with everything it uses still there.
         stop_server_first(engine, root);
         // Stop the supervisor and its runtime-created computers before removing the Compose stack.
-        if !stop_computers(engine, root)? {
-            return Ok(());
-        }
+        stop_computers(engine, root, &namespace)?;
 
         /*
          * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
@@ -11481,8 +11481,8 @@ fn main() {
                 .find("--profile harness --profile openbot down")
                 .unwrap();
             assert!(
-                server < config
-                    && config < supervisor
+                config < server
+                    && server < supervisor
                     && supervisor < snapshot
                     && snapshot < computers
                     && computers < teardown,
@@ -11533,7 +11533,7 @@ fn main() {
                 "{error}"
             );
             let log = std::fs::read_to_string(&record).unwrap();
-            // The server's own stop, its namespace, then the supervisor's stop that failed.
+            // Its namespace, the server's own stop, then the supervisor's stop that failed.
             assert_eq!(log.lines().count(), 3, "{log}");
             assert!(
                 !log.contains("ps --quiet") && !log.contains("harness down"),
