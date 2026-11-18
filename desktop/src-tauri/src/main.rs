@@ -4928,6 +4928,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // Compose's bind mount of the sign-in folder does not create it. Installation made it;
         // made again here in case it went since. See `stack::make_sign_in_folder`.
         stack::make_sign_in_folder(&root)?;
+        // A refusal an earlier start's server wrote into that folder is not this start's.
+        stack::forget_refusal(&root);
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
@@ -5034,20 +5036,31 @@ async fn start_stack_inner<R: tauri::Runtime>(
         api: ports.server,
         app: ports.app,
     };
+    let (asked, asked_root) = (found.clone(), root.clone());
     let answered = tauri::async_runtime::spawn_blocking(move || {
-        stack::wait_until_healthy(&ready, std::time::Duration::from_secs(180), || {
-            waiting
-                .state::<Shell>()
-                .start_generation
-                .load(std::sync::atomic::Ordering::SeqCst)
-                == ticket
-        })
+        stack::wait_until_healthy(
+            &ready,
+            std::time::Duration::from_secs(180),
+            || {
+                waiting
+                    .state::<Shell>()
+                    .start_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    == ticket
+            },
+            // A server that refused to start says why at once, not after the full wait.
+            || stack::server_refusal(&asked, &asked_root),
+        )
     })
     .await
-    .unwrap_or_else(|error| Err(format!("the wait did not run: {error}")));
+    .unwrap_or_else(|error| {
+        Err(stack::NotReady::NotAnswering(format!(
+            "the wait did not run: {error}"
+        )))
+    });
     // A Stop during the wait is the reason it ended, whatever the wait itself says.
     attempt.require_current()?;
-    if let Err(error) = answered {
+    if let Err(not_ready) = answered {
         // What the server said while it was not answering, from Compose's log, with every
         // credential this run handed out taken out of it.
         let log = stack::service_log(&found, &root, "server", 40);
@@ -5056,7 +5069,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
         } else {
             format!("Last from the server container (up to 40 lines):\n{log}")
         };
-        let problem = stack::startup_problem(Problem::with(error, detail), &secrets);
+        let problem = match not_ready {
+            stack::NotReady::Refused(said) => stack::startup_refusal(said, detail, &secrets),
+            stack::NotReady::NotAnswering(error) => {
+                stack::startup_problem(Problem::with(error, detail), &secrets)
+            }
+        };
         report_plain(&app, "answering", false, problem.said.clone());
         return Err(problem);
     }
