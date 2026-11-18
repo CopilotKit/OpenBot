@@ -5,6 +5,6 @@
 /**
  * @minLength 1
  * @maxLength 200
- * @pattern ^[^\x00]*\S[^\x00]*$
+ * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
  */
 export type AllowlistEntry = string;

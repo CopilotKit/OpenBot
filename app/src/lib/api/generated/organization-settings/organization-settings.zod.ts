@@ -111,13 +111,13 @@ export const getOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const getOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const getOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const getOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
@@ -281,13 +281,13 @@ export const updateOrganizationSettingsBodyOneInactiveComputerDaysMax = 3650;
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsBodyOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsBodyOneProactiveDailyRunsMax = 1440;
@@ -436,13 +436,13 @@ export const updateOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemMax = 200;
 
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersItemRegExp =
-  new RegExp("^[^\\x00]*\\S[^\\x00]*$");
+  new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneMcpAllowlistServersMax = 500;
 
 export const updateOrganizationSettingsResponseOneProactiveDailyRunsMax = 1440;
