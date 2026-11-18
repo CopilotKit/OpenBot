@@ -7,8 +7,12 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  splitMessageReplies,
+  withMessageReply,
+} from "@openbot/shared/message-reply";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { GroupChat } from "@/components/channels/group-chat";
@@ -241,4 +245,114 @@ test("a Bot's question waits in the group, and answering it there clears the bad
   );
   await view.findByText(ANSWER);
   await view.findByText(REPLY);
+});
+
+test("replying to one group Bot routes to it and carries its exact message, without answering another Bot's question", async () => {
+  messages.push(line("budget-answer", BUDGET, "Set aside $50 for the trip."));
+  const view = conversation();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await view.findByText("Set aside $50 for the trip.");
+  await user.click(
+    view.getAllByRole("button", { name: "Message actions" })[1]!,
+  );
+  await user.click(await view.findByRole("menuitem", { name: "Reply" }));
+  expect(view.getByText("Replying to Budget Buddy")).toBeTruthy();
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Can we do $40?",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(groupSends).toHaveLength(1));
+  const sent = groupSends[0] as { text: string; botId: string };
+  expect(sent.botId).toBe(BUDGET);
+  expect(splitMessageReplies(sent.text)).toEqual({
+    text: "Can we do $40?",
+    replies: [
+      {
+        messageId: "budget-answer",
+        text: "Set aside $50 for the trip.",
+        author: "Budget Buddy",
+        botId: BUDGET,
+      },
+    ],
+  });
+  expect(answers).toEqual([]);
+  expect(view.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+});
+
+test("group reply threads show bot names and exclude adjacent answers from other Bots", async () => {
+  open = false;
+  const quote = {
+    messageId: "budget-answer",
+    text: "Set aside $50.",
+    author: "Budget Buddy",
+    botId: BUDGET,
+  };
+  messages = [
+    line("budget-answer", BUDGET, quote.text),
+    line("other-bot", ERRANDS, "Unrelated errand advice"),
+    line("reply", null, withMessageReply("Can we do $40?", quote)),
+    line("follow-up", BUDGET, "$40 works."),
+  ];
+  const view = conversation();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(
+    await view.findByRole("button", { name: "View reply thread" }),
+  );
+  const dialog = await view.findByRole("dialog");
+  expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
+  expect(
+    within(dialog).getByRole("heading", { name: "Conversation replies" }),
+  ).toBeTruthy();
+  expect(within(dialog).getAllByText("Budget Buddy")).toHaveLength(2);
+  expect(within(dialog).getByText("Can we do $40?")).toBeTruthy();
+  expect(within(dialog).queryByText("Unrelated errand advice")).toBeNull();
+  await user.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(
+    view.getByRole("button", { name: "View this reply thread" }),
+  );
+  const reopened = await view.findByRole("dialog");
+  expect(within(reopened).getByText("Can we do $40?")).toBeTruthy();
+});
+
+test("expanded threads render bot Markdown while keeping user messages literal", async () => {
+  open = false;
+  const quote = {
+    messageId: "markdown-answer",
+    text: "**Test the pilot** before investing.\n\n- Validate `demand`.\n- Read [the plan](https://example.com/plan).",
+    author: "Budget Buddy",
+    botId: BUDGET,
+  };
+  messages = [
+    line(quote.messageId, BUDGET, quote.text),
+    line(
+      "literal-reply",
+      null,
+      withMessageReply("Keep **my words** exactly.", quote),
+    ),
+  ];
+  const view = conversation();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  const preview = await view.findByRole("button", {
+    name: "View reply thread",
+  });
+  expect(preview.textContent).toContain("Test the pilot before investing.");
+  expect(preview.textContent).not.toContain("**");
+  expect(preview.className).toContain("cursor-pointer");
+  await user.click(preview);
+  const dialog = await view.findByRole("dialog");
+  expect(
+    within(dialog)
+      .getByText("Test the pilot")
+      .closest('[data-streamdown="strong"]'),
+  ).not.toBeNull();
+  expect(within(dialog).getByText("demand").closest("code")).not.toBeNull();
+  expect(
+    within(dialog).getByRole("link", { name: "the plan" }).getAttribute("href"),
+  ).toBe("https://example.com/plan");
+  expect(
+    dialog.querySelectorAll('[data-slot="thread-bot-message"] li'),
+  ).toHaveLength(2);
+  expect(within(dialog).getByText("Keep **my words** exactly.")).toBeTruthy();
 });

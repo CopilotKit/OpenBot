@@ -324,7 +324,7 @@ test("the existing direct Bot copy action records only after clipboard success",
     },
   });
   const { view, id, threadId } = bot();
-  fireEvent.click(view.getByTestId("copilot-copy-button"));
+  fireEvent.click(view.getByRole("button", { name: "Copy message" }));
   await flush();
   expect(requests).toHaveLength(0);
   allowCopy();
@@ -345,7 +345,7 @@ test("a rejected clipboard write records no copy", async () => {
     },
   });
   const { view } = bot();
-  fireEvent.click(view.getByTestId("copilot-copy-button"));
+  fireEvent.click(view.getByRole("button", { name: "Copy message" }));
   await flush();
   expect(requests).toHaveLength(0);
   expect(error.mock.calls).toHaveLength(1);

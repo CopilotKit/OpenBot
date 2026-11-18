@@ -240,7 +240,7 @@ async function copyTheAnswer(chat: ReturnType<typeof directChat>) {
     value: { writeText: async () => {} },
   });
   await act(async () => {
-    fireEvent.click(chat.getByTestId("copilot-copy-button"));
+    fireEvent.click(chat.getByRole("button", { name: "Copy message" }));
   });
 }
 
