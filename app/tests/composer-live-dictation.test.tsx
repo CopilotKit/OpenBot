@@ -175,6 +175,82 @@ test("desktop: a refused permission says where to turn it on, and the draft is u
   expect(view.getByRole("button", { name: "Dictate a message" })).toBeDefined();
 });
 
+/** The page's language for one test, as a Mac set to `language` gives it to the window. */
+async function inLanguage(language: string, run: () => Promise<void>) {
+  const nav = navigator as {
+    language?: string;
+    languages?: readonly string[];
+  };
+  Object.defineProperty(navigator, "language", {
+    configurable: true,
+    get: () => language,
+  });
+  Object.defineProperty(navigator, "languages", {
+    configurable: true,
+    get: () => [language],
+  });
+  try {
+    await run();
+  } finally {
+    delete nav.language;
+    delete nav.languages;
+  }
+}
+
+/**
+ * FOUND IN DOGFOODING. A Mac set to English (United Kingdom), with Dictation on for English (United
+ * Kingdom) and English (United States), said "This computer can't take dictation in your language":
+ * its recognizer has no English (United Kingdom) on the device, and OpenBot never asked for English
+ * (United States).
+ */
+test("desktop: a Mac without the page's language on the device dictates in the next one it has", async () => {
+  await inLanguage("en-GB", async () => {
+    noProvider();
+    const { calls } = installDesktopShell({
+      ...desktop,
+      availability: (language) =>
+        language === "en-US" ? "available" : "unavailable",
+    });
+    const { view, box } = renderComposer(true, []);
+    fireEvent.click(
+      await view.findByRole("button", { name: "Dictate a message" }),
+    );
+    await waitFor(() =>
+      expect(box().textContent).toBe("Existing draft book a table for two"),
+    );
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(
+      calls
+        .filter((call) => call.command.endsWith("|speech_available"))
+        .map((call) => call.args?.language),
+    ).toEqual(["en-GB", "en-US"]);
+    const start = calls.find((call) => call.command.endsWith("|speech_start"));
+    expect(start?.args).toMatchObject({
+      language: "en-US",
+      refused: ["en-GB"],
+    });
+  });
+});
+
+test("desktop: with no language on the device it says which and where to add it", async () => {
+  await inLanguage("en-GB", async () => {
+    noProvider();
+    const { calls } = installDesktopShell({ availability: "unavailable" });
+    const { view, box } = renderComposer(true, []);
+    fireEvent.click(
+      await view.findByRole("button", { name: "Dictate a message" }),
+    );
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toBe(
+      "This Mac can't take dictation in English (United Kingdom). Turn on Dictation and add the language in System Settings, under Keyboard, then try again.",
+    );
+    expect(calls.some((call) => call.command.endsWith("|speech_start"))).toBe(
+      false,
+    );
+    expect(box().textContent).toBe("Existing draft");
+  });
+});
+
 test("desktop: typing while listening stops listening and keeps what is in the box", async () => {
   noProvider();
   const { calls } = installDesktopShell(desktop);

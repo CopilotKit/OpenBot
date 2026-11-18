@@ -234,11 +234,19 @@ async fn speech_available(language: String) -> speech::Availability {
         .unwrap_or(speech::Availability::Unavailable)
 }
 
-/// Start listening in `language`; what is heard arrives through `on_event`. Returns the session's
-/// number, for `speech_stop` and `speech_abort`. A session already listening ends.
+/// Start listening in `language`; what is heard arrives through `on_event`. `refused` are the
+/// languages the page asked about first and this computer turned down, for speech.log; a page from
+/// before the fallback sends none. Returns the session's number, for `speech_stop` and
+/// `speech_abort`. A session already listening ends.
 #[tauri::command]
-async fn speech_start(language: String, on_event: tauri::ipc::Channel<speech::Event>) -> u64 {
-    speech::start(&language, move |event| on_event.send(event).is_ok())
+async fn speech_start(
+    language: String,
+    refused: Option<Vec<String>>,
+    on_event: tauri::ipc::Channel<speech::Event>,
+) -> u64 {
+    speech::start(&language, &refused.unwrap_or_default(), move |event| {
+        on_event.send(event).is_ok()
+    })
 }
 
 /// Hand over the phrase in progress, then end.
