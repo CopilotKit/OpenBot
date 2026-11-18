@@ -21620,6 +21620,7 @@ components:
         - openduet
         - opendots
         - openfuse
+        - kitebot
       description: How OpenBot looks. openbot is OpenBot as it is without a skin.
     Preferences:
       type: object

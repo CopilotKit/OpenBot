@@ -1,8 +1,11 @@
 import Avatar from "boring-avatars";
-import { useBotLook } from "@/components/agents/bot-look";
+import { drawsBotMark, useBotLook } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
 
-/** A Bot's avatar: its orb, or its face in a skin that has not opted in to orbs. */
+/**
+ * A Bot's avatar: its orb or its kite, or its face in a skin that has opted in to neither.
+ * `BotOrb` draws whichever mark the skin asks for.
+ */
 export function AbstractAvatar({
   name,
   seed,
@@ -12,7 +15,7 @@ export function AbstractAvatar({
   seed: string;
   size?: number;
 }) {
-  if (useBotLook() === "orb") {
+  if (drawsBotMark(useBotLook())) {
     return <BotOrb name={name} seed={seed} size={size} />;
   }
 

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/generated/people/people";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { crossFade } from "@/lib/view-transition";
 import { getSkinId, setSkin } from "@/skins/store";
 import { settingsKeys } from "./queries";
 
@@ -140,7 +141,8 @@ export function saveSkinMutationOptions(
     },
     onMutate: async (skin) => {
       const previousSkin = getSkinId();
-      setSkin(skin);
+      // A new skin is a new frame around every page: it cross-fades in rather than snapping.
+      crossFade(() => setSkin(skin));
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData(queryKey);
       if (previous) queryClient.setQueryData(queryKey, { ...previous, skin });

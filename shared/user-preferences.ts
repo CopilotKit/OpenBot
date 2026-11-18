@@ -15,6 +15,7 @@ export const SKIN_IDS = [
   "openduet",
   "opendots",
   "openfuse",
+  "kitebot",
 ] as const;
 
 export type SkinId = (typeof SKIN_IDS)[number];

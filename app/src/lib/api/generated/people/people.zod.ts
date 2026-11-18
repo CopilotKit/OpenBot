@@ -919,7 +919,7 @@ export const GetPreferencesResponse = zod
         "Whether they narrate their recordings in OpenBot's browser, which opens the microphone only when on. Null until they choose, which the browser asks before their first recording.",
       ),
     skin: zod
-      .enum(["openbot", "openduet", "opendots", "openfuse"])
+      .enum(["openbot", "openduet", "opendots", "openfuse", "kitebot"])
       .describe(
         "How OpenBot looks. openbot is OpenBot as it is without a skin.",
       ),
@@ -988,7 +988,7 @@ export const UpdatePreferencesBody = zod
     selfHostBannerDismissed: zod.boolean().optional(),
     narration: zod.enum(["on", "off"]).optional(),
     skin: zod
-      .enum(["openbot", "openduet", "opendots", "openfuse"])
+      .enum(["openbot", "openduet", "opendots", "openfuse", "kitebot"])
       .optional()
       .describe(
         "How OpenBot looks. openbot is OpenBot as it is without a skin.",
@@ -1017,7 +1017,7 @@ export const UpdatePreferencesResponse = zod
         "Whether they narrate their recordings in OpenBot's browser, which opens the microphone only when on. Null until they choose, which the browser asks before their first recording.",
       ),
     skin: zod
-      .enum(["openbot", "openduet", "opendots", "openfuse"])
+      .enum(["openbot", "openduet", "opendots", "openfuse", "kitebot"])
       .describe(
         "How OpenBot looks. openbot is OpenBot as it is without a skin.",
       ),

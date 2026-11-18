@@ -5,6 +5,7 @@
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "./theme.css";
+@import "./components/agents/kite/kite.css";
 @import "./skins/skins.css";
 
 /*
@@ -444,5 +445,84 @@
   from {
     opacity: 0;
     transform: translateY(3px);
+  }
+}
+
+/*
+ * MOTION, ONCE FOR THE WHOLE APP.
+ *
+ * Hover, press and focus ease their colours in over 120ms on everything a person points at or tabs
+ * to, so a row filling as the pointer crosses it reads as a response rather than a flicker. `:where`
+ * keeps this at no specificity: anything that names its own transition (a width, a transform)
+ * keeps exactly that. Menu items and options are left out, so arrowing down a list keeps up with
+ * the keys, and so are transforms: a press that moves is each control's own decision.
+ */
+@layer base {
+  :where(
+    a,
+    button,
+    summary,
+    input,
+    textarea,
+    select,
+    [role="button"],
+    [role="tab"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"]
+  ) {
+    transition-property:
+      color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, box-shadow, opacity;
+    transition-duration: 120ms;
+    transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+/*
+ * Going to another page (lib/view-transition.ts). The page is a layer of its own: the old one fades
+ * out fast and the new one rises 4px into place, so the eye lands on what arrived, while the frame
+ * around it (the sidebar, a skin's bars) holds still. A theme or skin change cross-fades the whole
+ * app as one picture instead. Browsers without view transitions swap the page as they always did,
+ * and so does every browser for somebody who asked for less motion: none of these is started then.
+ */
+/*
+ * Named only while a page change runs. A name held all the time makes the page a stacking context of
+ * its own, which would put anything fixed inside it (an overlay at z-50) under the sidebar.
+ */
+:root:active-view-transition-type(page) [data-slot="sidebar-inset"] {
+  view-transition-name: main;
+}
+
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-group(main) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:root:active-view-transition-type(page)::view-transition-old(root),
+:root:active-view-transition-type(page)::view-transition-new(root) {
+  animation: none;
+}
+
+:root:active-view-transition-type(page)::view-transition-old(main) {
+  animation: page-leave 90ms ease-out both;
+}
+
+:root:active-view-transition-type(page)::view-transition-new(main) {
+  animation: page-arrive 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@keyframes page-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes page-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
 }

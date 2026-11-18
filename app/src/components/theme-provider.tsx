@@ -3,6 +3,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -14,6 +15,7 @@ import {
   THEME_STORAGE_KEY,
   type ThemePreference,
 } from "@/lib/theme";
+import { crossFade } from "@/lib/view-transition";
 
 type ThemeContextValue = {
   /** What the person chose: the system's light or dark, or one of their own. */
@@ -42,19 +44,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
   const systemDark = useSyncExternalStore(subscribeToSystemDark, systemIsDark);
 
+  /*
+   * The first theme is drawn as the page loads; every change after it cross-fades the whole app from
+   * one theme to the other, rather than each colour snapping on its own.
+   */
+  const drawn = useRef(false);
   useEffect(() => {
-    applyTheme(theme, systemDark, {
-      setStoredValue: (key, value) => window.localStorage.setItem(key, value),
-      removeStoredValue: (key) => window.localStorage.removeItem(key),
-      toggleRootClass: (name, force) =>
-        document.documentElement.classList.toggle(name, force),
-      setRootColorScheme: (scheme) => {
-        document.documentElement.style.colorScheme = scheme;
-      },
-      setRootChoice: (preference) => {
-        document.documentElement.dataset.themeChoice = preference;
-      },
-    });
+    const apply = () =>
+      applyTheme(theme, systemDark, {
+        setStoredValue: (key, value) => window.localStorage.setItem(key, value),
+        removeStoredValue: (key) => window.localStorage.removeItem(key),
+        toggleRootClass: (name, force) =>
+          document.documentElement.classList.toggle(name, force),
+        setRootColorScheme: (scheme) => {
+          document.documentElement.style.colorScheme = scheme;
+        },
+        setRootChoice: (preference) => {
+          document.documentElement.dataset.themeChoice = preference;
+        },
+      });
+    if (drawn.current) crossFade(apply);
+    else apply();
+    drawn.current = true;
   }, [theme, systemDark]);
 
   return (

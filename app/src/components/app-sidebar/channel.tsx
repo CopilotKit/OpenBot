@@ -6,7 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { memo, useState } from "react";
+import { memo, type ReactNode, useState } from "react";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
 import { RenameConversationDialog } from "@/components/channels/rename-conversation-dialog";
 import {
@@ -24,9 +24,7 @@ import { ChannelItemContent } from "./channel-item-content";
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
  * `content-visibility` keeps off-screen rows cheap without virtualization.
  *
- * Right-click opens Pin, Rename and Delete. Rename is offered only to the person who started the
- * conversation, which is who the server lets rename it. Deleting is confirmed in a dialog that
- * names the channel, because the row it was invoked on is one of several identical-looking rows.
+ * Right-click opens Pin, Rename and Delete (`ConversationMenu`).
  */
 export const Channel = memo(function Channel({
   channelId,
@@ -56,8 +54,6 @@ export const Channel = memo(function Channel({
   busy: boolean;
   emphasis: MessageListEmphasis;
 }) {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   // Whether this row's channel is the one on screen, as a boolean, so navigating between
   // channels re-renders the two rows whose answer changed rather than the whole roster.
   const isOpen = useParams({
@@ -68,6 +64,69 @@ export const Channel = memo(function Channel({
   /* Types in only on arrival; an already-named row draws it outright. */
   const revealed = useTypedReveal(summary);
   const threadTitle = revealed.text || untitled || "New conversation";
+  return (
+    <ConversationMenu
+      canRename={canRename}
+      channelId={channelId}
+      open={isOpen}
+      pinned={pinned}
+      title={summary || untitled || ""}
+    >
+      <Link
+        // Two or more Bots is a group conversation, which has its own shared transcript.
+        to={
+          participantIds.length > 1
+            ? "/group/$channelId"
+            : "/channel/$channelId"
+        }
+        params={{ channelId }}
+        type="button"
+        className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
+        activeProps={{
+          className: "bg-foreground/5",
+        }}
+      >
+        <ChannelItemContent
+          participantIds={participantIds}
+          name={name}
+          title={summary || untitled || "New conversation"}
+          displayedTitle={threadTitle}
+          lastMessageAt={lastMessageAt}
+          emphasis={emphasis}
+          busy={busy}
+          unread={unread}
+          pinned={pinned}
+          revealing={revealed.typing}
+        />
+      </Link>
+    </ConversationMenu>
+  );
+});
+
+/**
+ * A conversation's right-click menu around whatever row draws it: Pin, Rename (offered only to the
+ * person who started it, which is who the server lets rename it) and Delete, confirmed in a dialog
+ * that names the conversation. Exported so a skin's own roster offers the same three things.
+ */
+export function ConversationMenu({
+  channelId,
+  pinned,
+  canRename,
+  title,
+  open,
+  children,
+}: {
+  channelId: string;
+  pinned: boolean;
+  canRename: boolean;
+  /** What the dialogs call the conversation. */
+  title: string;
+  /** Whether the conversation is the one on screen, which Delete leaves first. */
+  open: boolean;
+  children: ReactNode;
+}) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -84,35 +143,7 @@ export const Channel = memo(function Channel({
   return (
     <>
       <ContextMenu>
-        <ContextMenuTrigger>
-          <Link
-            // Two or more Bots is a group conversation, which has its own shared transcript.
-            to={
-              participantIds.length > 1
-                ? "/group/$channelId"
-                : "/channel/$channelId"
-            }
-            params={{ channelId }}
-            type="button"
-            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
-            activeProps={{
-              className: "bg-foreground/5",
-            }}
-          >
-            <ChannelItemContent
-              participantIds={participantIds}
-              name={name}
-              title={summary || untitled || "New conversation"}
-              displayedTitle={threadTitle}
-              lastMessageAt={lastMessageAt}
-              emphasis={emphasis}
-              busy={busy}
-              unread={unread}
-              pinned={pinned}
-              revealing={revealed.typing}
-            />
-          </Link>
-        </ContextMenuTrigger>
+        <ContextMenuTrigger>{children}</ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem
             onClick={() => {
@@ -150,16 +181,16 @@ export const Channel = memo(function Channel({
         channelId={channelId}
         onOpenChange={setRenaming}
         open={renaming}
-        title={summary || untitled || ""}
+        title={title}
       />
       <DeleteConversationDialog
         channelId={channelId}
         // Away first when this row's channel is the one on screen.
-        leave={isOpen ? () => navigate({ to: "/" }) : undefined}
+        leave={open ? () => navigate({ to: "/" }) : undefined}
         onOpenChange={setConfirming}
         open={confirming}
-        title={summary || untitled || ""}
+        title={title}
       />
     </>
   );
-});
+}

@@ -12,4 +12,5 @@ export const SkinId = {
   openduet: "openduet",
   opendots: "opendots",
   openfuse: "openfuse",
+  kitebot: "kitebot",
 } as const;

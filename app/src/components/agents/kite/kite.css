@@ -1,0 +1,148 @@
+/*
+ * A Bot drawn as a kite (bot-kite.tsx). Each kite carries its colours for both themes on its own
+ * element, and this picks the pair for the page it is on.
+ *
+ * Motion follows one curve, fast out with a long soft landing and no overshoot, and then holds
+ * still: the eyes gather once and blink now and then, a small face glances aside on standby, and
+ * only a waiting Bot repeats a gesture.
+ */
+.bot-kite {
+  --kb: var(--kite-body);
+  --kp: var(--kite-panel);
+  --ks: var(--kite-spar);
+  --ke: var(--kite-edge);
+  --kx: var(--kite-eye);
+}
+
+.dark .bot-kite {
+  --kb: var(--kite-body-dark);
+  --kp: var(--kite-panel-dark);
+  --ks: var(--kite-spar-dark);
+  --ke: var(--kite-edge-dark);
+  --kx: var(--kite-eye-dark);
+}
+
+/* Waking: each pixel flies in from its own spot, a little after the one before. */
+.bot-kite .bot-kite-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bot-kite-gather 385ms cubic-bezier(0.2, 0, 0, 1)
+    var(--gather-delay, 0ms) both;
+}
+
+@keyframes bot-kite-gather {
+  from {
+    opacity: 0;
+    transform: translate(var(--sx, 0), var(--sy, 0)) scale(0.78);
+  }
+}
+
+/* A blink: 70ms to close, a moment shut, 120ms to open, once a cycle of 3–7 seconds. */
+.bot-kite .bot-kite-lids {
+  animation: bot-kite-blink var(--kite-blink, 4.4s) linear
+    var(--kite-blink-delay, 0s) infinite;
+}
+
+@keyframes bot-kite-blink {
+  0%,
+  95% {
+    opacity: 1;
+  }
+  96.4%,
+  97.2% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/*
+ * Standby, for a face drawn small: once a cycle of 6–10 seconds the eyes step one whole pixel aside,
+ * rest there a beat and step back. They step rather than slide, as pixel art does.
+ */
+.bot-kite .bot-kite-glance {
+  animation: bot-kite-glance var(--kite-glance, 8s) linear
+    var(--kite-glance-delay, 0s) infinite;
+}
+
+@keyframes bot-kite-glance {
+  0%,
+  71.9%,
+  86.1%,
+  100% {
+    transform: translateX(0);
+  }
+  72%,
+  86% {
+    transform: translateX(var(--kite-glance-by, 0));
+  }
+}
+
+/* A Bot waiting on the person tugs at its line every 4.8 seconds. */
+.bot-kite .bot-kite-nudge {
+  animation: bot-kite-nudge 4.8s linear infinite;
+}
+
+@keyframes bot-kite-nudge {
+  0%,
+  9.2%,
+  100% {
+    transform: translateY(0);
+  }
+  2.5% {
+    transform: translateY(0.03px);
+  }
+}
+
+/* Working: a ring steps out from the blue pixel and fades, keeping time. */
+.bot-kite .bot-kite-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bot-kite-pulse 1.4s cubic-bezier(0.2, 0, 0, 1) infinite;
+}
+
+@keyframes bot-kite-pulse {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.2);
+  }
+}
+
+/* Waiting: the amber pixel swells a little, every two seconds. */
+.bot-kite .bot-kite-beat {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bot-kite-beat 2s cubic-bezier(0.2, 0, 0, 1) infinite;
+}
+
+@keyframes bot-kite-beat {
+  0%,
+  40%,
+  100% {
+    transform: scale(1);
+  }
+  20% {
+    transform: scale(1.18);
+  }
+}
+
+/* Reduced motion: each state's designed still. The working ring rests part way out, faint. */
+@media (prefers-reduced-motion: reduce) {
+  .bot-kite .bot-kite-eye,
+  .bot-kite .bot-kite-lids,
+  .bot-kite .bot-kite-glance,
+  .bot-kite .bot-kite-nudge,
+  .bot-kite .bot-kite-beat {
+    animation: none;
+  }
+  .bot-kite .bot-kite-pulse {
+    animation: none;
+    opacity: 0.35;
+    transform: scale(1.54);
+  }
+}

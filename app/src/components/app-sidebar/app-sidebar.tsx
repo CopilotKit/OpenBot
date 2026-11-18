@@ -61,6 +61,7 @@ import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
+import { cn } from "@/lib/utils";
 import { BotsNavBadge } from "../bot-profile/attention";
 import {
   RecordingDot,
@@ -374,10 +375,13 @@ function usePointerRestingSinceNavigation(): boolean {
 function PrimaryNavItem({
   item,
   tooltip,
+  compact = false,
   children,
 }: {
   item: NavigationLink;
   tooltip?: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
+  /** A 32px row with its icon in a 22px slot, for a sidebar whose own rows are that shape. */
+  compact?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -385,7 +389,10 @@ function PrimaryNavItem({
       <SidebarMenuButton
         // No hover fill under a pointer that has not moved since the page changed (see
         // usePointerRestingSinceNavigation); the open page's row keeps its own.
-        className="hover:bg-foreground/5 h-10 group-data-[pointer-resting]/footer-menu:hover:bg-transparent group-data-[pointer-resting]/footer-menu:data-[status=active]:hover:bg-foreground/5"
+        className={cn(
+          "hover:bg-foreground/5 group-data-[pointer-resting]/footer-menu:hover:bg-transparent group-data-[pointer-resting]/footer-menu:data-[status=active]:hover:bg-foreground/5",
+          compact ? "h-8 gap-2.5" : "h-10",
+        )}
         render={(props) => (
           <Link
             {...props}
@@ -395,10 +402,17 @@ function PrimaryNavItem({
         )}
         tooltip={tooltip}
       >
-        <div className="size-[28px] flex items-center justify-center">
+        <div
+          className={cn(
+            "flex items-center justify-center",
+            compact ? "size-[22px]" : "size-[28px]",
+          )}
+        >
           <item.icon />
         </div>
-        <span className="text-sm">{item.label}</span>
+        <span className={compact ? "text-[13px]" : "text-sm"}>
+          {item.label}
+        </span>
         {children}
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -409,10 +423,17 @@ function PrimaryNavItem({
  * The Skills entry. While any of the person's Recorders records, it carries a red dot named for the recording, and a
  * tooltip saying the same, as the Teach a Bot entry once did. Nothing extra otherwise.
  */
-function SkillsNavItem({ item }: { item: NavigationLink }) {
+function SkillsNavItem({
+  item,
+  compact,
+}: {
+  item: NavigationLink;
+  compact?: boolean;
+}) {
   const recording = useLiveRecording();
   return (
     <PrimaryNavItem
+      compact={compact}
       item={item}
       tooltip={recordingTooltip(recording, item.label)}
     >
@@ -421,8 +442,18 @@ function SkillsNavItem({ item }: { item: NavigationLink }) {
   );
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const emphasis = useMessageListEmphasis();
+/**
+ * The sidebar's foot: the main destinations (`lib/navigation.ts`) and the person's account menu,
+ * with the organizations they can switch to and the way out. Exported so a skin that draws its own
+ * sidebar keeps the same destinations, the same Bots badge and the same menu, rather than a copy
+ * that drifts.
+ */
+export function AppSidebarFooter({
+  compact = false,
+}: {
+  /** Its destinations as 32px rows, for a sidebar whose own rows are that size. */
+  compact?: boolean;
+} = {}) {
   const signOut = useSignOut();
   const signOutOffered = useSignOutOffered();
   // Where OpenBot lists no organizations, the menu has none at all.
@@ -430,6 +461,90 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const invitationsWaiting = useWaitingInvitationCount();
   const switchOrganization = useSwitchOrganization();
   const pointerResting = usePointerRestingSinceNavigation();
+  const navigation = useNavigationItems();
+  const { setOpenMobile } = useSidebar();
+  return (
+    <SidebarFooter>
+      <SidebarMenu
+        className="group/footer-menu gap-px"
+        data-pointer-resting={pointerResting || undefined}
+      >
+        {navigation
+          .filter(isNavigationLink)
+          .filter((item) => item.section === "primary")
+          .map((item) =>
+            // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
+            item.id === "skills" ? (
+              <SkillsNavItem compact={compact} item={item} key={item.id} />
+            ) : (
+              <PrimaryNavItem compact={compact} item={item} key={item.id}>
+                {/* What waits on you across every Bot; Bots lists them first. */}
+                {item.id === "bots" ? <BotsNavBadge /> : null}
+              </PrimaryNavItem>
+            ),
+          )}
+        <SidebarMenuItem>
+          <AccountMenu>
+            <DropdownMenuContent
+              align="start"
+              className={accountMenuClassName}
+              side="top"
+              sideOffset={8}
+            >
+              {organizationChoices ? (
+                <OrganizationMenuItems
+                  choices={organizationChoices}
+                  invitationsWaiting={invitationsWaiting}
+                  itemClassName={userMenuItemClassName}
+                  onNew={() => {
+                    // A narrow window's sheet would wait behind the dialog.
+                    setOpenMobile(false);
+                    openNewOrganization();
+                  }}
+                  switching={switchOrganization}
+                />
+              ) : null}
+              {navigation
+                .filter((item) => item.section === "account")
+                .map((item) => (
+                  <DropdownMenuItem
+                    className={userMenuItemClassName}
+                    key={item.id}
+                    nativeButton={item.kind === "dialog"}
+                    // A link closes a narrow window's sheet as it is followed; a dialog has to
+                    // close it itself, or the sheet waits behind the dialog.
+                    render={navigationRender(
+                      item,
+                      item.kind === "dialog"
+                        ? { onClick: () => setOpenMobile(false) }
+                        : {},
+                    )}
+                  >
+                    <item.icon />
+                    <BrandName>{item.label}</BrandName>
+                  </DropdownMenuItem>
+                ))}
+              {signOutOffered ? (
+                <DropdownMenuItem
+                  className={userMenuItemClassName}
+                  disabled={signOut.pending}
+                  onClick={signOut.run}
+                  variant="destructive"
+                >
+                  <IconLogout />
+                  Sign out
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </AccountMenu>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </SidebarFooter>
+  );
+}
+
+export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const emphasis = useMessageListEmphasis();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -461,7 +576,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }, [searching]);
   const visibleChannels = pinnedFirst(channels.data ?? []);
   const animateOrder = (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
-  const navigation = useNavigationItems();
   const { setOpenMobile } = useSidebar();
   // Opened with Cmd/Ctrl+K over the phone sidebar, the menu closes it before it navigates.
   useBeforeCommandNavigate(() => setOpenMobile(false));
@@ -584,82 +698,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarGroup>
         </SidebarMenu>
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu
-          className="group/footer-menu gap-px"
-          data-pointer-resting={pointerResting || undefined}
-        >
-          {navigation
-            .filter(isNavigationLink)
-            .filter((item) => item.section === "primary")
-            .map((item) =>
-              // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
-              item.id === "skills" ? (
-                <SkillsNavItem item={item} key={item.id} />
-              ) : (
-                <PrimaryNavItem item={item} key={item.id}>
-                  {/* What waits on you across every Bot; Bots lists them first. */}
-                  {item.id === "bots" ? <BotsNavBadge /> : null}
-                </PrimaryNavItem>
-              ),
-            )}
-          <SidebarMenuItem>
-            <AccountMenu>
-              <DropdownMenuContent
-                align="start"
-                className={accountMenuClassName}
-                side="top"
-                sideOffset={8}
-              >
-                {organizationChoices ? (
-                  <OrganizationMenuItems
-                    choices={organizationChoices}
-                    invitationsWaiting={invitationsWaiting}
-                    itemClassName={userMenuItemClassName}
-                    onNew={() => {
-                      // A narrow window's sheet would wait behind the dialog.
-                      setOpenMobile(false);
-                      openNewOrganization();
-                    }}
-                    switching={switchOrganization}
-                  />
-                ) : null}
-                {navigation
-                  .filter((item) => item.section === "account")
-                  .map((item) => (
-                    <DropdownMenuItem
-                      className={userMenuItemClassName}
-                      key={item.id}
-                      nativeButton={item.kind === "dialog"}
-                      // A link closes a narrow window's sheet as it is followed; a dialog has to
-                      // close it itself, or the sheet waits behind the dialog.
-                      render={navigationRender(
-                        item,
-                        item.kind === "dialog"
-                          ? { onClick: () => setOpenMobile(false) }
-                          : {},
-                      )}
-                    >
-                      <item.icon />
-                      <BrandName>{item.label}</BrandName>
-                    </DropdownMenuItem>
-                  ))}
-                {signOutOffered ? (
-                  <DropdownMenuItem
-                    className={userMenuItemClassName}
-                    disabled={signOut.pending}
-                    onClick={signOut.run}
-                    variant="destructive"
-                  >
-                    <IconLogout />
-                    Sign out
-                  </DropdownMenuItem>
-                ) : null}
-              </DropdownMenuContent>
-            </AccountMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+      <AppSidebarFooter />
       <SidebarRail />
     </Sidebar>
   );
