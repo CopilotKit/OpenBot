@@ -59,7 +59,11 @@ export type LearningProposal = {
   /** Why Intelligence proposes it. */
   reason: string;
   operation: "add" | "update" | "remove";
-  status: "pending_review" | "approved" | "rejected";
+  /**
+   * `pending_review`, `approved` or `rejected`. The list can grow: a status this app doesn't know is
+   * read as neither waiting nor decided.
+   */
+  status: string;
   createdAt: string;
   reviewedAt: string | null;
 };

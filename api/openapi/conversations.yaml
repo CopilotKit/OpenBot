@@ -2486,7 +2486,7 @@ components:
           description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -2656,7 +2656,7 @@ components:
             server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - needs_input
         - working
         - resolved

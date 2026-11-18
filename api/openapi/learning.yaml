@@ -2149,7 +2149,7 @@ components:
           description: Whether it adds a skill, changes one, or removes one.
         status:
           type: string
-          enum: [pending_review, approved, rejected]
+          x-extensible-enum: [pending_review, approved, rejected]
         title:
           type: string
           description: The skill's name.
@@ -2333,7 +2333,7 @@ components:
           format: uuid
         status:
           type: string
-          enum: [queued, freezing, batching, reducing, finalizing, succeeded, failed]
+          x-extensible-enum: [queued, freezing, batching, reducing, finalizing, succeeded, failed]
         triggerSource:
           type: string
           enum: [automatic, manual]

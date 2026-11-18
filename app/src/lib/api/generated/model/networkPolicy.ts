@@ -3,13 +3,12 @@
  */
 import type { EgressRule } from "./egressRule";
 import type { NetworkMode } from "./networkMode";
-import type { NetworkPolicyScopeKind } from "./networkPolicyScopeKind";
 
 export interface NetworkPolicy {
   /** organization, team:<id> for a team, or group:<name> for a directory group. */
   id: string;
   /** Whose policy: the organization's, a team's, or a directory group's. */
-  scopeKind: NetworkPolicyScopeKind;
+  scopeKind: string;
   /** The team's id, or the directory group's name. Empty for the organization. */
   scopeId: string;
   mode: NetworkMode;

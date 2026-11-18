@@ -1930,12 +1930,11 @@ components:
           type:
             - string
             - "null"
-          enum:
+          x-extensible-enum:
             - succeeded
             - failed
             - skipped
             - waiting
-            - null
           description: How it ended, or null while it is still open. Only failed is a
             failure.
         at:
@@ -2085,7 +2084,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - running
             - succeeded
             - failed
@@ -2256,7 +2255,7 @@ components:
           description: When it last ran, or null.
         lastStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -2431,7 +2430,7 @@ components:
           description: Where it can be opened, or null.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - open
             - dismissed
             - started
@@ -2711,7 +2710,7 @@ components:
           description: When it is done. May be empty.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - paused
             - completed
@@ -2884,7 +2883,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting

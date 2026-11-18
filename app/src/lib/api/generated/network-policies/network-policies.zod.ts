@@ -64,7 +64,7 @@ export const ListNetworkPoliciesResponse = zod.object({
             "organization, team:<id> for a team, or group:<name> for a directory group.",
           ),
         scopeKind: zod
-          .enum(["organization", "group", "team"])
+          .string()
           .describe(
             "Whose policy: the organization's, a team's, or a directory group's.",
           ),
@@ -228,7 +228,7 @@ export const ReplaceNetworkPolicyResponse = zod.object({
       "organization, team:<id> for a team, or group:<name> for a directory group.",
     ),
   scopeKind: zod
-    .enum(["organization", "group", "team"])
+    .string()
     .describe(
       "Whose policy: the organization's, a team's, or a directory group's.",
     ),

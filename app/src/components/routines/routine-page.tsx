@@ -149,6 +149,13 @@ const RUN_STATUS: Record<
   waiting: { text: "Waiting for you", className: "" },
 };
 
+/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
+export function runStatusOf(status: string) {
+  const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
+    RUN_STATUS;
+  return known[status] ?? null;
+}
+
 const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
   run_now: "Run now",
   trigger: "Triggered",
@@ -184,7 +191,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
       ) : runs.data.length ? (
         <PageRows>
           {runs.data.map((run, index) => {
-            const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
+            const status = runStatusOf(run.status);
             return (
               <Fragment key={run.id}>
                 {index > 0 ? <Separator /> : null}
@@ -193,9 +200,11 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                     <IconHistory />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle className={status.className}>
-                      {status.text}
-                    </ItemTitle>
+                    {status ? (
+                      <ItemTitle className={status.className}>
+                        {status.text}
+                      </ItemTitle>
+                    ) : null}
                     <ItemDescription>
                       {RUN_SOURCE[run.source] ?? "Scheduled"} ·{" "}
                       {relativeTime(run.startedAt)}

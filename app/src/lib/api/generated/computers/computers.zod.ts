@@ -286,7 +286,7 @@ export const GetComputerParams = zod.object({
 export const GetComputerResponse = zod.object({
   botId: zod.string().describe("The Bot whose computer this is."),
   state: zod
-    .enum(["absent", "starting", "ready", "unreachable"])
+    .string()
     .describe(
       "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
     ),
@@ -332,7 +332,7 @@ export const WakeComputerHeader = zod.object({
 export const WakeComputerResponse = zod.object({
   botId: zod.string().describe("The Bot whose computer this is."),
   state: zod
-    .enum(["absent", "starting", "ready", "unreachable"])
+    .string()
     .describe(
       "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
     ),
@@ -382,7 +382,7 @@ export const GetComputerScreenshotResponse = zod.union([
     .object({
       ready: zod.literal(false),
       state: zod
-        .enum(["absent", "starting", "ready", "unreachable"])
+        .string()
         .describe(
           "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
         ),
@@ -537,14 +537,7 @@ export const GetComputerControlResponse = zod
           .describe(
             "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -640,14 +633,7 @@ export const RequestComputerControlResponse = zod
           .describe(
             "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -746,14 +732,7 @@ export const TakeComputerControlResponse = zod
           .describe(
             "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -852,14 +831,7 @@ export const ReleaseComputerControlResponse = zod
           .describe(
             "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -958,14 +930,7 @@ export const CancelComputerControlResponse = zod
           .describe(
             "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
@@ -1066,14 +1031,7 @@ export const RequestComputerSecretResponse = zod
           .describe(
             "Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).",
           ),
-        status: zod.enum([
-          "waiting",
-          "taken",
-          "completed",
-          "cancelled",
-          "expired",
-          "interrupted",
-        ]),
+        status: zod.string(),
         createdAt: zod.string(),
         updatedAt: zod.string(),
         expiresAt: zod.string().optional(),
