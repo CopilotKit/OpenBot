@@ -587,6 +587,23 @@ components:
           type: [string, 'null']
         effort:
           type: [string, 'null']
+        unverified:
+          $ref: '#/components/schemas/UnverifiedModel'
+    UnverifiedModel:
+      type: object
+      description: >-
+        The model a person chose for this conversation, set aside because it
+        hasn't been checked to work with the client this Bot's harness
+        ships. Runs answer on the default model until it has been. Absent when
+        the choice is in use, or set aside for another reason.
+      required: [model, label]
+      properties:
+        model:
+          type: string
+          description: The chosen model's id.
+        label:
+          type: string
+          description: Its name, as a model picker shows it.
     ModelChoiceInput:
       type: object
       additionalProperties: false

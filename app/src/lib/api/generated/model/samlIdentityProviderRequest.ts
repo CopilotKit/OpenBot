@@ -16,7 +16,7 @@ export interface SamlIdentityProviderRequest {
    * The provider's SAML metadata XML, as its identity team supplied it.
    * @minLength 1
    * @maxLength 200000
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   metadata: string;
 }

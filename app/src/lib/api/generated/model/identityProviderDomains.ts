@@ -6,6 +6,6 @@
  * The email domain whose people it signs in, such as acme.com. Several are separated by commas.
  * @minLength 1
  * @maxLength 2048
- * @pattern ^[^\x00]*\S[^\x00]*$
+ * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
  */
 export type IdentityProviderDomains = string;
