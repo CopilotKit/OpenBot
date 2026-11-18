@@ -1440,6 +1440,7 @@ export * from "./unpinBotHeaders";
 export * from "./unpublishComponentHeaders";
 export * from "./unpublishTeamBotHeaders";
 export * from "./unsupportedFileResponse";
+export * from "./unverifiedModel";
 export * from "./updateAppHeaders";
 export * from "./updateAppRequest";
 export * from "./updateApprovalPreferencesHeaders";

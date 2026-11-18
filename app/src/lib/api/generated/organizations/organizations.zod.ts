@@ -118,7 +118,7 @@ export const CreateOrganizationHeader = zod.object({
 export const createOrganizationBodyNameMax = 100;
 
 export const createOrganizationBodyNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createOrganizationBodySlugMin = 2;
 export const createOrganizationBodySlugMax = 48;
@@ -301,7 +301,7 @@ export const UpdateOrganizationHeader = zod.object({
 export const updateOrganizationBodyNameMax = 100;
 
 export const updateOrganizationBodyNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const UpdateOrganizationBody = zod.object({
