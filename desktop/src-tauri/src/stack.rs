@@ -12081,7 +12081,8 @@ fn main() {
     }
     for listener in &listeners { listener.set_nonblocking(true).unwrap(); }
     let mut requests = std::fs::File::create(format!("{name}.requests")).unwrap();
-    std::fs::write(format!("{name}.port"), port.to_string()).unwrap();
+    println!("{port}");
+    std::io::stdout().flush().unwrap();
     let mut ipv4_requests = 0_usize;
     loop {
         for listener in &listeners {
@@ -12126,33 +12127,29 @@ fn main() {
                     format!("synthetic {name} diagnostic"),
                 )
                 .unwrap();
-                fixture.children.push((
-                    name,
-                    Command::new(&binary)
-                        .args([name, mode])
-                        .current_dir(&fixture.root)
-                        .spawn()
-                        .unwrap(),
-                ));
-                let port_file = fixture.root.join(format!("{name}.port"));
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-                let port = loop {
-                    if let Ok(port) = std::fs::read_to_string(&port_file) {
-                        if let Ok(port) = port.parse() {
-                            break port;
-                        }
-                    }
-                    assert!(fixture
-                        .children
-                        .last_mut()
-                        .unwrap()
-                        .1
-                        .try_wait()
-                        .unwrap()
-                        .is_none());
-                    assert!(std::time::Instant::now() < deadline, "fixture did not bind");
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                };
+                let mut child = Command::new(&binary)
+                    .args([name, mode])
+                    .current_dir(&fixture.root)
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                // The fixture says its port once both loopbacks are bound. Waiting for that line, not
+                // for a deadline, holds however slowly a loaded computer starts it; a fixture that
+                // dies first closes its output and is reported as it is.
+                let mut said = String::new();
+                std::io::BufRead::read_line(
+                    &mut std::io::BufReader::new(child.stdout.take().unwrap()),
+                    &mut said,
+                )
+                .unwrap();
+                fixture.children.push((name, child));
+                let port = said.trim().parse().unwrap_or_else(|_| {
+                    let child = &mut fixture.children.last_mut().unwrap().1;
+                    panic!(
+                        "the {name} fixture stopped before it bound: {:?}",
+                        child.wait()
+                    )
+                });
                 if name == "server" {
                     fixture.ready.api = port;
                 } else {
