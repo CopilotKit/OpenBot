@@ -25,6 +25,7 @@ import {
 } from "../src/api/generated/computers/computers";
 import type { ComputerHumanInput } from "../src/api/generated/model";
 import { authClient, serverUrl } from "../src/auth";
+import { clientHeaders } from "../src/release";
 import { colors, input, muted, Problem, Screen, useAction } from "../src/ui";
 
 type Frame = { uri: string; width: number; height: number };
@@ -59,7 +60,7 @@ function useLiveFrame(botId: string, enabled: boolean) {
         options: { headers: Record<string, string> },
       ) => WebSocket;
       socket = new Native(url, null, {
-        headers: cookie ? { Cookie: cookie } : {},
+        headers: { ...clientHeaders(), ...(cookie ? { Cookie: cookie } : {}) },
       });
       socket.onmessage = (event) => {
         let message: unknown;
