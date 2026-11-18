@@ -25,3 +25,35 @@
   --text-4xl: 2.109375rem; /* 33.75px */
   --tracking-heading: normal;
 }
+
+/*
+ * And the colours of the buttons the skins were drawn with, before the UI Kit's
+ * (components/ui/button.tsx): a hover is the button tinted, a press looks like the hover, and a
+ * disabled button keeps its colours, since the button fades as a whole (`skin:` there). An outlined
+ * button keeps its border on the card.
+ */
+:root[data-skin] {
+  --color-primary-hover: color-mix(in oklab, var(--primary) 85%, transparent);
+  --color-primary-active: var(--color-primary-hover);
+  --color-primary-disabled: var(--primary-foreground);
+  --color-secondary-hover: color-mix(
+    in oklch,
+    var(--secondary),
+    var(--foreground) 5%
+  );
+  --color-secondary-active: var(--color-secondary-hover);
+  --color-secondary-disabled: var(--secondary-foreground);
+  --color-ghost-hover: var(--muted);
+  --color-ghost-active: var(--muted);
+  --color-outline: var(--card);
+  --color-outline-border: var(--input);
+  --color-outline-hover: var(--muted);
+  --color-outline-active: var(--muted);
+}
+:root[data-skin].dark {
+  --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);
+  --color-ghost-active: var(--color-ghost-hover);
+  --color-outline: color-mix(in oklab, var(--input) 30%, transparent);
+  --color-outline-hover: color-mix(in oklab, var(--input) 50%, transparent);
+  --color-outline-active: var(--color-outline-hover);
+}

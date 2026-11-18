@@ -1,4 +1,10 @@
 @custom-variant dark (&:is(.dark *));
+/*
+ * What a primitive keeps for the alternate skins only, where OpenBot's own look (the UI Kit) differs
+ * in more than a colour: `skin:disabled:opacity-50`. Colours go through tokens instead, which the
+ * skins set in skins/legacy-base.css.
+ */
+@custom-variant skin (:root[data-skin] &);
 
 :root {
   color-scheme: light;
@@ -160,6 +166,46 @@ body {
   --shadow-composer:
     0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
     0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
+  /*
+   * A button's hover, pressed and disabled colours (UI Kit "Button" and "Icon Button"). Mixed from
+   * the shadcn tokens above rather than written out, so they follow the dark theme and a theme that
+   * replaces these tokens; the mixes land on the kit's own colours in the light theme: the primary
+   * #31363a on hover, black pressed, its label #51595f disabled; the secondary #e7eaf0 on hover and
+   * #cfd7e6 (`--input`) pressed, its label #cfd7e6 disabled. A ghost button takes the secondary's
+   * hover and pressed. The alternate skins put back their own (skins/legacy-base.css).
+   */
+  --color-primary-hover: color-mix(
+    in oklab,
+    var(--primary) 81%,
+    var(--primary-foreground)
+  );
+  --color-primary-active: color-mix(in oklab, var(--primary) 50%, black);
+  --color-primary-disabled: color-mix(
+    in oklab,
+    var(--primary-foreground) 35%,
+    var(--primary)
+  );
+  --color-secondary-hover: color-mix(
+    in oklab,
+    var(--secondary) 70%,
+    var(--input)
+  );
+  --color-secondary-active: var(--input);
+  --color-secondary-disabled: color-mix(
+    in oklab,
+    var(--secondary-foreground) 11%,
+    var(--secondary)
+  );
+  --color-ghost-hover: var(--color-secondary-hover);
+  --color-ghost-active: var(--color-secondary-active);
+  /*
+   * The kit has no outlined button: what the app drew outlined (a row's Edit, a dialog's Cancel) is
+   * the kit's Secondary, a pale pill with no border.
+   */
+  --color-outline: var(--secondary);
+  --color-outline-border: transparent;
+  --color-outline-hover: var(--color-secondary-hover);
+  --color-outline-active: var(--color-secondary-active);
 }
 
 @theme inline {
