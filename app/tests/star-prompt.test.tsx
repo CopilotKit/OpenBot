@@ -116,7 +116,8 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-const ASK = "Enjoying OpenBot? Star it on GitHub so more people find it.";
+const ASK =
+  "Enjoying OpenBot? Star it on GitHub so that we can keep making it better.";
 
 function preferences(answered?: boolean): UserPreferences {
   return {

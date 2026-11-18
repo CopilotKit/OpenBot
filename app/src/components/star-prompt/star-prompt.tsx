@@ -98,7 +98,8 @@ export function StarPrompt({
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="text-pretty">
-          Enjoying OpenBot? Star it on GitHub so more people find it.
+          Enjoying OpenBot? Star it on GitHub so that we can keep making it
+          better.
         </ItemTitle>
       </ItemContent>
       <ItemActions>
