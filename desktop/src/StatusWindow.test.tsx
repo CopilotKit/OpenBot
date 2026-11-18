@@ -120,6 +120,33 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
   ).toBe(false);
 });
 
+/**
+ * Seen on a Windows box below the security floor: Start for OpenBot's services was offered, the
+ * shell refused it, and the window said nothing at all. Below the floor nothing starts here, so
+ * Start and Restart are not offered, and the window says why.
+ */
+test("below the security floor, nothing is offered to start and the window says why", async () => {
+  invokeHandler = answers({
+    security_floor: { blocked: true },
+    desktop_status: {
+      ...running,
+      openbotRunning: false,
+      intelligenceContainers: [],
+    },
+  });
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  const services = await view.findByRole("region", {
+    name: "OpenBot's services",
+  });
+  await waitFor(() =>
+    expect(services.textContent).toContain(
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    ),
+  );
+  expect(within(services).queryByRole("button", { name: "Start" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Restart" })).toBeNull();
+});
+
 test("Open log folder asks the desktop app to open its own log folder", async () => {
   const logFolder = "/Users/someone/Library/Logs/ai.copilotkit.openbot.desktop";
   invokeHandler = answers({ desktop_status: { ...running, logFolder } });

@@ -4508,6 +4508,44 @@ test("an upgrade that did not finish says so on the running screen before handin
   );
 });
 
+test("Retry after a refused start shows no refusal while the new start runs", async () => {
+  // Windows under Podman: Retry after the setting was put right kept "That didn't finish" and the
+  // old sentence under Starting OpenBot for the 20 seconds the new start took, until OpenBot opened.
+  setupConnectedLocalStack(
+    "/tmp/retry-clears-refusal",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "SMTP_HOST is set but MAIL_FROM is not. Set MAIL_FROM to the address OpenBot sends email from, such as OpenBot <openbot@example.com>.";
+  let starts = 0;
+  let answer: () => void = () => {};
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack") {
+      starts += 1;
+      if (starts === 1)
+        throw { said, detail: "the server exited 78 (EX_CONFIG)" };
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return null;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByText(said);
+
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(starts).toBe(2));
+  expect(view.queryByText(said)).toBeNull();
+  expect(view.queryByText("That didn't finish")).toBeNull();
+
+  answer();
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+});
+
 test("relaunch never starts a local stack that is not exactly ready and valid", async () => {
   for (const [readiness, licence, said] of [
     [

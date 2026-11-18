@@ -3,6 +3,7 @@ import { router, Stack } from "expo-router";
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { authClient } from "../src/auth";
+import { withSecurityFloor } from "../src/floor-gate";
 import { notificationDestination } from "../src/links";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
 
@@ -14,7 +15,7 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
-export default function Layout() {
+function Layout() {
   const { data: session } = authClient.useSession();
   // Asked before sign-in: whether this app and its OpenBot can work together. When they can't, one sentence covers
   // the app, so no screen behind it is seen failing.
@@ -58,3 +59,4 @@ export default function Layout() {
     </View>
   );
 }
+export default withSecurityFloor(Layout);

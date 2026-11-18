@@ -766,6 +766,7 @@ pub fn cli_failure(failure: local_eval::Failure) -> telemetry::CliFailure {
         F::InvalidAcceptance => T::InvalidAcceptance,
         F::RootlessPodman => T::RootlessPodman,
         F::DownloadStalled => T::DownloadStalled,
+        F::BelowSecurityFloor => T::BelowSecurityFloor,
     }
 }
 
