@@ -28,23 +28,67 @@ pub(crate) fn temp_root(label: &str) -> PathBuf {
     path
 }
 
+/// What every fixture is built with besides its own source: on macOS, a hook that runs before
+/// `main` and ends the program at once when `FIXTURE_FIRST_LAUNCH` is set, so `compile_fixture`
+/// can launch it without running any of the fixture.
+const FIXTURE_FIRST_LAUNCH_HOOK: &str = r#"
+#[cfg(target_os = "macos")]
+#[used]
+#[link_section = "__DATA,__mod_init_func"]
+static OPENBOT_FIXTURE_FIRST_LAUNCH: extern "C" fn() = openbot_fixture_first_launch;
+#[cfg(target_os = "macos")]
+extern "C" fn openbot_fixture_first_launch() {
+    if std::env::var_os("OPENBOT_TEST_FIXTURE_FIRST_LAUNCH").is_some() {
+        std::process::exit(0);
+    }
+}
+"#;
+const FIXTURE_FIRST_LAUNCH: &str = "OPENBOT_TEST_FIXTURE_FIRST_LAUNCH";
+
 /// Runtime PATH belongs to the scenario under test; the compiler and linker tools belong to
 /// Cargo's build environment. Neither an inherited runtime RUSTC nor another test can replace it.
+///
+/// THE FIRST LAUNCH IS TAKEN HERE. macOS checks a program the first time it is launched, and on a
+/// busy Mac that took more than ten seconds, with no CPU used, for a program that then ran in
+/// milliseconds. A fixture launched first by the code under test spent that inside its limits
+/// (an engine check, a readiness wait), and while a launch waits, the new process holds a copy of
+/// every socket of the test process that started it, so a port another test gave back stayed
+/// taken. Each fixture is launched once here, untimed, and ends before its `main`.
 pub(crate) fn compile_fixture(source: &std::path::Path, binary: &std::path::Path) {
+    let mut text =
+        std::fs::read_to_string(source).expect("the fixture's source should be readable");
+    text.push_str(FIXTURE_FIRST_LAUNCH_HOOK);
+    let built_from = source.with_file_name(format!(
+        "{}.first-launch.rs",
+        source.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::write(&built_from, text).expect("the fixture's build source should be writable");
     let output = std::process::Command::new(env!("OPENBOT_TEST_RUSTC"))
         .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"))
         // Source filenames can include executable suffixes, which are invalid crate names.
         .args(["--crate-name", "openbot_test_fixture"])
-        .arg(source)
+        .arg(&built_from)
         .arg("-o")
         .arg(binary)
         .output()
         .expect("Cargo's Rust compiler should run for the native fixture");
+    let _ = std::fs::remove_file(&built_from);
     assert!(
         output.status.success(),
         "fixture did not compile: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    if cfg!(target_os = "macos") {
+        let launched = std::process::Command::new(binary)
+            .env(FIXTURE_FIRST_LAUNCH, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the fixture should launch");
+        assert!(
+            launched.status.success() && launched.stdout.is_empty(),
+            "the fixture ran past its first-launch hook: {launched:?}"
+        );
+    }
 }
 
 /// A command-line program that stands in for one the shell probes: `say` writes to both streams
@@ -110,4 +154,33 @@ pub(crate) fn isolated_process(test: &str) -> bool {
         "isolated test {test} failed or did not execute:\n{stdout}\n{stderr}"
     );
     true
+}
+
+#[cfg(test)]
+mod tests {
+    /// A fixture is launched once as it is built, on macOS, and none of it runs then; launched
+    /// afterwards it is itself.
+    #[test]
+    fn a_fixtures_first_launch_runs_none_of_it() {
+        let root = super::temp_root("fixture-first-launch");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("marks.rs");
+        std::fs::write(
+            &source,
+            "fn main() { std::fs::write(std::env::args().nth(1).unwrap(), \"ran\").unwrap(); }\n",
+        )
+        .unwrap();
+        let binary = root.join(format!("marks{}", std::env::consts::EXE_SUFFIX));
+        super::compile_fixture(&source, &binary);
+        let mark = root.join("mark");
+        assert!(!mark.exists(), "the first launch ran the fixture");
+        assert!(!root.join("marks.rs.first-launch.rs").exists());
+        let ran = std::process::Command::new(&binary)
+            .arg(&mark)
+            .status()
+            .unwrap();
+        assert!(ran.success());
+        assert_eq!(std::fs::read_to_string(&mark).unwrap(), "ran");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }
