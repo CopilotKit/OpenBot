@@ -263,18 +263,6 @@ export const ProblemCategory = {
 export type ProblemProblemsItem = { [key: string]: unknown };
 
 /**
- * On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves.
- */
-export type ProblemClient = (typeof ProblemClient)[keyof typeof ProblemClient];
-
-export const ProblemClient = {
-  web: "web",
-  desktop: "desktop",
-  mobile: "mobile",
-  recorder: "recorder",
-} as const;
-
-/**
  * RFC 9457 problem details, in the shape CopilotKit Intelligence's v2 API uses. status equals the HTTP status; code and type name the same stable error. detail is the sentence a person reads.
  */
 export interface Problem {
@@ -301,8 +289,8 @@ export interface Problem {
   capability?: string;
   /** What is wrong, item by item, when a refusal has more than one reason: each entry names the item and says what is wrong with it. */
   problems?: ProblemProblemsItem[];
-  /** On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves. */
-  client?: ProblemClient;
+  /** On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves. A later OpenBot may name another app; read one you don't know as other. */
+  client?: string;
   /** On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves. */
   minimumVersion?: string;
   /** On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases. */

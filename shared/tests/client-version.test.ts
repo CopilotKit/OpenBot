@@ -16,7 +16,9 @@ import {
   parseClientHeader,
   RELEASE,
   SECURITY_UPDATE_SENTENCE,
+  clientTokens,
 } from "../client-version";
+import { countedClients } from "../api-deprecations";
 import cases from "../fixtures/client-version/cases.json";
 
 describe("which app is asking", () => {
@@ -147,4 +149,37 @@ describe("each app's decision from real deployment answers", () => {
         });
     });
   }
+});
+
+describe("one reading of the header", () => {
+  const HEADERS = [
+    "desktop/1.1.0",
+    "web/1.2.0 desktop/1.1.5",
+    "Desktop/v1.0.3",
+    "web/1.1.0 web/1.1.0",
+    "desktop/main-ci",
+    "curl/8.7.1",
+    "web/ /1.0.0 desktop",
+    "mobile/1.1.0-rc.2 recorder/1.1.0 laptop/9.9.9",
+    "a/1.0.0 b/1.0.0 c/1.0.0 d/1.0.0 e/1.0.0 f/1.0.0 g/1.0.0 h/1.0.0 desktop/1.0.0",
+  ];
+
+  test("the version check and the deprecation count read the same apps from every header", () => {
+    for (const header of HEADERS) {
+      const tokens = clientTokens(header);
+      const counted = countedClients(header).filter(
+        (client) => client.kind !== "other" && client.kind !== "unknown",
+      );
+      // The count names exactly the apps the tokenizer reads, each once.
+      expect(new Set(counted.map((client) => client.kind))).toEqual(
+        new Set(tokens.map((token) => token.kind)),
+      );
+      // And every app the version check holds against a minimum is counted at that release.
+      for (const named of parseClientHeader(header))
+        expect(counted).toContainEqual({
+          kind: named.kind,
+          version: named.version.replace(/^v/, ""),
+        });
+    }
+  });
 });

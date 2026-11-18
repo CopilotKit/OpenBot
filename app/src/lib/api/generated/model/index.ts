@@ -1126,7 +1126,6 @@ export * from "./pressComputerKeyHeaders";
 export * from "./previewCapabilityChangesHeaders";
 export * from "./problem";
 export * from "./problemCategory";
-export * from "./problemClient";
 export * from "./problemProblemsItem";
 export * from "./productEvent";
 export * from "./productEventKind";

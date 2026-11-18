@@ -22,6 +22,8 @@
  * reads. Its removal waits on its sunset alone.
  */
 
+import { CLIENT_KINDS, clientTokens, isVersion } from "./client-version";
+
 /** Where the `Link` header points: the changelog, whose Deprecated list says what replaces each one. */
 export const DEPRECATION_LINK =
   "https://github.com/CopilotKit/OpenBot/blob/main/CHANGELOG.md";
@@ -422,10 +424,8 @@ export function deprecationHeaders(
   };
 }
 
-/** The OpenBot apps that name themselves in the `OpenBot-Client` header. */
-export const CLIENT_KINDS = ["web", "desktop", "mobile", "recorder"] as const;
-
-const VERSION = /^v?\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,64})?$/;
+/** The OpenBot apps that name themselves in the `OpenBot-Client` header (shared/client-version.ts). */
+export { CLIENT_KINDS };
 
 /**
  * Who a use of a deprecated element is counted against, from the `OpenBot-Client` header: each
@@ -438,14 +438,10 @@ export function countedClients(
   header: string | null | undefined,
 ): { kind: string; version: string }[] {
   if (!header?.trim()) return [{ kind: "unknown", version: "" }];
+  // The header is read the one way the version check reads it (shared/client-version.ts).
   const named = new Map<string, { kind: string; version: string }>();
-  for (const token of header.trim().split(/\s+/).slice(0, 8)) {
-    const slash = token.indexOf("/");
-    if (slash < 1) continue;
-    const kind = token.slice(0, slash).toLowerCase();
-    if (!(CLIENT_KINDS as readonly string[]).includes(kind)) continue;
-    const written = token.slice(slash + 1);
-    const version = VERSION.test(written) ? written.replace(/^v/, "") : "";
+  for (const { kind, written } of clientTokens(header)) {
+    const version = isVersion(written) ? written.replace(/^v/, "") : "";
     named.set(`${kind}/${version}`, { kind, version });
   }
   return named.size > 0

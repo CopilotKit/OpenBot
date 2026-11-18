@@ -23491,12 +23491,12 @@ components:
             type: object
         client:
           type: string
-          enum:
+          x-extensible-enum:
             - web
             - desktop
             - mobile
             - recorder
-          description: On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves.
+          description: On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves. A later OpenBot may name another app; read one you don't know as other.
         minimumVersion:
           type: string
           description: On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves.

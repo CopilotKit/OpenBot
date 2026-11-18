@@ -66,25 +66,36 @@ export function clientToken(kind: ClientKind, version: string = RELEASE) {
 }
 
 /**
- * The apps a header names. The header is a list of `<kind>/<version>` separated by spaces, like a
- * User-Agent: OpenBot Desktop adds its own to the one its window's page sent. A token whose kind is
- * not an OpenBot app, or whose version is not one, is not read.
+ * The OpenBot apps a header names, each with the version as written. The one reading of the header:
+ * a list of `<kind>/<version>` separated by spaces, like a User-Agent (OpenBot Desktop adds its own
+ * to the one its window's page sent), at most eight read. A token whose kind is not an OpenBot app is
+ * not read; the version is left as written, for the caller to judge.
  */
-export function parseClientHeader(
+export function clientTokens(
   value: string | null | undefined,
-): NamedClient[] {
-  if (!value) return [];
-  const named: NamedClient[] = [];
+): { kind: ClientKind; written: string }[] {
+  if (!value?.trim()) return [];
+  const tokens: { kind: ClientKind; written: string }[] = [];
   for (const token of value.trim().split(/\s+/).slice(0, 8)) {
     const slash = token.indexOf("/");
     if (slash < 1) continue;
     const kind = token.slice(0, slash).toLowerCase();
-    const version = token.slice(slash + 1);
     if (!(CLIENT_KINDS as readonly string[]).includes(kind)) continue;
-    if (!isVersion(version)) continue;
-    named.push({ kind: kind as ClientKind, version });
+    tokens.push({ kind: kind as ClientKind, written: token.slice(slash + 1) });
   }
-  return named;
+  return tokens;
+}
+
+/**
+ * The apps a header names with a release number, which is what a minimum is held against
+ * ({@link clientTokens}). One whose version is not a release is not read.
+ */
+export function parseClientHeader(
+  value: string | null | undefined,
+): NamedClient[] {
+  return clientTokens(value)
+    .filter(({ written }) => isVersion(written))
+    .map(({ kind, written }) => ({ kind, version: written }));
 }
 
 const VERSION =

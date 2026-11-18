@@ -416,7 +416,6 @@ export * from "./personRole";
 export * from "./personRoleAnswer";
 export * from "./problem";
 export * from "./problemCategory";
-export * from "./problemClient";
 export * from "./problemProblemsItem";
 export * from "./question";
 export * from "./questionAnswer";
