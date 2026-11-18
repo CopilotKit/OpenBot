@@ -33,6 +33,11 @@ pub fn path() -> Option<PathBuf> {
     directory.map(|directory| directory.join("speech.log"))
 }
 
+/// Where the log at `path` is set aside when it grows past `MAX_BYTES`: `speech.log.1` beside it.
+pub fn set_aside(path: &std::path::Path) -> PathBuf {
+    path.with_extension("log.1")
+}
+
 thread_local! {
     /// The session this thread listens for, so each line says which.
     static SESSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -58,7 +63,7 @@ pub fn note(line: impl std::fmt::Display) {
         let _ = std::fs::create_dir_all(directory);
     }
     if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > MAX_BYTES) {
-        let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        let _ = std::fs::rename(&path, set_aside(&path));
     }
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
