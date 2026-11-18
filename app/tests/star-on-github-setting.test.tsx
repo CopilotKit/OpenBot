@@ -8,23 +8,24 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { UserPreferences } from "@openbot/shared/user-preferences";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { StarOnGitHubSection } from "@/components/settings/star-on-github";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import { OPENBOT_REPO_URL } from "@/lib/star-prompt";
+import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * Settings → General's permanent link to star OpenBot on GitHub. There whenever the deployment
- * allows the ask at all, whether or not this person has answered the card; pressing it is counted
- * as a Settings click and answers the card, so somebody who starred here is not asked again.
+ * Settings → General's permanent link to star OpenBot on GitHub. Only in the personal edition, like
+ * the card: a team's or a company's OpenBot never asks for a star. It stays whether or not the
+ * person answered the card; pressing it is counted as a Settings click and answers the card, so
+ * somebody who starred here is not asked again.
  */
 
+const STAR = "star-on-github";
 const originalFetch = globalThis.fetch;
-const clients: QueryClient[] = [];
 let requests: { path: string; method: string; body: unknown }[];
 
 beforeAll(() =>
@@ -57,10 +58,10 @@ beforeEach(() => {
     { preconnect: originalFetch.preconnect },
   );
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  for (const client of clients) client.clear();
-  clients.length = 0;
+  await settleReactWork();
+  queryClient.clear();
   globalThis.fetch = originalFetch;
 });
 afterAll(async () => {
@@ -71,72 +72,70 @@ afterAll(async () => {
 const preferences: UserPreferences = {
   messageListEmphasis: "thread",
   selfHostBannerDismissed: true,
-  starPromptAnswered: false,
+  dismissedNotices: [],
   narration: null,
   skin: "openbot",
   proactive: "on",
 };
 
-function setup(starPrompt: boolean) {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: Infinity },
-      mutations: { retry: false },
-    },
-  });
-  clients.push(client);
-  client.setQueryData(authKeys.currentUser(), {
+function setup(edition: "personal" | "team") {
+  queryClient.setQueryData(authKeys.currentUser(), {
     id: "alice",
     email: "alice@example.com",
     role: "user",
   });
-  client.setQueryData(deploymentKeys.capabilities(), {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
     generativeUi: true,
     selfHostBanner: false,
-    localEvaluation: false,
-    edition: "team",
-    starPrompt,
+    localEvaluation: edition === "personal",
+    edition,
+    // What an earlier build read as leave to list it everywhere. Nothing reads it now.
+    starPrompt: true,
   });
-  client.setQueryData(
+  queryClient.setQueryData(
     userPreferencesQueryOptions("alice").queryKey,
     preferences,
   );
-  return {
-    client,
-    view: render(
-      <QueryClientProvider client={client}>
-        <StarOnGitHubSection />
-      </QueryClientProvider>,
-    ),
-  };
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StarOnGitHubSection />
+    </QueryClientProvider>,
+  );
 }
 
-test("Settings lists Star OpenBot on GitHub, linking to the repository in a new tab", () => {
-  const { view } = setup(true);
+test("personal edition: Settings lists Star OpenBot on GitHub, linking to the repository in a new tab", () => {
+  const view = setup("personal");
   expect(view.getByText("Star OpenBot on GitHub")).toBeTruthy();
+  expect(
+    view.getByText(
+      "OpenBot is open source. A star helps us keep making it better.",
+    ),
+  ).toBeTruthy();
   const link = view.getByRole("link", { name: "Star on GitHub" });
-  expect(link.getAttribute("href")).toBe(OPENBOT_REPO_URL);
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/CopilotKit/OpenBot",
+  );
   expect(link.getAttribute("target")).toBe("_blank");
   expect(link.getAttribute("rel")).toBe("noopener noreferrer");
 });
 
-test("Settings lists nothing when the deployment turned the ask off", () => {
-  const { view } = setup(false);
+test("a team's OpenBot lists nothing", () => {
+  const view = setup("team");
   expect(view.queryByText("Star OpenBot on GitHub")).toBeNull();
   expect(view.queryByRole("link", { name: "Star on GitHub" })).toBeNull();
 });
 
 test("pressing it counts a Settings click and answers the card", async () => {
-  const { client, view } = setup(true);
+  const view = setup("personal");
   fireEvent.click(view.getByRole("link", { name: "Star on GitHub" }));
 
   await waitFor(() =>
     expect(
-      requests.find((request) => request.path.endsWith("/star-prompt-events"))
-        ?.body,
+      requests.find((request) => request.path.endsWith("/nudge-events"))?.body,
     ).toEqual({
-      kind: "star_prompt_clicked",
-      trigger: "settings",
+      nudge: STAR,
+      action: "clicked",
+      place: "settings",
       surface: "web",
     }),
   );
@@ -147,12 +146,12 @@ test("pressing it counts a Settings click and answers the card", async () => {
           request.path.endsWith("/people/me/preferences") &&
           request.method === "PATCH",
       )?.body,
-    ).toEqual({ starPromptAnswered: true }),
+    ).toEqual({ dismissedNotices: [STAR] }),
   );
   expect(
-    client.getQueryData(userPreferencesQueryOptions("alice").queryKey)
-      ?.starPromptAnswered,
-  ).toBe(true);
+    queryClient.getQueryData(userPreferencesQueryOptions("alice").queryKey)
+      ?.dismissedNotices,
+  ).toEqual([STAR]);
   // Still there: the link in Settings is permanent, whatever the card's answer.
   expect(view.getByRole("link", { name: "Star on GitHub" })).toBeTruthy();
 });

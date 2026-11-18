@@ -119,7 +119,6 @@ at the LangGraph harness, `agent-langgraph-agui`, on a laptop.
 | `OPENBOT_TOOL_GUIDES` | unset                             | Path to a JSON file of `{ "<ACTION>": guide }` that replaces or adds to the guides OpenBot ships for Composio actions; `null` for an action puts the app's own words back. Read once. A file that cannot be read is logged and left out, and the shipped guides are used. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
-| `OPENBOT_STAR_PROMPT` | unset (on)               | Set `false` or `0` to stop asking people to star OpenBot on GitHub and to drop the link from Settings → General, for everybody. Each person who answers the ask stops seeing it. |
 | `OPENBOT_MULTIPLE_ORGANIZATIONS` | unset (one organization) | `true` or `1` lets this OpenBot hold more than one organization. Everybody who signs in gets an organization of their own, anybody signed in can create another, and people join one by invitation. Signing in no longer makes anybody a member of `default`, which keeps the people already in it and the admins `INITIAL_ADMIN_EMAILS` names. Any other value, or none, keeps the one organization: everybody who signs in is a member of it, and creating another is refused for everybody. An OpenBot with one person keeps one organization either way. With it on, the server logs once at start what is not yet kept apart between organizations. |
 | `SMTP_HOST`          | unset (no email)                   | The mail server OpenBot sends email through. Today that is an invitation to an organization. Unset, OpenBot sends no email: the invited person sees the invitation in the app when they sign in with that address, and the inviter passes its link on. The email's link is on `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`); with neither, no email is sent. When the mail server does not take a message, the invitation is still made and the inviter is told to pass the link on. With `SMTP_HOST` unset, none of the mail settings below is read. |
 | `MAIL_FROM`          | unset                              | The sender, such as `OpenBot <openbot@example.com>`. Required with `SMTP_HOST`: without it the server refuses to start. |
@@ -157,17 +156,6 @@ developer plan, an inactive entitlement, and one that cannot be read all show it
 kept for ten minutes, so a plan bought today hides the bar within ten minutes, and a page waits at
 most a second for the first answer after the server starts. In Helm, set the variable through
 `config.extraEnv`.
-
-**`OPENBOT_STAR_PROMPT`** asks each person once, in a card above the message box, to star OpenBot
-on GitHub, and lists the same link in Settings → General. The card appears once five of that
-person's messages from a browser have been answered. Either of its buttons, Not now or Star on
-GitHub, is saved to that person's preferences, so it is never asked again on any device they sign
-in from. It is on in every edition, and reaches the browser as `starPrompt` in
-`GET /api/v2/organizations/{organizationId}/deployment`; a server that leaves it out does not ask.
-Set `false` or `0` to turn off both the card and the Settings link for everybody, which suits a fork
-running OpenBot for its own organization. Any other value, or none, leaves it on. In Helm, set the
-variable through `config.extraEnv`. With product telemetry on, OpenBot counts how many people were
-shown the card, starred from it, or dismissed it; see [TELEMETRY.md](TELEMETRY.md).
 
 **`OPENBOT_MULTIPLE_ORGANIZATIONS` and the mail settings** reach the server from `.env` under
 Docker Compose: the `server` service reads that file, and its own `environment:` names none of them.

@@ -59,7 +59,7 @@ export type UserPreferences = {
    * edition and how they have used OpenBot (`notices.ts`). Never one they dismissed. Absent from a
    * server that works out none.
    */
-  noticesDue?: string[];
+  noticesDue?: readonly string[];
   /**
    * Whether this person narrates their recordings in OpenBot's Browser: the page listens to their microphone (hosted
    * OpenBot), or the Recorder in their browser does (OpenBot Desktop), only when it is `on`. Null until they chose, which

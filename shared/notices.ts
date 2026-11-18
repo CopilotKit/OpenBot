@@ -24,7 +24,10 @@ export const MAX_NOTICES = 64;
  * they copied a Bot's answer, one of their routines finished a run, or a long task (a Bot's task in a
  * conversation of its own) finished with a result.
  */
-export type NudgeMoment = "result_copied" | "routine_succeeded" | "task_finished";
+export type NudgeMoment =
+  | "result_copied"
+  | "routine_succeeded"
+  | "task_finished";
 
 /**
  * When the star nudge is due. Only in the personal edition (OpenBot for one person), never a team's,

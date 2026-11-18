@@ -8,15 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-- **OpenBot asks once to be starred on GitHub.** Once five of your messages have been answered, a
-  card above the message box asks you to star OpenBot on GitHub, with Not now beside the link.
-  Either answer is saved to your account, so it is never asked again on any device, and it waits
-  until you have answered the notifications offer, so the two never show together. Settings →
-  General keeps the link in a new OpenBot section. Set `OPENBOT_STAR_PROMPT=false` to turn both off
-  for everybody, which suits a deployment running OpenBot for its own organization. With product
-  telemetry on, OpenBot counts how many people were shown the card, opened the link or dismissed
-  it, through `POST /api/v2/organizations/{organizationId}/star-prompt-events`; see
-  [TELEMETRY.md](docs/TELEMETRY.md).
+- **OpenBot for one person asks once to be starred on GitHub.** In the personal edition only, once
+  you have used OpenBot on three separate days, a card above the message box asks you to star
+  OpenBot on GitHub, right after something goes well: you copy a Bot's answer, one of your
+  routines finishes a run, or a long task finishes. Never right after an error, never on a team's
+  OpenBot, and never beside the notifications offer. Either answer is saved to your account, so it
+  is never asked again on any device. Settings → General keeps the link in a new OpenBot section.
+  The preferences gain `dismissedNotices` (the notices you answered) and `noticesDue` (the ones
+  OpenBot would show you now), and `POST /api/v2/organizations/{organizationId}/nudge-events`
+  counts how many people were shown a nudge, followed it or dismissed it, with product telemetry
+  on; see [TELEMETRY.md](docs/TELEMETRY.md).
 
 ## 1.1.0
 

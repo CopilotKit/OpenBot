@@ -31,7 +31,6 @@ import {
 } from "@/components/notifications/notify-prompt";
 import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { useNotificationPermission } from "@/lib/notifications/permission";
-import { notePromptSent } from "@/lib/star-prompt";
 import { newId } from "../../lib/new-id";
 
 /** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
@@ -344,14 +343,6 @@ export function ConversationView({
     setRunning(true);
     try {
       await onSubmit(draft);
-      /*
-       * Once `onSubmit` has resolved, which in a conversation is when the turn it started is over
-       * (a stopped turn included), so the card can appear as the answer lands. A send that throws,
-       * whose words go back in the box, is not counted. A first message that opens a new
-       * conversation resolves once the conversation is made, so it counts even if its run then
-       * fails, which is fine for a nudge counted to five.
-       */
-      notePromptSent();
     } finally {
       setRunning(false);
     }
@@ -540,16 +531,19 @@ export function ConversationView({
           <NotifyPrompt />
         ) : null}
         {/*
-         * The ask to star OpenBot on GitHub, once this browser has earned it, and never beside the
-         * notifications offer: one card above the composer at a time, and the offer that is useful
-         * to this person goes first. Read on each render, which a finished turn always causes.
+         * The ask to star OpenBot on GitHub, when the server says it is due (`StarPrompt`), and never
+         * beside the notifications offer: one card above the composer at a time, and the offer that
+         * is useful to this person goes first.
          *
-         * It also waits while OpenBot Desktop has not yet said whether notifications are on
-         * (`checking`), or the card could draw, be counted as shown, and vanish when the answer is
-         * "not asked yet". And never in a conversation that cannot take a message: the brief
-         * "Picking a Bot" screen, or one whose Bot was deleted.
+         * Never right after an error: not while this conversation shows one (`notice`) or its last
+         * turn ended without an answer (`stopped`). It also waits while OpenBot Desktop has not yet
+         * said whether notifications are on (`checking`), or the card could draw, be counted as
+         * shown, and vanish when the answer is "not asked yet". And never in a conversation that
+         * cannot take a message: the brief "Picking a Bot" screen, or one whose Bot was deleted.
          */}
         {disabled ||
+        notice ||
+        stopped ||
         notificationPermission === "checking" ||
         (notificationPermission === "default" &&
           !notifyPromptAnswered()) ? null : (

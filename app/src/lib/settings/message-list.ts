@@ -94,31 +94,36 @@ export function dismissSelfHostBannerMutationOptions(
 }
 
 /**
- * Answer the ask to star OpenBot on GitHub for this person, on every device they sign in from.
- * Either answer, Star on GitHub or Not now, is the same answer: do not ask again.
+ * Answer a notice for this person (a nudge, `lib/notices.ts`), on every device they sign in from.
+ * Either answer is the same answer: never show it again. The server adds the id to the ones already
+ * dismissed, so two devices answering two notices at once both stay answered.
  *
  * Patched in onMutate like the self-host banner's, so the card is gone the moment it is pressed,
- * and put back if the save fails rather than vanishing now and returning on the next load.
+ * and put back if the save fails. A card that vanished and came back on the next load would read
+ * as ignoring the click.
  */
-export function answerStarPromptMutationOptions(
+export function dismissNoticeMutationOptions(
   queryClient: QueryClient,
   userId: string | undefined,
 ) {
   const queryKey = userPreferencesQueryOptions(userId).queryKey;
   return mutationOptions({
-    mutationFn: (): Promise<UserPreferences> => {
+    mutationFn: (notice: string): Promise<UserPreferences> => {
       if (!userId) throw new Error("Sign in to save your preferences.");
       return savePreferences(
-        { starPromptAnswered: true },
+        { dismissedNotices: [notice] },
         "Could not save your preferences",
       );
     },
-    onMutate: () => {
+    onMutate: (notice) => {
       const previous = queryClient.getQueryData(queryKey);
       if (previous) {
         queryClient.setQueryData(queryKey, {
           ...previous,
-          starPromptAnswered: true,
+          dismissedNotices: [...(previous.dismissedNotices ?? []), notice],
+          noticesDue: (previous.noticesDue ?? []).filter(
+            (due) => due !== notice,
+          ),
         });
       }
       return { previous };

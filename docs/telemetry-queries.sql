@@ -125,23 +125,24 @@ FROM consumption c LEFT JOIN result_messages t
 -- No view/copy is unobserved consumption, not dissatisfaction. Notification
 -- open and usefulness have no event here; do not infer them from delivery.
 
--- F. The ask to star OpenBot on GitHub: people shown, starring and dismissing, per
--- trigger. Each event_id is one person, answer and trigger, so counts are people.
--- Surface is not in the key: somebody on web and Desktop is one person, under the
--- surface of the copy kept. Clicked is opening the repository, not a GitHub star;
--- GitHub's own count is the outcome. 'settings' clicks have no shown event.
-SELECT properties.prompt_trigger AS trigger,
-       count(DISTINCT if(event='oss.runtime.openbot.star_prompt_shown',
+-- F. Nudges (the ask to star OpenBot on GitHub, and any later one): people shown,
+-- following and dismissing, per nudge, place and the win that made it due. Each
+-- event_id is one person, nudge, action and place, so counts are people. Clicked
+-- is following the nudge (for the star nudge, opening the repository), not a
+-- GitHub star; GitHub's own count is the outcome. 'settings' has no shown event.
+SELECT properties.nudge_id AS nudge,
+       properties.nudge_place AS place,
+       properties.nudge_moment AS moment,
+       count(DISTINCT if(event='oss.runtime.openbot.nudge_shown',
                          properties.event_id, NULL)) AS people_shown,
-       count(DISTINCT if(event='oss.runtime.openbot.star_prompt_clicked',
+       count(DISTINCT if(event='oss.runtime.openbot.nudge_clicked',
                          properties.event_id, NULL)) AS people_clicked,
-       count(DISTINCT if(event='oss.runtime.openbot.star_prompt_dismissed',
+       count(DISTINCT if(event='oss.runtime.openbot.nudge_dismissed',
                          properties.event_id, NULL)) AS people_dismissed
 FROM events
-WHERE event IN ('oss.runtime.openbot.star_prompt_shown',
-                'oss.runtime.openbot.star_prompt_clicked',
-                'oss.runtime.openbot.star_prompt_dismissed')
+WHERE event IN ('oss.runtime.openbot.nudge_shown',
+                'oss.runtime.openbot.nudge_clicked',
+                'oss.runtime.openbot.nudge_dismissed')
   AND properties.app_id='openbot' AND properties.environment='production'
   AND properties.event_id IS NOT NULL
-  AND timestamp >= toDateTime('2026-11-03 00:00:00', 'UTC')
-GROUP BY trigger;
+GROUP BY nudge, place, moment;

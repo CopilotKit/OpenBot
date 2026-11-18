@@ -35,7 +35,7 @@ beforeEach(() => {
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: true,
-        starPromptAnswered: false,
+        dismissedNotices: [],
       },
     });
   globalThis.fetch = Object.assign(
@@ -92,7 +92,7 @@ function setup({
   const preferences: UserPreferences = {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: dismissed,
-    starPromptAnswered: false,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",

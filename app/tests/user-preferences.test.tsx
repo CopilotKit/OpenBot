@@ -100,7 +100,7 @@ test("successful writes update only the current account cache; failures preserve
   client.setQueryData(bobKey, {
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
-    starPromptAnswered: false,
+    dismissedNotices: [],
     narration: null,
     skin: "opendots",
     proactive: "on",
@@ -113,7 +113,7 @@ test("successful writes update only the current account cache; failures preserve
       preferences: {
         messageListEmphasis: "thread",
         selfHostBannerDismissed: false,
-        starPromptAnswered: false,
+        dismissedNotices: [],
         narration: null,
         skin: "openbot",
         proactive: "on",
@@ -131,7 +131,7 @@ test("successful writes update only the current account cache; failures preserve
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
     selfHostBannerDismissed: false,
-    starPromptAnswered: false,
+    dismissedNotices: [],
     narration: null,
     skin: "opendots",
     proactive: "on",
@@ -148,7 +148,7 @@ test("successful writes update only the current account cache; failures preserve
   ).toEqual({
     messageListEmphasis: "thread",
     selfHostBannerDismissed: false,
-    starPromptAnswered: false,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",

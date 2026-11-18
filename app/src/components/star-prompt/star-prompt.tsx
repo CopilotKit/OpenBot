@@ -1,6 +1,7 @@
+import { STAR_ON_GITHUB } from "@openbot/shared/notices";
 import { IconStar } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Item,
@@ -11,45 +12,53 @@ import {
 } from "@/components/ui/item";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { type NudgeAction, noticeDue, recordNudge } from "@/lib/notices";
 import {
-  answerStarPromptMutationOptions,
+  dismissNoticeMutationOptions,
   userPreferencesQueryOptions,
 } from "@/lib/settings/message-list";
-import {
-  firstStarPromptShow,
-  OPENBOT_REPO_URL,
-  recordStarPrompt,
-  STAR_PROMPT_TRIGGER,
-  type StarPromptEvent,
-  type StarPromptTrigger,
-  starPromptEarned,
-} from "@/lib/star-prompt";
 import { queryClient } from "@/query-client";
 
+/** Where Star on GitHub goes. The repository's own page, which has the Star button. */
+export const OPENBOT_REPO_URL = "https://github.com/CopilotKit/OpenBot";
+
+/** What the card says. Exported for the tests, which read the words a person reads. */
+export const STAR_ASK =
+  "Enjoying OpenBot? Star it on GitHub so that we can keep making it better.";
+
 /**
- * The ask to star OpenBot on GitHub, once this browser has reached the moment it asks at (see
- * `lib/star-prompt.ts`). The same card as the notifications offer above it, so it reads as part of
- * the composer rather than as an interruption, and never a dialog.
- *
- * Hidden until every answer is in, so it never flashes on and then off: the deployment has to allow
- * it, and this person's preferences have to have loaded and say they have not answered it. Either
- * button answers it, on every device they sign in from, and is counted with the trigger that asked.
- *
- * THE APP'S QUERY CLIENT, NAMED. This is drawn inside the conversation, whose components read no
- * query context of their own (`voice-call-widget.tsx` names it the same way), so it does not depend
- * on a provider being above it.
+ * Drawn once in this page's life, until it is answered: a card the server said was due a moment
+ * ago stays put when the moment passes, so it never vanishes from under somebody reading it. A
+ * reload asks the server again.
  */
-export function StarPrompt({
-  trigger = STAR_PROMPT_TRIGGER,
-}: {
-  trigger?: StarPromptTrigger;
-}) {
-  /*
-   * READ FROM WHAT THE APP ALREADY LOADED, NEVER FETCHED FROM HERE. The self-host banner, mounted in
-   * every page of the app, loads the person, the deployment and their preferences; this card only
-   * watches those answers (`enabled: false` keeps an observer on the cache and sends nothing). Drawn
-   * inside a conversation, it must not add requests of its own to every conversation that renders.
-   */
+let drawnThisPage = false;
+/** Its show is counted once per page. The server counts people, so a second page is no second person. */
+let shownCounted = false;
+
+/** For tests: a fresh page. */
+export function forgetStarPrompt(): void {
+  drawnThisPage = false;
+  shownCounted = false;
+}
+
+/**
+ * The ask to star OpenBot on GitHub, as a card above the message box. The same card as the
+ * notifications offer, so it reads as part of the composer, and never a dialog.
+ *
+ * ONLY WHEN THE SERVER SAYS IT IS DUE. That is the personal edition (OpenBot for one person), never a
+ * team's, for somebody who has used OpenBot on at least three days, right after a win: a copied
+ * answer, a routine's run that finished, a long task that finished. Never after an error, and never
+ * again once answered (shared/notices.ts). The browser only reads the answer: the edition from the
+ * deployment, and `noticesDue` from the person's preferences, which `lib/notices.ts` reads again at
+ * each moment that could make it due.
+ *
+ * READ FROM WHAT THE APP ALREADY LOADED, NEVER FETCHED FROM HERE. The self-host banner, mounted in
+ * every page of the app, loads the person, the deployment and their preferences; this card only
+ * watches those answers (`enabled: false` keeps an observer on the cache and sends nothing), so a
+ * conversation does not grow requests of its own. Named query client: drawn inside the conversation,
+ * whose components read no query context of their own (`voice-call-widget.tsx` names it the same way).
+ */
+export function StarPrompt() {
   const { data: capabilities } = useQuery(
     { ...deploymentCapabilitiesQueryOptions(), enabled: false },
     queryClient,
@@ -62,27 +71,39 @@ export function StarPrompt({
     { ...userPreferencesQueryOptions(userId), enabled: false },
     queryClient,
   );
-  const answer = useMutation(
-    answerStarPromptMutationOptions(queryClient, userId),
+  const dismiss = useMutation(
+    dismissNoticeMutationOptions(queryClient, userId),
     queryClient,
   );
+  const answered = (preferences?.dismissedNotices ?? []).includes(
+    STAR_ON_GITHUB,
+  );
+  const due =
+    capabilities?.edition === "personal" &&
+    noticeDue(preferences, STAR_ON_GITHUB);
+  const [held, setHeld] = useState(drawnThisPage);
   const shown =
-    capabilities?.starPrompt === true &&
+    capabilities?.edition === "personal" &&
     preferences !== undefined &&
-    preferences.starPromptAnswered !== true &&
-    starPromptEarned(trigger);
+    !answered &&
+    (due || held);
 
-  // Once per browser and trigger; the server keys the count on the person, so this is people.
   useEffect(() => {
-    if (shown && firstStarPromptShow(trigger))
-      void recordStarPrompt("star_prompt_shown", trigger);
-  }, [shown, trigger]);
+    if (!shown) return;
+    drawnThisPage = true;
+    setHeld(true);
+    if (shownCounted) return;
+    shownCounted = true;
+    void recordNudge(STAR_ON_GITHUB, "shown", "card");
+  }, [shown]);
 
   if (!shown) return null;
 
-  const respond = (kind: StarPromptEvent) => {
-    void recordStarPrompt(kind, trigger);
-    answer.mutate();
+  const respond = (action: NudgeAction) => {
+    void recordNudge(STAR_ON_GITHUB, action, "card");
+    drawnThisPage = false;
+    setHeld(false);
+    dismiss.mutate(STAR_ON_GITHUB);
   };
 
   return (
@@ -97,17 +118,10 @@ export function StarPrompt({
         <IconStar />
       </ItemMedia>
       <ItemContent>
-        <ItemTitle className="text-pretty">
-          Enjoying OpenBot? Star it on GitHub so that we can keep making it
-          better.
-        </ItemTitle>
+        <ItemTitle className="text-pretty">{STAR_ASK}</ItemTitle>
       </ItemContent>
       <ItemActions>
-        <Button
-          onClick={() => respond("star_prompt_dismissed")}
-          size="sm"
-          variant="ghost"
-        >
+        <Button onClick={() => respond("dismissed")} size="sm" variant="ghost">
           Not now
         </Button>
         {/*
@@ -118,7 +132,7 @@ export function StarPrompt({
         <a
           className={buttonVariants({ size: "sm", variant: "outline" })}
           href={OPENBOT_REPO_URL}
-          onClick={() => respond("star_prompt_clicked")}
+          onClick={() => respond("clicked")}
           rel="noopener noreferrer"
           target="_blank"
         >
