@@ -191,6 +191,10 @@ services:
       # ChatGPT plan for a step (server/src/learning/model-endpoint.ts). OpenBot Desktop mints it
       # once per installation and gives it to this service and that agent alone.
       OPENBOT_LEARNING_MODEL_TOKEN: ${LEARNING_MODEL_TOKEN:-}
+      # Where the server writes the sentence it refused to start with, as it exits 78: on the host at
+      # `.openbot/refusal`, through the mount below. OpenBot Desktop reads it there, which does not
+      # depend on catching the container stopped between the engine's restarts.
+      OPENBOT_REFUSAL_FILE: /openbot/refusal
     # Who the server runs as. The image's own user by default. On Linux the desktop names the host's,
     # because the sign-in file below is the host user's and readable by nobody else, and a bind mount
     # there keeps the host's numbers; Docker Desktop's file sharing on macOS and Windows does not.
