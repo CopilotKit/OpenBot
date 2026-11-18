@@ -520,6 +520,13 @@ another version. Its candidates, betas and final share it, so **Create release P
 else. A policy written for an earlier release is left alone: write the new release's policy into
 the release PR before merging it. A final may not change the policy beyond its version.
 
+`requiresDowntime` is false for a release whose migrations the previous release still works
+against, which is the rule: old and new servers share the database while a rolling upgrade runs. A
+release that cannot keep to it declares `true`, and the `openbot` chart it attaches must say the
+same in its `Chart.yaml` annotation `openbot.ai/requires-downtime`, which makes `helm upgrade`
+stop every old server before a new one starts. Publishing refuses a policy and a chart that
+disagree.
+
 ## Finishing a candidate
 
 Run **Create release PR** with `kind` set to `final`, from `release/X.Y`. A final started from
