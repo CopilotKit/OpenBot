@@ -4683,7 +4683,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * the very ports the `server` container is about to publish. Stopping them here, and waiting
          * for their sockets to close, is what lets that `up` bind them.
          */
-        let previous_ports = openbot_env::Ports::read(&root).map_err(|error| {
+        // The Bot's recorded host port goes with the Bot it was recorded for (`read_for_harness`).
+        let previous_ports = openbot_env::Ports::read_for_harness(
+            &root,
+            picked.as_ref().and_then(|picked| picked.installed_port()),
+        )
+        .map_err(|error| {
             Problem::with("OpenBot could not read its local ports.", error.to_string())
         })?;
         setup_phase("cleanup");
@@ -21495,6 +21500,18 @@ fn main() {
                 choice = serde_json::json!({"id":"langgraph"});
                 ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
             }
+            // An update from 1.0.3, which ran its `langgraph` Bot on the Python image at 4206 and
+            // published it on the host at 4206. The Bot now runs on the TypeScript image at 4215.
+            "updated-from-langgraph" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
+            }
+            // The same update, where the last run published the Bot on a host port of its own
+            // (moved off one somebody else held, or set by hand): that port is kept.
+            "updated-keeps-own-port" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose -f docker-compose.yml -f .openbot-harness-port.yml --profile harness up -d --no-build --pull never postgres agent-computer server agent-harness", Some("agent-langgraph-ts"))
+            }
             "none" => {
                 choice = serde_json::Value::Null;
                 (
@@ -21523,6 +21540,25 @@ fn main() {
             std::fs::write(
                 root.join(".env"),
                 "PICKED_HARNESS_IMAGE=localhost/old-image@sha256:00\nPICKED_HARNESS_PORT=4206\n",
+            )
+            .unwrap();
+        }
+        // What 1.0.3 wrote for its `langgraph` Bot: the Python image, its port inside the
+        // container, and the host port it was published on. 4212 is one the fixture stack
+        // already publishes, so the Start does not probe it against another test's Start.
+        let saved_host_port = match case {
+            "updated-from-langgraph" => Some(4206),
+            "updated-keeps-own-port" => Some(4212),
+            _ => None,
+        };
+        if let Some(host) = saved_host_port {
+            std::fs::write(
+                root.join(".env"),
+                format!(
+                    "PICKED_HARNESS_IMAGE=localhost/agent-langgraph-agui@sha256:00\n\
+                     PICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT={host}\n\
+                     PICKED_HARNESS_URL=http://127.0.0.1:{host}\n"
+                ),
             )
             .unwrap();
         }
@@ -21569,6 +21605,47 @@ fn main() {
             "model":model, "harness":choice,
         })).expect_err("intentional barrier after up prevents host startup");
         let commands = std::fs::read_to_string(&record).unwrap_or_default();
+        // The Bot's host port follows the image it runs on: an update that moved the Bot from 4206
+        // to 4215 inside its container publishes 4215 on the host, so the Bot answers where it
+        // says it is. A host port the last run chose for itself stays.
+        if let Some(saved) = saved_host_port {
+            let ports = openbot_env::read_already_set(
+                &root.join(".env"),
+                &[
+                    "PICKED_HARNESS_PORT",
+                    "PICKED_HARNESS_HOST_PORT",
+                    "PICKED_HARNESS_URL",
+                ],
+            )
+            .unwrap();
+            let host = if saved == 4206 { 4215 } else { saved };
+            assert_eq!(
+                (
+                    ports.get("PICKED_HARNESS_PORT").map(String::as_str),
+                    ports.get("PICKED_HARNESS_HOST_PORT").map(String::as_str),
+                    ports.get("PICKED_HARNESS_URL").map(String::as_str),
+                ),
+                (
+                    Some("4215"),
+                    Some(host.to_string().as_str()),
+                    Some(format!("http://127.0.0.1:{host}").as_str()),
+                ),
+                "case={case}: {problem:?}"
+            );
+            let overlay = std::fs::read_to_string(root.join(".openbot-harness-port.yml")).ok();
+            if host == 4215 {
+                assert!(
+                    !commands.contains(".openbot-harness-port.yml"),
+                    "case={case}: the Bot is published on its own port, with no remapping: {commands}"
+                );
+            } else {
+                let overlay = overlay.expect("the kept host port is remapped onto the Bot's own");
+                assert!(
+                    overlay.contains(&format!("127.0.0.1:{host}:4215")),
+                    "{overlay}"
+                );
+            }
+        }
         assert!(
             problem["detail"]
                 .as_str()
@@ -21708,6 +21785,26 @@ fn main() {
             return;
         }
         harness_start_ipc_case("installed");
+    }
+
+    #[test]
+    fn update_from_langgraph_start_ipc_publishes_the_new_bots_own_port() {
+        if crate::test_support::isolated_process(
+            "tests::update_from_langgraph_start_ipc_publishes_the_new_bots_own_port",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("updated-from-langgraph");
+    }
+
+    #[test]
+    fn update_from_langgraph_start_ipc_keeps_a_host_port_of_its_own() {
+        if crate::test_support::isolated_process(
+            "tests::update_from_langgraph_start_ipc_keeps_a_host_port_of_its_own",
+        ) {
+            return;
+        }
+        harness_start_ipc_case("updated-keeps-own-port");
     }
 
     #[test]

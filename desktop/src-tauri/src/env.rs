@@ -162,6 +162,28 @@ impl Ports {
         Ok(ports)
     }
 
+    /**
+    [`Ports::read`], for a Start whose Bot listens on `harness` inside its container.
+
+    The Bot's host port is recorded beside the container port it was published for
+    (`PICKED_HARNESS_PORT`). Where the two are the same, the host port was only that Bot's own
+    port, and a Bot that listens somewhere else gets its own port instead. Without this, an update
+    that moved the default Bot from the Python LangGraph image (4206) to the TypeScript one (4215)
+    kept publishing 4206 on the host, and nothing answered on 4215 there. A recorded host port that
+    differs from its container port (one a Start moved off a port somebody else held, or one set
+    by hand in `.env`) is kept, whichever Bot runs.
+    */
+    pub fn read_for_harness(root: &Path, harness: Option<u16>) -> std::io::Result<Self> {
+        let mut ports = Self::read(root)?;
+        let recorded = read_already_set(&root.join(".env"), &["PICKED_HARNESS_PORT"])?
+            .get("PICKED_HARNESS_PORT")
+            .and_then(|value| value.parse::<u16>().ok());
+        if recorded.is_some() && ports.harness == recorded && harness != recorded {
+            ports.harness = None;
+        }
+        Ok(ports)
+    }
+
     pub fn settings(&self) -> BTreeMap<String, String> {
         let mut settings: BTreeMap<_, _> = [
             ("APP_PORT", self.app),
