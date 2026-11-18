@@ -7,7 +7,7 @@ export interface BoundaryRuleLabelInput {
    * 1 to 80 characters once trimmed.
    * @minLength 1
    * @maxLength 80
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   name: string;
   /**

@@ -2754,7 +2754,7 @@ components:
           type: string
           minLength: 1
           maxLength: 6000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The person's answer. Trimmed.
         inConversation:
           type: boolean
@@ -2808,7 +2808,7 @@ components:
       type: string
       minLength: 1
       maxLength: 300
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: >-
         An exact value, or a pattern where * matches anything, so
         mcp/gmail/* names every Gmail tool. Trimmed.
@@ -3205,7 +3205,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The rule in a sentence or two, at most 1,000 characters once trimmed.
     ApprovalRuleDraftBehaviour:
       type: string
@@ -3468,7 +3468,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The sentence the rules were written from, at most 2,000 characters once trimmed.
     ApprovalRuleDraftBatch:
       type: object
@@ -3533,7 +3533,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance, at most 2,000 characters once trimmed.
     ReviewerGuidanceCheck:
       type: object
@@ -3589,7 +3589,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance to test, at most 2,000 characters once trimmed.
         limit:
           type: integer
@@ -3714,7 +3714,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: 1 to 80 characters once trimmed.
         description:
           type: string
@@ -4058,7 +4058,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The question, 1 to 500 characters once trimmed.
     WhatIfActionRead:
       type: object

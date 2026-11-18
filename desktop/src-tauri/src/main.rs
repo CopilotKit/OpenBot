@@ -4928,6 +4928,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // Compose's bind mount of the sign-in folder does not create it. Installation made it;
         // made again here in case it went since. See `stack::make_sign_in_folder`.
         stack::make_sign_in_folder(&root)?;
+        // A refusal an earlier start's server wrote into that folder is not this start's.
+        stack::forget_refusal(&root);
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
@@ -5034,20 +5036,31 @@ async fn start_stack_inner<R: tauri::Runtime>(
         api: ports.server,
         app: ports.app,
     };
+    let (asked, asked_root) = (found.clone(), root.clone());
     let answered = tauri::async_runtime::spawn_blocking(move || {
-        stack::wait_until_healthy(&ready, std::time::Duration::from_secs(180), || {
-            waiting
-                .state::<Shell>()
-                .start_generation
-                .load(std::sync::atomic::Ordering::SeqCst)
-                == ticket
-        })
+        stack::wait_until_healthy(
+            &ready,
+            std::time::Duration::from_secs(180),
+            || {
+                waiting
+                    .state::<Shell>()
+                    .start_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    == ticket
+            },
+            // A server that refused to start says why at once, not after the full wait.
+            || stack::server_refusal(&asked, &asked_root),
+        )
     })
     .await
-    .unwrap_or_else(|error| Err(format!("the wait did not run: {error}")));
+    .unwrap_or_else(|error| {
+        Err(stack::NotReady::NotAnswering(format!(
+            "the wait did not run: {error}"
+        )))
+    });
     // A Stop during the wait is the reason it ended, whatever the wait itself says.
     attempt.require_current()?;
-    if let Err(error) = answered {
+    if let Err(not_ready) = answered {
         // What the server said while it was not answering, from Compose's log, with every
         // credential this run handed out taken out of it.
         let log = stack::service_log(&found, &root, "server", 40);
@@ -5056,7 +5069,12 @@ async fn start_stack_inner<R: tauri::Runtime>(
         } else {
             format!("Last from the server container (up to 40 lines):\n{log}")
         };
-        let problem = stack::startup_problem(Problem::with(error, detail), &secrets);
+        let problem = match not_ready {
+            stack::NotReady::Refused(said) => stack::startup_refusal(said, detail, &secrets),
+            stack::NotReady::NotAnswering(error) => {
+                stack::startup_problem(Problem::with(error, detail), &secrets)
+            }
+        };
         report_plain(&app, "answering", false, problem.said.clone());
         return Err(problem);
     }
@@ -22575,6 +22593,48 @@ fn main() {
     }
 
     /// The CLI's answer to a `local setup` refused for resources, as the 4.34.0 CLI prints it.
+    /// A computer where no container engine answers, for a test that says none does. Returns the
+    /// empty folder PATH is set to.
+    ///
+    /// An empty PATH is not enough. The engine lookup also tries the places installers put Docker
+    /// (`engine::program`), and Windows finds a program in System32 whatever PATH says, where CI's
+    /// Windows runners have `docker.exe`. So Docker's clients are also sent to an address nothing
+    /// serves.
+    fn no_engine_answers(label: &str) -> PathBuf {
+        let empty = temp_root(&format!("{label}-no-engine"));
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        let nowhere = if cfg!(windows) {
+            format!("npipe:////./pipe/openbot-test-{label}-no-engine")
+        } else {
+            format!("unix://{}", empty.join("no-engine.sock").display())
+        };
+        std::env::set_var("DOCKER_HOST", nowhere);
+        std::env::remove_var("DOCKER_CONTEXT");
+        empty
+    }
+
+    /// The tests that say no engine answers stand on exactly that, on every computer that runs
+    /// them. They emptied PATH and nothing more, so they asked the computer's own Docker wherever
+    /// it was installed, and passed or failed by whether its service was running: on a Windows
+    /// runner whose Docker service had stopped, both update tests below failed together, the window
+    /// answering that the engine is not running without asking the CLI.
+    #[test]
+    fn no_engine_answers_where_a_test_says_none_does() {
+        if crate::test_support::isolated_process(
+            "tests::no_engine_answers_where_a_test_says_none_does",
+        ) {
+            return;
+        }
+        no_engine_answers("openbot-no-engine-answers");
+        for found in [
+            engine::detect(),
+            engine::detect_saved(Some(engine::Engine::Docker)),
+        ] {
+            assert!(!found.responding, "{found:?}");
+        }
+    }
+
     const SETUP_REFUSED_FOR_DISK: &str = r#"{"version":1,"command":"local setup","status":"failed","error":{"code":"LOCAL_DOCKER_RESOURCES_SHORT","message":"Docker available resources: 9.871234 CPUs (requires 4), 18.9 GiB RAM available (requires 4), 0 GiB free storage (requires 40). Stop other container workloads or increase Docker resources, then retry local setup."},"nextAction":{"reason":"local_command_failed","summary":"The local command did not finish.","instructions":[],"resumeCommand":"npx --yes copilotkit local setup --json","url":null,"linkLabel":null,"linkFile":null,"caveats":[],"requiredEnvVars":[],"artifacts":[]},"diagnostics":[]}"#;
 
     /// A failed `local setup` was handed back to the window and recorded nowhere. It is sent now,
@@ -22592,9 +22652,7 @@ fn main() {
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
         // No engine to find: the CLI's own answer is the whole of the failure.
-        let empty = temp_root("openbot-local-setup-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        no_engine_answers("openbot-local-setup");
         let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-local-setup-cli", false);
         cli.answer(SETUP_REFUSED_FOR_DISK, 1);
         let sink = desktop_telemetry::sink::Sink::start();
@@ -22762,11 +22820,26 @@ fn main() {
         .to_string()
     }
 
-    /// `local update` through `run_local_eval`, as the window runs it, against a CLI that answers
-    /// `update` with `refusal` and `status` with `status`: the window's answer, and the
-    /// `setup_failed` events it recorded.
+    /// An installation set up on Docker, in its own folder, for the update tests below.
+    ///
+    /// On Windows the window asks the CLI only once it knows the engine the installation runs on
+    /// (`cli_left_to_pick`): told none, the CLI would take Podman's default connection, which may be
+    /// the person's. These tests stand on a computer where no engine answers
+    /// (`no_engine_answers`), so the installation says which engine is its own, as one set up on
+    /// Docker does, and the CLI is asked whatever the computer's own engines are doing.
+    fn installation_on_docker(label: &str) -> PathBuf {
+        let root = temp_root(&format!("{label}-installation"));
+        std::fs::create_dir_all(&root).unwrap();
+        preparation::save_engine(&root, engine::Engine::Docker).unwrap();
+        root
+    }
+
+    /// `local update` through `run_local_eval`, as the window runs it for the installation in
+    /// `root`, against a CLI that answers `update` with `refusal` and `status` with `status`: the
+    /// window's answer, and the `setup_failed` events it recorded.
     fn update_through_the_command(
         cli: &desktop_telemetry::fake_cli::FakeCli,
+        root: &Path,
         refusal: &str,
         status: &str,
         label: &str,
@@ -22777,22 +22850,59 @@ fn main() {
         cli.forget_calls();
         cli.answer_to("update", refusal, 2);
         cli.answer_to("status", status, 0);
+        let shell = Shell::default();
+        *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
         let app = tauri::test::mock_builder()
-            .manage(Shell::default())
+            .manage(shell)
             .manage(desktop_telemetry::DesktopTelemetry::for_tests(
                 temp_root(&format!("{label}-telemetry")),
                 true,
             ))
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
+        // What the window is told while the update runs.
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        {
+            use tauri::Listener;
+            let told = told.clone();
+            app.listen_any("setup:progress", move |event| {
+                told.lock().unwrap().push(event.payload().to_owned());
+            });
+        }
         let report = tauri::async_runtime::block_on(run_local_eval(
             app.handle().clone(),
             format!("{label}-attempt"),
             local_eval::Action::Update,
             "local-abc123".into(),
         ));
-        assert!(cli.calls().contains("local update"), "{}", cli.calls());
+        assert!(
+            cli.calls().contains("local update"),
+            "{}",
+            update_not_asked(cli, root, &report, &app, &told.lock().unwrap())
+        );
         (report, setup_failures(&app))
+    }
+
+    /// Why `run_local_eval` answered an update without asking the CLI: its answer, everything the
+    /// window was told and recorded, and what decides whether the CLI is asked.
+    fn update_not_asked(
+        cli: &desktop_telemetry::fake_cli::FakeCli,
+        root: &Path,
+        report: &Result<local_eval::Report, local_eval::Failure>,
+        app: &tauri::App<tauri::test::MockRuntime>,
+        told: &[String],
+    ) -> String {
+        format!(
+            "the CLI was not asked for `local update`.\ncalls: {:?}\nreport: {report:#?}\n\
+             setup:progress: {told:#?}\ntelemetry queued: {:#?}\nengine known: {}\n\
+             engine saved at {}: {:?}\nengine found now: {:#?}",
+            cli.calls(),
+            app.state::<desktop_telemetry::DesktopTelemetry>().queued(),
+            local_eval::engine_known(),
+            root.display(),
+            preparation::saved_engine(root),
+            engine::detect_saved(preparation::saved_engine(root)),
+        )
     }
 
     /// Found in production telemetry from 1.0.2 to 1.1.0-rc.1: every upgrader sent
@@ -22812,9 +22922,8 @@ fn main() {
         }
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
-        let empty = temp_root("openbot-update-already-on-it-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        no_engine_answers("openbot-update-already-on-it");
+        let installation = installation_on_docker("openbot-update-already-on-it");
         std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
         let cli = desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-already-cli", false);
         let on_record = |to: &str| {
@@ -22833,6 +22942,7 @@ fn main() {
         ] {
             let (report, failures) = update_through_the_command(
                 &cli,
+                &installation,
                 &update_refused(&format!(
                     "This stack already runs {installed}. Local update only moves to a newer release."
                 )),
@@ -22870,9 +22980,8 @@ fn main() {
         }
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
-        let empty = temp_root("openbot-update-incompatible-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        no_engine_answers("openbot-update-incompatible");
+        let installation = installation_on_docker("openbot-update-incompatible");
         std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE", BUNDLED_RELEASE);
         let cli =
             desktop_telemetry::fake_cli::FakeCli::pinned("openbot-update-incompatible-cli", false);
@@ -22890,6 +22999,7 @@ fn main() {
         ] {
             let (report, failures) = update_through_the_command(
                 &cli,
+                &installation,
                 &update_refused(refusal),
                 &status,
                 "openbot-update-incompatible",
@@ -23427,9 +23537,7 @@ fn main() {
         }
         std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
         std::env::remove_var("DO_NOT_TRACK");
-        let empty = temp_root("openbot-sign-in-no-engine");
-        std::fs::create_dir_all(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        let empty = no_engine_answers("openbot-sign-in");
         // Each sign-in forgets the CLI's saved code: this one's, not that of whoever runs the test.
         for home in ["HOME", "APPDATA", "XDG_CONFIG_HOME"] {
             std::env::set_var(home, &empty);
