@@ -325,6 +325,36 @@ test("a client bump that breaks a verified model is caught, and one the lock alr
   );
 });
 
+test("a model the provider retires is refused, and fails no pull request", () => {
+  // What Google answered through Antigravity on 2026-11-18, for a model the lock had verified.
+  const RETIRED_SAID =
+    'AntigravityExecutionError: Agent execution terminated due to error. ("agent executor error: Error 404, Message: This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use models/gemini-3.5-flash-lite for the latest features and improvements.';
+  const google = (status: Result["status"], detail = "OK", tag = "source") =>
+    row("gemini-2.5-flash-lite", status, detail, {
+      harness: "agent-antigravity",
+      provider: "Google",
+      providerId: "google",
+      tag,
+    });
+  const before = buildLock(
+    undefined,
+    [{ results: [google("pass")] }],
+    "2026-11-17",
+  );
+  const after = buildLock(
+    before,
+    [{ results: [google("fail", RETIRED_SAID)] }],
+    "2026-11-18",
+  );
+  const pair = after.engines["agent-antigravity"]?.providers.google;
+  expect(pair?.verified).toEqual([]);
+  expect(pair?.refused["gemini-2.5-flash-lite"]).toContain(
+    "no longer available to new users",
+  );
+  // The provider's doing, on every image: not the change's.
+  expect(brokenVerified(before, [google("fail", RETIRED_SAID)])).toEqual([]);
+});
+
 test("a model the check's key can't use is the key's, not the client's", () => {
   const google = (model: string, status: Result["status"], detail = "OK") =>
     row(model, status, detail, {
@@ -332,18 +362,14 @@ test("a model the check's key can't use is the key's, not the client's", () => {
       provider: "Google",
       providerId: "google",
     });
-  // One Gemini key's run on 2026-11-17; another key, through the same image, disagreed on both.
+  // One Gemini key's run on 2026-11-17; another key, through the same image, disagreed.
   const lock = buildLock(
     undefined,
     [
       {
         results: [
           google("gemini-2.5-flash-lite", "pass"),
-          google(
-            "gemini-2.5-pro",
-            "fail",
-            "Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-pro is no longer available to new users.'}}]",
-          ),
+          google("gemini-decision-1", "fail", "Error code: 404"),
           google(
             "gemini-omni-1.1-flash",
             "fail",
@@ -356,7 +382,7 @@ test("a model the check's key can't use is the key's, not the client's", () => {
   );
   const pair = lock.engines["agent-langgraph-agui"]?.providers.google;
   expect(pair?.verified).toEqual(["gemini-2.5-flash-lite"]);
-  // Not refused: another key may run it, and a later run with one proves it.
+  // A bare 404 isn't refused: another key may run it, and a later run with one proves it.
   expect(Object.keys(pair?.refused ?? {})).toEqual(["gemini-omni-1.1-flash"]);
   expect(
     brokenVerified(lock, [

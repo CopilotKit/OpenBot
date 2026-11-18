@@ -1149,9 +1149,10 @@ the harness is hidden, and a conversation already set to one runs on the default
 - **A new model** stays hidden until a daily run proves it. The run then opens or updates one pull
   request, **Refresh the model lock**, on the branch `model-lock/refresh`, listing the models that
   started and stopped answering and the clients that moved. Merging it lets the picker offer them.
-  A failure that says nothing about the client keeps what the lock said before: the harness never
-  started, a timeout, a rate limit, or a model the check's key can't use (Google closes older models
-  to new projects, so two keys can disagree about the same model through the same client).
+  Every failure is asked once more before it counts. A failure that says nothing about the client
+  keeps what the lock said before: the harness never started, a timeout, a rate limit, or a bare
+  404 for a model the check's key can't see. A model the provider retires ("no longer available to
+  new users") is refused, so a person set to it is told, and it never fails a pull request.
 - **A client bump** is held to the lock: a pull request from this repository that changes a
   harness's `requirements.txt`, `package.json`, `bun.lock`, `Dockerfile` or the Codex client version
   runs the **Model lock** workflow, which builds that harness, sends every listed model a request

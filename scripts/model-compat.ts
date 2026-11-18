@@ -1272,12 +1272,21 @@ async function check(argv: string[]): Promise<number> {
   let done = 0;
   await pool(runs, options.concurrency, async (row) => {
     const image = imageOf(row.harness, row.tag);
-    const outcome = unpulled.has(image)
+    const ask = () => runOne(row, keys.get(row.provider) ?? "", scrub);
+    /*
+     * A failure is asked once more before it counts. A provider's refusal says the same thing
+     * twice; a run that timed out once does not (gemini-4-carbon through Antigravity's source
+     * image on 2026-11-18, which answered through the published image in the same run and through
+     * every other engine), and must not fail a pull request or leave the lock.
+     */
+    let outcome: Outcome = unpulled.has(image)
       ? {
           status: "fail" as const,
           detail: `could not get ${image}: ${unpulled.get(image)}`,
         }
-      : await runOne(row, keys.get(row.provider) ?? "", scrub);
+      : await ask();
+    if (outcome.status === "fail" && !unpulled.has(image))
+      outcome = await ask();
     results.push({
       harness: row.harness.image ?? "",
       tag: row.tag,
@@ -1341,14 +1350,24 @@ const RATE_LIMITED =
   /\b429\b|rate.?limit|RESOURCE_EXHAUSTED|too many requests/i;
 
 /**
- * A model this key's account can't use, which another account can: Google closes older models to
- * new projects ("no longer available to new users") and answers a model a project can't see with a
- * bare 404. Seen on 2026-11-17, when two Gemini keys disagreed on gemini-2.5-pro and
- * gemini-2.5-flash-lite through the same clients. About the key, not the client. A 404 that names
- * the client's endpoint ("only supported in v1/responses") is the client's, and stays a refusal.
+ * A model this key's account can't see, which another account may: a bare 404, or one that names
+ * no reason. About the key, not the client. A 404 that names the client's endpoint ("only supported
+ * in v1/responses") is the client's, and stays a refusal.
  */
 const UNAVAILABLE_TO_KEY =
-  /no longer available to new users|is not found for API version|does not exist or you do not have access|do not have access to (?:the )?model|^(?:NotFoundError\(')?Error code: 404'?\)?$|^Not Found$/i;
+  /is not found for API version|does not exist or you do not have access|do not have access to (?:the )?model|^(?:NotFoundError\(')?Error code: 404'?\)?$|^Not Found$/i;
+
+/**
+ * A provider retiring a model: Google's "no longer available to new users, use …". The check
+ * working as designed: the lock refuses it, so a person set to it is told and moved to the default
+ * instead of meeting the provider's 404. Not a client's fault, so it never fails a pull request.
+ */
+const RETIRED =
+  /no longer available to new users|has been (?:deprecated|retired|shut down)|(?:was|is) (?:deprecated|retired) and (?:is )?no longer/i;
+
+export function retiredByProvider(detail: string): boolean {
+  return RETIRED.test(detail);
+}
 
 /** A failure about the check's key, not the harness's client: a rate limit, or a model it can't see. */
 export function aboutTheKey(detail: string): boolean {
@@ -1601,7 +1620,12 @@ export function brokenVerified(
     if (row.status !== "fail" || row.model === "(all)") return false;
     if (row.tag !== SOURCE) return false;
     // The key's account, not the change's client: says nothing about the change.
-    if (aboutTheKey(row.detail) || failsOnPublished(row)) return false;
+    if (
+      aboutTheKey(row.detail) ||
+      retiredByProvider(row.detail) ||
+      failsOnPublished(row)
+    )
+      return false;
     const id = providerIdOf(row);
     return (
       !!id &&
