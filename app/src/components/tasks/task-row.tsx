@@ -1,5 +1,6 @@
 import {
   IconAlertTriangle,
+  IconChevronRight,
   IconCircleCheck,
   IconFileCheck,
   IconHandStop,
@@ -9,11 +10,17 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { HeldAnswer } from "@/components/approvals/waiting";
+import {
+  ROW_BUTTONS,
+  ROW_WITH_LINK,
+  RowLink,
+} from "@/components/layout/row-link";
 import { BoardRow } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemDescription,
   ItemFooter,
@@ -21,6 +28,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
+import { shortTitle } from "@/lib/short-title";
 import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
 import {
@@ -293,6 +301,130 @@ export function TaskRow({
           </p>
         ) : null}
       </ItemContent>
+    </Item>
+  );
+}
+
+/**
+ * A task on its Bot's Activity page: two lines and the row's buttons on the right, then a chevron.
+ * The title, then its status, when, and the Bot's last words, each cut to a line with the whole of it
+ * on hover. The row opens the task's conversation, which links back to the one that asked for it.
+ *
+ * FOUND LIVE: drawn as `TaskRow`, a finished task took five lines (title, status, the Bot's words,
+ * "Asked in …", an Open button on its own line) and left the right of the row empty.
+ */
+export function TaskActivityRow({
+  listed,
+  settled = false,
+}: {
+  listed: ListedTask;
+  /** Listed under Done: no dot asking for attention, and its status reads Done. */
+  settled?: boolean;
+}) {
+  const { task, status } = listed;
+  const resolve = useMutation(resolveTaskMutationOptions(queryClient));
+  const again = useMutation(tryTaskAgainMutationOptions(queryClient));
+  const stop = useMutation(stopTaskMutationOptions(queryClient));
+  const { state, Icon, dot: stateDot } = look(listed);
+  const dot = settled ? undefined : stateDot;
+  const busy = resolve.isPending || again.isPending || stop.isPending;
+  const error = resolve.error ?? again.error ?? stop.error;
+  const canStop = status === "working" || status === "needs_input";
+  const next = nextLine(listed);
+  const meta = [statusLabel(listed, settled), relativeTime(task.updatedAt)]
+    .filter(Boolean)
+    .join(" · ");
+  const title = shortTitle(task.title);
+  return (
+    <Item className={ROW_WITH_LINK} data-task-state={state} size="sm">
+      <ItemMedia className="relative" variant="icon">
+        <Icon />
+        {dot ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
+              dot,
+            )}
+          />
+        ) : null}
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle className="block w-auto truncate" title={task.title}>
+          <RowLink
+            link={
+              <Link
+                params={{ channelId: task.channelId }}
+                to="/channel/$channelId"
+              />
+            }
+          >
+            {title}
+          </RowLink>
+        </ItemTitle>
+        <ItemDescription
+          className="line-clamp-1"
+          title={next ? `${meta} · ${next}` : meta}
+        >
+          {meta}
+          {next ? (
+            <>
+              {" · "}
+              <span>{next}</span>
+            </>
+          ) : null}
+        </ItemDescription>
+        {error ? (
+          <p className="text-destructive text-xs" role="alert">
+            {error.message}
+          </p>
+        ) : null}
+      </ItemContent>
+      <ItemActions className={ROW_BUTTONS}>
+        {canTryAgain({ ...task, status }) ? (
+          <Button
+            disabled={busy}
+            onClick={() => again.mutate(task.id)}
+            size="sm"
+            variant="outline"
+          >
+            {again.isPending ? "Starting…" : "Try again"}
+          </Button>
+        ) : null}
+        {canStop ? (
+          <Button
+            disabled={busy}
+            onClick={() => stop.mutate(task.id)}
+            size="sm"
+            variant="ghost"
+          >
+            {stop.isPending ? "Stopping…" : "Stop"}
+          </Button>
+        ) : null}
+        {status === "resolved" ? (
+          <Button
+            disabled={busy}
+            onClick={() => resolve.mutate({ id: task.id, done: false })}
+            size="sm"
+            variant="ghost"
+          >
+            {resolve.isPending ? "Reopening…" : "Reopen"}
+          </Button>
+        ) : canMarkDone(listed, settled) ? (
+          <Button
+            disabled={busy}
+            onClick={() => resolve.mutate({ id: task.id, done: true })}
+            size="sm"
+            variant="ghost"
+          >
+            {resolve.isPending ? "Saving…" : "Mark done"}
+          </Button>
+        ) : null}
+        <IconChevronRight
+          aria-hidden="true"
+          className="size-4 text-muted-foreground"
+        />
+      </ItemActions>
     </Item>
   );
 }

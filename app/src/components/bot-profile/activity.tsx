@@ -20,10 +20,15 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import {
+  ROW_BUTTONS,
+  ROW_WITH_LINK,
+  RowLink,
+} from "@/components/layout/row-link";
+import {
   SettingRow,
   useCheckInsBlocked,
 } from "@/components/suggestions/proactive-panel";
-import { TaskRow } from "@/components/tasks/task-row";
+import { TaskActivityRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -51,12 +56,12 @@ import type {
   ActivityKind,
   BotActivity,
 } from "@/lib/bot-lifecycle/queries";
-import { conversationTitle } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { routinesQueryOptions } from "@/lib/routines/queries";
+import { shortTitle } from "@/lib/short-title";
 import { orderTasks } from "@/lib/tasks/groups";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
@@ -73,7 +78,7 @@ const ICONS: Record<ActivityKind, typeof IconBell> = {
 };
 
 const KIND_LABEL: Record<ActivityKind, string> = {
-  routine: "Routine",
+  routine: "On a schedule",
   responsibility: "Goal",
   handoff: "Delegated task",
   approval: "Approval",
@@ -134,8 +139,13 @@ export function ActivityRow({
       {cancel.isPending ? "Cancelling…" : "Cancel"}
     </Button>
   ) : null;
-  const content = (
-    <>
+  const title = shortTitle(item.title);
+  /*
+   * The title is the row's link, stretched over the row, so a Stop or Cancel sits beside it rather
+   * than inside a link, and the row still opens with a click anywhere and ends on a chevron.
+   */
+  return (
+    <Item className={link ? ROW_WITH_LINK : undefined} size="sm">
       <ItemMedia className="relative" variant="icon">
         <Icon />
         {live ? (
@@ -151,40 +161,26 @@ export function ActivityRow({
       {/* One line, cut with an ellipsis; the whole title shows on hover. */}
       <ItemContent className="min-w-0">
         <ItemTitle className="block w-auto truncate" title={item.title}>
-          {item.title}
+          {link ? <RowLink link={link}>{title}</RowLink> : title}
         </ItemTitle>
-        <ItemDescription>
+        <ItemDescription className="line-clamp-1">
           {KIND_LABEL[item.kind]} · {item.needsYou ? "needs you" : item.status}
           {when ? ` · ${when}` : ""}
           {item.detail ? ` · ${item.detail}` : ""}
         </ItemDescription>
       </ItemContent>
-    </>
-  );
-  /*
-   * A row with a Stop or Cancel keeps the row itself unlinked, so the button is not nested inside a
-   * link; the conversation is still one click away through the title's own link.
-   */
-  if (control)
-    return (
-      <Item size="sm">
-        {content}
-        <ItemActions>
-          {link ? (
-            <Button render={link} size="sm" variant="ghost">
-              Open
-            </Button>
-          ) : null}
+      {control || link ? (
+        <ItemActions className={ROW_BUTTONS}>
           {control}
+          {link ? (
+            <IconChevronRight
+              aria-hidden="true"
+              className="size-4 text-muted-foreground"
+            />
+          ) : null}
         </ItemActions>
-      </Item>
-    );
-  return link ? (
-    <Item render={link} size="sm">
-      {content}
+      ) : null}
     </Item>
-  ) : (
-    <Item size="sm">{content}</Item>
   );
 }
 
@@ -270,8 +266,8 @@ export function routinesSummary(
 }
 
 /**
- * The row for one entry: a task in its own conversation, with the way back to the conversation that
- * asked for it; a check-in as the Routines list draws it; anything else as this page always has.
+ * The row for one entry: a task, which opens its own conversation; a check-in as When it works
+ * draws it; anything else as this page always has.
  */
 function EntryRow({
   agentId,
@@ -279,7 +275,6 @@ function EntryRow({
   botName,
   entry,
   settled,
-  titleOf,
 }: {
   agentId: string;
   blocked: string | null;
@@ -287,21 +282,9 @@ function EntryRow({
   entry: ActivityEntry;
   /** Under Done: a task there asks for nothing. */
   settled: boolean;
-  /** What a conversation is called, or null when the list has not reached it. */
-  titleOf: (channelId: string) => string | null;
 }) {
-  if (entry.kind === "task") {
-    const origin = entry.listed.task.originChannelId;
-    return (
-      <TaskRow
-        askedIn={
-          origin ? { channelId: origin, title: titleOf(origin) } : undefined
-        }
-        listed={entry.listed}
-        settled={settled}
-      />
-    );
-  }
+  if (entry.kind === "task")
+    return <TaskActivityRow listed={entry.listed} settled={settled} />;
   if (entry.kind === "check_in")
     return (
       <SettingRow
@@ -334,15 +317,8 @@ export function BotActivitySections({
   /** The Needs you board sits above, so tasks and what the Bot asked are not listed twice. */
   boardAbove?: boolean;
 }) {
-  const {
-    activity,
-    taskList,
-    channel,
-    goalRoutineIds,
-    ownCheckIns,
-    groups,
-    pending,
-  } = useActivityGroups(agentId, boardAbove);
+  const { activity, taskList, goalRoutineIds, ownCheckIns, groups, pending } =
+    useActivityGroups(agentId, boardAbove);
   const bots = useQuery(agentListQueryOptions());
   const blocked = useCheckInsBlocked();
   if (pending || activity.isPending) return null;
@@ -354,10 +330,6 @@ export function BotActivitySections({
         </p>
       </PageSection>
     );
-  const titleOf = (channelId: string) => {
-    const found = channel(channelId);
-    return (found && conversationTitle(found)) || null;
-  };
   return (
     <>
       {/* The tasks failing to load leaves the rest listed, and says which part is missing. */}
@@ -386,7 +358,6 @@ export function BotActivitySections({
                   }
                   entry={entry}
                   settled={group.id === "done"}
-                  titleOf={titleOf}
                 />
               </Fragment>
             ))}

@@ -260,20 +260,17 @@ test("lists the Bot's threads by state: needs you, working, scheduled, done, fai
   expect(view.queryByText("Task other")).toBeNull();
   expect(view.queryByText("Which venue?")).toBeNull();
 
-  // Each task opens its own thread, and links back to the conversation that asked for it.
+  // Each task's row is one link, to its own thread, which links back to the conversation that
+  // asked for it: the row no longer says so on a line of its own.
   const row = view.getByText("Task working").closest("[data-slot=item]");
   const links = [...(row?.querySelectorAll("a") ?? [])].map((link) => [
     link.textContent,
     link.getAttribute("href"),
   ]);
-  expect(links).toContainEqual(["Open", "/channel/channel_working"]);
-  expect(links).toContainEqual([
-    "Asked in Plan the offsite",
-    "/channel/channel_main",
-  ]);
-  // A check-in's task has no conversation to go back to.
-  const checkIn = view.getByText("Task checkin").closest("[data-slot=item]");
-  expect(checkIn?.querySelector("[data-slot=task-asked-in]")).toBeNull();
+  expect(links).toEqual([["Task working", "/channel/channel_working"]]);
+  expect(row?.textContent).not.toContain("Asked in");
+  // It ends on a chevron, as every row that opens a page does.
+  expect(row?.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
 });
 
 test("a group with nothing in it is not drawn, and a Bot with nothing says so once", async () => {
@@ -354,7 +351,14 @@ test("a row under Done reads Done, as the task's card does, and never Ready for 
   // person marked keeps Reopen.
   expect(done.queryByRole("button", { name: "Mark done" })).toBeNull();
   expect(done.getAllByRole("button", { name: "Reopen" })).toHaveLength(1);
-  expect(done.getAllByText("Open")).toHaveLength(2);
+  // Each row opens its task's thread; Reopen sits on the row, beside that link, not inside it.
+  expect(
+    done
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"))
+      .sort(),
+  ).toEqual(["/channel/channel_marked", "/channel/channel_ready"]);
+  expect(done.getByRole("button", { name: "Reopen" }).closest("a")).toBeNull();
 });
 
 test("a stopped task has a Stopped group of its own, after Done and before Failed", async () => {
@@ -468,7 +472,9 @@ test("a working task's row opens its thread and does not offer Mark done", async
       (await view.findByText(title)).closest("[data-slot=item]") as HTMLElement,
     );
   const running = await row("Task running");
-  expect(running.getByText("Open")).toBeTruthy();
+  expect(running.getByRole("link").getAttribute("href")).toBe(
+    "/channel/channel_running",
+  );
   expect(running.queryByRole("button", { name: "Mark done" })).toBeNull();
   // Where there is something to be done with, it stays. A ready task is listed under Done, where
   // it already reads Done, so it is not offered there.

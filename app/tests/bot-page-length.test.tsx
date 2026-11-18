@@ -246,8 +246,11 @@ test("a long title is cut to one line with an ellipsis, and the whole of it show
     completed: [],
   });
 
-  const title = await view.findByText(long);
-  expect(title.getAttribute("data-slot")).toBe("item-title");
+  // Its address reads as its site: the row had room for little else.
+  const link = await view.findByText(
+    "Check the latest release of CopilotKit/OpenBot on GitHub (github.com) and post one line in this conversation with its version number (tag) and release date.",
+  );
+  const title = link.closest("[data-slot=item-title]") as HTMLElement;
   expect(title.getAttribute("title")).toBe(long);
   expect(title.className).toContain("truncate");
   // The row's content may shrink below its text, or the ellipsis never shows.
@@ -262,8 +265,8 @@ test("a goal's activity row says Goal and opens the Bot's routines", async () =>
     completed: [],
   });
   const title = await view.findByText("Close the month 1");
-  const row = title.closest("a");
-  expect(row?.getAttribute("href")).toBe("/bots/scout/routines");
+  expect(title.closest("a")?.getAttribute("href")).toBe("/bots/scout/routines");
+  const row = title.closest("[data-slot=item]");
   expect(row?.textContent).toContain("Goal · running");
   expect(row?.textContent).not.toMatch(/responsibilit/i);
 });
