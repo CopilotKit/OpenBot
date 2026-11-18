@@ -64,6 +64,8 @@ export function desktopRecognition(shell: ShellIpc): RecognitionConstructor {
     }
 
     lang = "";
+    /** Languages the recognizer turned down before `lang` was chosen, for the desktop's speech.log. */
+    refused: string[] = [];
     continuous = false;
     interimResults = false;
     maxAlternatives = 1;
@@ -93,6 +95,7 @@ export function desktopRecognition(shell: ShellIpc): RecognitionConstructor {
       this.#session = shell
         .invoke(`${PLUGIN}|speech_start`, {
           language: this.lang,
+          ...(this.refused.length > 0 ? { refused: this.refused } : {}),
           onEvent: `__CHANNEL__:${this.#callback}`,
         })
         .then(
