@@ -1539,16 +1539,23 @@ mod tests {
 
     #[test]
     fn keeping_the_host_installed_returns_at_once() {
-        let started = std::time::Instant::now();
+        // The install is let go only once the call has returned. One run before the call returned would wait out its
+        // patience unreleased, however fast or slow the computer.
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (report, reported) = std::sync::mpsc::channel();
         let handle = keep_recorder_host_installed(
-            || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
+            move || {
+                let _ = report.send(released.recv_timeout(Duration::from_secs(30)).is_ok());
                 Ok(vec![])
             },
             None,
         );
-        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        let _ = release.send(());
         handle.join().unwrap();
+        assert!(
+            reported.recv().unwrap(),
+            "the install ran before the call returned"
+        );
     }
 
     #[test]
