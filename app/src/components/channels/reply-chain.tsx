@@ -88,10 +88,10 @@ export function ReplyChainProvider({
               Messages connected to this reply.
             </DialogDescription>
             <div
-              className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-8 pt-12 sm:px-9 sm:pb-10 sm:pt-14 [@media(hover:hover)]:pb-12 sm:[@media(hover:hover)]:pb-14"
+              className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-12 pt-12 sm:px-9 sm:pb-14 sm:pt-14"
               data-slot="reply-chain"
             >
-              <ol className="flex flex-col gap-3 [@media(hover:hover)]:gap-6">
+              <ol className="flex flex-col gap-6">
                 {chain.map((message) => {
                   const reply = { messageId: message.id, text: message.text };
                   const speaker =

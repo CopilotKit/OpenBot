@@ -172,7 +172,7 @@ export function MessageActions({
             className={cn(
               "mt-1 flex items-center gap-1 text-muted-foreground opacity-100 transition-opacity data-[align=end]:justify-end sm:opacity-0 sm:group-hover/message-actions:opacity-100 sm:group-hover/agent-turn:opacity-100 sm:data-[turn-hovered=true]:opacity-100 sm:group-focus-within/message-actions:opacity-100 [@media(hover:none)]:opacity-100",
               floatingToolbar &&
-                "[@media(hover:hover)]:absolute [@media(hover:hover)]:top-full [@media(hover:hover)]:z-10 [@media(hover:hover)]:mt-0 [@media(hover:hover)]:w-max [@media(hover:hover)]:data-[align=end]:end-0 [@media(hover:hover)]:data-[align=start]:start-0 [&>button]:size-6",
+                "absolute top-full z-10 mt-0! w-max data-[align=end]:end-0 data-[align=start]:start-0 [&>button]:size-6",
             )}
             data-slot="message-actions"
             data-align={align}

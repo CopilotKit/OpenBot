@@ -2462,8 +2462,10 @@ export function ChatTranscript({
    */
   const turnToolbar = (item: TranscriptItem, index: number) => {
     const turn = turnActions.get(item.id);
+    // The toolbar uses the row gap so it can appear without changing the scroll anchor.
     return turn && (!busy || index < turnStart) ? (
       <MessageActions
+        floatingToolbar
         messageId={turn.messageId}
         text={turn.text}
         onReply={onReply}
