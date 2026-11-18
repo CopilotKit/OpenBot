@@ -7,6 +7,7 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
 - [Personal edition](personal-edition.md): OpenBot for one person, with no sign-in.
 - [Development](development.md): local setup, migrations, ports, and quality checks.
 - [The API spec](../api/README.md): the REST API in OpenAPI and the live channels in AsyncAPI, the client generated from them, and how to change them.
+- [API versions and compatibility](api-versioning.md): what counts as breaking, deprecation, the 12-month support window, minimum app versions, the launcher contract, the security floor, and what CI stops.
 - [Bots](coworkers.md): durable Bot profiles, conversations, visibility, deletion, and external AG-UI registration.
 - [Approvals](approvals.md): which actions a Bot asks before, the order that decides it, and what an admin can close.
 - [Routines](routines.md): the one list of routines, goals and check-ins, how the server fires them, and who they run as.
