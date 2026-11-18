@@ -71,7 +71,13 @@ The `API spec` job in `.github/workflows/ci.yml` fails a pull request when:
   every write, and `cursor` and `limit` on every list;
 - the spec breaks a client of the base branch's spec (oasdiff). A change that takes nothing from a
   client goes through only when it is listed with its reason in
-  [accepted-breaking-changes.md](accepted-breaking-changes.md).
+  [accepted-breaking-changes.md](accepted-breaking-changes.md);
+- the spec breaks a client of the last release's spec (oasdiff again), a deprecation names no
+  `x-sunset` at least 365 days out, or a minimum app version cuts the 12-month support window
+  (`scripts/support-window.ts`).
+
+The server ignores query parameters it does not know rather than refusing them, on purpose: a
+tolerant reader, so a client written against a newer spec still works against an older server.
 
 ## The live channels
 

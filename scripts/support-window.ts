@@ -7,7 +7,8 @@
  * deprecated. Two ways a change can quietly break that promise, each refused here:
  *
  * - a minimum app version (`minimumClients`) above an app released in the last 12 months, which
- *   would turn away an app we promise to serve;
+ *   would turn away an app we promise to serve. The window starts no earlier than each app's first
+ *   release on the one API (/api/v2), since the addresses apps called before it were retired;
  * - a deprecation whose `x-sunset` is less than 365 days after the first release that served it
  *   deprecated, or that names no sunset at all.
  *
@@ -89,17 +90,26 @@ export function lastRelease(
  * Each minimum that would turn away an app released in the window: an app older than the minimum
  * is refused (`CLIENT_UPDATE_REQUIRED`), so the minimum may be no newer than the oldest release in
  * the window. A release at the minimum itself is still served.
+ *
+ * The window starts no earlier than each app's first release on the one API (`firstOneApi`): the
+ * addresses apps called before /api/v2 were retired, so no server of today serves those releases
+ * whatever the minimum says. An app with no first one-API release named is held from the start of
+ * the window.
  */
 export function minimumViolations(
   minimums: Readonly<Record<string, string>>,
   releases: readonly Release[],
   now: Date,
+  firstOneApi: Readonly<Record<string, string>> = {},
 ): string[] {
   const window = windowReleases(releases, now);
   const violations: string[] = [];
   for (const [kind, minimum] of Object.entries(minimums)) {
+    const first = firstOneApi[kind];
     const cutOff = window.filter(
-      (release) => compareVersions(release.tagName, minimum) < 0,
+      (release) =>
+        compareVersions(release.tagName, minimum) < 0 &&
+        (first === undefined || compareVersions(release.tagName, first) >= 0),
     );
     const oldest = cutOff[0];
     const newest = cutOff.at(-1);
@@ -111,7 +121,7 @@ export function minimumViolations(
         ? named(oldest)
         : `${cutOff.length} releases, ${named(oldest)} to ${named(newest)}`;
     violations.push(
-      `minimumClients.${kind} is ${minimum}, which turns away ${kind} ${span}, published in the last 12 months. The oldest ${kind} release the window serves is ${oldest.tagName}, so the minimum can be no newer than that.`,
+      `minimumClients.${kind} is ${minimum}, which turns away ${kind} ${span}, published in the last 12 months${first ? ` on the one API (from ${first})` : ""}. The oldest ${kind} release the window serves is ${oldest.tagName}, so the minimum can be no newer than that.`,
     );
   }
   return violations;
@@ -225,24 +235,42 @@ function day(iso: string): string {
 }
 
 /**
- * The oldest release of each app this tree's server serves: `MINIMUM_CLIENTS` in
- * shared/client-version.ts, or `minimumClients` in release-policy.json. Undefined while neither
- * names any, and then there is nothing to hold.
+ * The oldest release of each app this tree's server serves, and each app's first release on the
+ * one API, kept side by side: `MINIMUM_CLIENTS` and `FIRST_ONE_API_RELEASES` in
+ * shared/client-version.ts, or `minimumClients` and `firstOneApiReleases` in release-policy.json.
+ * No minimums is nothing to hold.
  */
-async function publishedMinimums(
-  root: string,
-): Promise<Record<string, string> | undefined> {
+async function publishedMinimums(root: string): Promise<
+  | {
+      minimums: Record<string, string>;
+      firstOneApi: Record<string, string>;
+    }
+  | undefined
+> {
   const module = join(root, "shared", "client-version.ts");
   if (existsSync(module)) {
     const loaded = (await import(module)) as {
       MINIMUM_CLIENTS?: Record<string, string>;
+      FIRST_ONE_API_RELEASES?: Record<string, string>;
     };
-    if (loaded.MINIMUM_CLIENTS) return { ...loaded.MINIMUM_CLIENTS };
+    if (loaded.MINIMUM_CLIENTS)
+      return {
+        minimums: { ...loaded.MINIMUM_CLIENTS },
+        firstOneApi: { ...(loaded.FIRST_ONE_API_RELEASES ?? {}) },
+      };
   }
   const policy = JSON.parse(
     readFileSync(join(root, "release-policy.json"), "utf8"),
-  ) as { minimumClients?: Record<string, string> };
-  return policy.minimumClients;
+  ) as {
+    minimumClients?: Record<string, string>;
+    firstOneApiReleases?: Record<string, string>;
+  };
+  return policy.minimumClients
+    ? {
+        minimums: policy.minimumClients,
+        firstOneApi: policy.firstOneApiReleases ?? {},
+      }
+    : undefined;
 }
 
 /** A release's spec, fetched by its tag when this checkout lacks it. Undefined if it has none. */
@@ -308,14 +336,24 @@ async function main(args: readonly string[]): Promise<number> {
   );
   const violations: string[] = [];
 
-  const minimums = await publishedMinimums(root);
-  if (minimums) {
+  const published = await publishedMinimums(root);
+  if (published) {
+    const listed = (record: Record<string, string>) =>
+      Object.entries(record)
+        .map(([kind, version]) => `${kind} ${version}`)
+        .join(", ") || "none named";
+    console.log(`Minimum apps: ${listed(published.minimums)}.`);
     console.log(
-      `Minimum apps: ${Object.entries(minimums)
-        .map(([kind, minimum]) => `${kind} ${minimum}`)
-        .join(", ")}.`,
+      `First releases on the one API: ${listed(published.firstOneApi)}.`,
     );
-    violations.push(...minimumViolations(minimums, releases, now));
+    violations.push(
+      ...minimumViolations(
+        published.minimums,
+        releases,
+        now,
+        published.firstOneApi,
+      ),
+    );
   } else {
     console.log(
       "No minimum app versions are published yet (MINIMUM_CLIENTS in shared/client-version.ts, or minimumClients in release-policy.json), so none can cut the window.",

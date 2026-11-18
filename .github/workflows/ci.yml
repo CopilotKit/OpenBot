@@ -79,8 +79,8 @@ jobs:
     env:
       # Pinned with its checksum, from https://github.com/oasdiff/oasdiff/releases. The spec never
       # leaves the runner: the binary runs here, rather than the action, which uploads by default.
-      OASDIFF_VERSION: 1.39.0
-      OASDIFF_SHA256: 71a85930728f367a2086077b7ae1411319421549d18473a3e8258b6451520433
+      OASDIFF_VERSION: 1.38.0
+      OASDIFF_SHA256: 613037fd6a1d3362a1b742d6d86c338c0eb5ab3511f4942ce3948e78720ea2da
       # The deprecation window (API versioning design, section 4.3): a deprecated operation,
       # parameter or property keeps answering for at least this long, whatever its stability level.
       DEPRECATION_DAYS: 365

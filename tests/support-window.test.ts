@@ -84,6 +84,38 @@ describe("a minimum app version", () => {
       minimumViolations({ mobile: "1.1.0" }, releases, later),
     ).toHaveLength(1);
   });
+
+  // Each app's first release that calls /api/v2: 1.1.0 for all four. v1.0.3's web app, Desktop,
+  // phone app and Recorder call none of it, and the addresses they did call were retired in 1.1.0.
+  const FIRST_ONE_API_RELEASES = {
+    web: "1.1.0",
+    desktop: "1.1.0",
+    mobile: "1.1.0",
+    recorder: "1.1.0",
+  };
+
+  test("is held only against releases on the one API, which no server of today can serve before", () => {
+    // The minimums proposed with the client identity check: every release they turn away predates
+    // the one API.
+    expect(
+      minimumViolations(
+        { web: "1.1.0", desktop: "1.0.2", mobile: "1.1.0", recorder: "1.1.0" },
+        releases,
+        RELEASE_DAY,
+        FIRST_ONE_API_RELEASES,
+      ),
+    ).toEqual([]);
+    // A minimum that turns away 1.1.0, an app on the one API published this week, still fails.
+    const violations = minimumViolations(
+      { desktop: "1.2.0" },
+      releases,
+      RELEASE_DAY,
+      FIRST_ONE_API_RELEASES,
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("v1.1.0 (2026-11-17)");
+    expect(violations[0]).toContain("on the one API (from 1.1.0)");
+  });
 });
 
 describe("a deprecation's sunset", () => {
