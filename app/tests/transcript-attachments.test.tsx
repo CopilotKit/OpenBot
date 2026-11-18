@@ -562,6 +562,18 @@ test("an Office file a person sent is drawn as its kind, with its size and a dow
     );
     expect(container.querySelector(`svg.${icon}`)).not.toBeNull();
   }
+
+  /*
+   * THE SIZE IS NEVER CUT OFF. "PowerPoint presentation · 30 MB" is wider than the tile, and cut
+   * with an ellipsis it read "PowerPoint presentation ·…" in the browser, losing the size. The line
+   * may wrap to a second line, and only before the kind's last word, so the size stays with it.
+   */
+  const facts = getByText("PowerPoint presentation · 30 MB");
+  expect(facts.className).not.toContain("truncate");
+  expect(facts.className).toContain("line-clamp-2");
+  expect(facts.textContent).toBe(
+    "PowerPoint presentation\u00a0·\u00a030\u00a0MB",
+  );
 });
 
 /*

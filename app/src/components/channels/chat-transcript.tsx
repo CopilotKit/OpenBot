@@ -1252,12 +1252,14 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
           <p className="truncate font-medium text-sm" title={filename}>
             {name}
           </p>
-          <p className="truncate text-muted-foreground text-xs">
+          {/*
+           * Two lines at most, never cut: "PowerPoint presentation · 29 KB" is wider than the tile,
+           * and an ellipsis took the size off. See {@link kindAndSize} for where it may wrap.
+           */}
+          <p className="line-clamp-2 text-muted-foreground text-xs">
             {kind === undefined
               ? "Attachment"
-              : attachment.sizeBytes === undefined
-                ? kind
-                : `${kind} · ${fileSize(attachment.sizeBytes)}`}
+              : kindAndSize(kind, attachment.sizeBytes)}
           </p>
         </div>
       </div>
@@ -1304,6 +1306,19 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
       />
     </AttachmentLightbox>
   );
+}
+
+/**
+ * A file's kind and size for a narrow tile ("PowerPoint presentation · 29 KB"), joined so a line can
+ * break only between the kind's words: the kind's last word, the dot and the size stay together, and
+ * a long kind wraps to "PowerPoint" over "presentation · 29 KB" instead of losing the size.
+ */
+function kindAndSize(kind: string, sizeBytes: number | undefined): string {
+  if (sizeBytes === undefined) return kind;
+  const words = kind.split(" ");
+  const last = words.pop() ?? "";
+  const tail = [last, "·", ...fileSize(sizeBytes).split(" ")].join("\u00a0");
+  return [...words, tail].join(" ");
 }
 
 /**
