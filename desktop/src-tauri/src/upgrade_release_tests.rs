@@ -382,8 +382,10 @@ impl Steps for Installation {
             },
             std::time::Duration::from_secs(300),
             || true,
+            // As Start does: a server that refused to start says why at once.
+            || stack::server_refusal(&self.address, &self.root),
         )
-        .map_err(|error| Problem::with(error, self.server_log()))
+        .map_err(|error| Problem::with(error.to_string(), self.server_log()))
     }
 
     fn restore(&mut self, from: &Path) -> Result<(), Problem> {
