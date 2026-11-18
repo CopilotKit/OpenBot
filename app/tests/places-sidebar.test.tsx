@@ -262,7 +262,10 @@ async function reachable(app: ReturnType<typeof renderSidebar>) {
   };
 }
 
-/** The strip's place buttons are the five places, in the person's order, and More holds neither Bots nor Routines. */
+/**
+ * The strip's place buttons are the places, in the person's order, and More holds neither Bots nor
+ * Routines: Routines is each Bot's "When it works", reached through Bots.
+ */
 function expectPlacesOwnBotsAndRoutines(reached: {
   places: (string | null)[];
   more: (string | null)[];
@@ -272,12 +275,17 @@ function expectPlacesOwnBotsAndRoutines(reached: {
   expect(reached.more).not.toContain("/routines");
 }
 
+/** Routines is reached through each Bot (its "When it works"), and `/routines` itself goes to Bots. */
+const reachedThroughABot = (item: { to: string }) => item.to === "/routines";
+
 test("every destination a person may open is in the strip, More or the account menu", async () => {
   const app = renderSidebar();
   const reached = await reachable(app);
   const { places, hrefs } = reached;
   expectPlacesOwnBotsAndRoutines(reached);
-  for (const item of navigationFor("admin", "team").filter(isNavigationLink)) {
+  for (const item of navigationFor("admin", "team")
+    .filter(isNavigationLink)
+    .filter((item) => !reachedThroughABot(item))) {
     expect({
       to: item.to,
       reached: hrefs.includes(item.to) || places.includes(item.label),
@@ -290,9 +298,9 @@ test("the personal edition offers no Memory and no Teams, and offers the team fe
   const reached = await reachable(app);
   const { places, hrefs, accountMenu } = reached;
   expectPlacesOwnBotsAndRoutines(reached);
-  for (const item of navigationFor("admin", "personal").filter(
-    isNavigationLink,
-  )) {
+  for (const item of navigationFor("admin", "personal")
+    .filter(isNavigationLink)
+    .filter((item) => !reachedThroughABot(item))) {
     expect({
       to: item.to,
       reached: hrefs.includes(item.to) || places.includes(item.label),

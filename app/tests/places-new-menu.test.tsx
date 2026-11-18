@@ -24,7 +24,8 @@ import { NewBotCreationStub } from "./channel-new-error-state.fixture";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * THE "+" MENU: FIVE WAYS TO START SOMETHING, EACH WITH ITS OWN TARGET.
+ * THE "+" MENU: THREE WAYS TO START SOMETHING, EACH WITH ITS OWN TARGET. When a Bot works on its
+ * own is set on the Bot, so the menu has no routine entries.
  *
  * The router and the menu are real. Only the New Bot sheet is stubbed, a button that finishes
  * creating a Bot, because the sheet is a separate flow with its own tests.
@@ -70,20 +71,11 @@ function menuAt() {
       path,
       component: () => <p>{path}</p>,
     });
-  const routine = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/routines/new",
-    validateSearch: (search: Record<string, unknown>) => ({
-      agentId: typeof search.agentId === "string" ? search.agentId : undefined,
-    }),
-    component: () => <p>/routines/new</p>,
-  });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       index,
       plain("/channel/new"),
       plain("/bots/$agentId"),
-      routine,
       plain("/browser"),
     ]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -101,7 +93,7 @@ async function openMenu() {
   return user;
 }
 
-test("the five entries are in order with their targets", async () => {
+test("the three entries are in order with their targets, and none starts a routine", async () => {
   menuAt();
   await openMenu();
 
@@ -109,30 +101,10 @@ test("the five entries are in order with their targets", async () => {
   expect(items.map((item) => item.textContent)).toEqual([
     "New conversation",
     "New Bot",
-    "New routine",
-    "New routine for a new Bot",
     "Record a task",
   ]);
   expect(items[0]?.getAttribute("href")).toBe("/channel/new");
-  expect(items[2]?.getAttribute("href")).toBe("/routines/new");
-  expect(items[4]?.getAttribute("href")).toBe("/browser");
-});
-
-test("a Bot made for a routine lands on New routine with it chosen", async () => {
-  const router = menuAt();
-  const user = await openMenu();
-
-  await user.click(
-    await page().findByRole("menuitem", { name: "New routine for a new Bot" }),
-  );
-  await user.click(
-    await page().findByRole("button", { name: "Finish creation" }),
-  );
-
-  await waitFor(() =>
-    expect(router.state.location.pathname).toBe("/routines/new"),
-  );
-  expect(router.state.location.search).toEqual({ agentId: "b9" });
+  expect(items[2]?.getAttribute("href")).toBe("/browser");
 });
 
 test("a new Bot opens its page", async () => {

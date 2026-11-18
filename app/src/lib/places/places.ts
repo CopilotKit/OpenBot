@@ -2,13 +2,12 @@ import { type Icon, IconBolt } from "@tabler/icons-react";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { primitive } from "@/lib/primitives";
 
-/** `openbot` is the For you place: the id stays what browsers already remember. */
-export const PLACE_IDS = [
-  "openbot",
-  "conversations",
-  "bots",
-  "routines",
-] as const;
+/**
+ * `openbot` is the For you place: the id stays what browsers already remember. What a Bot does on
+ * its own is a setting on the Bot ("When it works"), so it has no place of its own; a browser that
+ * remembered the old Routines place starts in For you.
+ */
+export const PLACE_IDS = ["openbot", "conversations", "bots"] as const;
 
 export type PlaceId = (typeof PLACE_IDS)[number];
 
@@ -22,17 +21,15 @@ export const PLACES: Record<PlaceId, { label: string; icon: Icon }> = {
     icon: primitive("conversations").icon,
   },
   bots: { label: "Bots", icon: IconBolt },
-  routines: {
-    label: primitive("routines").label,
-    icon: primitive("routines").icon,
-  },
 };
 
-/** The place whose pages these are, or null when the address belongs to no place but the one already chosen. */
+/**
+ * The place whose pages these are, or null when the address belongs to no place but the one already
+ * chosen. A routine's pages are a Bot's: what it does on its own is part of the Bot.
+ */
 export function placeForPath(pathname: string): PlaceId | null {
   const first = pathname.split("/")[1];
-  if (first === "bots") return "bots";
-  if (first === "routines") return "routines";
+  if (first === "bots" || first === "routines") return "bots";
   return null;
 }
 

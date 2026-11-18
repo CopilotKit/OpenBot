@@ -1,4 +1,4 @@
-import { IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { IconChevronRight, IconClock, IconPlus } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -16,6 +16,8 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { isWorking, type MergedRoutine } from "@/lib/routines/merged";
+import { useMergedRoutines } from "@/lib/routines/use-merged";
 import { cn } from "@/lib/utils";
 import {
   PlaceEmpty,
@@ -39,6 +41,7 @@ function BotsPlace() {
       .filter((channel) => channel.busy || (channel.work?.length ?? 0) > 0)
       .flatMap((channel) => channel.agentIds),
   );
+  const onItsOwn = botsWithAWhen(useMergedRoutines().rows);
   if (agents.isPending) return null;
   if (agents.error) {
     return (
@@ -67,6 +70,7 @@ function BotsPlace() {
               <BotItem
                 agent={agent}
                 key={agent.id}
+                onItsOwn={onItsOwn.has(agent.id)}
                 recent={recentWith(channels.data ?? [], agent.id)}
                 waiting={waiting(agent.id)}
                 working={working.has(agent.id)}
@@ -98,13 +102,24 @@ export function recentWith(
     .slice(0, RECENT_CONVERSATIONS);
 }
 
+/**
+ * The Bots with at least one "when" switched on: a routine on, a goal active, a check-in on. Only
+ * the person's own, as the reads behind it are.
+ */
+export function botsWithAWhen(rows: readonly MergedRoutine[]): Set<string> {
+  return new Set(rows.filter(isWorking).map((row) => row.agentId));
+}
+
 function BotItem({
   agent,
+  onItsOwn,
   recent,
   waiting,
   working,
 }: {
   agent: AgentProfile;
+  /** Whether it has something set to run on its own. */
+  onItsOwn: boolean;
   recent: ChannelSummary[];
   waiting: number;
   working: boolean;
@@ -119,8 +134,15 @@ function BotItem({
           title={agent.name}
           to={{ to: "/bots/$agentId", params: { agentId: agent.id } }}
           trailing={
-            waiting > 0 || working ? (
+            waiting > 0 || working || onItsOwn ? (
               <span className="flex items-center gap-2">
+                {onItsOwn ? (
+                  <IconClock
+                    aria-label="Works on its own"
+                    className="size-3.5 text-muted-foreground"
+                    role="img"
+                  />
+                ) : null}
                 {waiting > 0 ? (
                   <span className="text-muted-foreground text-xs tabular-nums">
                     {waiting}

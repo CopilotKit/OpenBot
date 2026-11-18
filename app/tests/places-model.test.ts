@@ -9,10 +9,11 @@ import {
   readPlacesFlag,
 } from "@/lib/places/places";
 
-test("only Bots and Routines pages move the strip", () => {
+test("only a Bot's pages move the strip, and a routine's pages are a Bot's", () => {
   expect(placeForPath("/bots")).toBe("bots");
   expect(placeForPath("/bots/abc/skills")).toBe("bots");
-  expect(placeForPath("/routines/goals/g1")).toBe("routines");
+  expect(placeForPath("/routines/goals/g1")).toBe("bots");
+  expect(placeForPath("/routines")).toBe("bots");
   expect(placeForPath("/")).toBeNull();
   expect(placeForPath("/channel/c1")).toBeNull();
   expect(placeForPath("/group/c1")).toBeNull();
@@ -30,12 +31,18 @@ test("a stored order keeps what it knows, drops what it does not, and appends wh
   expect(parseStoredOrder("not json")).toEqual([...PLACE_IDS]);
   expect(
     parseStoredOrder('["bots","goals","at-work","openbot","bots"]'),
-  ).toEqual(["bots", "openbot", "conversations", "routines"]);
+  ).toEqual(["bots", "openbot", "conversations"]);
+  expect(parseStoredOrder('["routines","bots","openbot"]')).toEqual([
+    "bots",
+    "openbot",
+    "conversations",
+  ]);
 });
 
-test("a browser that was in At work, a place that is gone, lands in For you", () => {
+test("a browser that was in At work or Routines, places that are gone, lands in For you", () => {
   expect(DEFAULT_PLACE).toBe("openbot");
   expect(parseStoredPlace("at-work")).toBe("openbot");
+  expect(parseStoredPlace("routines")).toBe("openbot");
 });
 
 test("a place moves one step and stops at the ends", () => {
@@ -44,10 +51,9 @@ test("a place moves one step and stops at the ends", () => {
     "openbot",
     "bots",
     "conversations",
-    "routines",
   ]);
   expect(movePlace(order, "openbot", -1)).toEqual(order);
-  expect(movePlace(order, "routines", 1)).toEqual(order);
+  expect(movePlace(order, "bots", 1)).toEqual(order);
 });
 
 test("the switch is set from the address, remembered, and survives storage that throws", () => {

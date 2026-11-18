@@ -1,9 +1,7 @@
 import {
-  IconClockPlus,
   IconMessagePlus,
   IconPlayerRecord,
   IconRobot,
-  IconRobotFace,
 } from "@tabler/icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cloneElement, type ReactElement, useState } from "react";
@@ -15,13 +13,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-/** What happens once the Bot the person is making exists. */
-type Then = "bot" | "routine";
-
 /**
- * The "+" menu: start a conversation, a Bot, a routine or a recorded task. The caller passes its own
- * button, so the strip keeps one toolbar; `onNavigate` lets it close what the menu was opened from,
- * the phone's sheet, once a choice takes the person somewhere.
+ * The "+" menu: start a conversation, a Bot or a recorded task. When a Bot works on its own is set on
+ * the Bot, so a new Bot's page is where that starts. The caller passes its own button, so the strip
+ * keeps one toolbar; `onNavigate` lets it close what the menu was opened from, the phone's sheet,
+ * once a choice takes the person somewhere.
  */
 export function NewMenu({
   trigger,
@@ -31,17 +27,12 @@ export function NewMenu({
   onNavigate?: () => void;
 }) {
   const navigate = useNavigate();
-  const [then, setThen] = useState<Then | null>(null);
+  const [making, setMaking] = useState(false);
 
   function created(agentId: string) {
-    const next = then;
-    setThen(null);
+    setMaking(false);
     onNavigate?.();
-    if (next === "routine") {
-      void navigate({ search: { agentId }, to: "/routines/new" });
-    } else {
-      void navigate({ params: { agentId }, to: "/bots/$agentId" });
-    }
+    void navigate({ params: { agentId }, to: "/bots/$agentId" });
   }
 
   return (
@@ -63,21 +54,9 @@ export function NewMenu({
             <IconMessagePlus />
             New conversation
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setThen("bot")}>
+          <DropdownMenuItem onClick={() => setMaking(true)}>
             <IconRobot />
             New Bot
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            nativeButton={false}
-            onClick={onNavigate}
-            render={<Link to="/routines/new" />}
-          >
-            <IconClockPlus />
-            New routine
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setThen("routine")}>
-            <IconRobotFace />
-            New routine for a new Bot
           </DropdownMenuItem>
           <DropdownMenuItem
             nativeButton={false}
@@ -90,9 +69,9 @@ export function NewMenu({
         </DropdownMenuContent>
       </DropdownMenu>
       <NewBotSheet
-        onClose={() => setThen(null)}
+        onClose={() => setMaking(false)}
         onCreated={created}
-        open={then !== null}
+        open={making}
       />
     </>
   );

@@ -8,11 +8,19 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { botsPlace, recentWith } from "@/components/places/bots-place";
+import {
+  botsPlace,
+  botsWithAWhen,
+  recentWith,
+} from "@/components/places/bots-place";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { proactiveKeys } from "@/lib/proactive";
+import { responsibilityKeys } from "@/lib/responsibilities";
+import type { MergedRoutine } from "@/lib/routines/merged";
+import { routineKeys } from "@/lib/routines/queries";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -132,9 +140,12 @@ function renderPlace({
   waiting = {},
   rosterFails = false,
   channels = [],
+  onItsOwn = [],
 }: {
   /** The conversations read so far, newest first, as the list arrives. */
   channels?: ChannelSummary[];
+  /** Bots with a routine switched on. */
+  onItsOwn?: string[];
   roster: AgentProfile[];
   /** The roster read fails instead of answering. */
   rosterFails?: boolean;
@@ -170,6 +181,18 @@ function renderPlace({
   queryClient.setQueryData(deploymentKeys.capabilities(), {
     edition: "business",
   });
+  // The person's routines, goals and check-ins, behind the clock on a Bot that works on its own.
+  queryClient.setQueryData(agentKeys.list(true), []);
+  queryClient.setQueryData(routineKeys.list(), {
+    routines: onItsOwn.map((botId) => ({
+      id: `routine-${botId}`,
+      botId,
+      enabled: true,
+      goalId: null,
+    })),
+  });
+  queryClient.setQueryData(responsibilityKeys.all, []);
+  queryClient.setQueryData(proactiveKeys.settings, []);
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => <BotsPlace scrollRoot={{ current: null }} />,
@@ -269,6 +292,37 @@ test("an opened Bot lists its five latest conversations, newest first, each open
   expect(view.queryByText("six")).toBeNull();
   expect(view.queryByText("someone else's")).toBeNull();
   expect(view.queryByText("No conversations with Mine yet.")).toBeNull();
+});
+
+test("a Bot with something set to run on its own shows a clock", async () => {
+  const { view } = renderPlace({ roster: four, onItsOwn: ["mine"] });
+  const row = (await view.findByText("Mine")).closest("a") as HTMLElement;
+  expect(row.querySelector('[aria-label="Works on its own"]')).not.toBeNull();
+  const quiet = view.getByText("Starred").closest("a") as HTMLElement;
+  expect(quiet.querySelector('[aria-label="Works on its own"]')).toBeNull();
+});
+
+test("a Bot gets the clock only for a when that is on", () => {
+  const on = {
+    kind: "routine",
+    id: "r1",
+    agentId: "x",
+    routine: { enabled: true },
+  } as unknown as MergedRoutine;
+  const off = {
+    kind: "routine",
+    id: "r2",
+    agentId: "y",
+    routine: { enabled: false },
+  } as unknown as MergedRoutine;
+  const done = {
+    kind: "goal",
+    id: "g1",
+    agentId: "z",
+    goal: { status: "completed" },
+    routines: [],
+  } as unknown as MergedRoutine;
+  expect([...botsWithAWhen([on, off, done])]).toEqual(["x"]);
 });
 
 test("recentWith keeps one Bot's used conversations, five at most", () => {

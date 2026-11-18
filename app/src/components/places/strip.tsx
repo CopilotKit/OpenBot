@@ -212,8 +212,8 @@ function NewButton() {
 }
 
 /**
- * The main menu's destinations that are not places. Bots and Routines are places of their own, so
- * they are not repeated here. While a Recorder records, More and Skills carry its red dot: teaching
+ * The main menu's destinations that are not places. Bots is a place of its own, and Routines is
+ * part of each Bot (its "When it works"), so neither is repeated here. While a Recorder records, More and Skills carry its red dot: teaching
  * a Bot a task is how a skill is recorded.
  */
 function MoreMenu() {

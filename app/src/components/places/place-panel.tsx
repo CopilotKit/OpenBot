@@ -7,14 +7,12 @@ import { botsPlace } from "./bots-place";
 import { conversationsPlace } from "./conversations-place";
 import { openbotPlace } from "./openbot-place";
 import type { PlaceEntry } from "./place-row";
-import { routinesPlace } from "./routines-place";
 
 /** The list each place draws, registered by its own file. The strip draws a button for each. */
 export const PLACE_LISTS: Record<PlaceId, PlaceEntry> = {
   openbot: openbotPlace,
   conversations: conversationsPlace,
   bots: botsPlace,
-  routines: routinesPlace,
 };
 
 export function PlacePanel() {
