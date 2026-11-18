@@ -2,6 +2,7 @@ import { expoClient } from "@better-auth/expo/client";
 import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
 import * as SecureStore from "expo-secure-store";
+import { clientHeaders } from "./release";
 
 const configured = process.env.EXPO_PUBLIC_SERVER_URL;
 if (!configured)
@@ -21,6 +22,8 @@ if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
 export const serverUrl = endpoint.origin;
 export const authClient = createAuthClient({
   baseURL: serverUrl,
+  // Sign-in's own requests name the app too; the Expo plugin keeps these and adds the session's cookie.
+  fetchOptions: { headers: clientHeaders() },
   plugins: [
     expoClient({
       scheme: "openbotmobile",
