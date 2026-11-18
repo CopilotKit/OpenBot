@@ -384,8 +384,8 @@ pub(crate) fn require_images_within(
                 }
                 Inspected::NoAnswer(said) if std::time::Instant::now() >= deadline => {
                     return Err(Problem::with(
-                        format!("{engine} is not answering. Start it and try again."),
-                        format!("Asking for {image}: {said}"),
+                        "The software OpenBot runs on is not answering. Try Start again in a minute.",
+                        format!("Asking {engine} for {image}: {said}"),
                     ));
                 }
                 Inspected::NoAnswer(said) => {
