@@ -6242,6 +6242,22 @@ fn main() {
         }
     }
 
+    /// Whether this fixture's own leaf still listens: the leaf alive, as itself, and its port on
+    /// 127.0.0.1, where it bound, answering. A port given back can be taken by any listener on the
+    /// computer at once, so something answering there afterwards says nothing about the leaf; a
+    /// leaf that is gone listens on nothing.
+    #[cfg(unix)]
+    fn leaf_listening(fixture: &UnixDescendantFixture) -> bool {
+        unix_process(fixture.leaf.pid)
+            .unwrap()
+            .is_some_and(|now| now.start == fixture.leaf.start)
+            && std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::from(([127, 0, 0, 1], fixture.port)),
+                std::time::Duration::from_millis(300),
+            )
+            .is_ok()
+    }
+
     #[cfg(unix)]
     impl Drop for UnixDescendantFixture {
         fn drop(&mut self) {
@@ -6257,13 +6273,10 @@ fn main() {
             let _ = self.parent.kill();
             let _ = self.parent.wait();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            while something_answers(self.port) && std::time::Instant::now() < deadline {
+            while leaf_listening(self) && std::time::Instant::now() < deadline {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            assert!(
-                !something_answers(self.port),
-                "fixture listener was not cleaned"
-            );
+            assert!(!leaf_listening(self), "fixture listener was not cleaned");
             assert!(unix_process(self.parent.id()).unwrap().is_none());
             assert!(unix_process(self.leaf.pid).unwrap().is_none());
             std::fs::remove_dir_all(&self.root).unwrap();
@@ -6278,7 +6291,7 @@ fn main() {
             let result = stop_processes_under(&fixture.root);
             let parent = fixture.parent.try_wait().unwrap();
             let leaf = unix_process(fixture.leaf.pid).unwrap();
-            let listening = something_answers(fixture.port);
+            let listening = leaf_listening(&fixture);
             let retry = stop_processes_under(&fixture.root);
             eprintln!(
                 "{}",
@@ -6338,7 +6351,7 @@ fn main() {
         );
         // Retrying the durable record also handles ancestors left stopped by the failed attempt.
         assert!(stop_processes_under(&fixture.root).is_ok());
-        assert!(!something_answers(fixture.port));
+        assert!(!leaf_listening(&fixture));
         assert!(unix_process(fixture.leaf.pid).unwrap().is_none());
         assert_eq!(stop_processes_under(&fixture.root).unwrap(), 0);
         // Drop independently checks the retained instances and port before removing the fixture.
