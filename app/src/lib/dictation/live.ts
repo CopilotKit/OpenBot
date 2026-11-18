@@ -78,6 +78,110 @@ export const STOP_GRACE_MS = 2_000;
 const PERMISSION_POLL_MS = 500;
 const PERMISSION_WAIT_MS = 120_000;
 
+/** The most languages dictation asks the desktop app about before it gives up. */
+export const MOST_LANGUAGES = 10;
+
+/**
+ * Regions besides a language's likely one where it is commonly dictated. A Mac whose recognizer has no
+ * English (United Kingdom) on the device often has English (United States), and the person's
+ * Dictation may have it turned on.
+ */
+const COMMON_REGIONS: Record<string, readonly string[]> = {
+  en: ["US", "GB"],
+  es: ["ES", "MX"],
+  fr: ["FR", "CA"],
+  pt: ["BR", "PT"],
+  zh: ["CN", "TW"],
+};
+
+/** `tag` as a well-formed BCP 47 tag ("en_gb" is "en-GB"), or null when it is not one. */
+function canonicalTag(tag: string): string | null {
+  try {
+    return Intl.getCanonicalLocales(tag.trim().replace(/_/g, "-"))[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The languages to dictate in, best first: the page's language, then each language the person
+ * prefers, then for each of their base languages its likely region, its other common regions and
+ * the bare language ("en-GB" brings "en-US" and "en"). No repeats, and never more than
+ * `MOST_LANGUAGES`. The desktop app takes the first its recognizer has on the device.
+ */
+export function dictationLanguages(
+  primary: string | undefined,
+  preferred: readonly string[] = [],
+): string[] {
+  const asked = [primary ?? "", ...preferred]
+    .map(canonicalTag)
+    .filter((tag): tag is string => tag !== null);
+  const bases = [
+    ...new Set(asked.map((tag) => (tag.split("-")[0] ?? tag).toLowerCase())),
+  ];
+  const regional = bases.flatMap((base) => {
+    let likely: string | undefined;
+    try {
+      likely = new Intl.Locale(base).maximize().region;
+    } catch {
+      likely = undefined;
+    }
+    const regions = [
+      ...(likely ? [likely] : []),
+      ...(COMMON_REGIONS[base] ?? []),
+    ];
+    return [...regions.map((region) => `${base}-${region}`), base];
+  });
+  const seen = new Set<string>();
+  const languages: string[] = [];
+  for (const tag of [...asked, ...regional]) {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    languages.push(tag);
+  }
+  return (languages.length > 0 ? languages : ["en-US"]).slice(
+    0,
+    MOST_LANGUAGES,
+  );
+}
+
+/**
+ * A language as a person reads it: "English (United Kingdom)" for "en-GB", or the tag itself. Built
+ * from the language's and the region's names, the same in every engine (WebKit's standard name for
+ * en-GB is "English (UK)").
+ */
+export function languageName(tag: string): string {
+  try {
+    const locale = new Intl.Locale(tag);
+    const language =
+      new Intl.DisplayNames(["en"], { type: "language" }).of(locale.language) ??
+      locale.language;
+    const region = locale.region
+      ? new Intl.DisplayNames(["en"], { type: "region" }).of(locale.region)
+      : undefined;
+    return region ? `${language} (${region})` : language;
+  } catch {
+    return tag;
+  }
+}
+
+/** What to tell the person when nothing here can take dictation in `language`, and where to add it. */
+export function languageProblem(
+  platform: LivePlatform,
+  language: string,
+): string {
+  const name = language ? languageName(language) : "your language";
+  switch (platform) {
+    case "mac":
+      return `This Mac can't take dictation in ${name}. Turn on Dictation and add the language in System Settings, under Keyboard, then try again.`;
+    case "windows":
+      return `This computer can't take dictation in ${name}. Add the language in Settings, under Time & language > Speech, then try again.`;
+    default:
+      return `This browser can't take dictation in ${name}.`;
+  }
+}
+
 /** The transcript so far: every phrase in order, final or not, joined by single spaces. */
 export function transcriptOf(event: RecognitionResultEvent): string {
   const words: string[] = [];
@@ -88,10 +192,14 @@ export function transcriptOf(event: RecognitionResultEvent): string {
   return words.join(" ");
 }
 
-/** What to tell the person when recognition fails, or null when the failure is not one (no speech, aborted). */
+/**
+ * What to tell the person when recognition fails, or null when the failure is not one (no speech,
+ * aborted). `language` is the one listening was in.
+ */
 export function liveProblem(
   error: string,
   platform: LivePlatform,
+  language = "",
 ): string | null {
   switch (error) {
     case "no-speech":
@@ -108,9 +216,7 @@ export function liveProblem(
     case "network":
       return "Dictation in this browser needs an internet connection. Check your connection, then try again.";
     case "language-not-supported":
-      return platform === "browser"
-        ? "This browser can't take dictation in your language."
-        : "This computer can't take dictation in your language.";
+      return languageProblem(platform, language);
     case "service-not-allowed":
       return platform === "browser"
         ? "This browser won't run speech recognition for OpenBot. Try Chrome or Edge."
@@ -138,7 +244,8 @@ export class LiveDictation {
   constructor(
     private readonly deps: {
       source: () => LiveSource | null;
-      language: () => string;
+      /** The languages to dictate in, best first (`dictationLanguages`). */
+      languages: () => string[];
       /** Listening is about to begin: the box as it is now is what the words are added to. */
       onStart: () => void;
       /** The whole transcript so far, each time it changes. */
@@ -174,13 +281,19 @@ export class LiveDictation {
     if (!source) return;
     this.release();
     const generation = this.generation;
-    const language = this.deps.language();
+    const languages = this.deps.languages();
+    let language = languages[0] ?? "en-US";
+    let refused: string[] = [];
     if (source.platform !== "browser") {
-      const ready = await this.permission(source, language, generation);
-      if (!ready || generation !== this.generation) return;
+      const chosen = await this.choose(source, languages, generation);
+      if (!chosen || generation !== this.generation) return;
+      ({ language, refused } = chosen);
     }
     const recognition = new source.Recognition();
     recognition.lang = language;
+    // The desktop app notes the languages its recognizer turned down, so speech.log shows the fallback.
+    if (source.platform !== "browser")
+      (recognition as Recognition & { refused?: string[] }).refused = refused;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
@@ -191,7 +304,7 @@ export class LiveDictation {
     };
     recognition.onerror = ({ error }) => {
       if (generation !== this.generation) return;
-      problem = liveProblem(error, source.platform) ?? problem;
+      problem = liveProblem(error, source.platform, language) ?? problem;
     };
     recognition.onend = () => {
       if (generation !== this.generation) return;
@@ -248,52 +361,67 @@ export class LiveDictation {
   }
 
   /**
-   * The desktop app's answer for the language. The first time, it puts the system's microphone and
-   * speech recognition questions to the person and answers `downloading` until they have answered.
+   * The first of `languages` the desktop app's recognizer has on the device, and the ones it turned
+   * down before it. A language it answers `unavailable` for moves on to the next. The first time, it
+   * puts the system's microphone and speech recognition questions to the person and answers
+   * `downloading` until they have answered, which is waited out. Null, with the problem shown, when
+   * none will do.
    */
-  private async permission(
+  private async choose(
     source: LiveSource,
-    language: string,
+    languages: string[],
     generation: number,
-  ): Promise<boolean> {
+  ): Promise<{ language: string; refused: string[] } | null> {
+    const first = languages[0] ?? "en-US";
     const available = (
       source.Recognition as unknown as { available?: Availability }
     ).available;
-    if (typeof available !== "function") return true;
+    if (typeof available !== "function")
+      return { language: first, refused: [] };
     const wait =
       this.deps.wait ??
       ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     const asked = Date.now();
-    for (;;) {
-      let answer: unknown;
-      try {
-        answer = await available({ langs: [language], processLocally: true });
-      } catch {
-        answer = "unsupported";
+    const refused: string[] = [];
+    for (const language of languages.slice(0, MOST_LANGUAGES)) {
+      for (;;) {
+        let answer: unknown;
+        try {
+          answer = await available({ langs: [language], processLocally: true });
+        } catch {
+          answer = "unsupported";
+        }
+        if (generation !== this.generation) return null;
+        if (answer === "available") return { language, refused };
+        if (answer === "unavailable") {
+          refused.push(language);
+          break;
+        }
+        if (answer !== "downloading") {
+          this.update({
+            phase: "error",
+            error: "Dictation isn't available on this computer.",
+          });
+          return null;
+        }
+        if (Date.now() - asked > PERMISSION_WAIT_MS) {
+          this.update({
+            phase: "error",
+            error:
+              "OpenBot is still waiting for permission. Answer the system's question, then try again.",
+          });
+          return null;
+        }
+        if (this.state.phase !== "preparing")
+          this.update({ phase: "preparing" });
+        await wait(PERMISSION_POLL_MS);
+        if (generation !== this.generation) return null;
       }
-      if (generation !== this.generation) return false;
-      if (answer === "available") return true;
-      if (answer !== "downloading") {
-        this.update({
-          phase: "error",
-          error:
-            answer === "unavailable"
-              ? "This computer can't take dictation in your language."
-              : "Dictation isn't available on this computer.",
-        });
-        return false;
-      }
-      if (Date.now() - asked > PERMISSION_WAIT_MS) {
-        this.update({
-          phase: "error",
-          error:
-            "OpenBot is still waiting for permission. Answer the system's question, then try again.",
-        });
-        return false;
-      }
-      if (this.state.phase !== "preparing") this.update({ phase: "preparing" });
-      await wait(PERMISSION_POLL_MS);
-      if (generation !== this.generation) return false;
     }
+    this.update({
+      phase: "error",
+      error: languageProblem(source.platform, first),
+    });
+    return null;
   }
 }
