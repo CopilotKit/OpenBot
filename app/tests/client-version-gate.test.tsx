@@ -30,6 +30,7 @@ import {
   compatibility,
   parseClientHeader,
   RELEASE,
+  SECURITY_UPDATE_SENTENCE,
   SERVER_UPDATE_SENTENCE,
 } from "@openbot/shared/client-version";
 import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
@@ -68,19 +69,29 @@ const SPEC_REFUSAL = {
   title: "This app is too old for this OpenBot.",
   status: 400,
   detail:
-    "This OpenBot needs OpenBot Desktop 1.0.2 or later. Update OpenBot, then try again.",
+    "This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.",
   code: "CLIENT_UPDATE_REQUIRED",
   category: "validation",
   retryable: false,
   requestId: "req_example",
   traceId: "trace_example",
   client: "desktop",
-  minimumVersion: "1.0.2",
+  minimumVersion: "1.2.0",
+};
+
+/** The spec's example of a refusal for a security problem (`clientUpdateRequiredSecurity`), as is. */
+const SPEC_SECURITY_REFUSAL = {
+  ...SPEC_REFUSAL,
+  detail:
+    "This version of OpenBot has a security problem. Update to keep using it.",
+  security: true,
 };
 
 /** What the OpenBot answers: its `deployment`, and whether it refuses every other v2 operation. */
 let deployment: DeploymentName;
 let refuseEverything: boolean;
+/** What it refuses every other v2 operation with, when it does. */
+let refusalBody: Record<string, unknown>;
 const NativeResponse = globalThis.Response;
 let openbot: ReturnType<typeof Bun.serve>;
 
@@ -96,7 +107,7 @@ function answer(request: Request): Response {
   const published = cases.deployments[deployment];
   if (/^\/api\/v2\/organizations\/[^/]+\/deployment$/.test(path))
     return NativeResponse.json(published);
-  if (refuseEverything) return problem(400, SPEC_REFUSAL);
+  if (refuseEverything) return problem(400, refusalBody);
   // A later OpenBot that serves only v3 no longer answers at v2. One that names no API serves v2.
   if ("api" in published && !published.api.includes("v2"))
     return problem(404, { code: "NOT_FOUND" });
@@ -130,6 +141,7 @@ beforeAll(() => {
 beforeEach(() => {
   deployment = "current";
   refuseEverything = false;
+  refusalBody = SPEC_REFUSAL;
   queryClient.clear();
   // The page is at the server.
   globalThis.fetch = pageFetch();
@@ -303,7 +315,57 @@ test("any request refused with CLIENT_UPDATE_REQUIRED brings up Update OpenBot, 
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Update" })).toBeTruthy();
   expect(view.queryByText(SPEC_REFUSAL.detail)).toBeNull();
+  // A plain raise is not a security problem.
+  expect(view.queryByText(SECURITY_UPDATE_SENTENCE)).toBeNull();
   expect(view.queryByRole("heading", { name: /Sign in to/ })).toBeNull();
+}, 15_000);
+
+test("a refusal for a security problem says so in place of Update OpenBot, with the same Update", async () => {
+  refuseEverything = true;
+  refusalBody = SPEC_SECURITY_REFUSAL;
+  const view = openApp();
+  expect(
+    await view.findByRole(
+      "heading",
+      { name: SECURITY_UPDATE_SENTENCE },
+      { timeout: 5_000 },
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(APP_UPDATE_SENTENCE)).toBeNull();
+  expect(view.getByRole("button", { name: "Update" })).toBeTruthy();
+  expect(view.queryByRole("heading", { name: /Sign in to/ })).toBeNull();
+}, 15_000);
+
+test("an OpenBot whose deployment raised an app's minimum for a security problem: that app reads the security sentence", async () => {
+  deployment = "security";
+  const app = { kind: "recorder" as const, version: "1.1.0" };
+  expect(compatibility(cases.deployments.security, app)).toEqual({
+    fit: "app",
+    minimum: "1.2.0",
+    security: true,
+  });
+  const view = openApp(app);
+  expect(
+    await view.findByRole(
+      "heading",
+      { name: SECURITY_UPDATE_SENTENCE },
+      { timeout: 5_000 },
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Update" })).toBeTruthy();
+  cleanup();
+  // The same OpenBot's plain raise, for an app it raised for no security problem, reads as before.
+  deployment = "raised";
+  queryClient.clear();
+  const plain = openApp(app);
+  expect(
+    await plain.findByRole(
+      "heading",
+      { name: APP_UPDATE_SENTENCE },
+      { timeout: 5_000 },
+    ),
+  ).toBeTruthy();
+  expect(plain.queryByText(SECURITY_UPDATE_SENTENCE)).toBeNull();
 }, 15_000);
 
 /** OpenBot Desktop's window around the page, answering its plugin's update commands. */
@@ -343,7 +405,7 @@ test("inside OpenBot Desktop, a refusal naming OpenBot Desktop offers its own Up
     ),
   ).toBeTruthy();
   expect(
-    view.getByText("This OpenBot needs OpenBot Desktop 1.0.2 or later."),
+    view.getByText("This OpenBot needs OpenBot Desktop 1.2.0 or later."),
   ).toBeTruthy();
   const update = await view.findByRole(
     "button",
@@ -355,6 +417,30 @@ test("inside OpenBot Desktop, a refusal naming OpenBot Desktop offers its own Up
   expect(
     (await view.findByRole("alert", {}, { timeout: 5_000 })).textContent,
   ).toBe("Couldn't install the update: No update is available right now.");
+}, 15_000);
+
+test("inside OpenBot Desktop, a refusal of it for a security problem says so, with its own Update and restart", async () => {
+  refuseEverything = true;
+  refusalBody = SPEC_SECURITY_REFUSAL;
+  insideDesktop(true, []);
+  const view = openApp();
+  expect(
+    await view.findByRole(
+      "heading",
+      { name: SECURITY_UPDATE_SENTENCE },
+      { timeout: 5_000 },
+    ),
+  ).toBeTruthy();
+  expect(
+    view.getByText("This OpenBot needs OpenBot Desktop 1.2.0 or later."),
+  ).toBeTruthy();
+  expect(
+    await view.findByRole(
+      "button",
+      { name: "Update and restart" },
+      { timeout: 5_000 },
+    ),
+  ).toBeTruthy();
 }, 15_000);
 
 test("inside an OpenBot Desktop that never updates itself, it says what to do instead", async () => {

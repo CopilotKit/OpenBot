@@ -26,14 +26,10 @@ type Seen = {
 const seen: Seen[] = [];
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
-/** What this stand-in answers at `deployment` and `/api/capabilities`: one of the fixture's real answers, or a status. */
+/** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
 let deploymentAnswer: { status: number; body: unknown } = {
   status: 200,
   body: fixture.deployments.current,
-};
-let capabilitiesAnswer: { status: number; body: unknown } = {
-  status: 404,
-  body: null,
 };
 /** The OpenBot release this app is built from: the root package.json's version, read here on its own. */
 const RELEASE = (
@@ -64,10 +60,28 @@ const server = Bun.serve({
       return Response.json(deploymentAnswer.body, {
         status: deploymentAnswer.status,
       });
-    if (url.pathname === "/api/capabilities")
-      return Response.json(capabilitiesAnswer.body, {
-        status: capabilitiesAnswer.status,
-      });
+    if (url.pathname === `${ORG}/bots/insecure`)
+      return Response.json(
+        {
+          type: "https://open.bot/errors/client-update-required",
+          title: "This app is too old for this OpenBot.",
+          status: 400,
+          detail:
+            "This version of OpenBot has a security problem. Update to keep using it.",
+          code: "CLIENT_UPDATE_REQUIRED",
+          category: "validation",
+          retryable: false,
+          requestId: "req_example",
+          traceId: "trace_example",
+          client: "mobile",
+          minimumVersion: "1.2.0",
+          security: true,
+        },
+        {
+          status: 400,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
     if (url.pathname === `${ORG}/bots/too-old`)
       return Response.json(
         {
@@ -202,7 +216,6 @@ beforeEach(() => {
   seen.length = 0;
   named.length = 0;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
-  capabilitiesAnswer = { status: 404, body: null };
 });
 afterAll(() => {
   server.stop(true);
@@ -355,27 +368,69 @@ test("before sign-in the app reads the deployment and decides: this release's Op
   });
 });
 
-test("an OpenBot from before the v2 API (no deployment, but an OpenBot's capabilities) is too old: Ask whoever runs your OpenBot to update it", async () => {
+test("anything but an app too old for its OpenBot decides nothing: the app opens and its screens say what failed, as before", async () => {
+  // No deployment answer at all.
   deploymentAnswer = {
     status: 404,
     body: { detail: "Not found.", code: "NOT_FOUND" },
   };
-  capabilitiesAnswer = {
+  expect(await checkVersion()).toEqual({ kind: "ok" });
+  // An OpenBot that serves only an API older than any this app speaks: whoever runs it keeps it and their apps
+  // matched, and the app adds nothing of its own for it.
+  deploymentAnswer = {
     status: 200,
-    body: fixture["before-v2-capabilities"],
+    body: { ...fixture.deployments.current, api: ["v1"] },
   };
-  expect(await checkVersion()).toEqual({ kind: "server" });
+  expect(await checkVersion()).toEqual({ kind: "ok" });
+});
 
-  // A 404 from something that is not OpenBot says nothing about versions: the screens say what failed.
-  capabilitiesAnswer = { status: 404, body: { detail: "Not found." } };
-  expect(await checkVersion()).toEqual({ kind: "ok" });
-  capabilitiesAnswer = { status: 200, body: { status: "ok" } };
-  expect(await checkVersion()).toEqual({ kind: "ok" });
+test("an OpenBot that raised the phone app's minimum for a security problem says so, from its deployment and from a refusal", async () => {
+  deploymentAnswer = { status: 200, body: fixture.deployments.security };
+  expect(await checkVersion()).toEqual({
+    kind: "app",
+    detail:
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    security: true,
+  });
+  const heard: [string, boolean][] = [];
+  const stop = onUpdateRequired((detail, security) =>
+    heard.push([detail, security]),
+  );
+  try {
+    await getBot(ORGANIZATION_ID, "insecure").catch(() => undefined);
+    expect(heard).toEqual([
+      [
+        "This version of OpenBot has a security problem. Update to keep using it.",
+        true,
+      ],
+    ]);
+    deploymentAnswer = {
+      status: 400,
+      body: {
+        detail:
+          "This version of OpenBot has a security problem. Update to keep using it.",
+        code: "CLIENT_UPDATE_REQUIRED",
+        minimumVersion: "1.2.0",
+        security: true,
+      },
+    };
+    expect(await checkVersion()).toEqual({
+      kind: "app",
+      detail:
+        "This version of OpenBot has a security problem. Update to keep using it.",
+      security: true,
+    });
+  } finally {
+    stop();
+  }
 });
 
 test("a refusal of this app as too old, on any request, reaches the root layout as Update OpenBot with the server's sentence", async () => {
   const heard: string[] = [];
-  const stop = onUpdateRequired((detail) => heard.push(detail));
+  const stop = onUpdateRequired((detail, security) => {
+    heard.push(detail);
+    expect(security).toBe(false);
+  });
   try {
     const refused = await getBot(ORGANIZATION_ID, "too-old").catch(
       (error: unknown) => error,

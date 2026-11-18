@@ -305,6 +305,8 @@ export interface Problem {
   client?: ProblemClient;
   /** On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves. */
   minimumVersion?: string;
+  /** On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases. */
+  security?: boolean;
 }
 
 /**

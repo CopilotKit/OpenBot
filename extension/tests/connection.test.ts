@@ -53,6 +53,14 @@ const TOO_OLD = {
   minimumVersion: "1.2.0",
 };
 
+/** The same refusal for a minimum raised because of a security problem (the spec's clientUpdateRequiredSecurity). */
+const INSECURE = {
+  ...TOO_OLD,
+  detail:
+    "This version of OpenBot has a security problem. Update to keep using it.",
+  security: true,
+};
+
 let server: ReturnType<typeof Bun.serve>;
 /**
  * The web OpenBot most tests connect: an https site, as a hosted OpenBot is. The Recorder takes a connect from OpenBot
@@ -113,6 +121,11 @@ async function openbot(request: Request): Promise<Response> {
     await holdIfAsked(url.pathname);
     if (body.code === "obc_expired")
       return Response.json({ error: HOSTILE }, { status: 400 });
+    if (body.code === "obc_insecure")
+      return Response.json(INSECURE, {
+        status: 400,
+        headers: { "content-type": "application/problem+json" },
+      });
     if (body.code === "obc_too_old")
       return Response.json(TOO_OLD, {
         status: 400,
@@ -394,6 +407,23 @@ test("an OpenBot that serves only newer Recorders says so on the Connect page, U
       origin,
     }),
   ).toEqual({ ok: false, error: TOO_OLD.detail });
+  expect(await readLocal("connection")).toBeUndefined();
+});
+
+test("an OpenBot that raised the Recorder's minimum for a security problem says so on the Connect page, and stores nothing", async () => {
+  await connect("obc_insecure");
+  expect(
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+      origin,
+    }),
+  ).toEqual({
+    ok: false,
+    error:
+      "This version of OpenBot has a security problem. Update to keep using it.",
+  });
   expect(await readLocal("connection")).toBeUndefined();
 });
 
@@ -940,6 +970,18 @@ test("an OpenBot that serves only newer Recorders refuses Desktop's code with it
   ).toEqual({ connected: false, reason: "client-update-required" });
   expect(desktopSentence("client-update-required")).toBe(
     "This OpenBot needs a newer OpenBot Recorder. Update OpenBot, then try again.",
+  );
+  expect(await currentConnection()).toBeNull();
+  // One raised for a security problem has its own reason, which the popup says as that.
+  expect(
+    await connectThroughDesktop({
+      askDesktop: async () => ({ openbotUrl: loopback, code: "obc_insecure" }),
+      openTab,
+      readPolicy: async () => policy,
+    }),
+  ).toEqual({ connected: false, reason: "client-security-update-required" });
+  expect(desktopSentence("client-security-update-required")).toBe(
+    "This version of OpenBot has a security problem. Update to keep using it.",
   );
   expect(await currentConnection()).toBeNull();
 });

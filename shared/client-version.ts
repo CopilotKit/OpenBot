@@ -27,19 +27,16 @@ export const RELEASE = RELEASE_VERSION;
 export const API_VERSIONS: readonly string[] = ["v2"];
 
 /**
- * The oldest release of each app this release's server still serves. An older one is refused with
- * CLIENT_UPDATE_REQUIRED. Proposal (API versioning design, section 6.3): the previous minor release
- * in full. OpenBot Desktop goes back to 1.0.2, the first release whose window an OpenBot of today
- * still starts; the phone app and the Recorder to 1.1.0, their first release that speaks this API.
- * The web app is served by the server itself, so only a tab left open across an upgrade is older.
- * An app from before this check sends no header and is never refused by it.
+ * The oldest release of each app this release's server still serves, built in. An older one is
+ * refused with CLIENT_UPDATE_REQUIRED. A server serves every app released in the last 12 months
+ * (API versioning design, section 6.3), so a release may set an app's built-in minimum only to a
+ * release published more than 12 months before it. Until such a release exists there is none, and
+ * every app is served. An admin of a server, such as OpenBot Cloud's, raises it for that server
+ * with the server's OPENBOT_MINIMUM_CLIENTS. An app from before this check sends no header and is
+ * never refused by it.
  */
-export const MINIMUM_CLIENTS: Readonly<Record<ClientKind, string>> = {
-  web: "1.1.0",
-  desktop: "1.0.2",
-  mobile: "1.1.0",
-  recorder: "1.1.0",
-};
+export const MINIMUM_CLIENTS: Readonly<Partial<Record<ClientKind, string>>> =
+  {};
 
 /** The contract numbers `release-policy.json` keeps, which `deployment` publishes. */
 export const LAUNCHER_API: number = policy.compatibility.launcherApi;
@@ -47,6 +44,12 @@ export const EXTENSION_API: number = policy.compatibility.extensionApi;
 
 /** What a person reads when the app is older than the OpenBot it talks to serves. */
 export const APP_UPDATE_SENTENCE = "Update OpenBot";
+/**
+ * What a person reads, in place of "Update OpenBot", when the minimum the app is below was raised
+ * because of a security problem in older releases.
+ */
+export const SECURITY_UPDATE_SENTENCE =
+  "This version of OpenBot has a security problem. Update to keep using it.";
 /** What a person reads when the OpenBot is older than the app can use. */
 export const SERVER_UPDATE_SENTENCE =
   "Ask whoever runs your OpenBot to update it";
@@ -145,9 +148,15 @@ export function belowMinimum(
 
 /**
  * The sentence a server refuses an app below its minimum with, as the problem's detail: what
- * happened, then what to do (`.claude/skills/openbot-copy`).
+ * happened, then what to do (`.claude/skills/openbot-copy`). When the minimum was raised because of
+ * a security problem in older releases (`security`), that is what it says.
  */
-export function clientUpdateDetail(kind: ClientKind, minimum: string): string {
+export function clientUpdateDetail(
+  kind: ClientKind,
+  minimum: string,
+  security?: boolean,
+): string {
+  if (security) return SECURITY_UPDATE_SENTENCE;
   const version = minimum.replace(/^v/, "");
   switch (kind) {
     case "web":
@@ -173,24 +182,28 @@ function major(version: string): number | undefined {
  * - `ok`: they can. Features the server lacks are hidden by the fields that offer them, never by a
  *   version.
  * - `app`: the app is too old. The server serves no API version the app speaks and only newer ones,
- *   or it names a minimum for this app above the app's version. "Update OpenBot".
+ *   or it names a minimum for this app above the app's version. "Update OpenBot". `security` when
+ *   the server also names that app in `securityMinimumClients` above the app's version: the minimum
+ *   is there for a security problem, and the person reads SECURITY_UPDATE_SENTENCE instead.
  * - `server`: the server is too old. It serves only API versions older than any the app speaks.
  *   "Ask whoever runs your OpenBot to update it".
  *
  * A `deployment` that publishes no `api` is from a release before this check, and every such
- * release that answers `deployment` serves v2. `"before-v2"` is an OpenBot that answers no
- * `deployment` at all but still answers as an OpenBot: a release from before the v2 API.
+ * release that answers `deployment` serves v2.
  */
 export type Compatibility =
   | { fit: "ok" }
-  | { fit: "app"; minimum?: string }
+  | { fit: "app"; minimum?: string; security?: true }
   | { fit: "server" };
 
 export function compatibility(
-  deployment: { api?: unknown; minimumClients?: unknown } | "before-v2",
+  deployment: {
+    api?: unknown;
+    minimumClients?: unknown;
+    securityMinimumClients?: unknown;
+  },
   client: { kind: ClientKind; version: string; speaks?: readonly string[] },
 ): Compatibility {
-  if (deployment === "before-v2") return { fit: "server" };
   const speaks = client.speaks ?? API_VERSIONS;
   const served = Array.isArray(deployment.api)
     ? deployment.api.filter(
@@ -207,14 +220,25 @@ export function compatibility(
     // Only newer versions than any the app speaks: the app is behind. Otherwise the server is.
     return newestServed > newestSpoken ? { fit: "app" } : { fit: "server" };
   }
-  const minimums =
-    deployment.minimumClients && typeof deployment.minimumClients === "object"
-      ? (deployment.minimumClients as Record<string, unknown>)
-      : {};
-  const minimum = minimums[client.kind];
-  if (isVersion(minimum)) {
-    const order = compareVersions(client.version, minimum);
-    if (order !== undefined && order < 0) return { fit: "app", minimum };
+  const minimum = minimumFor(deployment.minimumClients, client.kind);
+  if (minimum && below(client.version, minimum)) {
+    const floor = minimumFor(deployment.securityMinimumClients, client.kind);
+    return floor && below(client.version, floor)
+      ? { fit: "app", minimum, security: true }
+      : { fit: "app", minimum };
   }
   return { fit: "ok" };
+}
+
+/** The release `minimums` names for `kind`, when it names one. */
+function minimumFor(minimums: unknown, kind: ClientKind): string | undefined {
+  if (!minimums || typeof minimums !== "object") return undefined;
+  const minimum = (minimums as Record<string, unknown>)[kind];
+  return isVersion(minimum) ? minimum : undefined;
+}
+
+/** Whether `version` is a release before `minimum`. */
+function below(version: string, minimum: string): boolean {
+  const order = compareVersions(version, minimum);
+  return order !== undefined && order < 0;
 }

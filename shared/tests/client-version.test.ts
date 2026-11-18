@@ -4,6 +4,7 @@ import { version } from "../../package.json";
 import {
   API_VERSIONS,
   belowMinimum,
+  CLIENT_KINDS,
   type ClientKind,
   clientToken,
   clientUpdateDetail,
@@ -14,6 +15,7 @@ import {
   MINIMUM_CLIENTS,
   parseClientHeader,
   RELEASE,
+  SECURITY_UPDATE_SENTENCE,
 } from "../client-version";
 import cases from "../fixtures/client-version/cases.json";
 
@@ -64,15 +66,19 @@ describe("release order", () => {
   });
 
   test("an app below a minimum is the one refused, and not one at it", () => {
-    const named = parseClientHeader("web/1.1.0 desktop/1.0.1");
-    expect(belowMinimum(named, MINIMUM_CLIENTS)).toEqual({
+    // As a server whose admin raised Desktop to 1.2.0 (OPENBOT_MINIMUM_CLIENTS=desktop=1.2.0).
+    const raised = cases.deployments.raised.minimumClients;
+    const named = parseClientHeader("web/1.1.0 desktop/1.1.0");
+    expect(belowMinimum(named, raised)).toEqual({
       kind: "desktop",
-      version: "1.0.1",
-      minimum: "1.0.2",
+      version: "1.1.0",
+      minimum: "1.2.0",
     });
     expect(
-      belowMinimum(parseClientHeader("desktop/1.0.2"), MINIMUM_CLIENTS),
+      belowMinimum(parseClientHeader("desktop/1.2.0"), raised),
     ).toBeUndefined();
+    // With no minimum, every app is served.
+    expect(belowMinimum(named, MINIMUM_CLIENTS)).toBeUndefined();
   });
 });
 
@@ -87,13 +93,15 @@ describe("what this release publishes", () => {
     });
   });
 
-  test("every app this release builds is at or above the minimum it serves", () => {
-    for (const minimum of Object.values(MINIMUM_CLIENTS))
-      expect(compareVersions(RELEASE, minimum)).toBeGreaterThanOrEqual(0);
+  test("no built-in minimum: every OpenBot release is less than 12 months old", () => {
+    // A server serves every app released in the last 12 months, so a release may name as a built-in
+    // minimum only a release published more than 12 months before it. The first OpenBot release,
+    // 0.0.1, is from 2026-08-16. Until one is old enough, only an admin raises a minimum.
+    expect(MINIMUM_CLIENTS).toEqual({});
   });
 
   test("the sentence a refused app reads says to update OpenBot", () => {
-    for (const kind of Object.keys(MINIMUM_CLIENTS) as ClientKind[]) {
+    for (const kind of CLIENT_KINDS) {
       const detail = clientUpdateDetail(kind, "1.2.0");
       expect(detail).toContain("Update OpenBot");
       expect(detail).not.toMatch(/reload|refresh|—/i);
@@ -101,6 +109,20 @@ describe("what this release publishes", () => {
     expect(clientUpdateDetail("desktop", "v1.2.0")).toBe(
       "This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.",
     );
+  });
+
+  test("a minimum raised for a security problem says so, for every app", () => {
+    expect(SECURITY_UPDATE_SENTENCE).toBe(
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    );
+    for (const kind of CLIENT_KINDS) {
+      expect(clientUpdateDetail(kind, "1.2.0", true)).toBe(
+        SECURITY_UPDATE_SENTENCE,
+      );
+      expect(clientUpdateDetail(kind, "1.2.0", false)).toBe(
+        clientUpdateDetail(kind, "1.2.0"),
+      );
+    }
   });
 });
 
@@ -113,15 +135,16 @@ describe("each app's decision from real deployment answers", () => {
     };
     test(`${each.deployment}, ${client.kind}/${client.version}${client.speaks ? ` speaking ${client.speaks}` : ""}: ${each.fit}`, () => {
       const deployment =
-        each.deployment === "before-v2"
-          ? ("before-v2" as const)
-          : cases.deployments[
-              each.deployment as keyof typeof cases.deployments
-            ];
+        cases.deployments[each.deployment as keyof typeof cases.deployments];
       const fit = compatibility(deployment, client);
       expect(fit.fit).toBe(each.fit as "ok" | "app" | "server");
+      // An app below a minimum raised for security is told so; one below a plain raise is not.
       if ("minimum" in each)
-        expect(fit).toEqual({ fit: "app", minimum: each.minimum as string });
+        expect(fit).toEqual({
+          fit: "app",
+          minimum: each.minimum as string,
+          ...("security" in each && each.security ? { security: true } : {}),
+        });
     });
   }
 });

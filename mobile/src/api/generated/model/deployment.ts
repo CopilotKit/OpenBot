@@ -44,6 +44,8 @@ export interface Deployment {
    */
   api?: string[];
   minimumClients?: MinimumClients;
+  /** The part of minimumClients raised because of a security problem in older releases: for each app named, the minimum is there for security. Absent or empty when none is. */
+  securityMinimumClients?: MinimumClients;
   /**
    * The version of what OpenBot Desktop supplies when it starts this OpenBot on its own computer. It changes when Desktop must supply something new.
    * @minimum 1

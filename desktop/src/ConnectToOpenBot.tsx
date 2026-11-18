@@ -3,7 +3,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import { asProblem, type Problem } from "./Problem";
 import { StatusLine } from "./SetupProgress";
-import { APP_TOO_OLD, UpdateOpenBot } from "./UpdateOpenBot";
+import {
+  APP_TOO_OLD,
+  APP_TOO_OLD_SECURITY,
+  UpdateOpenBot,
+} from "./UpdateOpenBot";
 
 /**
  * What the screen offers after something went wrong, chosen by the problem's `kind`. The sentence
@@ -11,7 +15,7 @@ import { APP_TOO_OLD, UpdateOpenBot } from "./UpdateOpenBot";
  *
  * `field`: the address is what to fix, so the sentence sits under the field and the field has the
  * focus. `sign-in` and `retry`: the screen's one button says Sign in again or Try again. `browser`:
- * that OpenBot is too old for this app, and a link opens it in the browser. `update`: this app is
+ * this app can't connect to that OpenBot, and a link opens it in the browser. `update`: this app is
  * too old for that OpenBot, and the way on is this app's own update. A kind this app does not know
  * is offered Try again.
  */
@@ -26,6 +30,7 @@ function offerFor(kind: string | null | undefined): Offer {
     case "too-old":
       return "browser";
     case APP_TOO_OLD:
+    case APP_TOO_OLD_SECURITY:
       return "update";
     case "sign-in-cancelled":
     case "sign-in-failed":

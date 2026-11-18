@@ -40,10 +40,11 @@ pub enum Kind {
     Unreachable,
     NotOpenBot,
     SinglePerson,
-    /// That OpenBot is older than this app can use: the window offers it in the browser.
     TooOld,
     /// This app is older than that OpenBot serves: the window offers this app's own update.
     AppTooOld,
+    /// The same, for a minimum that OpenBot raised because of a security problem.
+    AppTooOldSecurity,
     SignInCancelled,
     SignInFailed,
     /// Signed in, and then the OpenBot refused the new sign-in on the app's screens (401 or 403).
@@ -61,6 +62,7 @@ impl Kind {
             Kind::SinglePerson => "single-person",
             Kind::TooOld => "too-old",
             Kind::AppTooOld => crate::client_version::APP_TOO_OLD,
+            Kind::AppTooOldSecurity => crate::client_version::APP_TOO_OLD_SECURITY,
             Kind::SignInCancelled => "sign-in-cancelled",
             Kind::SignInFailed => "sign-in-failed",
             Kind::AccessRefused => "access-refused",
@@ -87,12 +89,13 @@ impl Kind {
             ),
             Kind::TooOld => format!(
                 "The OpenBot at {host} is on a release this app can't connect to yet. Ask whoever \
-                 runs your OpenBot to update it, or open it in your browser."
+                 runs it to update OpenBot, or open it in your browser."
             ),
             Kind::AppTooOld => format!(
                 "The OpenBot at {host} needs a newer version of this app. Update OpenBot, then \
                  connect again."
             ),
+            Kind::AppTooOldSecurity => crate::client_version::SECURITY_UPDATE.into(),
             Kind::SignInCancelled => "Sign-in didn't finish. Try again when you're ready.".into(),
             Kind::SignInFailed => format!(
                 "OpenBot couldn't sign you in at {host}. Try again, or ask whoever runs your OpenBot."
@@ -133,6 +136,7 @@ pub fn kind_of(problem: &Problem) -> Option<Kind> {
         Kind::SinglePerson,
         Kind::TooOld,
         Kind::AppTooOld,
+        Kind::AppTooOldSecurity,
         Kind::SignInCancelled,
         Kind::SignInFailed,
         Kind::AccessRefused,
@@ -219,16 +223,24 @@ mod tests {
             Kind::SessionEnded.said("openbot.example.com"),
             "Your sign-in to openbot.example.com has ended. Sign in again to keep going."
         );
-        // The two sentences every OpenBot app says when it and the OpenBot don't fit
-        // (`shared/client-version.ts`): "Ask whoever runs your OpenBot to update it" when that
-        // OpenBot is too old, "Update OpenBot" when this app is.
         assert_eq!(
             Kind::TooOld.said("127.0.0.1:4000"),
-            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs your OpenBot to update it, or open it in your browser."
+            "The OpenBot at 127.0.0.1:4000 is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser."
         );
+        // This app too old for that OpenBot, as every OpenBot app says it (`shared/client-version.ts`).
         assert_eq!(
             Kind::AppTooOld.said("openbot.example.com"),
             "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again."
+        );
+        assert_eq!(
+            Kind::AppTooOldSecurity.said("openbot.example.com"),
+            "This version of OpenBot has a security problem. Update to keep using it."
+        );
+        let insecure = Kind::AppTooOldSecurity.problem("openbot.example.com", "security");
+        assert_eq!(kind_of(&insecure), Some(Kind::AppTooOldSecurity));
+        assert_eq!(
+            serde_json::to_value(&insecure).unwrap()["kind"],
+            "app-too-old-security"
         );
         let too_old = Kind::AppTooOld.problem("openbot.example.com", "minimum 1.2.0");
         assert_eq!(kind_of(&too_old), Some(Kind::AppTooOld));

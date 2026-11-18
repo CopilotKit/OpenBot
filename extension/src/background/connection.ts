@@ -900,7 +900,9 @@ async function desktopConnect(
     return refused(
       error instanceof OpenBotError
         ? error.updateRequired
-          ? "client-update-required"
+          ? error.securityUpdateRequired
+            ? "client-security-update-required"
+            : "client-update-required"
           : "exchange-refused"
         : "openbot-unreachable",
     );

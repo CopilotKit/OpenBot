@@ -1,7 +1,7 @@
 /**
- * The screen the root layout shows in place of the app when it and its OpenBot can't work together: the app is too old
- * ("Update OpenBot") or the OpenBot is ("Ask whoever runs your OpenBot to update it"). It covers everything, headers
- * included, so nothing behind it is shown failing.
+ * The screen the root layout shows in place of the app when the app is too old for its OpenBot ("Update OpenBot", or
+ * the security sentence when the minimum was raised for a security problem). It covers everything, headers included,
+ * so nothing behind it is shown failing.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -16,7 +16,7 @@ import { serverUrl } from "./auth";
 import {
   APP_UPDATE_SENTENCE,
   onUpdateRequired,
-  SERVER_UPDATE_SENTENCE,
+  SECURITY_UPDATE_SENTENCE,
   type VersionVerdict,
 } from "./client-version";
 import { heading, muted } from "./ui";
@@ -44,8 +44,12 @@ export function useVersionVerdict() {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") void check();
     });
-    const stop = onUpdateRequired((detail) =>
-      setVerdict({ kind: "app", detail }),
+    const stop = onUpdateRequired((detail, security) =>
+      setVerdict(
+        security
+          ? { kind: "app", detail, security: true }
+          : { kind: "app", detail },
+      ),
     );
     return () => {
       subscription.remove();
@@ -69,16 +73,19 @@ export function VersionGate({
         <ActivityIndicator accessibilityLabel="Checking OpenBot" />
       ) : (
         <View style={styles.body}>
-          <Text accessibilityRole="header" style={heading}>
-            {verdict.kind === "app"
-              ? APP_UPDATE_SENTENCE
-              : SERVER_UPDATE_SENTENCE}
-          </Text>
-          <Text style={styles.sentence}>
-            {verdict.kind === "app"
-              ? verdict.detail
-              : `The OpenBot at ${new URL(serverUrl).host} is on a release this app can't connect to yet.`}
-          </Text>
+          {verdict.security ? (
+            // The security sentence is the heading, and says what to do: nothing repeats it below.
+            <Text accessibilityRole="header" style={heading}>
+              {SECURITY_UPDATE_SENTENCE}
+            </Text>
+          ) : (
+            <>
+              <Text accessibilityRole="header" style={heading}>
+                {APP_UPDATE_SENTENCE}
+              </Text>
+              <Text style={styles.sentence}>{verdict.detail}</Text>
+            </>
+          )}
           <Text style={muted}>{serverUrl}</Text>
           <View style={styles.action}>
             <Button title="Try again" onPress={onRetry} />

@@ -4,7 +4,7 @@ loopback port that answers the addresses the app uses as the real one does.
 
 - the public deployment answer and the authorization server metadata (RFC 8414), at the real paths,
   the deployment as one of the real answers in `shared/fixtures/client-version/cases.json` when
-  asked (`Shape::Answers`), and `/api/capabilities` as an OpenBot from before the v2 API answers it;
+  asked (`Shape::Answers`);
 - the authorization endpoint, which accepts only the public client, `response_type=code`, an S256
   challenge and a redirect of exactly `http://127.0.0.1:<port>/callback`, and sends the browser
   back with a code or with `error=access_denied`;
@@ -63,12 +63,9 @@ pub enum Shape {
     /// Its revocation endpoint fails with a 500 whatever it is sent.
     RevokeBroken,
     /// Signs in as `Current` does, and answers `deployment` with one of the real answers in
-    /// `shared/fixtures/client-version/cases.json`, by name: `current`, `v1.1.0`, `raised` or
-    /// `v3-only`.
+    /// `shared/fixtures/client-version/cases.json`, by name: `current`, `v1.1.0`, `raised`,
+    /// `security` or `v3-only`.
     Answers(&'static str),
-    /// An OpenBot from before the v2 API, as 1.0.3 answers: `deployment` is 404, `/api/capabilities`
-    /// answers as the fixture's `before-v2-capabilities`, and apps can't sign in to it.
-    BeforeV2,
 }
 
 const SCOPES: [&str; 4] = ["openid", "profile", "offline_access", "openbot"];
@@ -430,10 +427,6 @@ async fn answer(
                 StatusCode::OK,
                 crate::client_version::fixture_deployment(name),
             ),
-            Shape::BeforeV2 => json(
-                StatusCode::NOT_FOUND,
-                serde_json::json!({ "error": "not_found" }),
-            ),
             _ => json(
                 StatusCode::OK,
                 serde_json::json!({
@@ -446,16 +439,10 @@ async fn answer(
                 }),
             ),
         },
-        // Every OpenBot answers what it offers here, before sign-in, the releases from before the
-        // v2 API included.
-        ("GET", "/api/capabilities") => json(
-            StatusCode::OK,
-            crate::client_version::fixture_deployment("before-v2-capabilities"),
-        ),
         ("GET", "/.well-known/oauth-authorization-server/api/auth") => {
             if matches!(
                 shape,
-                Shape::NoMetadata | Shape::Personal | Shape::LocalEvaluation | Shape::BeforeV2
+                Shape::NoMetadata | Shape::Personal | Shape::LocalEvaluation
             ) {
                 return Ok(json(
                     StatusCode::NOT_FOUND,

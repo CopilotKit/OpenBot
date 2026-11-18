@@ -4,7 +4,8 @@
  * Every request names this app in the `OpenBot-Client` header (`lib/client.ts`). An OpenBot whose
  * oldest served release of that app is newer than it refuses every request except its `deployment`
  * with a 400 problem whose code is CLIENT_UPDATE_REQUIRED, naming the app (`client`) and the oldest
- * release it serves (`minimumVersion`). Inside OpenBot Desktop's window the desktop app adds its own
+ * release it serves (`minimumVersion`), and `security: true` when that minimum was raised because of a
+ * security problem in older releases. Inside OpenBot Desktop's window the desktop app adds its own
  * name to the page's header, so there the app named can be OpenBot Desktop rather than this page.
  *
  * `lib/client.ts` hands every 400 here before the caller sees it. The first refusal is kept until the
@@ -20,8 +21,15 @@ import {
   isVersion,
 } from "@openbot/shared/client-version";
 
-/** The app the OpenBot refused, and the oldest release of it that OpenBot serves. */
-export type ClientRefusal = { client: ClientKind; minimumVersion?: string };
+/**
+ * The app the OpenBot refused, the oldest release of it that OpenBot serves, and `security` when that
+ * minimum is there for a security problem.
+ */
+export type ClientRefusal = {
+  client: ClientKind;
+  minimumVersion?: string;
+  security?: true;
+};
 
 let refused: ClientRefusal | null = null;
 const listeners = new Set<() => void>();
@@ -33,15 +41,20 @@ export function clientRefusalOf(body: unknown): ClientRefusal | null {
     code?: unknown;
     client?: unknown;
     minimumVersion?: unknown;
+    security?: unknown;
   };
   if (problem.code !== CLIENT_UPDATE_REQUIRED) return null;
   // A refusal that names no app we know is still this page's to act on: it is the page that asked.
   const client = (CLIENT_KINDS as readonly unknown[]).includes(problem.client)
     ? (problem.client as ClientKind)
     : "web";
-  return isVersion(problem.minimumVersion)
-    ? { client, minimumVersion: problem.minimumVersion }
-    : { client };
+  return {
+    client,
+    ...(isVersion(problem.minimumVersion)
+      ? { minimumVersion: problem.minimumVersion }
+      : {}),
+    ...(problem.security === true ? { security: true as const } : {}),
+  };
 }
 
 /**

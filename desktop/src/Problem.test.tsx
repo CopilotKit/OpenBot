@@ -88,6 +88,36 @@ test("an OpenBot that needs a newer app says Update OpenBot and Update and resta
   await waitFor(() => expect(update.textContent).toBe("Downloading…"));
 });
 
+/** The same, for a minimum the OpenBot on this computer raised because of a security problem. */
+const LOCAL_APP_TOO_OLD_SECURITY = {
+  said: "This version of OpenBot has a security problem. Update to keep using it.",
+  detail:
+    "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+  kind: "app-too-old-security",
+};
+
+// For a security problem, the security sentence is the heading, in place of Update OpenBot, with the
+// same update and nothing repeating it below.
+test("an OpenBot that raised this app's minimum for a security problem says so in place of Update OpenBot, with the same update", async () => {
+  answers = {
+    app_update_offer: {
+      version: null,
+      current: "1.1.0",
+      installing: null,
+      updatesItself: true,
+    },
+  };
+  const view = render(<Failure problem={LOCAL_APP_TOO_OLD_SECURITY} />);
+  expect(
+    view.getByRole("heading", { name: LOCAL_APP_TOO_OLD_SECURITY.said }),
+  ).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "Update OpenBot" })).toBeNull();
+  expect(view.getAllByText(LOCAL_APP_TOO_OLD_SECURITY.said)).toHaveLength(1);
+  expect(view.queryByText("That didn’t finish")).toBeNull();
+  const update = view.getByRole("button", { name: "Update and restart" });
+  await waitFor(() => expect(update).toHaveProperty("disabled", false));
+});
+
 // A build that never updates itself has nothing to press: it says how to get one that does.
 test("an OpenBot that needs a newer app, on a build that doesn't update itself, says how to get one", async () => {
   answers = {

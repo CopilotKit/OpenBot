@@ -7,14 +7,26 @@ import { type AppUpdate, describe } from "./UpdateOffer";
 
 /**
  * The `kind` the shell gives a problem when this app is older than the OpenBot it talks to serves
- * (`client_version::APP_TOO_OLD`): connected to a company's OpenBot whose admin raised the oldest
- * app it serves, or with an OpenBot on this computer that needs a newer app.
+ * (`client_version::APP_TOO_OLD`): connected to an OpenBot, such as OpenBot Cloud, that raised the
+ * oldest app it serves, or with an OpenBot on this computer that needs a newer app.
  */
 export const APP_TOO_OLD = "app-too-old";
 
-/** Whether a problem is this app being too old for its OpenBot. */
+/**
+ * The same, when the minimum this app is below was raised because of a security problem in older
+ * releases (`client_version::APP_TOO_OLD_SECURITY`). The shell's sentence says so, and the window
+ * puts it where "Update OpenBot" would be.
+ */
+export const APP_TOO_OLD_SECURITY = "app-too-old-security";
+
+/** Whether a problem is this app being too old for its OpenBot, for a security problem or not. */
 export function appTooOld(problem: Problem | null | undefined): boolean {
-  return problem?.kind === APP_TOO_OLD;
+  return problem?.kind === APP_TOO_OLD || forSecurity(problem);
+}
+
+/** Whether this app is too old for its OpenBot because of a security problem. */
+export function forSecurity(problem: Problem | null | undefined): boolean {
+  return problem?.kind === APP_TOO_OLD_SECURITY;
 }
 
 /** How often to ask the shell how an install is going, as Check for updates does. */
@@ -170,22 +182,24 @@ export function UpdateOpenBot() {
 /**
  * An OpenBot that needs a newer version of this app, wherever setup shows a problem: the shell's
  * sentence, which says "Update OpenBot", and Update and restart. Nothing failed, so it is not drawn as
- * a failure: no "That didn't finish", no technical details, no troubleshooting logs.
+ * a failure: no "That didn't finish", no technical details, no troubleshooting logs. For a security
+ * problem the shell's sentence is the heading, in place of "Update OpenBot", and is not said twice.
  */
 export function AppTooOld({
   problem,
   headed = true,
 }: {
   problem: Problem;
-  /** False where the screen's own heading already says "Update OpenBot". */
+  /** False where the screen's own heading already says it. */
   headed?: boolean;
 }) {
+  const security = forSecurity(problem);
   return (
     // The calm notice the connect screen uses for a connection that didn't work, not the failure
     // card: nothing failed.
     <div className="local-alert needs app-too-old" role="alert">
-      {headed && <h2>Update OpenBot</h2>}
-      <p>{problem.said}</p>
+      {headed && <h2>{security ? problem.said : "Update OpenBot"}</h2>}
+      {!security && <p>{problem.said}</p>}
       <UpdateOpenBot />
     </div>
   );
