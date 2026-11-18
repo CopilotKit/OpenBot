@@ -78,6 +78,85 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_DOCUMENT_BYTES = MAX_IMAGE_BYTES;
 
 /**
+ * The largest picture drawn in place in a conversation. A larger one is shown as its file (its
+ * name, kind and size) with a way to open it full size, and is fetched only when somebody does.
+ *
+ * Pictures go up to 100MB on an install with an object store, and a thumbnail is drawn from the
+ * whole file: drawing every picture would cost each reader that much on first paint. Set to the
+ * image limit every install had before (`MAX_IMAGE_BYTES`), so every picture drawn in place before
+ * larger ones were allowed is still drawn in place.
+ */
+export const LARGEST_PICTURE_DRAWN_INLINE = MAX_IMAGE_BYTES;
+
+/**
+ * How large an attached file of each kind may be, in bytes, as one server answers it.
+ *
+ * THE CONSTANTS ABOVE ARE THE DEFAULT, NOT THE ONLY ANSWER. A server may take larger files, and
+ * says so in the API's `deployment` (`attachmentLimits`). The composer refuses at pick time with the
+ * server's numbers, and the server refuses again on arrival with the same ones, so the two refusals
+ * still agree: they are one answer read from one place, now the server rather than this file.
+ *
+ * What reaches the model is a separate limit and is the server's alone. A file larger than a model
+ * provider takes is still stored and downloadable; the server hands the model what it can read, or a
+ * note saying the file is too large for it to view.
+ */
+export type AttachmentLimits = {
+  /** An image. */
+  imageBytes: number;
+  /** A document whose text the server reads out (a PDF). */
+  documentBytes: number;
+  /** Text and every other accepted kind. */
+  fileBytes: number;
+};
+
+/** The limits a server that does not publish its own takes: the constants above. */
+export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
+  imageBytes: MAX_IMAGE_BYTES,
+  documentBytes: MAX_DOCUMENT_BYTES,
+  fileBytes: MAX_FILE_BYTES,
+};
+
+/**
+ * The limits a server published, read field by field.
+ *
+ * Absent reads as today's numbers: an older server publishes nothing and takes exactly the defaults,
+ * so assuming more would have the composer pass files that server then refuses. A field that is not
+ * a positive whole number is read the same way, rather than as a limit of zero that refuses every
+ * file or one of infinity that refuses none.
+ */
+export function attachmentLimitsFrom(published: unknown): AttachmentLimits {
+  const fields =
+    typeof published === "object" && published !== null
+      ? (published as Record<string, unknown>)
+      : {};
+  const read = (key: keyof AttachmentLimits): number => {
+    const value = fields[key];
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+      ? value
+      : DEFAULT_ATTACHMENT_LIMITS[key];
+  };
+  return {
+    imageBytes: read("imageBytes"),
+    documentBytes: read("documentBytes"),
+    fileBytes: read("fileBytes"),
+  };
+}
+
+/** The largest file of any kind these limits take: the ceiling for a file whose kind is not known yet. */
+export function largestAttachmentBytes(limits: AttachmentLimits): number {
+  return Math.max(limits.imageBytes, limits.documentBytes, limits.fileBytes);
+}
+
+/**
+ * A limit as a person reads it: whole megabytes, counted in 1,048,576 bytes as the limits are
+ * ("8MB", "1MB", "100MB"). One function for the composer and the server, so a refusal names the same
+ * number whichever side said it.
+ */
+export function formatAttachmentLimit(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
+}
+
+/**
  * How much extracted text may reach the model from one file.
  *
  * The real limit on a text attachment is tokens, not bytes: a one-megabyte file is a few hundred
@@ -119,34 +198,144 @@ export function mayBeTruncatedForModel(sizeBytes: number): boolean {
 }
 
 /**
- * `image/svg+xml` is deliberately absent.
+ * EVERY KIND OF FILE OPENBOT TAKES, IN ONE LIST, AND THE ONE PLACE TO ADD ONE.
  *
- * An SVG is an image and can also carry script. Served inline from this app's own origin, one
- * pasted into a channel is stored XSS against everybody in it. Nobody pastes an SVG expecting a
- * model to read it, so it is refused at the door rather than sanitised.
+ * What a person may attach and what a Bot may send from its computer are both read from here: the
+ * composer's picker and its refusals, the server's sniff and its refusals, the Bot's send tool, its
+ * description and its refusal sentence. So the two can never take different files, and a kind added
+ * here is added everywhere at once.
+ *
+ * A row is the media type the server serves the file as, its kind (which decides its size limit and
+ * how the model reads it), the name a person reads, and the extensions that claim it. A Bot's file
+ * has no browser to name its type, so its extension is the claim; the bytes still decide.
+ *
+ * ADDING A ROW IS NOT ALL OF ADDING A KIND. The server must recognise it by its bytes (images and
+ * documents by their signatures, text only when it is UTF-8), and the model must have a way to read
+ * it (a document's text is extracted on the server). Without both, a row makes a file the composer
+ * offers and the server refuses. The test beside this file pins today's set, so a change here is one
+ * somebody decided on.
+ *
+ * `image/svg+xml` is deliberately absent. An SVG is an image and can also carry script. Served inline
+ * from this app's own origin, one pasted into a channel is stored XSS against everybody in it. Nobody
+ * pastes an SVG expecting a model to read it, so it is refused at the door rather than sanitised.
+ *
+ * PDF is the one document today: its text is extracted before the model sees it. It is accepted only
+ * when the bytes start with the PDF signature; a claim of `application/pdf` on anything else is
+ * refused. Served back as a download, never inline, like every type that is not an image.
  */
-export const ACCEPTED_IMAGE_MIME = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-] as const;
+export const ACCEPTED_FILE_TYPES = [
+  { mimeType: "image/png", kind: "image", name: "PNG", extensions: ["png"] },
+  {
+    mimeType: "image/jpeg",
+    kind: "image",
+    name: "JPEG",
+    extensions: ["jpg", "jpeg"],
+  },
+  { mimeType: "image/gif", kind: "image", name: "GIF", extensions: ["gif"] },
+  { mimeType: "image/webp", kind: "image", name: "WebP", extensions: ["webp"] },
+  {
+    mimeType: "application/pdf",
+    kind: "document",
+    name: "PDF",
+    extensions: ["pdf"],
+  },
+  {
+    mimeType: "text/plain",
+    kind: "text",
+    name: "text",
+    extensions: ["txt", "text", "log"],
+  },
+  {
+    mimeType: "text/markdown",
+    kind: "text",
+    name: "Markdown",
+    extensions: ["md", "markdown"],
+  },
+  { mimeType: "text/csv", kind: "text", name: "CSV", extensions: ["csv"] },
+  {
+    mimeType: "application/json",
+    kind: "text",
+    name: "JSON",
+    extensions: ["json"],
+  },
+] as const satisfies readonly {
+  mimeType: string;
+  kind: "image" | "text" | "document";
+  name: string;
+  extensions: readonly string[];
+}[];
 
-export const ACCEPTED_TEXT_MIME = [
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-] as const;
+export type AcceptedFileType = (typeof ACCEPTED_FILE_TYPES)[number];
+
+type MimeTypeOf<Kind extends AcceptedFileType["kind"]> = Extract<
+  AcceptedFileType,
+  { kind: Kind }
+>["mimeType"];
+
+/** The media types of one kind, from {@link ACCEPTED_FILE_TYPES}. */
+function mimeTypesOf<Kind extends AcceptedFileType["kind"]>(
+  kind: Kind,
+): readonly MimeTypeOf<Kind>[] {
+  return ACCEPTED_FILE_TYPES.filter((type) => type.kind === kind).map(
+    (type) => type.mimeType as MimeTypeOf<Kind>,
+  );
+}
+
+export const ACCEPTED_IMAGE_MIME = mimeTypesOf("image");
+
+export const ACCEPTED_TEXT_MIME = mimeTypesOf("text");
+
+/** Documents whose text the server extracts before the model sees them. Today that is PDF alone. */
+export const ACCEPTED_DOCUMENT_MIME = mimeTypesOf("document");
+
+/** The accepted type a media type names, or undefined for one OpenBot does not take. */
+export function acceptedFileTypeOf(
+  mimeType: string,
+): AcceptedFileType | undefined {
+  const mediaType = mediaTypeOf(mimeType);
+  return ACCEPTED_FILE_TYPES.find((type) => type.mimeType === mediaType);
+}
 
 /**
- * Documents whose text the server extracts before the model sees them. Today that is PDF alone.
- *
- * Accepted only when the bytes start with the PDF signature (`attachment-mime.ts` on the server);
- * a claim of `application/pdf` on anything else is refused. Served back as a download, never inline,
- * like every type that is not an image.
+ * The type a file's name claims, for the server's sniff to corroborate. Blank for an extension no
+ * accepted type has, which the sniff reads as a claim that names nothing.
  */
-export const ACCEPTED_DOCUMENT_MIME = ["application/pdf"] as const;
+export function claimedTypeOfName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return "";
+  const extension = name.slice(dot + 1).toLowerCase();
+  return (
+    ACCEPTED_FILE_TYPES.find((type) =>
+      (type.extensions as readonly string[]).includes(extension),
+    )?.mimeType ?? ""
+  );
+}
+
+/**
+ * What can be sent, as a person or a model reads it: "images (PNG, JPEG, GIF, WebP), PDFs, and text,
+ * Markdown, CSV or JSON files". Built from {@link ACCEPTED_FILE_TYPES}, so it never lists a kind the
+ * server refuses or leaves out one it takes.
+ */
+export function acceptedFilesInWords(): string {
+  const names = (kind: AcceptedFileType["kind"]) =>
+    ACCEPTED_FILE_TYPES.filter((type) => type.kind === kind).map(
+      (type) => type.name,
+    );
+  const either = (words: string[]) =>
+    words.length < 2
+      ? words.join("")
+      : `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
+  const images = names("image");
+  const documents = names("document");
+  const texts = names("text");
+  const groups = [
+    images.length > 0 ? `images (${images.join(", ")})` : "",
+    ...documents.map((name) => `${name}s`),
+    texts.length > 0 ? `${either(texts)} files` : "",
+  ].filter(Boolean);
+  if (groups.length < 2) return groups.join("");
+  return `${groups.slice(0, -1).join(", ")}, and ${groups[groups.length - 1]}`;
+}
 
 /**
  * THE MEDIA TYPE ON ITS OWN: LOWER CASE, PARAMETERS GONE — AND THE ONLY FORM ANYTHING HERE COMPARES.
@@ -302,7 +491,12 @@ export type AttachmentSource =
 export type AttachmentPart = {
   type: "image" | "document";
   source: AttachmentSource;
-  metadata?: { attachmentId: string; filename?: string };
+  metadata?: {
+    attachmentId: string;
+    filename?: string;
+    /** The file's size, so a reader can decide how to show it without fetching it. */
+    sizeBytes?: number;
+  };
 };
 
 /** The relative URL form stored in a sent message. Resolved server-side, never by a provider. */

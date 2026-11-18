@@ -2519,6 +2519,14 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer
+            with this reply, in the order it sent them. Each is an attachment of the
+            conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:

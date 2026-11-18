@@ -1690,7 +1690,7 @@ paths:
         - Organization settings
       operationId: getDeployment
       summary: Read what this OpenBot offers
-      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
+      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
       x-openbot-singleton: true
       security:
         - {}
@@ -8482,7 +8482,7 @@ paths:
         - Routines
       operationId: createRoutine
       summary: Create a routine
-      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. There is no operation to change a routine: that is done by asking its Bot. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. updateRoutine changes one. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -8536,6 +8536,57 @@ paths:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
       - $ref: '#/components/parameters/RoutineId'
+    patch:
+      tags:
+        - Routines
+      operationId: updateRoutine
+      summary: Change a routine
+      description: 'Change one of the caller''s routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine''s, and its next run is worked out from now. One that does not exist, or is somebody else''s, is not found. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoutineRequest'
+            examples:
+              request:
+                value:
+                  instruction: Summarize my unread mail, today's calendar and the weather.
+                  cron: 30 8 * * 1-5
+      responses:
+        '200':
+          description: The routine, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     delete:
       tags:
         - Routines
@@ -22231,6 +22282,8 @@ components:
         botComputers:
           type: boolean
           description: 'Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).'
+        attachmentLimits:
+          $ref: '#/components/schemas/AttachmentLimits'
     AllowlistEntry:
       type: string
       minLength: 1
@@ -23745,6 +23798,26 @@ components:
       minLength: 1
       maxLength: 1000
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+    AttachmentLimits:
+      type: object
+      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a PDF and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
+      required:
+        - imageBytes
+        - documentBytes
+        - fileBytes
+      properties:
+        imageBytes:
+          type: integer
+          minimum: 1
+          description: The largest image.
+        documentBytes:
+          type: integer
+          minimum: 1
+          description: The largest PDF.
+        fileBytes:
+          type: integer
+          minimum: 1
+          description: The largest text file, or a file of any other kind.
     ConversationWork:
       type: object
       description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
@@ -24131,6 +24204,27 @@ components:
         personId:
           type: string
           description: The person who is now in the conversation.
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
     ConversationMessage:
       type: object
       description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
@@ -24203,6 +24297,12 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:
@@ -24269,27 +24369,6 @@ components:
           type: string
           description: Names the message being written, so the files of two windows are counted apart.
           maxLength: 200
-    Attachment:
-      type: object
-      description: A file held for a message, or sent with one.
-      required:
-        - id
-        - name
-        - mimeType
-        - sizeBytes
-      properties:
-        id:
-          type: string
-          description: The attachment's id.
-        name:
-          type: string
-          description: The file's name.
-        mimeType:
-          type: string
-          description: The type OpenBot recognised it as.
-        sizeBytes:
-          type: integer
-          minimum: 0
     VoiceCallRequest:
       type: object
       additionalProperties: false
@@ -27692,6 +27771,7 @@ components:
         - id
         - botId
         - schedule
+        - cron
         - timezone
         - instruction
         - title
@@ -27711,6 +27791,9 @@ components:
         schedule:
           type: string
           description: When it runs, as text to show.
+        cron:
+          type: string
+          description: 'The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.'
         timezone:
           type: string
           description: The IANA time zone the schedule is read in.
@@ -27815,6 +27898,34 @@ components:
       properties:
         routine:
           $ref: '#/components/schemas/Routine'
+    UpdateRoutineRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: What to change. Only the fields sent change, and at least one must be sent.
+      properties:
+        title:
+          type: string
+          description: A new name, at most 100 characters. Empty takes the name away, and the routine is called by what it does.
+          maxLength: 100
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: What the Bot does on each run from now on. At most 2,000 characters.
+        cron:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: 'A new schedule, as five cron fields: minute, hour, day of month, month, day of week. The same rules as a new routine''s.'
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: A new IANA time zone to read the schedule in.
     RoutineSwitch:
       type: object
       required:
@@ -41754,6 +41865,10 @@ components:
         builtInBots: true
         isolatedBots: false
         botComputers: true
+        attachmentLimits:
+          imageBytes: 104857600
+          documentBytes: 104857600
+          fileBytes: 104857600
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
@@ -43321,6 +43436,7 @@ components:
           - id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
             botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
             schedule: Weekdays at 09:00
+            cron: 0 9 * * 1-5
             timezone: America/New_York
             instruction: Summarize my unread mail and today's calendar.
             title: Morning brief
@@ -43344,6 +43460,7 @@ components:
           id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           schedule: Weekdays at 09:00
+          cron: 0 9 * * 1-5
           timezone: America/New_York
           instruction: Summarize my unread mail and today's calendar.
           title: Morning brief

@@ -181,10 +181,11 @@ def bot_settings(
 
 
 # `requiresResponsesApi` in shared/model-providers.ts, the rule every Bot in the box decides by:
-# `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, and the `-pro` and
+# `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, `gpt-5.4*` and
+# `gpt-5.5*` take them on Chat Completions only without a reasoning effort, and the `-pro` and
 # `-codex` models are not served on Chat Completions at all.
 _RESPONSES_API_MODEL = re.compile(
-    r"^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
+    r"^gpt-5\.[4-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
 )
 
 
