@@ -177,7 +177,28 @@ impl Installation {
             );
         }
         settings.extend(openbot_env::Ports::default().settings());
-        openbot_env::write(&env_file, &settings, &BTreeMap::new())
+        /*
+         * A release from before the personal edition (its Compose file never names
+         * OPENBOT_EDITION) ran the team edition, with its supervisor, under its own app, which wrote
+         * none of the personal edition's settings. Started here as its app started it: without
+         * them. Every later release reads them, this tree's included.
+         */
+        let mut purge = BTreeMap::new();
+        let compose_file =
+            std::fs::read_to_string(self.root.join("docker-compose.yml")).unwrap_or_default();
+        if !compose_file.contains("OPENBOT_EDITION") {
+            for key in [
+                "OPENBOT_EDITION",
+                "COMPUTER_SUPERVISOR_URL",
+                "COMPUTER_SUPERVISOR_CONTAINER_URL",
+                "COMPUTER_PERSON_ID",
+            ] {
+                if let Some(value) = settings.remove(key) {
+                    purge.insert(key.to_string(), value);
+                }
+            }
+        }
+        openbot_env::write(&env_file, &settings, &purge)
             .map_err(|error| Problem::from(error.to_string()))?;
         Ok(settings)
     }
