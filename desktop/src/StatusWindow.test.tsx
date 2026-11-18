@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -230,7 +230,7 @@ test("once a start finishes elsewhere, the services row follows without Refresh"
     ),
   );
   // Told the Start finished, it asks the services' readiness again.
-  said("status:refresh");
+  await act(async () => said("status:refresh"));
   await waitFor(() =>
     expect(
       view.getByRole("region", { name: "OpenBot's services" }).textContent,
@@ -244,11 +244,11 @@ test("once a start finishes elsewhere, the services row follows without Refresh"
 });
 
 /**
- * Seen on a Mac: opened while OpenBot updated itself, the App row said Stopped and offered Start.
- * An update stops OpenBot and starts it again by itself, as the main window's Updating OpenBot
- * says. The row says Updating, with nothing to press.
+ * Seen on a Mac: opened while OpenBot updated itself, the App row said Stopped and offered Start,
+ * and so did the services row. An update stops OpenBot and starts it again by itself, as the main
+ * window's Updating OpenBot says. The App row says Updating, and neither row has Start.
  */
-test("while OpenBot updates, the App row says so and offers no Start", async () => {
+test("while OpenBot updates, the App row says so and nothing offers Start", async () => {
   invokeHandler = answers({ desktop_status: { ...stopped, updating: true } });
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const app = await view.findByRole("region", { name: "App" });
@@ -257,6 +257,15 @@ test("while OpenBot updates, the App row says so and offers no Start", async () 
   expect(app.textContent).toContain(
     "OpenBot is updating and opens by itself when it's done.",
   );
+  // Nor do the services: the update starts what it needs.
+  const services = view.getByRole("region", { name: "OpenBot's services" });
+  await waitFor(() => expect(services.textContent).toContain("Stopped"));
+  expect(
+    within(services)
+      .queryAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual([]);
+  expect(view.queryByRole("button", { name: "Start" })).toBeNull();
 });
 
 /**

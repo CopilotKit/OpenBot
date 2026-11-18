@@ -2572,7 +2572,7 @@ describe.skipIf(!asked)(
       });
 
     for (const colorScheme of ["light", "dark"] as const) {
-      test(`while OpenBot updates, the App row says Updating with nothing to press (${colorScheme})`, async () => {
+      test(`while OpenBot updates, the App row says Updating and nothing offers Start (${colorScheme})`, async () => {
         const page = await browser.newPage({
           viewport: { width: 640, height: 720 },
           colorScheme,
@@ -2584,6 +2584,11 @@ describe.skipIf(!asked)(
           await shoot(page, "updating", colorScheme);
           expect(await appRow(page)).toEqual({
             state: "Updating",
+            buttons: [],
+          });
+          // Nor the services row: the update starts what it needs.
+          expect(await servicesRow(page)).toEqual({
+            state: "Stopped",
             buttons: [],
           });
         } finally {

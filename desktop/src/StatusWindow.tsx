@@ -369,59 +369,63 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                   group="back-end"
                   parts={status.intelligenceContainers}
                 />
-                <div className="row">
-                  {belowFloor ? (
-                    intelligenceRunning && (
+                {/* Stopped during an update of OpenBot, nothing: the update starts what it needs,
+                    as the App row says. Seen on a Mac, both rows offered Start mid-update. */}
+                {!(updating && !belowFloor && !intelligenceRunning) && (
+                  <div className="row">
+                    {belowFloor ? (
+                      intelligenceRunning && (
+                        <button
+                          type="button"
+                          className="quiet"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            act("intelligence-stop", () => intelligence("stop"))
+                          }
+                        >
+                          Stop
+                        </button>
+                      )
+                    ) : intelligenceRunning ? (
+                      <>
+                        <button
+                          type="button"
+                          className="quiet"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            act("intelligence-restart", async () => {
+                              await intelligence("stop");
+                              await intelligence("start");
+                            })
+                          }
+                        >
+                          Restart
+                        </button>
+                        <button
+                          type="button"
+                          className="quiet"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            act("intelligence-stop", () => intelligence("stop"))
+                          }
+                        >
+                          Stop
+                        </button>
+                      </>
+                    ) : (
                       <button
                         type="button"
                         className="quiet"
                         disabled={busy !== null}
                         onClick={() =>
-                          act("intelligence-stop", () => intelligence("stop"))
+                          act("intelligence-start", () => intelligence("start"))
                         }
                       >
-                        Stop
+                        Start
                       </button>
-                    )
-                  ) : intelligenceRunning ? (
-                    <>
-                      <button
-                        type="button"
-                        className="quiet"
-                        disabled={busy !== null}
-                        onClick={() =>
-                          act("intelligence-restart", async () => {
-                            await intelligence("stop");
-                            await intelligence("start");
-                          })
-                        }
-                      >
-                        Restart
-                      </button>
-                      <button
-                        type="button"
-                        className="quiet"
-                        disabled={busy !== null}
-                        onClick={() =>
-                          act("intelligence-stop", () => intelligence("stop"))
-                        }
-                      >
-                        Stop
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="quiet"
-                      disabled={busy !== null}
-                      onClick={() =>
-                        act("intelligence-start", () => intelligence("start"))
-                      }
-                    >
-                      Start
-                    </button>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
                 {belowFloor ? (
                   <p className="footnote">{SECURITY_FLOOR_SENTENCE}</p>
                 ) : (
