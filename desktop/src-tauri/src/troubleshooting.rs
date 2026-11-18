@@ -4,8 +4,9 @@
 //! Before this, finding out why a fresh install said "The back end could not start" took asking for
 //! two files by path, the version, and Docker's details, one message at a time. Now one action
 //! gathers them: which build, on what, what failed, the container engine's version and size as the
-//! back end's own engine check measures it (`local_eval::measured_engine`), and the end of this app's
-//! newest log file and of the back end CLI's log.
+//! back end's own engine check measures it (`local_eval::measured_engine`), the end of this app's
+//! newest log file and of the back end CLI's log, and the end of the speech log
+//! (`speech::diagnostics`), which says what dictation and narration did and never what was said.
 //!
 //! EVERY LINE IS REDACTED, because the point is that a person pastes this into a third-party AI.
 //! This app's own log is scrubbed as it is written (`logging::scrub`), but the CLI's is not: it logs
@@ -26,6 +27,11 @@ pub const DESKTOP_TAIL_BYTES: u64 = 192 * 1024;
 
 /// How much of the end of the CLI's log goes in. It writes far less than the shell does.
 pub const CLI_TAIL_BYTES: u64 = 64 * 1024;
+
+/// How much of the end of the speech log goes in, across it and the one it set aside. A language
+/// is noted only when its answer changes, so the line that says why dictation was refused can sit
+/// well before the latest sessions.
+pub const SPEECH_TAIL_BYTES: u64 = 128 * 1024;
 
 /// The most of what failed that goes in: the window passes it, and only its start says anything.
 pub const FAILURE_BYTES: usize = 16 * 1024;
@@ -66,6 +72,9 @@ pub struct Facts {
     pub cli_log: Option<(PathBuf, String)>,
     /// The end of the server container's log, or None when the server isn't running.
     pub server_log: Option<String>,
+    /// The end of the speech log, oldest first: the end of the one set aside (`speech.log.1`) when
+    /// the current one is shorter than the budget, then the current one. Empty when there is none.
+    pub speech_log: Vec<(PathBuf, String)>,
 }
 
 /// Where `gather` finds what goes into a bundle.
@@ -114,8 +123,32 @@ pub fn gather(sources: Sources) -> String {
             .home
             .and_then(|home| read(cli_log(Path::new(home)), CLI_TAIL_BYTES)),
         server_log: sources.server_log,
+        speech_log: crate::speech::diagnostics::path()
+            .map(|path| speech_log(&path, SPEECH_TAIL_BYTES))
+            .unwrap_or_default(),
     };
     bundle(&facts, sources.home)
+}
+
+/// The last `max_bytes` of the speech log at `current`, oldest first: when the current file is
+/// shorter than that, the end of the one it set aside (`speech.log.1`) comes before it.
+pub fn speech_log(current: &Path, max_bytes: u64) -> Vec<(PathBuf, String)> {
+    let mut found = Vec::new();
+    // What the current file leaves of the budget when it is read whole; nothing when it was cut.
+    let mut left = max_bytes;
+    if let Ok(length) = std::fs::metadata(current).map(|meta| meta.len()) {
+        left = max_bytes.saturating_sub(length);
+        if let Ok(text) = tail(current, max_bytes) {
+            found.push((current.to_path_buf(), text));
+        }
+    }
+    let set_aside = crate::speech::diagnostics::set_aside(current);
+    if left > 0 {
+        if let Ok(text) = tail(&set_aside, left) {
+            found.insert(0, (set_aside, text));
+        }
+    }
+    found
 }
 
 /// The engine's version, size and disk use, asked at once: each within the engine check's own
@@ -198,6 +231,22 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
         Some(lines) if !lines.is_empty() => out.push_str(&format!("```\n{lines}\n```\n")),
         Some(_) => out.push_str("None in the server's recent log.\n"),
         None => out.push_str("The server isn't running.\n"),
+    }
+    // What dictation and narration did: which languages this computer said it could recognise,
+    // permissions, the microphone, and the recognizer's errors. Never a word of what was said.
+    out.push_str("\n## Speech log (end)\n\n");
+    if facts.speech_log.is_empty() {
+        out.push_str("Not found on this computer.\n");
+    }
+    for (index, (path, tail)) in facts.speech_log.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "{}\n\n```\n{}\n```\n",
+            path.display(),
+            tail.trim_end()
+        ));
     }
     redact(&out, home).into_owned()
 }
@@ -551,6 +600,10 @@ mod tests {
                 r#"signed in {"email":"a@b.co","organizationId":"org_1"}"#.into(),
             )),
             server_log: None,
+            speech_log: vec![(
+                PathBuf::from("/Users/dana/Library/Logs/OpenBot/speech.log"),
+                "1763460000000 session=0 available(cy-GB) = Unavailable\n".into(),
+            )],
         };
         let text = bundle(&facts, Some("/Users/dana"));
         assert!(text.starts_with(
@@ -565,6 +618,7 @@ mod tests {
             "[local setup] failed after 88.1s: exit 1",
             "~/.copilotkit/cli.log",
             r#"{"email":"[email]","organizationId":"[id]"}"#,
+            "## Speech log (end)\n\n~/Library/Logs/OpenBot/speech.log\n\n```\n1763460000000 session=0 available(cy-GB) = Unavailable\n```\n",
         ] {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
@@ -574,7 +628,11 @@ mod tests {
         assert!(empty.contains("Container engine: none is answering."));
         assert!(empty.contains("Nothing reported a failure."));
         assert!(empty.contains("No container engine is answering."));
-        assert_eq!(empty.matches("Not found on this computer.").count(), 2);
+        assert_eq!(empty.matches("Not found on this computer.").count(), 3);
+        assert!(
+            empty.contains("## Speech log (end)\n\nNot found on this computer.\n"),
+            "{empty}"
+        );
 
         // A window that passes a huge failure does not make a huge bundle.
         let huge = Facts {
@@ -710,6 +768,46 @@ mod tests {
         let end = tail(&path, CLI_TAIL_BYTES).unwrap();
         assert!(end.len() as u64 <= CLI_TAIL_BYTES);
         assert!(end.starts_with("2026-11-08T"));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// The speech log and the one it set aside go in oldest first, within one budget: the set-aside
+    /// one only while the current one leaves room, and neither when there is none.
+    #[test]
+    fn the_speech_log_and_the_one_set_aside_go_in_oldest_first() {
+        let folder = temp_root("troubleshooting-speech");
+        std::fs::create_dir_all(&folder).unwrap();
+        let current = folder.join("speech.log");
+        let set_aside = folder.join("speech.log.1");
+        assert_eq!(speech_log(&current, 1024), Vec::new());
+
+        std::fs::write(&current, "3 session=0 available(cy-GB) = Unavailable\n").unwrap();
+        assert_eq!(
+            speech_log(&current, 1024),
+            [(
+                current.clone(),
+                "3 session=0 available(cy-GB) = Unavailable\n".to_owned()
+            )]
+        );
+
+        std::fs::write(&set_aside, "1 session=7 listening\n2 session=7 end\n").unwrap();
+        assert_eq!(
+            speech_log(&current, 1024),
+            [
+                (
+                    set_aside.clone(),
+                    "1 session=7 listening\n2 session=7 end\n".to_owned()
+                ),
+                (
+                    current.clone(),
+                    "3 session=0 available(cy-GB) = Unavailable\n".to_owned()
+                ),
+            ]
+        );
+        // The current one fills the budget: the set-aside one stays out, and nothing is cut short.
+        let found = speech_log(&current, 20);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, current);
         let _ = std::fs::remove_dir_all(folder);
     }
 
