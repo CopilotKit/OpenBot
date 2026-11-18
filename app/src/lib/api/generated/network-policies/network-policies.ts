@@ -633,7 +633,6 @@ export const getTranslateNetworkPolicyUrl = (organizationId: string) => {
 
 /**
  * Turn a description in English into a list of hosts and addresses Bot computers may connect to, written by the deployment's model and checked as a save would check it. Nothing is saved. The audit trail records the description and what it became. Only an administrator may ask.
- * @deprecated
  * @summary Write a network list from a description
  */
 export const translateNetworkPolicy = async (
@@ -754,7 +753,6 @@ export type TranslateNetworkPolicyMutationVariables = {
 };
 
 /**
- * @deprecated
  * @summary Write a network list from a description
  */
 export const useTranslateNetworkPolicy = <
