@@ -51,7 +51,7 @@ than showing an empty row. `app/src/lib/primitives.ts` holds the names, the orde
 | Say | For | Not |
 |---|---|---|
 | **Conversations** | Where you give a Bot work and it reports back. Not a settings row. | channels, groups, chats |
-| **Routines** | Work a Bot starts by itself: what, starts, does, until. One list per Bot. A goal is a routine with an outcome to reach; a check-in is a routine that only tells you. | Goals, Check-ins, Responsibilities (as page or menu names) |
+| **When it works** | Work a Bot starts by itself, as a setting on the Bot: each one a when (a schedule or an event) and a what (one sentence), with an optional until. One list per Bot, titled "When {Bot} works"; a row reads as its pair, "Every weekday at 9 · Send me yesterday's new leads". A goal is one with an outcome to reach; a check-in is one that only tells you. "Routines" is still the name of the every-Bot page in the old sidebar and the other skins, until the old sidebar is removed. | Routines (as a strip place, a "+" menu entry or a Bot's page), Goals, Check-ins, Responsibilities, Triggers (as page or menu names) |
 | **Memory** | What a Bot knows about you and your work. | Capabilities |
 | **Skills** | What a Bot knows how to do: skills you wrote, taught, or OpenBot proposed. One page per scope. | Learning (as a page), What it can do, Skills and access, Capabilities |
 | **Apps** | The services a Bot can reach. Connections is its every-Bot page. | Plugins, What it can do |
