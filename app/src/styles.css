@@ -501,42 +501,6 @@
 }
 
 /*
- * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
- * so swapping or turning off the empty-state pattern does the same here. It fades out from the
- * center instead of a corner, and is gone by the edge of its own box (`closest-side`), so the box's
- * square never shows. The intro leaves it room to reach that edge (`HALO_ROOM` in
- * conversation-intro.tsx).
- *
- * The dark theme's light pattern on a near-black ground stood out about 1.6 times as strongly as the
- * light theme's, and read as a block of pixels around the orb rather than a halo; it is drawn at 0.6
- * of the token's strength there so the two themes match. A skin's 0 is still 0.
- */
-.orb-pattern {
-  position: absolute;
-  inset: -40px;
-  z-index: -1;
-  pointer-events: none;
-  background-color: var(--empty-pattern-color);
-  opacity: var(--empty-pattern-opacity);
-  mask-image:
-    var(--empty-pattern),
-    radial-gradient(
-      circle closest-side,
-      #000 42%,
-      rgb(0 0 0 / 0.35) 78%,
-      transparent 100%
-    );
-  mask-repeat: repeat, no-repeat;
-  mask-size:
-    auto,
-    100% 100%;
-  mask-composite: intersect;
-}
-.dark .orb-pattern {
-  opacity: calc(var(--empty-pattern-opacity) * 0.6);
-}
-
-/*
  * A Bot's live orb, toned for the app's surfaces. AgentOrb's own contrast boost and full-strength
  * halftone wash light colors out to white; these keep each Bot's palette true. Only `BotOrb`
  * carries `.bot-orb-live`, so the orb anywhere else is unchanged.

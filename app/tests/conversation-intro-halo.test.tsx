@@ -34,8 +34,8 @@ const asked = process.env.OPENBOT_APP_BROWSER === "1";
 
 const APP = join(import.meta.dir, "..");
 
-/** ChatTranscript's column: centred, 768px at most, with a 16px gutter. */
-const COLUMN = "mx-auto w-full max-w-3xl px-4";
+/** ChatTranscript's column: centred, Figma's 700px at most, with a 16px gutter. */
+const COLUMN = "mx-auto w-full max-w-page px-4";
 
 const bot = {
   id: "general-assistant",
@@ -148,9 +148,10 @@ async function open(width: number, theme: Theme): Promise<Page> {
 type Box = { top: number; right: number; bottom: number; left: number };
 
 /**
- * Where the halo paints, and where it can be seen. The halo is the pattern's box (its mask is gone
- * by the box's edge) and the orb's glow, whose box is blurred outward by the blur's radius. It can
- * be seen inside the window and inside every ancestor that clips what overflows it.
+ * Where the halo paints, and where it can be seen. The halo is the orb's glow, whose box is blurred
+ * outward by the blur's radius (the empty-state pattern that once sat behind the orb went with
+ * Figma's card). It can be seen inside the window and inside every ancestor that clips what
+ * overflows it.
  */
 async function halo(tab: Page) {
   return tab.evaluate(() => {
@@ -158,35 +159,26 @@ async function halo(tab: Page) {
       const { top, right, bottom, left } = element.getBoundingClientRect();
       return { top, right, bottom, left };
     };
-    const pattern = document.querySelector(".orb-pattern");
     const disc = document.querySelector(".bot-orb-live .agent-orb");
     const glow = disc?.previousElementSibling;
-    if (!pattern || !disc || !glow) throw new Error("No orb in the intro");
+    if (!disc || !glow) throw new Error("No orb in the intro");
     const blur = Number.parseFloat(
       /blur\(([\d.]+)px\)/.exec(getComputedStyle(glow).filter)?.[1] ?? "0",
     );
     const bloom = box(glow);
-    const painted = [
-      box(pattern),
-      {
-        top: bloom.top - blur,
-        right: bloom.right + blur,
-        bottom: bloom.bottom + blur,
-        left: bloom.left - blur,
-      },
-    ].reduce((all, one) => ({
-      top: Math.min(all.top, one.top),
-      right: Math.max(all.right, one.right),
-      bottom: Math.max(all.bottom, one.bottom),
-      left: Math.min(all.left, one.left),
-    }));
+    const painted = {
+      top: bloom.top - blur,
+      right: bloom.right + blur,
+      bottom: bloom.bottom + blur,
+      left: bloom.left - blur,
+    };
     const visible = {
       top: 0,
       right: window.innerWidth,
       bottom: window.innerHeight,
       left: 0,
     };
-    for (let at = pattern.parentElement; at; at = at.parentElement) {
+    for (let at = glow.parentElement; at; at = at.parentElement) {
       if (at === document.body) break;
       const { overflowX, overflowY, contain } = getComputedStyle(at);
       const paints = /paint|content|strict/.test(contain);
@@ -212,13 +204,12 @@ const inside = (painted: Box, visible: Box) => ({
 });
 const whole = { top: true, right: true, bottom: true, left: true };
 
-/** How the orb is drawn: its outline, the disc's ground, and the halo's pattern against the page. */
+/** How the orb is drawn: its outline and the disc's ground. */
 async function drawn(tab: Page) {
   return tab.evaluate(() => {
     const wrapper = document.querySelector(".bot-orb-live");
     const disc = wrapper?.querySelector(".agent-orb");
-    const pattern = document.querySelector(".orb-pattern");
-    if (!wrapper || !disc || !pattern) throw new Error("No orb in the intro");
+    if (!wrapper || !disc) throw new Error("No orb in the intro");
     // Resolved to rgb by drawing each color on a canvas, so oklch and rgb compare alike.
     const canvas = document.createElement("canvas").getContext("2d");
     const rgb = (color: string) => {
@@ -228,18 +219,6 @@ async function drawn(tab: Page) {
       canvas.fillRect(0, 0, 1, 1);
       return [...canvas.getImageData(0, 0, 1, 1).data];
     };
-    // Perceived lightness: the cube root of luminance, as OKLab's L is.
-    const lightness = (color: string) => {
-      const [r, g, b] = rgb(color).map((channel) => {
-        const c = channel / 255;
-        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-      });
-      return Math.cbrt(0.2126 * r + 0.7152 * g + 0.0722 * b);
-    };
-    const page = getComputedStyle(
-      document.body.firstElementChild as Element,
-    ).backgroundColor;
-    const shown = getComputedStyle(pattern);
     // Every shadow on the wrapper, less the transparent ones Tailwind keeps in its stack.
     const outlines = getComputedStyle(wrapper)
       .boxShadow.split(/,(?![^(]*\))/)
@@ -251,9 +230,6 @@ async function drawn(tab: Page) {
     return {
       outlines,
       ground: rgb(getComputedStyle(disc).backgroundColor),
-      halo:
-        Number(shown.opacity) *
-        Math.abs(lightness(shown.backgroundColor) - lightness(page)),
     };
   });
 }
@@ -305,20 +281,5 @@ describe.skipIf(!asked)("the Bot's orb at the top of a conversation", () => {
     }
     expect(grounds[0][3]).toBe(255);
     expect(grounds[1]).toEqual(grounds[0]);
-  });
-
-  test("the halo's pattern stands out no more on the dark page than on the light one", async () => {
-    const strength: Record<Theme, number> = { light: 0, dark: 0 };
-    for (const theme of ["light", "dark"] as const) {
-      const tab = await open(650, theme);
-      try {
-        strength[theme] = (await drawn(tab)).halo;
-      } finally {
-        await tab.close();
-      }
-    }
-    expect(strength.light).toBeGreaterThan(0);
-    // Within the rounding of 8-bit color; before the fix the dark one was 1.6 times as strong.
-    expect(strength.dark).toBeLessThanOrEqual(strength.light * 1.05);
   });
 });

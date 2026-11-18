@@ -118,12 +118,16 @@ function RouteComponent() {
       }
     >
       <div className="flex flex-col">
+        {/*
+         * Figma's conversation bar: 48px, the Bot's 28px orb and its name on the left, the computer
+         * and the Bot's settings on the right as 20px glyphs 12px apart.
+         */}
         <div
-          className="min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2"
+          className="sticky top-0 flex h-12 flex-row items-center justify-between gap-2 border-foreground/12 border-b px-6"
           data-slot="conversation-header"
         >
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
             <SidebarToggle />
             <motion.div
               animate={{ opacity: 1 }}
@@ -137,7 +141,7 @@ function RouteComponent() {
             >
               <ChannelAvatar
                 participantIds={channel.data?.agentIds ?? []}
-                size={22}
+                size={28}
               />
             </motion.div>
             <motion.span
@@ -146,7 +150,7 @@ function RouteComponent() {
                   ? { opacity: 1 }
                   : { opacity: 1, transform: "translateY(0px)" }
               }
-              className="min-w-0 text-sm tracking-tight truncate"
+              className="min-w-0 truncate text-sm"
               initial={
                 prefersReducedMotion
                   ? { opacity: 0 }
@@ -161,7 +165,7 @@ function RouteComponent() {
               {channel.data?.name ?? "Channel"}
             </motion.span>
           </div>
-          <div className="flex flex-row gap-1.5">
+          <div className="-mr-1.5 flex flex-row [&_svg]:size-5">
             <ComputerChatControls
               computerId={agentId}
               open={isWatching}
@@ -176,7 +180,7 @@ function RouteComponent() {
               variant="ghost"
               size="icon"
             >
-              <IconSettings className="size-4.5" />
+              <IconSettings className="size-5" />
             </Button>
           </div>
         </div>

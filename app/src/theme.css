@@ -154,6 +154,8 @@ body {
   --radius-tile: 0.75rem;
   /* The page column: Figma's 700px of content, with the 16px gutter either side. */
   --container-page: 45.75rem;
+  /* The bubble behind what a person sent (Figma's surface/50, #d8dee9). Not redrawn for dark yet. */
+  --color-message: oklch(0.899 0.016 262.7);
   /* The message box's long soft shadow, which lifts it off the page (Figma's "Chat input"). */
   --shadow-composer:
     0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
