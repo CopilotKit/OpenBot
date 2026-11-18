@@ -144,19 +144,17 @@ wrote:
 
 - A Claude plan names the Claude Agent SDK as its Bot (`PICKED_HARNESS_IMAGE`): only a plan picks
   that Bot (`harness::for_credential`).
-- A ChatGPT plan names its model service's address. An installation from before the plan ran as a
-  service names only the plan's token store, until the Start after its update writes the address.
+- A plan recorded for the installation (`stack::plan_engine`) runs its own engine: the Claude Agent
+  SDK for a Claude plan, the Python LangGraph image for a ChatGPT plan. Every Start names both plan
+  engines' addresses whatever the plan, so the address says nothing. An installation from before the
+  plan ran as a service names only the plan's token store.
 
 Every other sign-in names neither, and an installation nobody has signed in to has no `.env`.
 */
 pub fn plan_images(root: &Path) -> Vec<&'static str> {
     let set = crate::env::already_set(
         &root.join(".env"),
-        &[
-            "PICKED_HARNESS_IMAGE",
-            "CHATGPT_PLAN_HARNESS_URL",
-            "CHATGPT_AUTH_FILE",
-        ],
+        &["PICKED_HARNESS_IMAGE", "CHATGPT_AUTH_FILE"],
     );
     let named = |key: &str| set.get(key).is_some_and(|value| !value.trim().is_empty());
     let mut images = Vec::new();
@@ -171,7 +169,11 @@ pub fn plan_images(root: &Path) -> Vec<&'static str> {
     }) {
         images.push(crate::plan::SIGN_IN_IMAGE);
     }
-    if named("CHATGPT_PLAN_HARNESS_URL") || named("CHATGPT_AUTH_FILE") {
+    let engine = crate::stack::plan_engine(root).map(|engine| engine.service);
+    if engine == Some("agent-claude-plan") && !images.contains(&crate::plan::SIGN_IN_IMAGE) {
+        images.push(crate::plan::SIGN_IN_IMAGE);
+    }
+    if named("CHATGPT_AUTH_FILE") || engine == Some(crate::plan::CHATGPT_PLAN_SERVICE) {
         images.push(crate::plan::CHATGPT_SIGN_IN_IMAGE);
     }
     images
