@@ -139,6 +139,9 @@ pub enum Failure {
     /// The back end's images stopped downloading: no new bytes for `local_images::Limits::stall`.
     /// What arrived is kept, and the next attempt continues from there. See `local_images`.
     DownloadStalled,
+    /// This version of OpenBot is below the security floor (`security_floor`): nothing of it starts
+    /// on this computer until it is updated.
+    BelowSecurityFloor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -9086,6 +9089,7 @@ printf '%s' '{completed}'
             Failure::InvalidAcceptance,
             Failure::RootlessPodman,
             Failure::DownloadStalled,
+            Failure::BelowSecurityFloor,
         ];
         // Adding a variant without listing it above stops compiling here.
         for failure in all {
@@ -9107,7 +9111,8 @@ printf '%s' '{completed}'
                 | Failure::UnexpectedExit
                 | Failure::InvalidAcceptance
                 | Failure::RootlessPodman
-                | Failure::DownloadStalled => {}
+                | Failure::DownloadStalled
+                | Failure::BelowSecurityFloor => {}
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");

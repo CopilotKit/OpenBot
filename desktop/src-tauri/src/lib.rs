@@ -47,6 +47,7 @@ pub mod recorder_install;
 pub mod registry;
 pub mod release_images;
 pub mod saved_intent;
+pub mod security_floor;
 pub mod shell_updates;
 pub mod speech;
 pub mod stack;

@@ -1689,6 +1689,7 @@ pub enum CliFailure {
     InvalidAcceptance,
     RootlessPodman,
     DownloadStalled,
+    BelowSecurityFloor,
 }
 
 /**
@@ -1800,6 +1801,7 @@ const CLI_FAILURES: &[&str] = &[
     "invalid_acceptance",
     "rootless_podman",
     "download_stalled",
+    "below_security_floor",
 ];
 
 /// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`):

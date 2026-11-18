@@ -1808,3 +1808,8 @@ volumes:
         }
     }
 }
+
+/// The upgrade from a real published release to this tree, on a real engine. See the file.
+#[cfg(test)]
+#[path = "upgrade_release_tests.rs"]
+mod real_release;
