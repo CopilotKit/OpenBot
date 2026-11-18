@@ -238,8 +238,8 @@ test("an OpenBot of today: the sign-in screen, and no update screen", async () =
 }, 15_000);
 
 test("an OpenBot whose oldest web app is newer than this one: Update OpenBot, before sign-in", async () => {
-  deployment = "raised";
-  expect(expected("raised", THIS_WEB)).toBe("app");
+  deployment = "next";
+  expect(expected("next", THIS_WEB)).toBe("app");
   const view = openApp();
   expect(
     await view.findByRole(
