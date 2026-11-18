@@ -85,7 +85,9 @@ const serverUrl = `http://127.0.0.1:${server.port}`;
 
 mock.module("../src/auth", () => ({
   serverUrl,
-  authClient: { getCookie: () => "better-auth.session_token=signed-in" },
+  // A session of its own: the mutator keeps each session's organizations, and this server's are not
+  // generated-client.test.ts's.
+  authClient: { getCookie: () => "better-auth.session_token=tolerant-reader" },
 }));
 mock.module("expo-crypto", () => ({
   randomUUID: () => crypto.randomUUID(),
