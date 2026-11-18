@@ -416,6 +416,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenu
             className="group/footer-menu gap-0.5"
             data-pointer-resting={pointerResting || undefined}
+            data-primary-navigation={layoutNavigation || undefined}
           >
             <PrimaryNavItem
               item={{ to: "/channel/new", label: "New", icon: IconPlus }}
@@ -472,6 +473,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu
           className="group/footer-menu gap-px"
           data-pointer-resting={pointerResting || undefined}
+          data-primary-navigation={!layoutNavigation || undefined}
         >
           {!layoutNavigation ? primaryNavigation : null}
           <SidebarMenuItem>

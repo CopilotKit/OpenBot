@@ -1352,6 +1352,7 @@ components:
       required:
         - messageListEmphasis
         - selfHostBannerDismissed
+        - dismissedNotices
         - narration
         - skin
         - proactive
@@ -1361,6 +1362,28 @@ components:
         selfHostBannerDismissed:
           type: boolean
           description: Whether they closed the banner offering help self-hosting OpenBot.
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: >-
+            The notices they answered, either way, by id. A notice in this list
+            is never shown to them again, on any device. Empty until they
+            answer one.
+          items:
+            $ref: './common.yaml#/components/schemas/NoticeId'
+        noticesDue:
+          type: array
+          readOnly: true
+          maxItems: 64
+          uniqueItems: true
+          description: >-
+            The notices OpenBot would show them now, by id, worked out by the
+            server from the edition and how they have used OpenBot. A notice
+            they dismissed is never here. Absent from a server that works out
+            none.
+          items:
+            $ref: './common.yaml#/components/schemas/NoticeId'
         narration:
           description: >-
             Whether they narrate their recordings in OpenBot's browser, which
@@ -1392,6 +1415,15 @@ components:
           $ref: '#/components/schemas/MessageListEmphasis'
         selfHostBannerDismissed:
           type: boolean
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: >-
+            Notices they answered, by id. Added to the ones already dismissed:
+            a notice is never taken back off the list.
+          items:
+            $ref: './common.yaml#/components/schemas/NoticeId'
         narration:
           $ref: '#/components/schemas/OnOff'
         skin:
@@ -2108,6 +2140,8 @@ components:
       value:
         messageListEmphasis: thread
         selfHostBannerDismissed: false
+        dismissedNotices: []
+        noticesDue: []
         narration: null
         skin: openbot
         proactive: 'on'

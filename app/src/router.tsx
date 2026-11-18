@@ -18,7 +18,8 @@ export const router = createRouter({
   defaultErrorComponent: ReportedErrorComponent,
 });
 
-trackSidebarHistory(router.history);
+// The router can be inspected without a browser or a history (for example in route tests).
+if (router.history) trackSidebarHistory(router.history);
 
 declare module "@tanstack/react-router" {
   interface Register {

@@ -821,7 +821,7 @@ describe("the account menu", () => {
     const marked = () =>
       [
         ...app.view.container.querySelectorAll(
-          "[data-sidebar=footer] a[data-status=active], [data-sidebar=footer] [aria-current=page]",
+          "[data-primary-navigation] a[data-status=active], [data-primary-navigation] [aria-current=page]",
         ),
       ].map((link) => link.textContent?.trim());
     await waitFor(() => expect(marked()).toEqual(["Bots"]));

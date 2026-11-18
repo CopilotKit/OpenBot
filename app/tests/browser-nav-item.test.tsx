@@ -138,6 +138,7 @@ function renderSidebar() {
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
@@ -173,38 +174,38 @@ function renderSidebar() {
   return { view, queryClient };
 }
 
-/** The sidebar's footer, where the main menu's entries are. */
-async function footerOf(view: ReturnType<typeof render>) {
+/** The sidebar's primary navigation. */
+async function navigationOf(view: ReturnType<typeof render>) {
   return waitFor(() => {
     const element = view.container.querySelector<HTMLElement>(
-      '[data-sidebar="footer"]',
+      "[data-primary-navigation]",
     );
-    if (!element) throw new Error("No sidebar footer");
+    if (!element) throw new Error("No sidebar navigation");
     return element;
   });
 }
 
-/** The names of the red dots in the footer. */
-const dots = (footer: HTMLElement) =>
-  within(footer)
+/** The names of the red dots in the navigation. */
+const dots = (navigation: HTMLElement) =>
+  within(navigation)
     .queryAllByRole("img")
     .map((dot) => dot.getAttribute("aria-label"));
 
 test("a recording puts a red dot named for it on Skills, ticking while it records, and Stop takes it away", async () => {
   state = { ...idleState(), activity: receipt("recording") };
   const { view } = renderSidebar();
-  const footer = await footerOf(view);
-  const dot = await within(footer).findByRole("img", {
+  const navigation = await navigationOf(view);
+  const dot = await within(navigation).findByRole("img", {
     name: /^Recording: Submit the receipt, 1:2\d$/,
   });
   expect(dot.querySelector(".bg-destructive")).not.toBeNull();
   // On Skills, and on Skills alone: the entry carries the recording's name with its own, for a screen reader.
-  const skills = within(footer).getByRole("link", {
+  const skills = within(navigation).getByRole("link", {
     name: /^Skills Recording: Submit the receipt, 1:2\d$/,
   });
   expect(skills.getAttribute("href")).toBe("/skills");
   expect(skills.contains(dot)).toBe(true);
-  expect(dots(footer)).toHaveLength(1);
+  expect(dots(navigation)).toHaveLength(1);
 
   // Hovered, the tooltip says what the dot's name says, even with the sidebar open.
   const user = userEvent.setup({ document });
@@ -223,22 +224,22 @@ test("a recording puts a red dot named for it on Skills, ticking while it record
   // Stopping, then stopped: gone at the next ask, which is every second while something records.
   state = { ...idleState(), activity: receipt("stopping") };
   expect(
-    await within(footer).findByRole(
+    await within(navigation).findByRole(
       "img",
       { name: "Recording: Submit the receipt, stopping" },
       { timeout: 2000 },
     ),
   ).toBeTruthy();
   state = idleState();
-  await waitFor(() => expect(dots(footer)).toEqual([]), { timeout: 2000 });
-  expect(within(footer).getByRole("link", { name: "Skills" })).toBeTruthy();
+  await waitFor(() => expect(dots(navigation)).toEqual([]), { timeout: 2000 });
+  expect(within(navigation).getByRole("link", { name: "Skills" })).toBeTruthy();
 });
 
 test("while a recording starts the dot shows, and is not yet live", async () => {
   state = { ...idleState(), activity: receipt("starting") };
   const { view } = renderSidebar();
-  const footer = await footerOf(view);
-  const dot = await within(footer).findByRole("img", {
+  const navigation = await navigationOf(view);
+  const dot = await within(navigation).findByRole("img", {
     name: "Recording: Submit the receipt, starting",
   });
   expect(dot.querySelector(".bg-destructive")).toBeNull();
@@ -246,25 +247,25 @@ test("while a recording starts the dot shows, and is not yet live", async () => 
 
 test("nothing recording, or OpenBot unable to run a browser, puts nothing extra on Skills", async () => {
   const { view, queryClient } = renderSidebar();
-  const footer = await footerOf(view);
+  const navigation = await navigationOf(view);
   await waitFor(() =>
     expect(queryClient.getQueryState(["browser", "state"])?.status).toBe(
       "success",
     ),
   );
-  expect(dots(footer)).toEqual([]);
-  expect(within(footer).getByRole("link", { name: "Skills" })).toBeTruthy();
+  expect(dots(navigation)).toEqual([]);
+  expect(within(navigation).getByRole("link", { name: "Skills" })).toBeTruthy();
   expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull();
   cleanup();
 
   // A server that says it cannot run a browser for this person, whatever its activity says, lights nothing.
   state = { ...idleState(false), activity: receipt("recording") };
   const unavailable = renderSidebar();
-  const footer2 = await footerOf(unavailable.view);
+  const navigation2 = await navigationOf(unavailable.view);
   await waitFor(() =>
     expect(
       unavailable.queryClient.getQueryState(["browser", "state"])?.status,
     ).toBe("success"),
   );
-  expect(dots(footer2)).toEqual([]);
+  expect(dots(navigation2)).toEqual([]);
 });

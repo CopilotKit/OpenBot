@@ -121,6 +121,7 @@ function renderSidebar(
   queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
@@ -192,21 +193,25 @@ test.each(["user", "admin"] as const)(
   "the sidebar draws exactly the shared list for a %s",
   async (role) => {
     const { view, user } = renderSidebar(role);
-    const footer = await waitFor(() => {
+    const navigation = await waitFor(() => {
       const element = view.container.querySelector<HTMLElement>(
-        '[data-sidebar="footer"]',
+        "[data-primary-navigation]",
       );
-      if (!element) throw new Error("No sidebar footer");
+      if (!element) throw new Error("No sidebar navigation");
       return element;
     });
     expect(
-      links(footer).map(({ label, to }) => ({
+      links(navigation).map(({ label, to }) => ({
         label: label.replace(/\d+$/, ""),
         to,
       })),
-    ).toEqual(expected(role, "primary"));
+    ).toEqual([
+      { label: "New", to: "/channel/new" },
+      ...expected(role, "primary"),
+    ]);
     // What a person makes and comes back to, beside Bots, in the order of the eight.
-    expect(links(footer).map(({ to }) => to)).toEqual([
+    expect(links(navigation).map(({ to }) => to)).toEqual([
+      "/channel/new",
       "/bots",
       "/agents",
       "/routines",
@@ -215,7 +220,7 @@ test.each(["user", "admin"] as const)(
       "/connections",
     ]);
     // Bots keeps its count of what waits on the person, and only Bots has one.
-    const badge = within(footer).getByRole("img", {
+    const badge = within(navigation).getByRole("img", {
       name: "1 thing needs you",
     });
     expect(badge.closest("a")?.getAttribute("href")).toBe("/bots");

@@ -157,6 +157,7 @@ function renderNarrowApp(
   queryClient.setQueryData(userPreferencesQueryOptions("dana").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
