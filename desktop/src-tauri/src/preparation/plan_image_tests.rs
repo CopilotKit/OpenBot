@@ -1,15 +1,21 @@
 /*!
-Which sign-in downloads the Python LangGraph image (`plan::CHATGPT_PLAN_SERVICE`).
+Which sign-in downloads the two plan images.
 
-The default Bot is the TypeScript LangGraph engine. The Python image runs only on a ChatGPT plan,
-beside that Bot, as the plan's model service. A Windows install on an API key still downloaded it
-ahead of Install, pulled it at Install, and had its update download the next release's copy, and it
-never ran. Each path that decides what to download is driven here as the app drives it, with the
-`.env` each sign-in's Start writes (`env::compose`, `env::write`):
+- The Python LangGraph image (`plan::CHATGPT_SIGN_IN_IMAGE`) runs only on a ChatGPT plan, beside the
+  TypeScript Bot, as the plan's model service.
+- The Claude Agent SDK image (`plan::SIGN_IN_IMAGE`) runs only on a Claude plan, as its Bot.
+
+Both carry their vendor's sign-in. An install on an API key still downloaded both ahead of Install,
+pulled both at Install, and had its update download the next release's copies, and neither ran.
+Each path that decides what to download is driven here as the app drives it, with the `.env` each
+sign-in's Start writes (`harness::for_credential`, `env::compose`, `vault::split`, `env::write`):
 
 - the first screen's early download, before anybody has signed in (`early_downloads::named_images`);
 - Install, and the Install an update makes before its Start (`installation_pull_set_by`);
 - the download an update makes ahead of the Update click (`images_it_runs`, `update_ready`).
+
+A switch to a plan later downloads its image then: see `tests::a_switch_to_a_claude_plan_*` and
+`tests::a_switch_to_a_chatgpt_plan_*` in `main.rs`, which drive Start.
 */
 
 use std::collections::BTreeMap;
@@ -18,7 +24,8 @@ use std::path::{Path, PathBuf};
 use crate::env::{Intelligence, Model, ModelCredential, Ports};
 use crate::harness::{HarnessChoice, DEFAULT_HARNESS};
 
-const PLAN_REPOSITORY: &str = "openbot-agent-langgraph-agui@";
+const CHATGPT_PLAN: &str = "openbot-agent-langgraph-agui@";
+const CLAUDE_PLAN: &str = "openbot-agent-claude-sdk@";
 
 /// A release laid out as Install lays it out: this repository's Compose file and an image list
 /// that names the default Bot.
@@ -55,8 +62,8 @@ fn laid_out(label: &str) -> PathBuf {
 }
 
 /// Compose, as far as `config --images` goes: a line for each service it is asked about that has
-/// an image. The plan's service is answered with the release's own reference, as Compose reads it
-/// from `LANGGRAPH_IMAGE`.
+/// an image. The ChatGPT plan's service is answered with the release's own reference, as Compose
+/// reads it from `LANGGRAPH_IMAGE`.
 #[cfg(unix)]
 fn compose_stand_in(root: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -82,9 +89,18 @@ fn compose_stand_in(root: &Path) -> PathBuf {
     path
 }
 
-/// The `.env` Start writes for `credential`, written where Start writes it.
+/// The `.env` Start writes for `credential`, written where Start writes it: the Bot the sign-in
+/// picks, the settings for it, and none of the secrets, which go to the credential store.
 fn signed_in(root: &Path, credential: ModelCredential) {
-    let settings = crate::env::compose(
+    let chosen = crate::harness::for_credential(
+        &credential,
+        Some(HarnessChoice {
+            id: DEFAULT_HARNESS.into(),
+            agent_url: None,
+        }),
+    );
+    let picked = crate::harness::picked(chosen.as_ref(), root).unwrap();
+    let all = crate::env::compose(
         &Intelligence {
             api_url: "https://api.example".into(),
             gateway_ws_url: "wss://realtime.example".into(),
@@ -100,38 +116,43 @@ fn signed_in(root: &Path, credential: ModelCredential) {
         },
         &Ports::default(),
         &[],
-        None,
+        picked.as_ref(),
         &BTreeMap::new(),
     );
+    let (settings, _secrets) = crate::vault::split(all);
     crate::env::write(&root.join(".env"), &settings, &BTreeMap::new()).unwrap();
 }
 
-/// Every sign-in the model screen offers, and whether it runs the plan's service.
-fn sign_ins() -> Vec<(&'static str, Option<ModelCredential>, bool)> {
+/// A sign-in the model screen offers, and which plan image it runs.
+struct SignIn {
+    said: &'static str,
+    credential: Option<ModelCredential>,
+    chatgpt_plan: bool,
+    claude_plan: bool,
+}
+
+fn sign_ins() -> Vec<SignIn> {
+    let neither = |said, credential| SignIn {
+        said,
+        credential,
+        chatgpt_plan: false,
+        claude_plan: false,
+    };
     vec![
-        ("nothing yet, a first install", None, false),
-        (
+        neither("nothing yet, a first install", None),
+        neither(
             "an OpenAI key",
             Some(ModelCredential::OpenAi {
                 api_key: "sk-test".into(),
             }),
-            false,
         ),
-        (
+        neither(
             "an Anthropic key",
             Some(ModelCredential::Anthropic {
                 api_key: "sk-ant-api-test".into(),
             }),
-            false,
         ),
-        (
-            "a Claude plan",
-            Some(ModelCredential::ClaudePlan {
-                token: "sk-ant-oat-test".into(),
-            }),
-            false,
-        ),
-        (
+        neither(
             "the Gemini sign-in",
             Some(ModelCredential::ProviderOAuth {
                 provider: "google".into(),
@@ -139,57 +160,57 @@ fn sign_ins() -> Vec<(&'static str, Option<ModelCredential>, bool)> {
                 proxy_token: "proxy".into(),
                 model: "gemini-2.5-pro".into(),
             }),
-            false,
         ),
-        (
-            "a ChatGPT plan",
-            Some(ModelCredential::ChatGptPlan {
+        SignIn {
+            said: "a Claude plan",
+            credential: Some(ModelCredential::ClaudePlan {
+                token: "sk-ant-oat-test".into(),
+            }),
+            chatgpt_plan: false,
+            claude_plan: true,
+        },
+        SignIn {
+            said: "a ChatGPT plan",
+            credential: Some(ModelCredential::ChatGptPlan {
                 store: "{\"access_token\":\"a\",\"refresh_token\":\"r\"}".into(),
             }),
-            true,
-        ),
+            chatgpt_plan: true,
+            claude_plan: false,
+        },
     ]
 }
 
-fn names_the_plan_image(images: &[String]) -> bool {
-    images.iter().any(|image| image.contains(PLAN_REPOSITORY))
+fn names(images: &[String], repository: &str) -> bool {
+    images.iter().any(|image| image.contains(repository))
 }
 
 /// The first screen downloads the default Bot's images before anybody has signed in, so it never
-/// downloads the plan's: most people never sign in to one.
+/// downloads either plan's: most people never sign in to one.
 #[cfg(unix)]
 #[test]
-fn the_first_screen_never_downloads_the_chatgpt_plan_image() {
+fn the_first_screen_downloads_neither_plan_image() {
     let release = laid_out("plan-image-first-screen");
     let compose = compose_stand_in(&release);
     let images = crate::early_downloads::named_images(&release, || Ok(compose.clone())).unwrap();
-    assert!(
-        images.iter().any(|image| image.contains("openbot-server@")),
-        "{images:?}"
-    );
-    assert!(
-        images
-            .iter()
-            .any(|image| image.contains("openbot-agent-claude-sdk@")),
-        "the Claude sign-in image still comes ahead: {images:?}"
-    );
-    assert!(!names_the_plan_image(&images), "{images:?}");
+    assert!(names(&images, "openbot-server@"), "{images:?}");
+    assert!(!names(&images, CHATGPT_PLAN), "{images:?}");
+    assert!(!names(&images, CLAUDE_PLAN), "{images:?}");
     let _ = std::fs::remove_dir_all(&release);
 }
 
-/// Install pulls the plan's image only for a ChatGPT plan: every other sign-in leaves it out, and
-/// so does an install nobody has signed in to yet. The ChatGPT sign-in pulls it itself.
+/// Install pulls each plan's image only for that plan: API keys, the Gemini sign-in and an install
+/// nobody has signed in to yet pull neither. A sign-in to a plan pulls its own (`main.rs`).
 #[cfg(unix)]
 #[test]
-fn install_pulls_the_chatgpt_plan_image_only_on_a_chatgpt_plan() {
+fn install_pulls_a_plan_image_only_for_its_plan() {
     let default = HarnessChoice {
         id: DEFAULT_HARNESS.into(),
         agent_url: None,
     };
-    for (said, credential, plan) in sign_ins() {
+    for sign_in in sign_ins() {
         let root = laid_out("plan-image-install");
         let compose = compose_stand_in(&root);
-        if let Some(credential) = credential {
+        if let Some(credential) = sign_in.credential {
             signed_in(&root, credential);
         }
         let images = super::installation_pull_set_by(
@@ -199,7 +220,17 @@ fn install_pulls_the_chatgpt_plan_image_only_on_a_chatgpt_plan() {
             Some(&default),
         )
         .unwrap();
-        assert_eq!(names_the_plan_image(&images), plan, "{said}: {images:?}");
+        let said = sign_in.said;
+        assert_eq!(
+            names(&images, CHATGPT_PLAN),
+            sign_in.chatgpt_plan,
+            "{said}: {images:?}"
+        );
+        assert_eq!(
+            names(&images, CLAUDE_PLAN),
+            sign_in.claude_plan,
+            "{said}: {images:?}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
@@ -227,39 +258,34 @@ fn an_update_over_a_chatgpt_plan_from_before_the_plan_service_pulls_its_image() 
         }),
     )
     .unwrap();
-    assert!(names_the_plan_image(&images), "{images:?}");
+    assert!(names(&images, CHATGPT_PLAN), "{images:?}");
+    assert!(!names(&images, CLAUDE_PLAN), "{images:?}");
     let _ = std::fs::remove_dir_all(&root);
 }
 
 /// An update downloads the next release's images ahead of the Update click, by the images the last
-/// install pulled. An installation from when every install pulled the plan's image keeps that image
-/// in its record, and only a ChatGPT plan gets the next release's copy.
+/// install pulled. An installation from when every install pulled both plan images keeps them in
+/// its record, and only that plan gets the next release's copy of each.
 #[test]
-fn an_update_downloads_the_next_chatgpt_plan_image_only_on_a_chatgpt_plan() {
+fn an_update_downloads_a_plan_image_only_for_its_plan() {
     let next = crate::update_ready::Announced {
         openbot: "v9.9.9".into(),
         intelligence: "0.0.0".into(),
-        images: vec![
-            format!(
-                "ghcr.io/copilotkit/openbot-server@sha256:{}",
-                "a".repeat(64)
-            ),
-            format!(
-                "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:{}",
-                "a".repeat(64)
-            ),
-            format!(
-                "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:{}",
-                "a".repeat(64)
-            ),
-        ],
+        images: [
+            "openbot-server",
+            "openbot-agent-langgraph-agui",
+            "openbot-agent-claude-sdk",
+        ]
+        .iter()
+        .map(|name| format!("ghcr.io/copilotkit/{name}@sha256:{}", "a".repeat(64)))
+        .collect(),
     };
-    for (said, credential, plan) in sign_ins() {
+    for sign_in in sign_ins() {
         let root = laid_out("plan-image-update-ahead");
-        if let Some(credential) = credential {
+        if let Some(credential) = sign_in.credential {
             signed_in(&root, credential);
         }
-        // What an install that always pulled the plan's image recorded.
+        // What an install that always pulled both plan images recorded.
         let pulled = vec![
             crate::deployment::reference(&root, "server").unwrap(),
             crate::deployment::reference(&root, crate::plan::SIGN_IN_IMAGE).unwrap(),
@@ -268,11 +294,18 @@ fn an_update_downloads_the_next_chatgpt_plan_image_only_on_a_chatgpt_plan() {
         super::record(&root, None, pulled).unwrap();
         let runs = super::images_it_runs(&root).unwrap();
         let ahead = crate::update_ready::openbot_images(&runs, &next);
-        assert_eq!(names_the_plan_image(&ahead), plan, "{said}: {ahead:?}");
-        assert!(
-            ahead.iter().any(|image| image.contains("openbot-server@")),
+        let said = sign_in.said;
+        assert_eq!(
+            names(&ahead, CHATGPT_PLAN),
+            sign_in.chatgpt_plan,
             "{said}: {ahead:?}"
         );
+        assert_eq!(
+            names(&ahead, CLAUDE_PLAN),
+            sign_in.claude_plan,
+            "{said}: {ahead:?}"
+        );
+        assert!(names(&ahead, "openbot-server@"), "{said}: {ahead:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -7,8 +7,8 @@ The list it copies is made here, from the same calls Install and the back end's 
 it cannot name one image fewer than the app pulls:
 
 - OpenBot's own: `preparation::installation_pull_set`, which asks Compose for the images of the
-  services this app runs, with each Bot this release can install picked in turn, and adds the
-  Claude sign-in's image; and the ChatGPT plan's image, which Install pulls only on that plan.
+  services this app runs, with each Bot this release can install picked in turn (the Claude plan's
+  image among them), and the ChatGPT plan's image, which no Bot choice names.
   Compose reads the release's `docker-compose.yml`, with the images pinned by its
   `container-images.json`, exactly as it does beside an installation.
 - The bundled back end's: `local_images::cli_images`, read from the very CLI the installer carries.
@@ -123,7 +123,8 @@ pub fn release_images(compose: &Path, manifest: &Path, cli: &str) -> Result<Rele
         images.extend(pulled);
     }
     // The ChatGPT plan's image: no Bot is it, and Install pulls it only on a ChatGPT plan, so no
-    // choice above names it. The app pulls it for everybody on one (`preparation::on_chatgpt_plan`).
+    // choice above names it. The app pulls it for everybody on one (`preparation::PLAN_IMAGES`).
+    // The Claude plan's is a Bot, so the choices above name it.
     images.insert(crate::deployment::reference(
         &release,
         crate::plan::CHATGPT_SIGN_IN_IMAGE,

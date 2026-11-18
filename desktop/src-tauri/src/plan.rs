@@ -471,8 +471,7 @@ impl SigningIn {
 /// The LangGraph harness, used as a tool rather than as a Bot for the same reason the Claude one is:
 /// it is the image that already carries the vendor's own login. A ChatGPT plan also runs it as its
 /// model service (`CHATGPT_PLAN_SERVICE`), and nothing else does, so it is pulled only for a ChatGPT
-/// plan: by the sign-in, and by Install for an installation on one
-/// (`crate::preparation::pull_chatgpt_plan_image`, `crate::preparation::on_chatgpt_plan`).
+/// plan (`crate::preparation::PLAN_IMAGES`).
 ///
 /// A name, not a reference: see `SIGN_IN_IMAGE`.
 pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";

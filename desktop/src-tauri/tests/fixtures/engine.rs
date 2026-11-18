@@ -17,7 +17,24 @@ fn main() {
         println!("1.4.3");
         return;
     }
-    if joined.starts_with("image inspect ") {
+    // An image the test says this engine does not have, until something pulls it. Every other
+    // image is here.
+    let missing = std::env::var("OPENBOT_TEST_ENGINE_MISSING_IMAGE").ok();
+    let pulled_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD")
+        .map(|record| std::path::PathBuf::from(format!("{}.pulled", record.to_string_lossy())));
+    let pulled = |image: &str| {
+        pulled_record.as_ref().is_some_and(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .any(|line| line == image)
+        })
+    };
+    if let Some(image) = joined.strip_prefix("image inspect ") {
+        if missing.as_deref() == Some(image) && !pulled(image) {
+            eprintln!("Error: No such image: {image}");
+            std::process::exit(1);
+        }
         return;
     }
     if SCENARIO == "installation-boundary" {
@@ -118,6 +135,16 @@ fn main() {
     }
     match joined.as_str() {
         "compose version" => println!("Docker Compose synthetic"),
+        // A pull of the image this engine is missing puts it here.
+        value if missing.as_deref().is_some_and(|image| value == format!("pull {image}")) => {
+            let path = pulled_record.as_ref().expect("a pull is recorded");
+            let mut done = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .unwrap();
+            writeln!(done, "{}", missing.as_deref().unwrap()).unwrap();
+        }
         // Read before a Start that remaps the Bot's host port. No COMPOSE_FILE is set, so Start
         // finds the installation's own `docker-compose.yml`.
         "compose config --environment" if SCENARIO == "harness" => {}

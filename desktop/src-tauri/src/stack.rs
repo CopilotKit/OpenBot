@@ -10898,11 +10898,15 @@ fn main() {
             .map(|image| format!("{image}\t\n"))
             .collect();
         std::fs::write(root.join(".fixture-images"), others).unwrap();
-        // On a ChatGPT plan, so each release's install pulls the plan's image too
-        // (`preparation::on_chatgpt_plan`): the image a later release replaces under the same name.
+        // A `.env` that names both plans' images (`preparation::plan_images`), so each release's
+        // install pulls both, as every install did before: one a later release replaces under the
+        // same name, and one both releases share.
         std::fs::write(
             root.join(".env"),
-            "CHATGPT_AUTH_FILE=/root/.langchain/chatgpt-auth.json\n",
+            format!(
+                "PICKED_HARNESS_IMAGE={}\nCHATGPT_AUTH_FILE=/root/.langchain/chatgpt-auth.json\n",
+                published("openbot-agent-claude-sdk", 'c')
+            ),
         )
         .unwrap();
         lay_out_release(&root, &earlier);

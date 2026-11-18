@@ -91,66 +91,90 @@ pub fn installed_images(root: &Path) -> Option<Vec<String>> {
 }
 
 /**
-The images of [`installed_images`] that the installation in `root` still runs: all of them but the
-ChatGPT plan's model service, which runs only on a ChatGPT plan ([`on_chatgpt_plan`]).
+The images of [`installed_images`] that the installation in `root` still runs: all of them but a
+plan image for a plan it is not on ([`plan_images`]).
 
-Every install pulled that image while the Python LangGraph image was the default Bot, and while it
-was pulled for every sign-in, so an update that went by the record alone would download the next
-release's copy for installations that never run it. Matched by repository, as `update_ready` matches
-the next release's images.
+Every install pulled both plan images while each was pulled for every sign-in, and the Python
+LangGraph one was also the default Bot, so an update that went by the record alone would download
+the next release's copies for installations that never run them. Matched by repository, as
+`update_ready` matches the next release's images.
 */
 pub fn images_it_runs(root: &Path) -> Option<Vec<String>> {
     let images = installed_images(root)?;
-    if on_chatgpt_plan(root) {
-        return Some(images);
-    }
-    let repository = |image: &str| {
-        crate::registry::parse_reference(image).map(|found| (found.host, found.repository))
-    };
-    let Some(plan) = deployment::reference(root, crate::plan::CHATGPT_SIGN_IN_IMAGE)
-        .ok()
-        .and_then(|plan| repository(&plan))
-    else {
-        return Some(images);
-    };
+    let runs = plan_images(root);
+    let not_run: Vec<_> = PLAN_IMAGES
+        .iter()
+        .filter(|published| !runs.contains(published))
+        .filter_map(|published| deployment::reference(root, published).ok())
+        .filter_map(|reference| repository(&reference))
+        .collect();
     Some(
         images
             .into_iter()
-            .filter(|image| repository(image).as_ref() != Some(&plan))
+            .filter(|image| repository(image).is_none_or(|found| !not_run.contains(&found)))
             .collect(),
     )
 }
 
-/**
-Whether the installation in `root` is on a ChatGPT plan: the one sign-in that runs the Python
-LangGraph image, as the plan's model service beside its Bot (`plan::CHATGPT_PLAN_SERVICE`).
-
-Read from the `.env` the last Start wrote. A ChatGPT plan names the service's address there. An
-installation from before the plan ran as a service names only the plan's token store, until the
-Start after its update writes the address. Every other sign-in empties both.
-*/
-pub fn on_chatgpt_plan(root: &Path) -> bool {
-    crate::env::already_set(
-        &root.join(".env"),
-        &["CHATGPT_PLAN_HARNESS_URL", "CHATGPT_AUTH_FILE"],
-    )
-    .values()
-    .any(|value| !value.trim().is_empty())
+/// An image's registry and repository, as an engine reads its name.
+fn repository(image: &str) -> Option<(String, String)> {
+    crate::registry::parse_reference(image).map(|found| (found.host, found.repository))
 }
 
 /**
-The ChatGPT plan's image, from the release laid out in `release`, pulled into `address` when it is
-not there yet.
+The two images only a plan runs, by their published names. Each carries its vendor's sign-in, and
+each runs only on that vendor's plan:
 
-Install pulls it only for an installation already on a ChatGPT plan, so the ChatGPT sign-in, which
-runs in this image, pulls it first, and so does a Start that raises the plan's service and does not
-find it (a saved plan an installation returns to after it was signed in with something else).
+- `plan::SIGN_IN_IMAGE`, the Claude Agent SDK, is the Bot a Claude plan runs on.
+- `plan::CHATGPT_SIGN_IN_IMAGE`, the Python LangGraph image, is a ChatGPT plan's model service
+  beside the Bot (`plan::CHATGPT_PLAN_SERVICE`).
+
+Install pulls one only for an installation on its plan ([`plan_images`]). A sign-in to a plan pulls
+its image, and a Start on a plan pulls whatever its Bot and services need that is not there, each
+showing the download as Install does (`main.rs`). So a switch to a plan downloads its image then.
 */
-pub fn pull_chatgpt_plan_image(address: &Address, release: &Path) -> Result<String, Problem> {
-    let image = deployment::reference(release, crate::plan::CHATGPT_SIGN_IN_IMAGE)
-        .map_err(Problem::from)?;
-    crate::pull_metrics::pull_image(address, &image, |_| {}, |_| {})?;
-    Ok(image)
+pub const PLAN_IMAGES: [&str; 2] = [
+    crate::plan::SIGN_IN_IMAGE,
+    crate::plan::CHATGPT_SIGN_IN_IMAGE,
+];
+
+/**
+The plan images ([`PLAN_IMAGES`]) the installation in `root` runs, from the `.env` its last Start
+wrote:
+
+- A Claude plan names the Claude Agent SDK as its Bot (`PICKED_HARNESS_IMAGE`): only a plan picks
+  that Bot (`harness::for_credential`).
+- A ChatGPT plan names its model service's address. An installation from before the plan ran as a
+  service names only the plan's token store, until the Start after its update writes the address.
+
+Every other sign-in names neither, and an installation nobody has signed in to has no `.env`.
+*/
+pub fn plan_images(root: &Path) -> Vec<&'static str> {
+    let set = crate::env::already_set(
+        &root.join(".env"),
+        &[
+            "PICKED_HARNESS_IMAGE",
+            "CHATGPT_PLAN_HARNESS_URL",
+            "CHATGPT_AUTH_FILE",
+        ],
+    );
+    let named = |key: &str| set.get(key).is_some_and(|value| !value.trim().is_empty());
+    let mut images = Vec::new();
+    let bot = set.get("PICKED_HARNESS_IMAGE").map(String::as_str);
+    let claude = deployment::reference(root, crate::plan::SIGN_IN_IMAGE)
+        .ok()
+        .and_then(|reference| repository(&reference));
+    if bot.is_some_and(|bot| {
+        claude.is_some() && repository(bot) == claude
+            || bot.contains(&format!("/{}@", crate::plan::SIGN_IN_IMAGE))
+            || bot.contains(&format!("/openbot-{}@", crate::plan::SIGN_IN_IMAGE))
+    }) {
+        images.push(crate::plan::SIGN_IN_IMAGE);
+    }
+    if named("CHATGPT_PLAN_HARNESS_URL") || named("CHATGPT_AUTH_FILE") {
+        images.push(crate::plan::CHATGPT_SIGN_IN_IMAGE);
+    }
+    images
 }
 
 #[derive(Serialize, Deserialize)]
@@ -381,9 +405,9 @@ fn require_with(
 }
 
 /// Every image Install pulls for the release laid out in `release`, run as `root`'s project: the
-/// Compose services desktop runs with the picked Bot, the migration, the Claude sign-in's image,
-/// and the ChatGPT plan's image only on a ChatGPT plan ([`on_chatgpt_plan`]); never the agents this
-/// installation does not run or the all-in-one image desktop never runs.
+/// Compose services desktop runs with the picked Bot, the migration, and a plan's image only for an
+/// installation on that plan ([`plan_images`]); never the agents this installation does not run or
+/// the all-in-one image desktop never runs.
 pub fn installation_pull_set(
     address: &Address,
     root: &Path,
@@ -414,14 +438,10 @@ pub fn installation_pull_set_by(
         .and_then(|picked| picked.installed_port())
         .is_some();
     let mut images = stack::installation_images_by(compose(&settings), root, release, installed)?;
-    images.push(deployment::reference(release, crate::plan::SIGN_IN_IMAGE)?);
-    // The ChatGPT plan's image runs only on a ChatGPT plan, so it is pulled only for one. A first
-    // install has no sign-in yet: the ChatGPT sign-in pulls it (`pull_chatgpt_plan_image`).
-    if on_chatgpt_plan(root) {
-        images.push(deployment::reference(
-            release,
-            crate::plan::CHATGPT_SIGN_IN_IMAGE,
-        )?);
+    // A plan's image only for an installation on that plan. A first install has no sign-in yet:
+    // a sign-in to a plan pulls its image (`PLAN_IMAGES`).
+    for published in plan_images(root) {
+        images.push(deployment::reference(release, published)?);
     }
     images.sort();
     images.dedup();
@@ -443,7 +463,7 @@ pub fn image_settings(
 }
 
 #[cfg(test)]
-mod chatgpt_plan_image_tests;
+mod plan_image_tests;
 
 #[cfg(test)]
 mod tests {
