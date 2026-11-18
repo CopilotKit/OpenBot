@@ -79,7 +79,14 @@ function serving(
     );
     if (listed) return listed;
     const schedules = answerScheduleLists(input, init, {
-      routines: [{ id: "r1", botId: "expenses" }],
+      routines: [
+        {
+          id: "r1",
+          botId: "expenses",
+          enabled: true,
+          schedule: "Weekdays at 09:00",
+        },
+      ],
       goals: [
         { id: "g1", botId: "expenses", status: "active" },
         { id: "g2", botId: "expenses", status: "paused" },
@@ -284,7 +291,7 @@ test("the rows for routines, reach, memory, approvals and agents say what this B
     expect(link?.getAttribute("href")).toBe(`/bots/expenses/${path}`);
   };
   // The first of its three by the list's order, the routine that is on, and how many more.
-  await row("When it works", /, and 2 more$/, "routines");
+  await row("When it works", "Weekdays at 09:00, and 2 more", "routines");
   await row("Reaching you", "Slack", "reach");
   await row("Memory", "1 source", "memory");
   await row("Approvals", "1 rule", "approvals");

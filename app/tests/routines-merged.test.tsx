@@ -266,6 +266,28 @@ test("the Settings summary is the first when and how many more, finished goals l
       ],
     ),
   ).toBe("Weekdays at 09:00, and 1 more");
+  // Only one that is on is named.
+  expect(summary([routine("r1", "expenses", { enabled: false })], [])).toBe(
+    "Paused",
+  );
+  expect(
+    summary(
+      [
+        routine("r1", "expenses", { enabled: false }),
+        routine("r2", "expenses", { enabled: false }),
+      ],
+      [],
+    ),
+  ).toBe("2, all paused");
+  expect(
+    summary(
+      [
+        routine("r1", "expenses", { enabled: false }),
+        routine("r2", "expenses", { schedule: "Every day at 08:00" }),
+      ],
+      [],
+    ),
+  ).toBe("Every day at 08:00, and 1 more");
   // A goal with no schedule and no event known here is named by what it does.
   expect(summary([], [goal("g1", "expenses", "Reconcile receipts")])).toBe(
     "Reconcile receipts",

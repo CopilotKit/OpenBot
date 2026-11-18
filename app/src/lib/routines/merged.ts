@@ -159,8 +159,9 @@ export function isDone(row: MergedRoutine): boolean {
 
 /**
  * The Settings tab's summary of a Bot's "When it works": the first one's "when" and how many more,
- * "Every weekday at 9, and 2 more". Finished goals don't count. A goal's triggers aren't read for
- * this, so one that starts only by a trigger is named by its "what" instead.
+ * "Every weekday at 9, and 2 more". Finished goals don't count. Only one that is on is named, so a
+ * Bot whose every one is paused says so rather than naming a schedule that never runs. A goal's
+ * triggers aren't read for this, so one that starts only by a trigger is named by its "what".
  */
 export function whenItWorksSummary(
   rows: readonly MergedRoutine[],
@@ -169,8 +170,11 @@ export function whenItWorksSummary(
   ) => string,
 ): string {
   const listed = rows.filter((row) => !isDone(row));
+  if (listed.length === 0) return "Not set";
+  // `mergeRoutines` puts the ones that are on first.
   const first = listed[0];
-  if (!first) return "Not set";
+  if (!first || !isWorking(first))
+    return listed.length === 1 ? "Paused" : `${listed.length}, all paused`;
   const words = whenWords(first, undefined, sourceLabel) ?? whatWords(first);
   const more = listed.length - 1;
   return more > 0 ? `${words}, and ${more} more` : words;

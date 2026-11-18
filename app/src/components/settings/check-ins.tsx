@@ -25,9 +25,10 @@ import { queryClient } from "@/query-client";
  * When an admin turned check-ins off for this person, the switch is off and cannot be changed, and
  * says who turned it off. Their own choice is kept underneath for when the admin turns it back on.
  *
- * No section heading: the page is Routines, and a check-in is one kind of routine on it.
+ * No section heading under the Routines list, where a check-in is one kind of routine. On
+ * Notifications, which every frame reaches (the places strip has no Routines page), it has one.
  */
-export function CheckInsSection() {
+export function CheckInsSection({ title }: { title?: string } = {}) {
   const preferences = useUserPreferences();
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const save = useMutation(
@@ -40,7 +41,7 @@ export function CheckInsSection() {
   const byAdmin = allowed.data === false;
   const on = chosen === "on" && !byAdmin;
   return (
-    <PageSection>
+    <PageSection title={title}>
       {preferences.isPending ? null : preferences.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Couldn't load your check-ins. Try again in a moment.

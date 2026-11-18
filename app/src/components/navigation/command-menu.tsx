@@ -29,6 +29,7 @@ import {
 import { formatHotkey, getHotkey } from "@/lib/hotkeys/hotkeys";
 import { useHotkey } from "@/lib/hotkeys/use-hotkey";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
+import { usePlacesEnabled } from "@/lib/places/store";
 import { cn } from "@/lib/utils";
 
 /**
@@ -154,7 +155,11 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
   const searching = isChannelSearchable(trimmed);
   const settledText = useDebounced(trimmed, SEARCH_DEBOUNCE_MS);
 
-  const navigation = useNavigationItems().filter(isNavigationLink);
+  const places = usePlacesEnabled();
+  // With the places strip, Routines is each Bot's "When it works" and `/routines` goes to Bots.
+  const navigation = useNavigationItems()
+    .filter(isNavigationLink)
+    .filter((item) => !(places && item.id === "routines"));
   const bots = useQuery(agentListQueryOptions());
   const recent = useInfiniteQuery({
     ...channelListQueryOptions(),

@@ -183,9 +183,12 @@ test("a Bot's own check-ins say they are off for all your Bots, and won't run no
   serving();
   const view = await draw(<ProactiveResearchSettings agentId="expenses" />);
   expect(
-    await view.findByText(/You turned off check-ins for all your Bots in/),
+    await view.findByText(/You turned off check-ins for all your Bots\./),
   ).toBeTruthy();
-  expect(view.getByRole("link", { name: "Routines" })).toBeTruthy();
+  // Where they are turned back on in every frame: the places strip has no Routines page.
+  expect(
+    view.getByRole("link", { name: "Notifications" }).getAttribute("href"),
+  ).toBe("/settings/notifications");
   expect(
     view.getByText("Every hour · Tells you · Off for all your Bots"),
   ).toBeTruthy();

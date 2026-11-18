@@ -197,9 +197,12 @@ export function ProactiveResearchSettings({
         <p className="mt-1 max-w-prose text-muted-foreground text-sm">
           {blocked === "Off for all your Bots" ? (
             <>
-              You turned off check-ins for all your Bots in{" "}
-              <Link className="underline underline-offset-4" to="/routines">
-                Routines
+              You turned off check-ins for all your Bots. Turn them back on in{" "}
+              <Link
+                className="underline underline-offset-4"
+                to="/settings/notifications"
+              >
+                Notifications
               </Link>
               .
             </>

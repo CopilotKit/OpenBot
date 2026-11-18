@@ -4,7 +4,8 @@ import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { TellItWhen } from "@/components/bot-profile/tell-it-when";
 import { NewRoutineButton } from "@/components/routines/new-routine-button";
 import { RoutinesList } from "@/components/routines/routines-list";
-import { agentQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * When this Bot works on its own: its routines, goals and check-ins, as one list of whens, each with
@@ -17,6 +18,14 @@ export const Route = createFileRoute("/_authed/_app/bots/$agentId/routines")({
 function WhenItWorksPage() {
   const { agentId } = Route.useParams();
   const name = useQuery(agentQueryOptions(agentId)).data?.name;
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  /*
+   * Each person's own are listed, so a Bot somebody shared says so. Not in the personal edition,
+   * where nobody else sets any up, nor on a Bot that comes with OpenBot.
+   */
+  const sharedWithYou = (agent: AgentProfile) =>
+    !personal && !agent.mine && !agent.systemOwned;
   return (
     <BotSubpage
       action={<NewRoutineButton agentId={agentId} label="Add" />}
@@ -29,7 +38,7 @@ function WhenItWorksPage() {
           <div className="mt-8">
             <TellItWhen agent={agent} />
           </div>
-          <RoutinesList agentId={agent.id} onlyYours={!agent.mine} />
+          <RoutinesList agentId={agent.id} onlyYours={sharedWithYou(agent)} />
         </>
       )}
     </BotSubpage>
