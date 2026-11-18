@@ -1587,7 +1587,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum: [default, organization, role, group, team]
+          x-extensible-enum: [default, organization, role, group, team]
         scopeId:
           type: string
           description: The role, the group's name or the team's id that decided it. Empty otherwise.
@@ -1610,7 +1610,7 @@ components:
               name:
                 type: [string, 'null']
               role:
-                $ref: './common.yaml#/components/schemas/PersonRole'
+                $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -1732,7 +1732,7 @@ components:
             organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum: [organization, group, team]
+          x-extensible-enum: [organization, group, team]
           description: >-
             Whose policy: the organization's, a team's, or a directory
             group's.

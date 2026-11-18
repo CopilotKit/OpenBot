@@ -3,7 +3,6 @@
  */
 import type { SharedUseApproval } from "./sharedUseApproval";
 import type { SharedUseRequestReason } from "./sharedUseRequestReason";
-import type { SharedUseRequestStatus } from "./sharedUseRequestStatus";
 
 /**
  * A request that a Bot may use a shared app's one account, for the audience the Bot had when it was asked.
@@ -32,6 +31,6 @@ export interface SharedUseRequest {
   /** The id of the person who asked. */
   requestedBy: string;
   /** pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it. */
-  status: SharedUseRequestStatus;
+  status: string;
   createdAt: string;
 }

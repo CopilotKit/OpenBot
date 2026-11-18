@@ -77,16 +77,7 @@ export const ListDeliveriesResponse = zod.object({
               "What was sent: a Bot's reply, a question it asked, an approval it needs, or what the person's Bots' check-ins found that needs them.",
             ),
           state: zod
-            .enum([
-              "queued",
-              "running",
-              "accepted",
-              "sent",
-              "delivered",
-              "failed",
-              "unknown",
-              "opted_out",
-            ])
+            .string()
             .describe(
               "Where it got to. accepted is the provider taking it without saying yet that it arrived. unknown is a send that may or may not have gone. opted_out is a text message not sent because the person texted STOP.",
             ),

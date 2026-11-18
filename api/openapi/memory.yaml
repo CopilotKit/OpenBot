@@ -672,7 +672,7 @@ components:
           type: boolean
         syncStatus:
           type: string
-          enum: [idle, running, succeeded, error]
+          x-extensible-enum: [idle, running, succeeded, error]
         syncError:
           type: [string, 'null']
           description: Why the last sync failed, in a sentence for the person.

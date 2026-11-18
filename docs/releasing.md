@@ -9,6 +9,9 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
    the person reading the diff and these notes are for the person deciding whether to upgrade.
+   Anything the API deprecated since the last release is in the Deprecated list under "Before
+   upgrading", with its sunset; CI fails a deprecation the changelog doesn't list
+   ([api/README.md](../api/README.md#deprecating)).
 3. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Leave
    `kind` as `stable`. Use `dry_run` first if you want to see the version and the notes without
    opening anything.
