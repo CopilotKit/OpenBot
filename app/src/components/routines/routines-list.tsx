@@ -12,7 +12,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import { STATUS } from "@/components/responsibilities/goal-page";
+import { goalStatusOf } from "@/components/responsibilities/goal-page";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
 import { useGoalTriggers } from "@/components/responsibilities/use-goal-reads";
 import {
@@ -159,7 +159,7 @@ function GoalItem({
       goalCanEnd(goal, routines, undefined) &&
       !goal.endsWhenMet);
   const triggers = useGoalTriggers(goal.id, { enabled: triggersDecide });
-  const Icon = STATUS[goal.status].icon;
+  const Icon = goalStatusOf(goal.status).icon;
   const starts =
     goal.status === "active"
       ? goalStarts(

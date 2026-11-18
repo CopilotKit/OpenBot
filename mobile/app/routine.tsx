@@ -11,7 +11,7 @@ import {
   runRoutine,
 } from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
-import { RUN_COLORS, RUN_LABELS, when } from "../src/routines";
+import { runColor, runLabel, when } from "../src/routines";
 import {
   card,
   colors,
@@ -136,11 +136,13 @@ export default function RoutineScreen() {
             {runs.data?.length === 0 && <Text style={muted}>No runs yet</Text>}
             {runs.data?.map((run) => (
               <View key={run.id} style={card}>
-                <Text
-                  style={{ fontWeight: "600", color: RUN_COLORS[run.status] }}
-                >
-                  {RUN_LABELS[run.status]}
-                </Text>
+                {runLabel(run.status) ? (
+                  <Text
+                    style={{ fontWeight: "600", color: runColor(run.status) }}
+                  >
+                    {runLabel(run.status)}
+                  </Text>
+                ) : null}
                 <Text style={muted}>
                   Started {when(run.startedAt)}
                   {run.finishedAt ? ` · finished ${when(run.finishedAt)}` : ""}

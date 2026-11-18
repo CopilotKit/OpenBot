@@ -14,6 +14,7 @@ import {
   updateOrganizationMember,
 } from "@/lib/api/generated/organizations/organizations";
 import { idempotencyKey } from "@/lib/api/request";
+import type { KnownRole } from "@/lib/auth/roles";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
 import {
   type OrganizationMemberSummary,
@@ -165,7 +166,8 @@ export function changeMemberRoleMutationOptions(queryClient: QueryClient) {
     mutationFn: async (variables: {
       organizationId: string;
       personId: string;
-      role: OrganizationMemberSummary["role"];
+      /** Only a role this app knows: one from `givableRoles`. */
+      role: KnownRole;
     }): Promise<OrganizationMemberSummary> =>
       (
         await updateOrganizationMember(
