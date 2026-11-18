@@ -48,6 +48,22 @@ pub struct Problem {
     /// the window can choose what to offer next. See `connected::Kind`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<&'static str>,
+    /// What is known of the room this computer has: boxed and flattened, so the window reads
+    /// `shortfall` and `cause`, and a problem stays small.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub room: Option<Box<Room>>,
+}
+
+/// Room on this computer, beside a failure.
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct Room {
+    /// What this computer is short of, for an update it did not start (`upgrade::Ran::Short`). The
+    /// window says it with the figures, as it says the back end's own shortfall.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shortfall: Option<crate::local_eval::Shortfall>,
+    /// A plain line above the raw output, when that output shows the disk ran out (`disk_full`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<&'static str>,
 }
 
 /// Exactly what one confirmed reset removes: the containers first, then the volumes.
@@ -72,6 +88,7 @@ impl Problem {
             leftover: None,
             restart_windows: false,
             kind: None,
+            room: None,
         }
     }
 
@@ -86,7 +103,20 @@ impl Problem {
             leftover: None,
             restart_windows: false,
             kind: None,
+            room: None,
         }
+    }
+
+    /// What this computer is short of, for an update it did not start.
+    pub fn shortfall(&self) -> Option<&crate::local_eval::Shortfall> {
+        self.room
+            .as_deref()
+            .and_then(|room| room.shortfall.as_ref())
+    }
+
+    /// The plain line for a disk that ran out, above the raw output.
+    pub fn cause(&self) -> Option<&'static str> {
+        self.room.as_deref().and_then(|room| room.cause)
     }
 
     /// The volumes a confirmed reset removes, or none when no reset is offered.
@@ -105,6 +135,71 @@ impl Problem {
         self.connection = Some(connection);
         self
     }
+
+    /// With the plain line for a disk that ran out (`disk_full`) above its raw output, when its
+    /// sentence or its output shows one, on `os` and the engine OpenBot runs on.
+    pub fn explained(mut self, os: &str, podman: bool) -> Self {
+        if self.cause().is_none() {
+            let all = format!(
+                "{}\n{}",
+                self.said,
+                self.detail.as_deref().unwrap_or_default()
+            );
+            if let Some(cause) = disk_full(&all, os, podman) {
+                self.room.get_or_insert_with(Default::default).cause = Some(cause);
+            }
+        }
+        self
+    }
+}
+
+/**
+Whether engine output says the disk ran out. Not only "no space left on device": once the drive under
+a Docker or Podman machine's disk fills, the machine's own file system stops writing ("EXT4-fs error
+... Detected aborted journal"), and every write and read of the engine's store after it fails as an
+input/output error. A Mac updating to 1.1.0 with 7.5 GB free showed only those:
+`write /var/lib/desktop-containerd/daemon/io.containerd.metadata.v1.bolt/meta.db: input/output error`,
+and the same for an image's blob under `io.containerd.content.v1.content/blobs`.
+*/
+fn disk_ran_out(lower: &str) -> bool {
+    let engine_store = [
+        "containerd",
+        "/var/lib/docker/",
+        "/var/lib/containers/storage",
+    ]
+    .iter()
+    .any(|store| lower.contains(store));
+    lower.contains("no space left")
+        || lower.contains("not enough space on the disk")
+        || lower.contains("ext4-fs error")
+        || lower.contains("aborted journal")
+        || (engine_store && lower.contains("input/output error"))
+}
+
+/**
+The plain line a failure gets above its raw output when that output shows the disk ran out
+(`disk_ran_out`), or nothing. What to do on this computer: free space, then start the engine's
+machine again, since its disk stops writing until it is restarted. Docker Desktop is quit and opened
+again; OpenBot's own Podman machine restarts with the computer.
+*/
+pub fn disk_full(output: &str, os: &str, podman: bool) -> Option<&'static str> {
+    if !disk_ran_out(&output.to_lowercase()) {
+        return None;
+    }
+    Some(match (os, podman) {
+        ("macos", false) => {
+            "Your Mac's disk is full. Free up space, quit and reopen Docker Desktop, then try again."
+        }
+        ("macos", true) => "Your Mac's disk is full. Free up space, restart your Mac, then try again.",
+        ("windows", false) => {
+            "This computer's disk is full. Free up space, quit and reopen Docker Desktop, then try \
+             again."
+        }
+        ("windows", true) => {
+            "This computer's disk is full. Free up space, restart this computer, then try again."
+        }
+        _ => "This computer's disk is full. Free up space, then try again.",
+    })
 }
 
 /*
@@ -153,7 +248,7 @@ pub fn said_about(output: &str) -> String {
                 restart the computer, and try again."
             .into();
     }
-    if lower.contains("no space left") {
+    if disk_ran_out(&lower) {
         return "This computer has run out of disk space, so OpenBot could not finish. Free some \
                 space and try again."
             .into();
@@ -259,6 +354,67 @@ mod tests {
         assert!(
             said.contains("can't reach the software it runs on"),
             "{said}"
+        );
+    }
+
+    /// The card a Mac showed updating to 1.1.0 with 7.5 GB free of 926 GB, word for word: Docker's
+    /// disk had stopped writing, and nothing on it said the disk was full.
+    const FULL_MAC_CARD: &str = "Image ghcr.io/copilotkit/openbot@sha256:479cccd42fc8942c98c7f326b065ca53cfd58f91d78fd1d5a2680b684e1a5f70: write /var/lib/desktop-containerd/daemon/io.containerd.metadata.v1.bolt/meta.db: input/output error
+Error response from daemon: write /var/lib/desktop-containerd/daemon/io.containerd.metadata.v1.bolt/meta.db: input/output error
+putting back: OpenBot could not put its database back.
+Postgres did not start on its own: time=\"2026-11-17T13:46:50-08:00\" level=warning msg=\"The \\\"OPENAI_API_KEY\\\" variable is not set. Defaulting to a blank string.\"
+unable to get image 'pgvector/pgvector:pg17': Error response from daemon: rpc error: code = Unknown desc = blob sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f expected at /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f: open /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f: input/output error";
+
+    #[test]
+    fn a_full_disk_is_said_as_one_even_when_the_engine_says_only_input_output_error() {
+        // Each line of that card alone, as each step's own output reached `said_about`.
+        for line in [
+            "write /var/lib/desktop-containerd/daemon/io.containerd.metadata.v1.bolt/meta.db: input/output error",
+            "unable to get image 'pgvector/pgvector:pg17': Error response from daemon: rpc error: code = Unknown desc = blob sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f expected at /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f: open /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f: input/output error",
+            // Docker's own log on that Mac, first on the Mac, then inside its machine.
+            "no space left on device",
+            "EXT4-fs error (device vda1): ext4_journal_check_start:83: Detected aborted journal",
+            FULL_MAC_CARD,
+        ] {
+            let said = said_about(line);
+            assert!(said.contains("run out of disk space"), "{line}: {said}");
+        }
+
+        // The card itself: its sentence, and above the raw output, the line that says what to do.
+        let card = Problem::with(
+            "OpenBot couldn't update or put the version it had back. Choose Retry to try putting it \
+             back again.",
+            FULL_MAC_CARD,
+        );
+        assert_eq!(
+            card.clone().explained("macos", false).cause(),
+            Some("Your Mac's disk is full. Free up space, quit and reopen Docker Desktop, then try again.")
+        );
+        assert_eq!(
+            card.clone().explained("windows", false).cause(),
+            Some("This computer's disk is full. Free up space, quit and reopen Docker Desktop, then try again.")
+        );
+        assert_eq!(
+            card.explained("windows", true).cause(),
+            Some("This computer's disk is full. Free up space, restart this computer, then try again.")
+        );
+        for said in [
+            disk_full(FULL_MAC_CARD, "macos", true).unwrap(),
+            disk_full(FULL_MAC_CARD, "linux", false).unwrap(),
+        ] {
+            assert!(!said.contains('\u{2014}'), "{said}");
+        }
+        // An input/output error that is not the engine's store, and a timeout, are not a full disk.
+        assert_eq!(
+            disk_full("read /dev/sdb: input/output error", "macos", false),
+            None
+        );
+        assert_eq!(disk_full("dial tcp: i/o timeout", "macos", false), None);
+        assert_eq!(
+            Problem::with("OpenBot couldn't start.", "exit 1")
+                .explained("macos", false)
+                .cause(),
+            None
         );
     }
 

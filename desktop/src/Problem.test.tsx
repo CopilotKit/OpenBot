@@ -34,6 +34,54 @@ afterEach(() => {
 });
 afterAll(() => GlobalRegistrator.unregister());
 
+/*
+ * The card a Mac showed when its disk filled mid-update: containerd's input/output errors and
+ * nothing about disk space. The native side recognises the full disk in that output
+ * (`problem::disk_full`), and the card says it in a plain line above the raw output.
+ */
+test("a full disk is said in a plain line above the raw output", () => {
+  const view = render(
+    <Failure
+      problem={{
+        said: "OpenBot couldn't update or put the version it had back. Choose Retry to try putting it back again.",
+        detail:
+          "write /var/lib/desktop-containerd/daemon/io.containerd.metadata.v1.bolt/meta.db: input/output error",
+        cause:
+          "Your Mac's disk is full. Free up space, quit and reopen Docker Desktop, then try again.",
+      }}
+    />,
+  );
+  const text = view.getByRole("alert").textContent ?? "";
+  const cause = text.indexOf("Your Mac's disk is full.");
+  expect(cause).toBeGreaterThan(text.indexOf("OpenBot couldn't update"));
+  expect(cause).toBeLessThan(text.indexOf("Technical details"));
+});
+
+// An update not started for lack of room: said with the figures it carries.
+test("an update with no room is said with its figures", () => {
+  const view = render(
+    <Failure
+      problem={{
+        said: "There isn't room on this computer for the update, so nothing changed.",
+        shortfall: {
+          podman: false,
+          cpu: false,
+          memory: false,
+          disk: true,
+          diskGb: "7.5",
+          freeOnDrive: true,
+          mac: true,
+          updating: true,
+          neededGb: "13",
+        },
+      }}
+    />,
+  );
+  expect(view.getByRole("alert").textContent).toContain(
+    "This Mac has 7.5 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+  );
+});
+
 test("problem_ui_has_no_credential_restore_action", () => {
   const view = render(
     <Failure
