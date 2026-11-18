@@ -664,6 +664,51 @@ mod stop_ipc {
         assert!(take_start_asked(fixture.app.handle().clone()));
     }
 
+    /// Seen on a Mac and on Windows: after the App row's Start brought everything up, the open
+    /// Status window's services row still said Stopped, with Start, until Refresh. A Start and a
+    /// Stop that finish, whichever way, tell the Status window to read again, and not before.
+    #[test]
+    fn the_status_window_reads_again_when_a_start_or_a_stop_finishes() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::the_status_window_reads_again_when_a_start_or_a_stop_finishes",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let status = tauri::WebviewWindowBuilder::new(&fixture.app, "status", Default::default())
+            .build()
+            .unwrap();
+        let (heard, told) = mpsc::channel();
+        status.listen(STATUS_REFRESH_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+
+        // A Start that ends at once: the fixture's OpenBot, in another folder, still runs.
+        let elsewhere = temp_root("status-refresh-elsewhere");
+        let started = tauri::async_runtime::block_on(start_stack_now(
+            fixture.app.handle().clone(),
+            elsewhere.to_string_lossy().into_owned(),
+            "http://127.0.0.1:1".into(),
+            "ws://127.0.0.1:2".into(),
+            compatible_choice(None, None),
+            None,
+        ));
+        assert!(started.is_err(), "{started:?}");
+        told.recv_timeout(DEADLINE)
+            .expect("told once the Start ended");
+
+        let compose = fixture.compose_barrier();
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::StatusWindow);
+        let mut stopping = await_compose(&compose);
+        assert!(
+            told.recv_timeout(Duration::from_millis(300)).is_err(),
+            "not told while the Stop runs"
+        );
+        stopping.write_all(&[0]).unwrap();
+        told.recv_timeout(DEADLINE)
+            .expect("told once the Stop ended");
+    }
+
     #[test]
     fn change_ai_connection_after_a_failed_stop_opens_setup_as_usual() {
         if crate::test_support::isolated_process(

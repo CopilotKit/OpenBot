@@ -16,6 +16,20 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 
+/** What the native side says to this window, by name, as `listen` hears it. */
+const listeners = new Map<string, Set<() => void>>();
+mock.module("@tauri-apps/api/event", () => ({
+  listen: async (name: string, listener: () => void) => {
+    const heard = listeners.get(name) ?? new Set();
+    heard.add(listener);
+    listeners.set(name, heard);
+    return () => heard.delete(listener);
+  },
+}));
+function said(name: string) {
+  for (const listener of listeners.get(name) ?? []) listener();
+}
+
 const { diagnostics, formatBytes, StatusWindow, totalMemory } = await import(
   "./StatusWindow"
 );
@@ -23,6 +37,7 @@ const { diagnostics, formatBytes, StatusWindow, totalMemory } = await import(
 afterEach(() => {
   cleanup();
   invokeCalls.length = 0;
+  listeners.clear();
 });
 
 const running = {
@@ -174,6 +189,74 @@ test("a Start the main window could not be asked for says so", async () => {
   const app = await view.findByRole("region", { name: "App" });
   await userEvent.click(within(app).getByRole("button", { name: "Start" }));
   await view.findByText("Starting OpenBot did not finish. Try again.");
+});
+
+/** What `local status` answers, at a readiness. */
+const localStatus = (readiness: string) => ({
+  outcome: "completed",
+  stack: null,
+  reason: null,
+  readiness,
+  licence: "valid",
+  licenceExpiresAt: null,
+  checksPassed: false,
+});
+
+/**
+ * Seen on a Mac and on Windows: after the App row's Start brought everything up in the main window,
+ * this window's services row still said Stopped, with Start, 30 seconds on and after reopening it,
+ * until Refresh. Its own reading every few seconds found the services' parts again, but their
+ * readiness is the CLI's, asked only when told. The native side tells it once a start, a stop or
+ * an update finishes, or the window is shown again (`status:refresh`), and it reads everything.
+ */
+test("once a start finishes elsewhere, the services row follows without Refresh", async () => {
+  let up = false;
+  invokeHandler = async (command, args) => {
+    if (command === "desktop_status") return up ? running : stopped;
+    if (command === "run_local_eval")
+      return localStatus(up ? "ready" : "stopped");
+    return answers()(command, args);
+  };
+  const view = render(<StatusWindow readEveryMs={20} />);
+  const services = await view.findByRole("region", {
+    name: "OpenBot's services",
+  });
+  await waitFor(() => expect(services.textContent).toContain("Stopped"));
+  // The main window's Start brings everything up. This window's own reading sees the parts.
+  up = true;
+  await waitFor(() =>
+    expect(view.getByRole("region", { name: "App" }).textContent).toContain(
+      "Running",
+    ),
+  );
+  // Told the Start finished, it asks the services' readiness again.
+  said("status:refresh");
+  await waitFor(() =>
+    expect(
+      view.getByRole("region", { name: "OpenBot's services" }).textContent,
+    ).toContain("Ready · 2.4 GB"),
+  );
+  expect(
+    within(
+      view.getByRole("region", { name: "OpenBot's services" }),
+    ).queryByRole("button", { name: "Start" }),
+  ).toBeNull();
+});
+
+/**
+ * Seen on a Mac: opened while OpenBot updated itself, the App row said Stopped and offered Start.
+ * An update stops OpenBot and starts it again by itself, as the main window's Updating OpenBot
+ * says. The row says Updating, with nothing to press.
+ */
+test("while OpenBot updates, the App row says so and offers no Start", async () => {
+  invokeHandler = answers({ desktop_status: { ...stopped, updating: true } });
+  const view = render(<StatusWindow readEveryMs={60_000} />);
+  const app = await view.findByRole("region", { name: "App" });
+  expect(app.querySelector(".status-state")?.textContent).toBe("Updating");
+  expect(within(app).queryAllByRole("button")).toEqual([]);
+  expect(app.textContent).toContain(
+    "OpenBot is updating and opens by itself when it's done.",
+  );
 });
 
 /**

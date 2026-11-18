@@ -2083,6 +2083,7 @@ async fn upgrade_and_start(
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
     let selected = stack::root_from(&root);
+    let status = app.clone();
     let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness)
         .await
         .map(|mut outcome| {
@@ -2104,6 +2105,8 @@ async fn upgrade_and_start(
         );
     }
     logging::outcome("update", asked, &ran);
+    // The update is over, whichever way: the Status window stops saying Updating.
+    status_changed(&status);
     ran
 }
 
@@ -4775,8 +4778,9 @@ async fn start_stack_now<R: tauri::Runtime>(
     let menus = app.clone();
     let started =
         start_stack_inner(app, root.clone(), api_url, gateway_ws_url, model, harness).await;
-    // The menu bar says whether OpenBot is running.
+    // The menu bar says whether OpenBot is running, and so does the Status window.
     refresh_menus(&menus);
+    status_changed(&menus);
     // Setup is done once OpenBot starts: the window hands over to it at once. Recorded once.
     if started.is_ok() {
         desktop_telemetry::record(&menus, telemetry::EventData::Activated);
@@ -5499,6 +5503,7 @@ async fn stop_stack<R: tauri::Runtime>(
     );
     // Inventory, held-child cleanup and Compose all block. Keep the complete shutdown off both
     // Tauri's event loop and its async workers, and resolve IPC only when shutdown has finished.
+    let status = app.clone();
     let stopped = tauri::async_runtime::spawn_blocking(move || {
         stop_everything(&app, &stack::root_from(&root)).into_result()
     })
@@ -5506,6 +5511,7 @@ async fn stop_stack<R: tauri::Runtime>(
     .map_err(|error| format!("the shutdown did not run: {error}"))
     .and_then(|stopped| stopped);
     logging::outcome("stop", asked, &stopped);
+    status_changed(&status);
     stopped
 }
 
@@ -8833,6 +8839,9 @@ fn show_status_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         focus(&window, "the Status window");
+        // Shown again, it reads everything afresh. On Windows the page is not told it is visible
+        // again, and a window reopened from the tray showed what it read before it was closed.
+        status_changed(app);
         return;
     }
     let Ok(mut url) = setup_destination(app) else {
@@ -8934,6 +8943,10 @@ pub(crate) struct DesktopStatus {
     /// The folder this app's log file is in (`logging`), for Open log folder. Absent from a desktop
     /// app older than the log, so a page can tell the button would have nothing to open.
     log_folder: Option<String>,
+    /// OpenBot is updating itself (`RuntimeUpdateGuard`), as the setup window's Updating OpenBot
+    /// says. It stops and starts again on its own meanwhile, so nothing offers Start for it: the
+    /// Status window offered Start while an update had OpenBot stopped.
+    updating: bool,
 }
 
 impl DesktopStatus {
@@ -8959,6 +8972,7 @@ impl DesktopStatus {
             log_folder: logging::folder(app)
                 .ok()
                 .map(|folder| folder.display().to_string()),
+            updating: false,
         }
     }
 }
@@ -9055,6 +9069,25 @@ fn read_desktop_status<R: tauri::Runtime>(
         log_folder: logging::folder(app)
             .ok()
             .map(|folder| folder.display().to_string()),
+        updating: shell.updating.load(std::sync::atomic::Ordering::SeqCst),
+    }
+}
+
+/// Said to the Status window when it should read everything afresh: a start, a stop or an update
+/// finished, or the window was shown again.
+const STATUS_REFRESH_EVENT: &str = "status:refresh";
+
+/**
+A start, a stop or an update has finished: the Status window, if there is one, reads everything
+again. Its services' readiness is the CLI's, which it asks only when told, since the main window's
+own CLI calls take the same lock. Seen on a Mac and on Windows: after the App row's Start brought
+everything up, the services row still said Stopped, with Start, until Refresh.
+*/
+fn status_changed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if app.get_webview_window("status").is_some() {
+        if let Err(error) = app.emit_to("status", STATUS_REFRESH_EVENT, ()) {
+            log::warn!("[status] could not ask the Status window to read again: {error}");
+        }
     }
 }
 
@@ -12112,6 +12145,7 @@ fn stop_then_show_setup<R: tauri::Runtime>(
             Some(problem) => Err(problem),
         };
         logging::outcome("stop", asked, &settled);
+        status_changed(&app);
         settle_change_ai_connection(&shell, settled.is_ok(), change_ai_connection);
         // Asked for only once everything stopped, as the AI screen is.
         if choose_connection && settled.is_ok() {
@@ -18746,6 +18780,36 @@ mod tests {
             status_of(env!("CARGO_PKG_VERSION")),
             env!("CARGO_PKG_VERSION")
         );
+    }
+
+    /// Seen on a Mac: opened while OpenBot updated itself, the Status window said the app was
+    /// Stopped and offered Start. The status says OpenBot is updating for as long as an update
+    /// holds it, and not after.
+    #[test]
+    fn status_says_openbot_is_updating_while_an_update_holds_it() {
+        if crate::test_support::isolated_process(
+            "tests::status_says_openbot_is_updating_while_an_update_holds_it",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_only_with("docker", "desktop-status-updating");
+        let root = temp_root("desktop-status-updating");
+        std::fs::create_dir_all(&root).unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        *app.state::<Shell>().root.lock().unwrap() = Some(root.clone());
+        let updating = || {
+            serde_json::to_value(read_desktop_status(app.handle(), false)).unwrap()["updating"]
+                .clone()
+        };
+        assert_eq!(updating(), false);
+        let update = RuntimeUpdateGuard::begin(app.handle()).unwrap();
+        assert_eq!(updating(), true);
+        drop(update);
+        assert_eq!(updating(), false);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// The Windows check runs on a blocking thread, never the one that asked: Tauri runs a command

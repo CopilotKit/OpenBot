@@ -236,6 +236,8 @@ export async function invoke(command, args) {
           shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "8.2", freeOnDrive: true, mac: true, updating: true, neededGb: "13" },
         };
       if (backEndShort) return { ...status("ready", "valid"), updateTo: "0.16.0-rc.13" };
+      // The Status window's services, stopped until the main window's Start brings them up.
+      if (location.search === "?started" && !fake.up) return status("stopped", "valid");
       return status("ready", "valid");
     // OpenBot's own start, the step's last row: it stays there for the test to look at. Running,
     // when the window is about to find it needs a newer app. Refused, when the release laid out
@@ -249,10 +251,16 @@ export async function invoke(command, args) {
         };
       return localTooOld ? null : new Promise(() => {});
     // The Status window (\`#status\`): everything running, or, at \`?stopped#status\`, all of it
-    // stopped as Stop leaves it, the software OpenBot runs on still running.
+    // stopped as Stop leaves it, the software OpenBot runs on still running. At
+    // \`?updating#status\`, stopped by an update of OpenBot. At \`?started#status\`, stopped until
+    // \`__fake.up\`, as when the main window's Start brings everything up.
     case "desktop_status": {
-      const stopped = location.search === "?stopped";
+      const stopped =
+        location.search === "?stopped" ||
+        location.search === "?updating" ||
+        (location.search === "?started" && !fake.up);
       return {
+        updating: location.search === "?updating",
         openbotRunning: !stopped,
         openbotHeld: !stopped,
         processes: [],
@@ -2492,11 +2500,14 @@ describe.skipIf(!asked)("the Status window after Stop", () => {
               const buttons = [...(section?.querySelectorAll("button") ?? [])];
               const button = buttons[0]?.getBoundingClientRect();
               const top = head?.getBoundingClientRect();
+              // Whole pixels: Chromium on Linux lays a 40 px button out at 39.99998.
+              const px = (value: number | undefined) =>
+                value === undefined ? null : Math.round(value);
               return {
                 said: buttons.map((one) => one.textContent),
-                left: button?.left,
-                width: button?.width,
-                height: button?.height,
+                left: px(button?.left),
+                width: px(button?.width),
+                height: px(button?.height),
                 underHead:
                   button && top ? Math.round(button.top - top.bottom) : null,
                 className: buttons[0]?.className,
@@ -2517,3 +2528,108 @@ describe.skipIf(!asked)("the Status window after Stop", () => {
       }
     }, 30_000);
 });
+
+/*
+ * Two states the Mac and Windows pass found. Opened while OpenBot updated itself, the App row said
+ * Stopped and offered Start: it says Updating now, with nothing to press. And after the App row's
+ * Start brought everything up in the main window, the services row still said Stopped, with Start,
+ * until Refresh: told the Start finished (`status:refresh`), it reads its readiness again. Each
+ * screenshot is taken before anything is asserted, so a run against the earlier window keeps its
+ * look too. `OPENBOT_APP_SHOTS=<folder>` keeps them, light and dark.
+ */
+describe.skipIf(!asked)(
+  "the Status window through an update and a start",
+  () => {
+    const shots = process.env.OPENBOT_APP_SHOTS;
+    const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const shoot = (page: Page, name: string, colorScheme: string) =>
+      shots
+        ? page.screenshot({
+            path: `${shots}/status-${name}-${colorScheme}-${engine}.png`,
+          })
+        : null;
+    const appRow = (page: Page) =>
+      page.evaluate(() => {
+        const section = document.querySelector('section[aria-label="App"]');
+        return {
+          state: section?.querySelector(".status-state")?.textContent ?? null,
+          buttons: [...(section?.querySelectorAll("button") ?? [])].map(
+            (button) => button.textContent,
+          ),
+        };
+      });
+    const servicesRow = (page: Page) =>
+      page.evaluate(() => {
+        const section = document.querySelector(
+          `section[aria-label="OpenBot's services"]`,
+        );
+        return {
+          state: section?.querySelector(".status-state")?.textContent ?? null,
+          buttons: [...(section?.querySelectorAll("button") ?? [])].map(
+            (button) => button.textContent,
+          ),
+        };
+      });
+
+    for (const colorScheme of ["light", "dark"] as const) {
+      test(`while OpenBot updates, the App row says Updating with nothing to press (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 640, height: 720 },
+          colorScheme,
+        });
+        try {
+          await open(page, "?updating#status");
+          await page.getByRole("region", { name: "App" }).waitFor();
+          await page.waitForTimeout(400);
+          await shoot(page, "updating", colorScheme);
+          expect(await appRow(page)).toEqual({
+            state: "Updating",
+            buttons: [],
+          });
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+
+      test(`once a start finishes, the services row follows without Refresh (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 640, height: 720 },
+          colorScheme,
+        });
+        try {
+          await open(page, "?started#status");
+          await page.getByRole("region", { name: "App" }).waitFor();
+          await page.waitForTimeout(400);
+          // The main window's Start brings everything up; the window's own reading sees the parts.
+          await page.evaluate(() => {
+            (globalThis as unknown as { __fake: { up: boolean } }).__fake.up =
+              true;
+          });
+          await page
+            .locator('section[aria-label="App"] .status-state', {
+              hasText: "Running",
+            })
+            .waitFor();
+          await page.waitForTimeout(400);
+          // Told the Start finished, as the native side tells it.
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as {
+                __fake: { emit: (name: string, payload: unknown) => void };
+              }
+            ).__fake.emit("status:refresh", null),
+          );
+          await page.waitForTimeout(1500);
+          await shoot(page, "started", colorScheme);
+          expect((await appRow(page)).buttons).toEqual(["Restart", "Stop"]);
+          expect(await servicesRow(page)).toEqual({
+            state: "Ready · 2.4 GB",
+            buttons: ["Restart", "Stop"],
+          });
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+    }
+  },
+);
