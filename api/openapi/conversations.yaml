@@ -1714,22 +1714,25 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/star-prompt-events:
+  /api/v2/organizations/{organizationId}/nudge-events:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
     post:
       tags:
         - Product events
-      operationId: recordStarPromptEvent
-      summary: Record what the caller did with the ask to star OpenBot
+      operationId: recordNudgeEvent
+      summary: Record what the caller did with a nudge
       description: >-
-        Tell OpenBot that the ask to star OpenBot on GitHub was shown to the
-        caller, that they opened the repository from it, or that they said
-        Not now, and which moment asked, so OpenBot can count which moment
-        works. It is best effort: a client sends one per show or answer and
-        waits on nothing. The event counts for the caller and names nothing
-        else. Where this OpenBot has product telemetry switched off, it is
-        accepted and dropped.
+        Tell OpenBot that a nudge (a notice OpenBot shows a person once, such
+        as the ask to star OpenBot on GitHub) was shown to the caller, that
+        they followed it, or that they dismissed it, and where. OpenBot adds
+        the moment that made it due, from what it already knows about the
+        caller, so the counts say which moment works. It is best effort: a
+        client sends one per show or answer and waits on nothing. Saving the
+        answer is a separate change to the caller's preferences
+        (`dismissedNotices`). The event counts for the caller and names
+        nothing else. Where this OpenBot has product telemetry switched off,
+        it is accepted and dropped.
       security:
         - webSession: []
         - appOAuth:
@@ -1742,10 +1745,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StarPromptEvent'
+              $ref: '#/components/schemas/NudgeEvent'
             examples:
               clicked:
-                $ref: '#/components/examples/StarPromptClicked'
+                $ref: '#/components/examples/NudgeClicked'
       responses:
         '204':
           description: The event is accepted.
@@ -2233,37 +2236,39 @@ components:
             - desktop
             - mobile
           description: Where the caller saw or copied it.
-    StarPromptEvent:
+    NudgeEvent:
       type: object
       description: >-
-        What the caller did with the ask to star OpenBot on GitHub, and the
-        moment that asked. Names nothing about the person, who is the caller.
+        What the caller did with a nudge, and where. Names nothing about the
+        person, who is the caller. The moment that made the nudge due is
+        added by OpenBot, not sent.
       additionalProperties: false
       required:
-        - kind
-        - trigger
+        - nudge
+        - action
+        - place
         - surface
       properties:
-        kind:
+        nudge:
+          $ref: './common.yaml#/components/schemas/NoticeId'
+        action:
           type: string
           enum:
-            - star_prompt_shown
-            - star_prompt_clicked
-            - star_prompt_dismissed
+            - shown
+            - clicked
+            - dismissed
           description: >-
-            star_prompt_shown when the card was drawn, star_prompt_clicked when
-            they opened the repository from it or from Settings, and
-            star_prompt_dismissed when they said Not now.
-        trigger:
+            shown when the nudge was drawn, clicked when they followed it
+            (for the star nudge, opened the repository), and dismissed when
+            they said Not now.
+        place:
           type: string
           enum:
-            - prompts
-            - bot_created
+            - card
             - settings
           description: >-
-            The moment that asked: prompts after their fifth message,
-            bot_created after they created a Bot, or settings for the
-            permanent link in Settings, which is never shown as a card.
+            card for the nudge drawn above the message box, settings for its
+            permanent row in Settings, which is never shown as a card.
         surface:
           type: string
           enum:
@@ -3476,9 +3481,9 @@ components:
     ProductEventViewed:
       summary: "An answer the caller saw in the web app."
       value: {"kind": "result_viewed", "threadId": "6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "messageId": "msg_0b1c6f0e", "surface": "web"}
-    StarPromptClicked:
-      summary: "The caller opened the repository from the card after their fifth message, in OpenBot Desktop."
-      value: {"kind": "star_prompt_clicked", "trigger": "prompts", "surface": "desktop"}
+    NudgeClicked:
+      summary: "The caller opened OpenBot's repository from the star card, in OpenBot Desktop."
+      value: {"nudge": "star-on-github", "action": "clicked", "place": "card", "surface": "desktop"}
     AppErrorBoundary:
       summary: "An error the web app's error screen caught."
       value: {"source": "error_boundary", "type": "TypeError", "message": "Cannot read properties of undefined (reading 'title')", "stack": "TypeError: Cannot read properties of undefined (reading 'title')\n    at BotCard (/assets/route-app-secondary.js:12:345)", "surface": "web", "appVersion": "1.1.0-rc.2"}

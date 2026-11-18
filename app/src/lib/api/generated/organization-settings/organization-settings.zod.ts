@@ -35,12 +35,6 @@ export const GetDeploymentResponse = zod
     selfHostBanner: zod
       .boolean()
       .describe("Whether to offer help self-hosting OpenBot."),
-    starPrompt: zod
-      .boolean()
-      .optional()
-      .describe(
-        "Whether to ask people, once, to star OpenBot on GitHub, and list the link in Settings. Off when the deployment sets OPENBOT_STAR_PROMPT to false or 0. A server that leaves it out does not ask.",
-      ),
     transcription: zod
       .boolean()
       .describe("Whether a person can dictate a message."),

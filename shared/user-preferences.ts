@@ -49,10 +49,17 @@ export type UserPreferences = {
   /** Whether this person closed the banner offering help self-hosting OpenBot. */
   selfHostBannerDismissed: boolean;
   /**
-   * Set once this person answers the ask to star OpenBot on GitHub, either way, so it is asked once
-   * on every device they sign in from.
+   * The notices this person answered, either way, by id (`notices.ts`). A notice here is never shown
+   * to them again, on any device they sign in from. Saving one adds it to the list; nothing takes
+   * one back off.
    */
-  starPromptAnswered: boolean;
+  dismissedNotices: string[];
+  /**
+   * Server-owned: the notices OpenBot would show this person now, worked out on every read from the
+   * edition and how they have used OpenBot (`notices.ts`). Never one they dismissed. Absent from a
+   * server that works out none.
+   */
+  noticesDue?: string[];
   /**
    * Whether this person narrates their recordings in OpenBot's Browser: the page listens to their microphone (hosted
    * OpenBot), or the Recorder in their browser does (OpenBot Desktop), only when it is `on`. Null until they chose, which
@@ -72,7 +79,7 @@ export type UserPreferences = {
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   messageListEmphasis: "thread",
   selfHostBannerDismissed: false,
-  starPromptAnswered: false,
+  dismissedNotices: [],
   narration: null,
   skin: DEFAULT_SKIN,
   proactive: "on",

@@ -17554,15 +17554,15 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
-  /api/v2/organizations/{organizationId}/star-prompt-events:
+  /api/v2/organizations/{organizationId}/nudge-events:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
     post:
       tags:
         - Product events
-      operationId: recordStarPromptEvent
-      summary: Record what the caller did with the ask to star OpenBot
-      description: 'Tell OpenBot that the ask to star OpenBot on GitHub was shown to the caller, that they opened the repository from it, or that they said Not now, and which moment asked, so OpenBot can count which moment works. It is best effort: a client sends one per show or answer and waits on nothing. The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
+      operationId: recordNudgeEvent
+      summary: Record what the caller did with a nudge
+      description: 'Tell OpenBot that a nudge (a notice OpenBot shows a person once, such as the ask to star OpenBot on GitHub) was shown to the caller, that they followed it, or that they dismissed it, and where. OpenBot adds the moment that made it due, from what it already knows about the caller, so the counts say which moment works. It is best effort: a client sends one per show or answer and waits on nothing. Saving the answer is a separate change to the caller''s preferences (`dismissedNotices`). The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
       security:
         - webSession: []
         - appOAuth:
@@ -17575,10 +17575,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StarPromptEvent'
+              $ref: '#/components/schemas/NudgeEvent'
             examples:
               clicked:
-                $ref: '#/components/examples/StarPromptClicked'
+                $ref: '#/components/examples/NudgeClicked'
       responses:
         '204':
           description: The event is accepted.
@@ -21481,6 +21481,13 @@ components:
         - admin
         - member
       description: 'The person''s role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.'
+    NoticeId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+      description: 'A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.'
+      example: star-on-github
     AssignableRole:
       type: string
       enum:
@@ -21671,7 +21678,7 @@ components:
       required:
         - messageListEmphasis
         - selfHostBannerDismissed
-        - starPromptAnswered
+        - dismissedNotices
         - narration
         - skin
         - proactive
@@ -21681,9 +21688,21 @@ components:
         selfHostBannerDismissed:
           type: boolean
           description: Whether they closed the banner offering help self-hosting OpenBot.
-        starPromptAnswered:
-          type: boolean
-          description: Whether they answered the ask to star OpenBot on GitHub, either way, so it is asked once on every device.
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: The notices they answered, either way, by id. A notice in this list is never shown to them again, on any device. Empty until they answer one.
+          items:
+            $ref: '#/components/schemas/NoticeId'
+        noticesDue:
+          type: array
+          readOnly: true
+          maxItems: 64
+          uniqueItems: true
+          description: The notices OpenBot would show them now, by id, worked out by the server from the edition and how they have used OpenBot. A notice they dismissed is never here. Absent from a server that works out none.
+          items:
+            $ref: '#/components/schemas/NoticeId'
         narration:
           description: Whether they narrate their recordings in OpenBot's browser, which opens the microphone only when on. Null until they choose, which the browser asks before their first recording.
           oneOf:
@@ -21708,8 +21727,13 @@ components:
           $ref: '#/components/schemas/MessageListEmphasis'
         selfHostBannerDismissed:
           type: boolean
-        starPromptAnswered:
-          type: boolean
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: 'Notices they answered, by id. Added to the ones already dismissed: a notice is never taken back off the list.'
+          items:
+            $ref: '#/components/schemas/NoticeId'
         narration:
           $ref: '#/components/schemas/OnOff'
         skin:
@@ -22174,9 +22198,6 @@ components:
         selfHostBanner:
           type: boolean
           description: Whether to offer help self-hosting OpenBot.
-        starPrompt:
-          type: boolean
-          description: Whether to ask people, once, to star OpenBot on GitHub, and list the link in Settings. Off when the deployment sets OPENBOT_STAR_PROMPT to false or 0. A server that leaves it out does not ask.
         transcription:
           type: boolean
           description: Whether a person can dictate a message.
@@ -34525,29 +34546,31 @@ components:
           minLength: 1
           maxLength: 32
           pattern: ^v?\d+(?:\.\d+){1,3}(?:-[a-z]+(?:\.\d{1,9})?)?$
-    StarPromptEvent:
+    NudgeEvent:
       type: object
-      description: What the caller did with the ask to star OpenBot on GitHub, and the moment that asked. Names nothing about the person, who is the caller.
+      description: What the caller did with a nudge, and where. Names nothing about the person, who is the caller. The moment that made the nudge due is added by OpenBot, not sent.
       additionalProperties: false
       required:
-        - kind
-        - trigger
+        - nudge
+        - action
+        - place
         - surface
       properties:
-        kind:
+        nudge:
+          $ref: '#/components/schemas/NoticeId'
+        action:
           type: string
           enum:
-            - star_prompt_shown
-            - star_prompt_clicked
-            - star_prompt_dismissed
-          description: star_prompt_shown when the card was drawn, star_prompt_clicked when they opened the repository from it or from Settings, and star_prompt_dismissed when they said Not now.
-        trigger:
+            - shown
+            - clicked
+            - dismissed
+          description: shown when the nudge was drawn, clicked when they followed it (for the star nudge, opened the repository), and dismissed when they said Not now.
+        place:
           type: string
           enum:
-            - prompts
-            - bot_created
+            - card
             - settings
-          description: 'The moment that asked: prompts after their fifth message, bot_created after they created a Bot, or settings for the permanent link in Settings, which is never shown as a card.'
+          description: card for the nudge drawn above the message box, settings for its permanent row in Settings, which is never shown as a card.
         surface:
           type: string
           enum:
@@ -41610,7 +41633,8 @@ components:
       value:
         messageListEmphasis: thread
         selfHostBannerDismissed: false
-        starPromptAnswered: false
+        dismissedNotices: []
+        noticesDue: []
         narration: null
         skin: openbot
         proactive: 'on'
@@ -44946,11 +44970,12 @@ components:
               at BotCard (/assets/route-app-secondary.js:12:345)
         surface: web
         appVersion: 1.1.0-rc.2
-    StarPromptClicked:
-      summary: The caller opened the repository from the card after their fifth message, in OpenBot Desktop.
+    NudgeClicked:
+      summary: The caller opened OpenBot's repository from the star card, in OpenBot Desktop.
       value:
-        kind: star_prompt_clicked
-        trigger: prompts
+        nudge: star-on-github
+        action: clicked
+        place: card
         surface: desktop
     LearningConfigurationExample:
       summary: Learning on, every Bot learning into the space OpenBot assigned, people reviewing their own.

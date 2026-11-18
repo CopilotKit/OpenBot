@@ -4,7 +4,7 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { AppError, ProductEvent, StarPromptEvent } from "../model";
+import type { AppError, NudgeEvent, ProductEvent } from "../model";
 
 export const getRecordProductEventMockHandler = (
   overrideResponse?:
@@ -60,21 +60,21 @@ export const getRecordAppErrorMockHandler = (
   );
 };
 
-export const getRecordStarPromptEventMockHandler = (
+export const getRecordNudgeEventMockHandler = (
   overrideResponse?:
     | void
     | ((
         info: Parameters<
-          HttpResponseResolver<{ organizationId: string }, StarPromptEvent>
+          HttpResponseResolver<{ organizationId: string }, NudgeEvent>
         >[0],
       ) => Promise<void> | void),
   options?: RequestHandlerOptions,
 ) => {
-  return http.post<{ organizationId: string }, StarPromptEvent>(
-    "*/api/v2/organizations/:organizationId/star-prompt-events",
+  return http.post<{ organizationId: string }, NudgeEvent>(
+    "*/api/v2/organizations/:organizationId/nudge-events",
     async (
       info: Parameters<
-        HttpResponseResolver<{ organizationId: string }, StarPromptEvent>
+        HttpResponseResolver<{ organizationId: string }, NudgeEvent>
       >[0],
     ) => {
       if (typeof overrideResponse === "function") {
@@ -89,5 +89,5 @@ export const getRecordStarPromptEventMockHandler = (
 export const getProductEventsMock = () => [
   getRecordProductEventMockHandler(),
   getRecordAppErrorMockHandler(),
-  getRecordStarPromptEventMockHandler(),
+  getRecordNudgeEventMockHandler(),
 ];

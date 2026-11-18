@@ -16,8 +16,6 @@ export interface Deployment {
   generativeUi: boolean;
   /** Whether to offer help self-hosting OpenBot. */
   selfHostBanner: boolean;
-  /** Whether to ask people, once, to star OpenBot on GitHub, and list the link in Settings. Off when the deployment sets OPENBOT_STAR_PROMPT to false or 0. A server that leaves it out does not ask. */
-  starPrompt?: boolean;
   /** Whether a person can dictate a message. */
   transcription: boolean;
   /** Whether a person can talk to a Bot. */

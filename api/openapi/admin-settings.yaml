@@ -1041,13 +1041,6 @@ components:
         selfHostBanner:
           type: boolean
           description: Whether to offer help self-hosting OpenBot.
-        starPrompt:
-          type: boolean
-          description: >-
-            Whether to ask people, once, to star OpenBot on GitHub, and list
-            the link in Settings. Off when the deployment sets
-            OPENBOT_STAR_PROMPT to false or 0. A server that leaves it out
-            does not ask.
         transcription:
           type: boolean
           description: Whether a person can dictate a message.

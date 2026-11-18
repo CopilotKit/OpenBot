@@ -901,6 +901,20 @@ export const GetPreferencesParams = zod.object({
     ),
 });
 
+export const getPreferencesResponseDismissedNoticesItemMax = 64;
+
+export const getPreferencesResponseDismissedNoticesItemRegExp = new RegExp(
+  "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+);
+export const getPreferencesResponseDismissedNoticesMax = 64;
+
+export const getPreferencesResponseNoticesDueItemMax = 64;
+
+export const getPreferencesResponseNoticesDueItemRegExp = new RegExp(
+  "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+);
+export const getPreferencesResponseNoticesDueMax = 64;
+
 export const GetPreferencesResponse = zod
   .object({
     messageListEmphasis: zod
@@ -913,10 +927,36 @@ export const GetPreferencesResponse = zod
       .describe(
         "Whether they closed the banner offering help self-hosting OpenBot.",
       ),
-    starPromptAnswered: zod
-      .boolean()
+    dismissedNotices: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(getPreferencesResponseDismissedNoticesItemMax)
+          .regex(getPreferencesResponseDismissedNoticesItemRegExp)
+          .describe(
+            "A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.",
+          ),
+      )
+      .max(getPreferencesResponseDismissedNoticesMax)
       .describe(
-        "Whether they answered the ask to star OpenBot on GitHub, either way, so it is asked once on every device.",
+        "The notices they answered, either way, by id. A notice in this list is never shown to them again, on any device. Empty until they answer one.",
+      ),
+    noticesDue: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(getPreferencesResponseNoticesDueItemMax)
+          .regex(getPreferencesResponseNoticesDueItemRegExp)
+          .describe(
+            "A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.",
+          ),
+      )
+      .max(getPreferencesResponseNoticesDueMax)
+      .optional()
+      .describe(
+        "The notices OpenBot would show them now, by id, worked out by the server from the edition and how they have used OpenBot. A notice they dismissed is never here. Absent from a server that works out none.",
       ),
     narration: zod
       .union([zod.enum(["on", "off"]), zod.null()])
@@ -982,6 +1022,13 @@ export const UpdatePreferencesHeader = zod.object({
     ),
 });
 
+export const updatePreferencesBodyDismissedNoticesItemMax = 64;
+
+export const updatePreferencesBodyDismissedNoticesItemRegExp = new RegExp(
+  "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+);
+export const updatePreferencesBodyDismissedNoticesMax = 64;
+
 export const UpdatePreferencesBody = zod
   .object({
     messageListEmphasis: zod
@@ -991,7 +1038,22 @@ export const UpdatePreferencesBody = zod
         "What the conversation list leads with, the Bot or the conversation.",
       ),
     selfHostBannerDismissed: zod.boolean().optional(),
-    starPromptAnswered: zod.boolean().optional(),
+    dismissedNotices: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(updatePreferencesBodyDismissedNoticesItemMax)
+          .regex(updatePreferencesBodyDismissedNoticesItemRegExp)
+          .describe(
+            "A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.",
+          ),
+      )
+      .max(updatePreferencesBodyDismissedNoticesMax)
+      .optional()
+      .describe(
+        "Notices they answered, by id. Added to the ones already dismissed: a notice is never taken back off the list.",
+      ),
     narration: zod.enum(["on", "off"]).optional(),
     skin: zod
       .enum(["openbot", "openduet", "opendots", "openfuse"])
@@ -1005,6 +1067,20 @@ export const UpdatePreferencesBody = zod
     "The preferences to change. At least one; the rest stay as they are.",
   );
 
+export const updatePreferencesResponseDismissedNoticesItemMax = 64;
+
+export const updatePreferencesResponseDismissedNoticesItemRegExp = new RegExp(
+  "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+);
+export const updatePreferencesResponseDismissedNoticesMax = 64;
+
+export const updatePreferencesResponseNoticesDueItemMax = 64;
+
+export const updatePreferencesResponseNoticesDueItemRegExp = new RegExp(
+  "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+);
+export const updatePreferencesResponseNoticesDueMax = 64;
+
 export const UpdatePreferencesResponse = zod
   .object({
     messageListEmphasis: zod
@@ -1017,10 +1093,36 @@ export const UpdatePreferencesResponse = zod
       .describe(
         "Whether they closed the banner offering help self-hosting OpenBot.",
       ),
-    starPromptAnswered: zod
-      .boolean()
+    dismissedNotices: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(updatePreferencesResponseDismissedNoticesItemMax)
+          .regex(updatePreferencesResponseDismissedNoticesItemRegExp)
+          .describe(
+            "A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.",
+          ),
+      )
+      .max(updatePreferencesResponseDismissedNoticesMax)
       .describe(
-        "Whether they answered the ask to star OpenBot on GitHub, either way, so it is asked once on every device.",
+        "The notices they answered, either way, by id. A notice in this list is never shown to them again, on any device. Empty until they answer one.",
+      ),
+    noticesDue: zod
+      .array(
+        zod
+          .string()
+          .min(1)
+          .max(updatePreferencesResponseNoticesDueItemMax)
+          .regex(updatePreferencesResponseNoticesDueItemRegExp)
+          .describe(
+            "A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.",
+          ),
+      )
+      .max(updatePreferencesResponseNoticesDueMax)
+      .optional()
+      .describe(
+        "The notices OpenBot would show them now, by id, worked out by the server from the edition and how they have used OpenBot. A notice they dismissed is never here. Absent from a server that works out none.",
       ),
     narration: zod
       .union([zod.enum(["on", "off"]), zod.null()])

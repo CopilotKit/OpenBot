@@ -5,10 +5,10 @@
 /**
  * Where the caller saw or answered it.
  */
-export type StarPromptEventSurface =
-  (typeof StarPromptEventSurface)[keyof typeof StarPromptEventSurface];
+export type NudgeEventSurface =
+  (typeof NudgeEventSurface)[keyof typeof NudgeEventSurface];
 
-export const StarPromptEventSurface = {
+export const NudgeEventSurface = {
   web: "web",
   desktop: "desktop",
 } as const;

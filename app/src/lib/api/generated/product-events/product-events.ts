@@ -14,14 +14,14 @@ import type {
   ForbiddenResponse,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
+  NudgeEvent,
   OrganizationNotFoundResponse,
   PayloadTooLargeResponse,
   ProductEvent,
   RecordAppErrorHeaders,
+  RecordNudgeEventHeaders,
   RecordProductEventHeaders,
-  RecordStarPromptEventHeaders,
   ServerErrorResponse,
-  StarPromptEvent,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
 } from "../model";
@@ -332,18 +332,18 @@ export const useRecordAppError = <
 > => {
   return useMutation(getRecordAppErrorMutationOptions(options), queryClient);
 };
-export const getRecordStarPromptEventUrl = (organizationId: string) => {
-  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/star-prompt-events`;
+export const getRecordNudgeEventUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/nudge-events`;
 };
 
 /**
- * Tell OpenBot that the ask to star OpenBot on GitHub was shown to the caller, that they opened the repository from it, or that they said Not now, and which moment asked, so OpenBot can count which moment works. It is best effort: a client sends one per show or answer and waits on nothing. The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.
- * @summary Record what the caller did with the ask to star OpenBot
+ * Tell OpenBot that a nudge (a notice OpenBot shows a person once, such as the ask to star OpenBot on GitHub) was shown to the caller, that they followed it, or that they dismissed it, and where. OpenBot adds the moment that made it due, from what it already knows about the caller, so the counts say which moment works. It is best effort: a client sends one per show or answer and waits on nothing. Saving the answer is a separate change to the caller's preferences (`dismissedNotices`). The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.
+ * @summary Record what the caller did with a nudge
  */
-export const recordStarPromptEvent = async (
+export const recordNudgeEvent = async (
   organizationId: string,
-  starPromptEvent: StarPromptEvent,
-  headers: RecordStarPromptEventHeaders,
+  nudgeEvent: NudgeEvent,
+  headers: RecordNudgeEventHeaders,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<void> => {
   const getHeaders = (
@@ -367,7 +367,7 @@ export const recordStarPromptEvent = async (
     }
     return headers;
   };
-  return apiRequest<void>(getRecordStarPromptEventUrl(organizationId), {
+  return apiRequest<void>(getRecordNudgeEventUrl(organizationId), {
     ...options,
     method: "POST",
     headers: {
@@ -375,14 +375,14 @@ export const recordStarPromptEvent = async (
       ...headers,
       ...getHeaders(options?.headers),
     },
-    body: JSON.stringify(starPromptEvent),
+    body: JSON.stringify(nudgeEvent),
   });
 };
 
-export const getRecordStarPromptEventMutationKey = () =>
-  ["recordStarPromptEvent"] as const;
+export const getRecordNudgeEventMutationKey = () =>
+  ["recordNudgeEvent"] as const;
 
-export const getRecordStarPromptEventMutationOptions = <
+export const getRecordNudgeEventMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -395,19 +395,19 @@ export const getRecordStarPromptEventMutationOptions = <
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof recordStarPromptEvent>>,
+    Awaited<ReturnType<typeof recordNudgeEvent>>,
     TError,
-    RecordStarPromptEventMutationVariables,
+    RecordNudgeEventMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof apiRequest>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof recordStarPromptEvent>>,
+  Awaited<ReturnType<typeof recordNudgeEvent>>,
   TError,
-  RecordStarPromptEventMutationVariables,
+  RecordNudgeEventMutationVariables,
   TContext
 > => {
-  const mutationKey = getRecordStarPromptEventMutationKey();
+  const mutationKey = getRecordNudgeEventMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -417,22 +417,22 @@ export const getRecordStarPromptEventMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof recordStarPromptEvent>>,
-    RecordStarPromptEventMutationVariables
+    Awaited<ReturnType<typeof recordNudgeEvent>>,
+    RecordNudgeEventMutationVariables
   > = (props) => {
     const { organizationId, data, headers } = props ?? {};
 
-    return recordStarPromptEvent(organizationId, data, headers, requestOptions);
+    return recordNudgeEvent(organizationId, data, headers, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type RecordStarPromptEventMutationResult = NonNullable<
-  Awaited<ReturnType<typeof recordStarPromptEvent>>
+export type RecordNudgeEventMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordNudgeEvent>>
 >;
-export type RecordStarPromptEventMutationBody = StarPromptEvent;
-export type RecordStarPromptEventMutationError =
+export type RecordNudgeEventMutationBody = NudgeEvent;
+export type RecordNudgeEventMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
   | ForbiddenResponse
@@ -441,16 +441,16 @@ export type RecordStarPromptEventMutationError =
   | PayloadTooLargeResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
-export type RecordStarPromptEventMutationVariables = {
+export type RecordNudgeEventMutationVariables = {
   organizationId: string;
-  data: StarPromptEvent;
-  headers: RecordStarPromptEventHeaders;
+  data: NudgeEvent;
+  headers: RecordNudgeEventHeaders;
 };
 
 /**
- * @summary Record what the caller did with the ask to star OpenBot
+ * @summary Record what the caller did with a nudge
  */
-export const useRecordStarPromptEvent = <
+export const useRecordNudgeEvent = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -464,22 +464,19 @@ export const useRecordStarPromptEvent = <
 >(
   options?: {
     mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof recordStarPromptEvent>>,
+      Awaited<ReturnType<typeof recordNudgeEvent>>,
       TError,
-      RecordStarPromptEventMutationVariables,
+      RecordNudgeEventMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof apiRequest>;
   },
   queryClient?: QueryClient,
 ): UseMutationResult<
-  Awaited<ReturnType<typeof recordStarPromptEvent>>,
+  Awaited<ReturnType<typeof recordNudgeEvent>>,
   TError,
-  RecordStarPromptEventMutationVariables,
+  RecordNudgeEventMutationVariables,
   TContext
 > => {
-  return useMutation(
-    getRecordStarPromptEventMutationOptions(options),
-    queryClient,
-  );
+  return useMutation(getRecordNudgeEventMutationOptions(options), queryClient);
 };
