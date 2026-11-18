@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { DEFAULT_HARNESS } from "./harness";
 import type { ModelChoice } from "./ProviderPicker";
 import {
   harnessChoiceEvent,
@@ -14,6 +15,11 @@ test("harness telemetry admits catalogue enums and excludes URLs and unknown IDs
   expect(harnessChoiceEvent("claude-agent-sdk")).toEqual({
     kind: "harness_chosen",
     harness: "claude_agent_sdk",
+  });
+  // The default Bot, which the first screen's Install records as chosen.
+  expect(harnessChoiceEvent(DEFAULT_HARNESS)).toEqual({
+    kind: "harness_chosen",
+    harness: "langgraph_ts",
   });
   for (const unknown of [
     "https://private-agent.example",

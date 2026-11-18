@@ -74,6 +74,7 @@ APP_PORT="$(setting APP_PORT 3010)"
 SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
+LANGGRAPH_TS_PORT="$(setting LANGGRAPH_TS_PORT 4215)"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
 # Through `setting`, like every other key here, so `.env` counts as the comment above says and as
 # docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
@@ -103,12 +104,16 @@ COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 EDITION="$(setting OPENBOT_EDITION team)"
 if [ "$EDITION" = "personal" ]; then
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
+  LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "")"
   COMPUTER_PERSON_ID=personal
 else
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_PORT}/")"
+  # The TypeScript LangGraph engine, which new Bots run on, beside the managed Bot. Unset, the
+  # server runs new Bots on its built-in engine instead.
+  LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_TS_PORT}/")"
   COMPUTER_PERSON_ID=
 fi
-export MANAGED_AGENT_AG_UI_URL COMPUTER_PERSON_ID
+export MANAGED_AGENT_AG_UI_URL LANGGRAPH_TS_AG_UI_URL COMPUTER_PERSON_ID
 
 # Whether this run minted a secret that something already running may not have.
 #
@@ -376,12 +381,13 @@ SERVICES+=(agent-computer)
 # The managed coworker is the LangGraph harness, on whichever provider BOT_PROVIDER names.
 if [ "$EDITION" = "personal" ]; then
   info "  agent-langgraph-agui: skipped for the personal edition (its Bot runs in the server)"
+  info "  agent-langgraph-ts: skipped for the personal edition (its Bot runs in the server)"
 else
-  SERVICES+=(agent-langgraph-agui)
+  SERVICES+=(agent-langgraph-agui agent-langgraph-ts)
 fi
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN
-export COMPUTER_PORT LANGGRAPH_PORT SUPERVISOR_PORT
+export COMPUTER_PORT LANGGRAPH_PORT LANGGRAPH_TS_PORT SUPERVISOR_PORT
 # Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
 # terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
 # stdout, and stops with "failed to get console: provided file is not a console". An environment
@@ -419,6 +425,7 @@ done
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$EDITION" != "personal" ]; then
   wait_for "http://127.0.0.1:$LANGGRAPH_PORT/health" "agent-langgraph-agui"
+  wait_for "http://127.0.0.1:$LANGGRAPH_TS_PORT/health" "agent-langgraph-ts"
 fi
 
 # Resolved at the top, where the default that .env deliberately does not carry is applied. Reading
