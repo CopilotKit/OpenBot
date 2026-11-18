@@ -3,7 +3,7 @@ import {
   IconBrain,
   IconChevronRight,
   IconPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";

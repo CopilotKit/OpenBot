@@ -17,7 +17,6 @@ import {
 import { heldFileOf } from "@/components/channels/composer/attachments";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
-import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +45,9 @@ import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
+
+/** Figma's section heading on the home page: 20px semibold, tight. */
+const EXPLORE_HEADING = "font-semibold text-xl leading-tight tracking-heading";
 
 export const Route = createFileRoute("/_authed/_app/")({
   /*
@@ -184,22 +186,33 @@ function RouteComponent() {
 
   return (
     <>
-      <SidebarToggleBar>
-        <BusinessLink />
-      </SidebarToggleBar>
-      <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
+      {/* The page's top band: the OpenBot for Business bar in the personal edition, else plain. */}
+      <BusinessLink />
+      {/*
+       * Figma's home: the greeting, the box and the Bots to explore, 48px apart, in one 700px column
+       * centred in the page.
+       */}
+      <div className="flex w-full flex-1 flex-col items-center justify-center gap-12 py-8">
         {/* No product-name label above the greeting: the sidebar already names the product, and a
             second heading over the first made the page open on a word that says nothing. */}
-        <div className="flex flex-col items-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-center">
+        <div className="flex flex-col items-center gap-2 px-4 text-center">
+          <h1 className="font-semibold text-3xl tracking-heading">
             {firstConversationGreeting(
               user,
               channels.isSuccess && channels.data.length === 0,
             )}
           </h1>
+          {fallback ? (
+            // Said out loud: a message that silently reaches somebody you did not choose is the
+            // kind of surprise that costs trust the first time it happens. Under the greeting, as
+            // Figma has it, so it is read before the box is used.
+            <p className="font-light text-muted-foreground text-sm">
+              OpenBot picks the right Bot. Type @ to choose one.
+            </p>
+          ) : null}
         </div>
         <div
-          className="mt-8 w-full flex flex-col items-center"
+          className="flex w-full max-w-page flex-col items-center px-4"
           onKeyDownCapture={() => {
             typed.current = true;
           }}
@@ -218,7 +231,7 @@ function RouteComponent() {
           <Composer
             agents={toAgentOptions(agents)}
             commands={skillCommands}
-            className="w-full max-w-2xl"
+            className="w-full"
             disabled={!fallback}
             // The box reads its words once, when it mounts; a start that fails while this page is
             // open is a new box with them in it.
@@ -250,18 +263,8 @@ function RouteComponent() {
               void startBehind(pendingId, draft);
             }}
           />
-          {fallback ? (
-            // Said out loud: a message that silently reaches somebody you did not choose is the
-            // kind of surprise that costs trust the first time it happens.
-            <p className="mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center">
-              OpenBot picks the right Bot. Type <code>@</code> to choose one.
-            </p>
-          ) : null}
           {error ? (
-            <p
-              className="mt-2 w-full max-w-2xl text-sm text-destructive"
-              role="alert"
-            >
+            <p className="mt-2 w-full text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : failed && agents === undefined ? (
@@ -272,10 +275,7 @@ function RouteComponent() {
             // failed to load anything. `agents === undefined` is the one condition that is only
             // true when the query has never once returned successfully, so this alert can only
             // ever claim a load failure while that is actually what happened.
-            <p
-              className="mt-2 w-full max-w-2xl text-sm text-destructive"
-              role="alert"
-            >
+            <p className="mt-2 w-full text-sm text-destructive" role="alert">
               Couldn't load your Bots, so there's no one to send this to. Reload
               the page.
             </p>
@@ -287,34 +287,31 @@ function RouteComponent() {
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
          */}
-        <div className="mt-10 w-full max-w-2xl">
+        <div className="w-full max-w-page px-4">
           {loading || capabilities.isPending ? (
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
+              <h2 className={EXPLORE_HEADING}>Explore Bots</h2>
+              <Skeleton className="mt-5 h-[210px] rounded-card" />
             </>
           ) : explore?.length ? (
             // Wins over `failed`: a failed background refetch does not clear TanStack Query's
             // cached `data`, so a stale list here beats an error card claiming there is
             // nothing to explore, which would be false while this list is still populated.
             <section aria-labelledby="explore-agents-heading">
-              <div className="flex flex-row items-center justify-between gap-4">
-                <h2
-                  id="explore-agents-heading"
-                  className="font-semibold text-base"
-                >
+              <div className="flex flex-row items-baseline justify-between gap-4">
+                <h2 id="explore-agents-heading" className={EXPLORE_HEADING}>
                   Explore Bots
                 </h2>
                 {explore.length > EXPLORE_SHOWN ? (
                   <Link
-                    className="text-muted-foreground text-sm hover:text-foreground"
+                    className="font-semibold text-foreground/85 text-sm hover:text-foreground"
                     to="/bots"
                   >
                     All Bots
                   </Link>
                 ) : null}
               </div>
-              <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
+              <ul className="mt-5 grid min-h-[210px] grid-cols-1 content-start gap-0.5 sm:grid-cols-2">
                 {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
                   <li className="min-w-0" key={agent.id}>
                     <Link search={{ agent: agent.id }} to="/channel/new">
@@ -334,8 +331,8 @@ function RouteComponent() {
             // card there would say the opposite of what a populated composer beside it (still
             // working off that same, successfully loaded `agents`) proves.
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
+              <h2 className={EXPLORE_HEADING}>Explore Bots</h2>
+              <Empty className="mt-5 h-[210px] border border-dashed border-destructive">
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
                     Couldn't load the Bots shared with you.
@@ -348,8 +345,8 @@ function RouteComponent() {
             // when it failed but `agents` is defined — a loaded, empty slice either way. Same
             // plain copy for both: an empty roster is a fact, not an error.
             <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed">
+              <h2 className={EXPLORE_HEADING}>Explore Bots</h2>
+              <Empty className="mt-5 h-[210px] border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
                     Nobody has shared a Bot with you yet.

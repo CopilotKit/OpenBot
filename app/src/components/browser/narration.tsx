@@ -3,7 +3,7 @@ import {
   IconInfoCircle,
   IconMicrophone,
   IconMicrophoneOff,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useId } from "react";
 import {
   Item,

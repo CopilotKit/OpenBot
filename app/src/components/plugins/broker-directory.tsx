@@ -1,4 +1,4 @@
-import { IconKey, IconPlug, IconSearch } from "@tabler/icons-react";
+import { IconKey, IconPlug, IconSearch } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, type LinkOptions, useNavigate } from "@tanstack/react-router";
 import * as React from "react";

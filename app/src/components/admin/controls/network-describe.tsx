@@ -1,4 +1,4 @@
-import { IconWorld, IconWorldOff } from "@tabler/icons-react";
+import { IconWorld, IconWorldOff } from "@/components/icons";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { DescribeField } from "@/components/boundaries/describe-rule";

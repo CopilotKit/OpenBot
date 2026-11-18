@@ -136,7 +136,7 @@ describe("the Vault", () => {
       const media = row.querySelector(
         "[data-slot=item-media][data-variant=icon]",
       );
-      expect({ name, icon: media?.querySelector(".tabler-icon-key") }).toEqual({
+      expect({ name, icon: media?.querySelector(".icon-key") }).toEqual({
         name,
         icon: expect.anything(),
       });

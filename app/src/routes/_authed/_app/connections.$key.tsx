@@ -5,7 +5,7 @@ import {
   IconPlug,
   IconPlugOff,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

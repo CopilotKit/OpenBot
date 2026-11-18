@@ -1,4 +1,4 @@
-import { IconDeviceDesktop, IconPlug } from "@tabler/icons-react";
+import { IconDeviceDesktop, IconPlug } from "@/components/icons";
 import type { ReactNode } from "react";
 import {
   type AuditEvent,

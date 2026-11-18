@@ -4,7 +4,7 @@ import {
   IconFileCheck,
   IconHandStop,
   IconProgress,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { BoardRow } from "@/components/needs-you/board-row";

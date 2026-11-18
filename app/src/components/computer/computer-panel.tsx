@@ -1,4 +1,4 @@
-import { IconDeviceDesktop, IconTerminal2 } from "@tabler/icons-react";
+import { IconDeviceDesktop, IconTerminal2 } from "@/components/icons";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {

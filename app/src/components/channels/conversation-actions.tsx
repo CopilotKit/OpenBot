@@ -1,4 +1,4 @@
-import { IconPin, IconPinnedOff, IconTrash } from "@tabler/icons-react";
+import { IconPin, IconPinnedOff, IconTrash } from "@/components/icons";
 import {
   useInfiniteQuery,
   useMutation,

@@ -8,7 +8,7 @@ import {
   IconLoader2,
   IconPlayerRecordFilled,
   IconTrash,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";

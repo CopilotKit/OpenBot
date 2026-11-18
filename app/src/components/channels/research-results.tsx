@@ -1,4 +1,4 @@
-import { IconArrowUpRight, IconWorld } from "@tabler/icons-react";
+import { IconArrowUpRight, IconWorld } from "@/components/icons";
 import { useState } from "react";
 import type { ResearchSource } from "@/lib/plugins/research-results";
 

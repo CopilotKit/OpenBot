@@ -1,4 +1,4 @@
-import { IconRadar } from "@tabler/icons-react";
+import { IconRadar } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
+import { IconBrandGithub, IconBrandSlack, IconLink } from "@/components/icons";
 import { unlinkOutcome } from "@/lib/identity/mutations";
 import { linksFromResponse } from "@/lib/identity/queries";
 import {

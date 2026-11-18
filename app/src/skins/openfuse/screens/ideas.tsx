@@ -1,4 +1,4 @@
-import { IconBulb } from "@tabler/icons-react";
+import { IconBulb } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   ProactiveResearchSettings,

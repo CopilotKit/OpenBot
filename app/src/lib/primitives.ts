@@ -10,7 +10,7 @@ import {
   IconMessages,
   IconPlug,
   IconSettings,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 
 /**
  * The eight things a Bot has, in the one order every list of them keeps: on a Bot's page, in

@@ -1,4 +1,4 @@
-import { IconChartBar } from "@tabler/icons-react";
+import { IconChartBar } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import {

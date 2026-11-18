@@ -3,7 +3,7 @@ import {
   IconPin,
   IconPinnedOff,
   IconTrash,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";

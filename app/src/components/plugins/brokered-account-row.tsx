@@ -1,4 +1,4 @@
-import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
+import { IconArrowUpRight, IconUser } from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";

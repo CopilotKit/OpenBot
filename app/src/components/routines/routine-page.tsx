@@ -8,7 +8,7 @@ import {
   IconPlayerPlay,
   IconRobot,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { Fragment, useState } from "react";

@@ -6,7 +6,7 @@ import {
   IconPlus,
   IconTrash,
   IconUsers,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import type { AuditEvent } from "@/components/audit/audit-cells";
 import {

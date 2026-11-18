@@ -1,5 +1,5 @@
 import type { NarrationPreference } from "@openbot/shared/user-preferences";
-import { IconMicrophone } from "@tabler/icons-react";
+import { IconMicrophone } from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {

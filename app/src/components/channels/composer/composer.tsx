@@ -7,7 +7,7 @@ import {
   IconArrowUp,
   IconPlayerStopFilled,
   IconPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { PromptArea, type PromptAreaHandle } from "prompt-area";
 import {
   isSegmentsEmpty,
@@ -124,6 +124,11 @@ function stagedModality(attachment: Attachment) {
 }
 
 const MAX_HEIGHT_PX = 220;
+/**
+ * The home page's box opens 48px tall, which with its 16px padding, the gap and the 36px buttons
+ * is Figma's 120px. prompt-area's own default is 80px, which made the box 140px before any typing.
+ */
+const HOME_MIN_HEIGHT_PX = 48;
 /**
  * Two `text-sm` lines: the compact composer's message box sits on its own row above the controls,
  * so it opens two lines tall and grows from there.
@@ -1519,9 +1524,14 @@ export function Composer({
   const sendLabel = parking ? "Queue message" : "Send message";
   const callAction =
     draft.isEmpty && draft.attachments.length === 0 ? voiceCall : undefined;
+  /*
+   * Figma's send: a 36px ink circle with an 18px arrow, as dark while the box is empty as when it is
+   * ready. The arrow is the only button in the box drawn in ink, so it reads as the way to send
+   * before anything is typed, and a press on it then does nothing.
+   */
   const actionClassName = cn(
-    "rounded-full p-0",
-    compact ? "size-8 self-end" : "size-7",
+    "size-9 rounded-full p-0 disabled:opacity-100",
+    compact && "self-end",
   );
   const primaryAction = canStop ? (
     <Button
@@ -1533,7 +1543,7 @@ export function Composer({
       size="icon"
       type="button"
     >
-      <IconPlayerStopFilled className="size-3" />
+      <IconPlayerStopFilled className="size-3.5" />
     </Button>
   ) : callAction ? (
     <Button
@@ -1551,7 +1561,7 @@ export function Composer({
       size="icon"
       type="button"
     >
-      <IconWaveform className="size-4" />
+      <IconWaveform />
     </Button>
   ) : (
     <Button
@@ -1562,7 +1572,7 @@ export function Composer({
       size="icon"
       type="submit"
     >
-      <IconArrowUp className="size-3.5" />
+      <IconArrowUp />
     </Button>
   );
 
@@ -1768,18 +1778,24 @@ export function Composer({
       <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
-        className="overflow-hidden rounded-2xl border border-border bg-card"
+        /*
+         * Figma's "Chat input" on the home page: white, 20px corners, no outline, lifted off the
+         * page by a long soft shadow. Its placeholder is the ink at 40%, a step fainter than
+         * secondary text, so "Ask anything" reads as the box's own hint and not as words in it.
+         */
+        className="overflow-hidden rounded-card bg-card shadow-composer [--prompt-area-placeholder:color-mix(in_oklab,var(--foreground)_40%,transparent)]"
         data-slot="composer"
         onSubmit={handleFormSubmit}
       >
         <DictationSurface
           dictation={dictation}
           canSend={canSendRecording}
-          className="p-3"
+          className="p-4"
         >
           {filePicker}
 
-          <div className="grow pb-2">
+          {/* Two lines of room before the buttons: with them, Figma's 120px box. */}
+          <div className="grow pb-1">
             <AttachmentStrip
               files={files}
               images={images}
@@ -1795,6 +1811,7 @@ export function Composer({
                 )}
                 disabled={disabled}
                 maxHeight={MAX_HEIGHT_PX}
+                minHeight={HOME_MIN_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
@@ -1810,14 +1827,14 @@ export function Composer({
             {attachmentsEnabled ? (
               <Button
                 aria-label="Attach a file"
-                className="size-7 rounded-full p-0"
+                className="size-9 rounded-full p-0"
                 data-slot="composer-attach"
                 disabled={disabled}
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
                 variant="ghost"
               >
-                <IconPlus className="size-4" />
+                <IconPlus />
               </Button>
             ) : (
               <div />

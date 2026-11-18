@@ -1,4 +1,4 @@
-import { IconChevronRight, type IconProps, IconX } from "@tabler/icons-react";
+import { IconChevronRight, type IconProps, IconX } from "@/components/icons";
 import * as React from "react";
 import { BrandName } from "@/components/edition/brand-name";
 import { Button, buttonVariants } from "@/components/ui/button";

@@ -1,4 +1,4 @@
-import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
+import { IconLogout, IconPlus, IconSearch } from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";

@@ -116,8 +116,8 @@ the action is right there. A search with no results uses `IconSearch` and "No ma
 
 ### Procedure 2: Compose a row
 
-1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a 20px glyph
-   on a 44px tile (`bg-tile`, `rounded-tile`). It is what makes a column of rows scannable; a row without one reads as a
+1. `ItemMedia variant="icon"` holds a leading icon from `@/components/icons` (Hugeicons, never an icon
+   package directly), drawn as a 20px glyph on a 44px tile (`bg-sidebar`, `rounded-tile`). It is what makes a column of rows scannable; a row without one reads as a
    paragraph. Pass the bare icon — the variant sizes and colours it — and use plain `ItemMedia` only
    for something that is its own picture, such as a Bot's avatar.
 2. `ItemContent` holds `ItemTitle` and, where the row needs a second line, `ItemDescription`.

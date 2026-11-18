@@ -3,7 +3,7 @@ import {
   IconListSearch,
   IconPlus,
   IconShieldX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {

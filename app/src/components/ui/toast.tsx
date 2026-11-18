@@ -11,7 +11,7 @@ import {
   IconInfoCircle,
   IconLoader,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import type * as React from "react";
 
 import { Button } from "@/components/ui/button";

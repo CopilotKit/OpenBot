@@ -1,4 +1,4 @@
-import { IconBolt, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { IconBolt, IconChevronRight, IconPlus } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";

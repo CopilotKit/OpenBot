@@ -1,4 +1,4 @@
-import type { Icon, IconProps } from "@tabler/icons-react";
+import type { Icon, IconProps } from "@/components/icons";
 import { forwardRef } from "react";
 import logo from "@/assets/openbot-logo.png";
 

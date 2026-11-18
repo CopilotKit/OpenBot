@@ -1,4 +1,4 @@
-import { IconBrandGithub, IconPlus } from "@tabler/icons-react";
+import { IconBrandGithub, IconPlus } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import {

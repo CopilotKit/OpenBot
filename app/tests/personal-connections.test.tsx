@@ -394,7 +394,7 @@ test("a search that matches nothing says No matches, with no sections and no dir
   expect(await view.findByText("No matches")).toBeTruthy();
   expect(view.getByText("Nothing matches “zzzz”.")).toBeTruthy();
   expect(
-    view.container.querySelector(".tabler-icon-search:not([aria-hidden])"),
+    view.container.querySelector(".icon-search:not([aria-hidden])"),
   ).not.toBeNull();
   expect(view.queryByTestId("account-browse")).toBeNull();
   expect(view.queryByRole("heading", { name: "Your apps" })).toBeNull();

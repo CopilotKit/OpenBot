@@ -156,9 +156,7 @@ test("a Bot an admin assigned to you reads as pinned and cannot be hidden or unp
 test("rows that open a dialog show a chevron, and Duplicate, which acts at once, does not", () => {
   const view = draw(BOT);
   const chevron = (name: RegExp) =>
-    view
-      .getByRole("button", { name })
-      .querySelector(".tabler-icon-chevron-right");
+    view.getByRole("button", { name }).querySelector(".icon-chevron-right");
   expect(chevron(/^Reset/)).not.toBeNull();
   expect(chevron(/^Delete/)).not.toBeNull();
   expect(chevron(/^Duplicate/)).toBeNull();

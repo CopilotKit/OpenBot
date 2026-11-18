@@ -1,4 +1,4 @@
-import { IconHandStop } from "@tabler/icons-react";
+import { IconHandStop } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Item,

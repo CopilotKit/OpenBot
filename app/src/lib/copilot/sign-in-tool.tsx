@@ -1,4 +1,4 @@
-import { IconLock } from "@tabler/icons-react";
+import { IconLock } from "@/components/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";

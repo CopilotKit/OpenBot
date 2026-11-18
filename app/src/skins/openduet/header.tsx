@@ -1,4 +1,4 @@
-import { IconChevronLeft } from "@tabler/icons-react";
+import { IconChevronLeft } from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   Link,

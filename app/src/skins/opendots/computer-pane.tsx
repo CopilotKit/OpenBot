@@ -1,4 +1,4 @@
-import { IconDeviceDesktop, IconX } from "@tabler/icons-react";
+import { IconDeviceDesktop, IconX } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";

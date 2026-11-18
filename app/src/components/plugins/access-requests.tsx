@@ -1,4 +1,4 @@
-import { IconInbox } from "@tabler/icons-react";
+import { IconInbox } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";

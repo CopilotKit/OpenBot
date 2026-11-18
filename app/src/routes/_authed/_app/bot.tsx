@@ -1,6 +1,6 @@
 import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { CopilotChat } from "@copilotkit/react-core/v2";
-import { IconPlus } from "@tabler/icons-react";
+import { IconPlus } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";

@@ -8,7 +8,7 @@ import {
   IconReload,
   IconWorld,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import type { UseMutationResult } from "@tanstack/react-query";
 import {
   type KeyboardEvent,

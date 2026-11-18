@@ -1,4 +1,4 @@
-import { IconClock, IconPlus } from "@tabler/icons-react";
+import { IconClock, IconPlus } from "@/components/icons";
 import { Link, useRouter } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import {

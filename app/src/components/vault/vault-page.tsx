@@ -1,4 +1,4 @@
-import { IconPlus } from "@tabler/icons-react";
+import { IconPlus } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { CredentialsList } from "@/components/manage/credentials-page";

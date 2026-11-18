@@ -107,14 +107,14 @@ function setup({
   return { client, view };
 }
 
-test("offers self-hosting, and Book a call opens the OpenBot for Business dialog in the app", async () => {
+test("offers self-hosting, and Talk to an engineer opens the OpenBot for Business dialog in the app", async () => {
   const { view } = setup();
   expect(
     view.getByText("Self-host OpenBot for your organization."),
   ).toBeTruthy();
-  expect(view.queryByRole("link", { name: "Book a call" })).toBeNull();
+  expect(view.queryByRole("link", { name: "Talk to an engineer" })).toBeNull();
 
-  fireEvent.click(view.getByRole("button", { name: "Book a call" }));
+  fireEvent.click(view.getByRole("button", { name: "Talk to an engineer" }));
 
   const dialog = await view.findByRole("dialog", {
     name: "OpenBot for Business",

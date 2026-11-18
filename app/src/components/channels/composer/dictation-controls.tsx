@@ -4,7 +4,7 @@ import {
   IconMicrophone,
   IconPlayerStopFilled,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -43,14 +43,14 @@ export function DictationButton({
           ? "Dictate a message"
           : "Dictation needs a supported browser and a secure (HTTPS) connection"
       }
-      className="size-8 shrink-0 self-end rounded-full"
+      className="size-9 shrink-0 self-end rounded-full"
       disabled={disabled || !dictation.supported || dictation.busy}
       onClick={() => void dictation.session.start()}
       size="icon"
       type="button"
       variant="ghost"
     >
-      <IconMicrophone className="size-4" />
+      <IconMicrophone />
     </Button>
   );
 }
@@ -76,7 +76,7 @@ function LiveDictationButton({
         aria-label="Dictate a message"
         data-slot="composer-dictate"
         title="Dictate a message"
-        className="size-8 shrink-0 self-end rounded-full"
+        className="size-9 shrink-0 self-end rounded-full"
         disabled={disabled}
         onClick={() => {
           void session.start();
@@ -86,7 +86,7 @@ function LiveDictationButton({
         type="button"
         variant="ghost"
       >
-        <IconMicrophone className="size-4" />
+        <IconMicrophone />
       </Button>
     );
   const stopping = state.phase === "stopping";
@@ -96,7 +96,7 @@ function LiveDictationButton({
       data-slot="composer-dictate-stop"
       data-state={state.phase}
       title="Stop dictation"
-      className="relative size-8 shrink-0 self-end rounded-full bg-muted text-foreground hover:bg-muted"
+      className="relative size-9 shrink-0 self-end rounded-full bg-muted text-foreground hover:bg-muted"
       disabled={stopping}
       onClick={session.stop}
       size="icon"

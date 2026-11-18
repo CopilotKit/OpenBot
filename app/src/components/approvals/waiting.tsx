@@ -5,7 +5,7 @@ import {
   IconHandStop,
   IconMessageQuestion,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";

@@ -1,5 +1,5 @@
 import type { BrowserApiState } from "@openbot/shared/openbot-browser";
-import { IconSearch } from "@tabler/icons-react";
+import { IconSearch } from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import {

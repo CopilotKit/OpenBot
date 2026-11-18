@@ -182,7 +182,7 @@ describe("the Skills list", () => {
     ).toBeTruthy();
     // The command is the skill's key, not something to read, and the row has no icon.
     expect(row?.textContent).not.toContain("/triage");
-    expect(row?.querySelector("svg.tabler-icon-file-text")).toBeNull();
+    expect(row?.querySelector("svg.icon-file-text")).toBeNull();
     expect(within(row as HTMLElement).getByText("1 of 2 Bots")).toBeTruthy();
     // No chip per Bot and no Remove on the row: those are on the skill's page.
     expect(view.queryByRole("button", { name: "Ada" })).toBeNull();

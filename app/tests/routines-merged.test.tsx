@@ -531,7 +531,7 @@ test("every kind of row is one link or button with a chevron, with no control in
     const row = view.getByText(text).closest("a, button") as HTMLElement;
     expect(row).not.toBeNull();
     expect(row.querySelector("button, a, input, [role=switch]")).toBeNull();
-    expect(row.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
+    expect(row.querySelector(".icon-chevron-right")).not.toBeNull();
   }
   expect(view.queryByRole("switch")).toBeNull();
   expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();

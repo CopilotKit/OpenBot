@@ -1,4 +1,4 @@
-import { IconShare } from "@tabler/icons-react";
+import { IconShare } from "@/components/icons";
 import { PageRows } from "@/components/layout/page-shell";
 import {
   Item,

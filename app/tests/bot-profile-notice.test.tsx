@@ -117,5 +117,5 @@ test("the Message row shows the chevron every row that goes somewhere carries", 
   serving();
   const view = draw(BOT);
   const row = (await view.findByText("Message Expenses")).closest("a");
-  expect(row?.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
+  expect(row?.querySelector(".icon-chevron-right")).not.toBeNull();
 });

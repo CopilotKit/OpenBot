@@ -1,4 +1,4 @@
-import { IconChartBar, IconTerminal2 } from "@tabler/icons-react";
+import { IconChartBar, IconTerminal2 } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import {

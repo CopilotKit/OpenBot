@@ -162,9 +162,7 @@ test("the trigger is a CPU icon, and names a model that takes no effort on its o
   // No name and no maker's mark in the row: the CPU icon and a chevron, named for screen readers.
   expect(trigger.textContent).toBe("");
   expect(trigger.querySelector("img")).toBeNull();
-  expect(trigger.firstElementChild?.classList.contains("tabler-icon-cpu")).toBe(
-    true,
-  );
+  expect(trigger.firstElementChild?.classList.contains("icon-cpu")).toBe(true);
 });
 
 /** The open popup of a picker drawn on its own. */
@@ -189,7 +187,7 @@ test("a model whose maker has no mark vendored gets the app's plain model icon i
   const row = within(popup).getByRole("option", { name: "fast" });
   // No brand mark is invented for it, and the app's own icon holds the place.
   expect(row.querySelector("img")).toBeNull();
-  expect(row.querySelector("svg.tabler-icon-cube")).not.toBeNull();
+  expect(row.querySelector("svg.icon-cube")).not.toBeNull();
 });
 
 test("Google and xAI models carry their makers' marks in the list", async () => {

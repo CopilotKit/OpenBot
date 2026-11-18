@@ -1,4 +1,4 @@
-import { IconChevronRight } from "@tabler/icons-react";
+import { IconChevronRight } from "@/components/icons";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
 import {

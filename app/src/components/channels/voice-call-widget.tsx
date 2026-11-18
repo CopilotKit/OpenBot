@@ -5,7 +5,7 @@ import {
   IconMicrophoneOff,
   IconSettings,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";

@@ -4,7 +4,7 @@ import {
   IconLock,
   IconPlus,
   IconShieldCheck,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { type UseMutationResult, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";

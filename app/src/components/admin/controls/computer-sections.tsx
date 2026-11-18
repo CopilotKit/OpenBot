@@ -3,7 +3,7 @@ import {
   IconDeviceDesktop,
   IconNetwork,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";

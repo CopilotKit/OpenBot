@@ -1,4 +1,4 @@
-import { IconLayoutSidebar } from "@tabler/icons-react";
+import { IconLayoutSidebar } from "@/components/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChannelItemContent } from "@/components/app-sidebar/channel-item-content";
 import { PageRows } from "@/components/layout/page-shell";

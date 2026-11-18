@@ -1,5 +1,5 @@
 import { updateOffered } from "@openbot/shared/desktop-updates";
-import { IconX } from "@tabler/icons-react";
+import { IconX } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {

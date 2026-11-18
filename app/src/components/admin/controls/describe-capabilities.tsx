@@ -11,7 +11,7 @@ import {
   IconUser,
   IconUserShield,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Fragment } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";

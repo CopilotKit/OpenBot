@@ -1,4 +1,4 @@
-import { IconFolderFilled, IconLock } from "@tabler/icons-react";
+import { IconFolderFilled, IconLock } from "@/components/icons";
 import { motion, useReducedMotion } from "motion/react";
 import { EASE_OUT } from "@/lib/motion";
 import { cn } from "@/lib/utils";

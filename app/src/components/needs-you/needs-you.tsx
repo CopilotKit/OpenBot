@@ -1,4 +1,4 @@
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown } from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";

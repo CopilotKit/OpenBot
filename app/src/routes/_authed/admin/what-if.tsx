@@ -3,7 +3,7 @@ import {
   missingFrom,
   type WhatIfAction,
 } from "@openbot/shared/what-if";
-import { IconSparkles } from "@tabler/icons-react";
+import { IconSparkles } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";

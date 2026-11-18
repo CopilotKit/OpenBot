@@ -8,7 +8,7 @@ import {
   IconShieldCheck,
   IconTag,
   IconTextCaption,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import type { ZodType } from "zod";

@@ -3,7 +3,7 @@ import {
   IconFileText,
   IconPresentation,
   IconTable,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import type { ComponentProps } from "react";
 import {
   type CodeHighlighterPlugin,

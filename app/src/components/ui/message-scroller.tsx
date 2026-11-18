@@ -4,7 +4,7 @@ import {
   useMessageScrollerScrollable,
   useMessageScrollerVisibility,
 } from "@shadcn/react/message-scroller";
-import { IconArrowDown } from "@tabler/icons-react";
+import { IconArrowDown } from "@/components/icons";
 import type * as React from "react";
 import { useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";

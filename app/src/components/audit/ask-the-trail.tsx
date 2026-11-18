@@ -3,7 +3,7 @@ import {
   IconFilter,
   IconInfoCircle,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useState } from "react";
 import {
   InputGroup,

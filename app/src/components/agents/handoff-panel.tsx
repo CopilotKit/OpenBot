@@ -1,4 +1,4 @@
-import { IconArrowsExchange, IconBolt, IconLock } from "@tabler/icons-react";
+import { IconArrowsExchange, IconBolt, IconLock } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";

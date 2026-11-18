@@ -1,4 +1,4 @@
-import { IconKey, IconPlus } from "@tabler/icons-react";
+import { IconKey, IconPlus } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {

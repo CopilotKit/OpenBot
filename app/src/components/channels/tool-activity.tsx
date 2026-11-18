@@ -24,7 +24,7 @@ import {
   IconSubtask,
   IconTool,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   useCallback,
   useContext,

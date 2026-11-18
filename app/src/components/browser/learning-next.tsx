@@ -6,7 +6,7 @@ import {
   IconAlertTriangle,
   IconLoader2,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";

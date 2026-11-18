@@ -1,5 +1,5 @@
 import { WEB_HARNESSES } from "@openbot/shared/harnesses";
-import { IconChevronRight } from "@tabler/icons-react";
+import { IconChevronRight } from "@/components/icons";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import { cn } from "@/lib/utils";
 

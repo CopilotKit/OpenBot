@@ -1,4 +1,4 @@
-import { IconListCheck } from "@tabler/icons-react";
+import { IconListCheck } from "@/components/icons";
 import { BotActivitySections } from "@/components/bot-profile/activity";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { useFuse } from "../context";

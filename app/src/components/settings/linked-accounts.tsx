@@ -1,4 +1,4 @@
-import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
+import { IconBrandGithub, IconBrandSlack, IconLink } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {

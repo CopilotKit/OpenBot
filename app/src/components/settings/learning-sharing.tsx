@@ -9,7 +9,7 @@ import {
   IconLock,
   IconSparkles,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import React from "react";
 import {

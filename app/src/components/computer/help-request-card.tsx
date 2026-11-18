@@ -3,7 +3,7 @@ import {
   IconAlertTriangle,
   IconCircleCheck,
   IconHandStop,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   Item,

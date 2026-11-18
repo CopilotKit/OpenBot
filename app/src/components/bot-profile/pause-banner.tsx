@@ -1,4 +1,4 @@
-import { IconPlayerPause } from "@tabler/icons-react";
+import { IconPlayerPause } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";

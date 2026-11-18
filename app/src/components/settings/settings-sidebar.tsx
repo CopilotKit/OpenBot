@@ -4,7 +4,7 @@ import {
   IconLayoutGrid,
   IconListCheck,
   IconSettings,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";

@@ -3,7 +3,7 @@ import {
   IconDots,
   IconRadar,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { BoardRow, MetaTag } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";

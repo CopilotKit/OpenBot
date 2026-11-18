@@ -1,4 +1,4 @@
-import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
+import { IconArrowUp, IconMicrophone, IconPlus } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { DemoOrb } from "@/components/onboarding/demo-orb";
 import { cn } from "@/lib/utils";

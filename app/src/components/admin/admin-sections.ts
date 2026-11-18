@@ -8,7 +8,7 @@ import {
   IconShieldCheck,
   IconUsers,
   IconZoomQuestion,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { managePaths } from "@/lib/manage-paths";

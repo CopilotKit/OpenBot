@@ -1,4 +1,4 @@
-import { IconFingerprint, IconShieldLock } from "@tabler/icons-react";
+import { IconFingerprint, IconShieldLock } from "@/components/icons";
 import { PageRows } from "@/components/layout/page-shell";
 import {
   Item,

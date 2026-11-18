@@ -1,4 +1,4 @@
-import { IconArrowLeft } from "@tabler/icons-react";
+import { IconArrowLeft } from "@/components/icons";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";

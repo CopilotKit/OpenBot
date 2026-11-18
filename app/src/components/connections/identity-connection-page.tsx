@@ -1,4 +1,4 @@
-import { IconBrandGithub, IconChevronRight } from "@tabler/icons-react";
+import { IconBrandGithub, IconChevronRight } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

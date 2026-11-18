@@ -1,4 +1,4 @@
-import { IconPinFilled } from "@tabler/icons-react";
+import { IconPinFilled } from "@/components/icons";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 

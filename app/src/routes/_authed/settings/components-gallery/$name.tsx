@@ -1,4 +1,4 @@
-import { IconCode, IconTag } from "@tabler/icons-react";
+import { IconCode, IconTag } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";

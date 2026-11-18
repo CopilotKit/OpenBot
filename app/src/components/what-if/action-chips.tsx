@@ -9,7 +9,7 @@ import {
   type WhatIfVocabulary,
 } from "@openbot/shared/what-if";
 import { humanise } from "@openbot/shared/tool-name";
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown } from "@/components/icons";
 import { type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {

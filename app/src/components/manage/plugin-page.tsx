@@ -4,7 +4,7 @@ import {
   IconExternalLink,
   IconPuzzle,
   IconTool,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";

@@ -9,7 +9,7 @@ import {
   IconChevronRight,
   IconHistory,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useId, useState } from "react";

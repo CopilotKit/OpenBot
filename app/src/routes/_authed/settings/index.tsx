@@ -1,4 +1,4 @@
-import { IconMoon } from "@tabler/icons-react";
+import { IconMoon } from "@/components/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import React from "react";
 import {

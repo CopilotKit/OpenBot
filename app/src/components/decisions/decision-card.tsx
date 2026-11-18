@@ -1,4 +1,4 @@
-import { IconCheck } from "@tabler/icons-react";
+import { IconCheck } from "@/components/icons";
 import { type RegisterableHotkey, useHotkeys } from "@tanstack/react-hotkeys";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useId, useRef, useState } from "react";

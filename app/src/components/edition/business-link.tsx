@@ -1,14 +1,15 @@
-import { IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Trademark } from "@/components/edition/brand-name";
-import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { openTeamFeatures } from "@/components/edition/team-features-dialog";
-import { Button } from "@/components/ui/button";
+import { AnnouncementBar } from "@/components/layout/announcement-bar";
+import {
+  SidebarToggle,
+  SidebarToggleBar,
+} from "@/components/layout/sidebar-toggle";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
- * Closed for this session only. The link comes back the next time the app starts, or the next tab:
+ * Closed for this session only. The bar comes back the next time the app starts, or the next tab:
  * it is an offer, not a setting, so closing it is not saved anywhere that outlives the window.
  *
  * The desktop window hides when closed rather than quitting, so there it comes back after Quit.
@@ -25,45 +26,39 @@ function readDismissed(): boolean {
 }
 
 /**
- * The home page's way to OpenBot for Business, in the personal edition only. It opens the OpenBot
- * for Business dialog, with its calendar, in the app.
+ * The home page's top band, and in the personal edition its way to OpenBot for Business: the bar
+ * Figma draws across the top of the page, whose link opens the OpenBot for Business dialog, with
+ * its calendar, in the app.
  *
- * An outlined button with OpenBot's mark, so it reads as an offer at a glance without competing
- * with the greeting and the composer below it.
+ * The same sentence as the team edition's self-host bar (`SelfHostBanner`), which the server never
+ * turns on in the personal edition, so a person only ever sees one of the two.
  *
- * Hidden until the deployment says which edition it is, so it never flashes on a team deployment.
+ * Until the deployment says which edition it is, and once the bar is closed, the band is the plain
+ * one every screen keeps for the sidebar's toggle, at the bar's height, so nothing below it moves.
  */
 export function BusinessLink() {
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const [dismissed, setDismissed] = useState(readDismissed);
 
-  if (capabilities?.edition !== "personal" || dismissed) return null;
+  if (capabilities?.edition !== "personal" || dismissed) {
+    return <SidebarToggleBar />;
+  }
 
   return (
-    <span className="flex items-center gap-1">
-      <Button onClick={openTeamFeatures} size="sm" variant="outline">
-        <OpenBotLogo />
-        <span>
-          Meet OpenBot for Business
-          <Trademark />
-        </span>
-      </Button>
-      <Button
-        aria-label="Close"
-        className="text-muted-foreground"
-        onClick={() => {
-          try {
-            sessionStorage.setItem(DISMISSED, "1");
-          } catch {
-            // Closed for this page only.
-          }
-          setDismissed(true);
-        }}
-        size="icon-xs"
-        variant="ghost"
-      >
-        <IconX />
-      </Button>
-    </span>
+    <AnnouncementBar
+      action="Talk to an engineer"
+      label="OpenBot for Business"
+      leading={<SidebarToggle className="-ml-3.5" />}
+      message="Self-host OpenBot for your organization."
+      onAction={openTeamFeatures}
+      onDismiss={() => {
+        try {
+          sessionStorage.setItem(DISMISSED, "1");
+        } catch {
+          // Closed for this page only.
+        }
+        setDismissed(true);
+      }}
+    />
   );
 }

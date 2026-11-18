@@ -154,6 +154,10 @@ body {
   --radius-tile: 0.75rem;
   /* The page column: Figma's 700px of content, with the 16px gutter either side. */
   --container-page: 45.75rem;
+  /* The message box's long soft shadow, which lifts it off the page (Figma's "Chat input"). */
+  --shadow-composer:
+    0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
+    0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
 }
 
 @theme inline {

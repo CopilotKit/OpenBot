@@ -1,4 +1,4 @@
-import { IconKey, IconLockOff, IconTrash } from "@tabler/icons-react";
+import { IconKey, IconLockOff, IconTrash } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageEmpty, PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";

@@ -8,7 +8,7 @@ import {
   IconPlayerPlay,
   IconPlus,
   IconSearch,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Link,

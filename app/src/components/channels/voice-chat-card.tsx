@@ -1,4 +1,4 @@
-import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
+import { IconChevronDown, IconLoader2 } from "@/components/icons";
 import { IconWaveform } from "@/components/icons/waveform";
 import { Button } from "@/components/ui/button";
 import {

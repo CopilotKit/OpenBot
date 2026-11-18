@@ -26,7 +26,7 @@ import {
   IconClock,
   IconFile,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {

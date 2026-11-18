@@ -1,4 +1,4 @@
-import { IconPlug } from "@tabler/icons-react";
+import { IconPlug } from "@/components/icons";
 import { useState } from "react";
 
 /**

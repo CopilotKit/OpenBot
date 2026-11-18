@@ -3,7 +3,7 @@ import {
   IconChevronRight,
   IconGauge,
   IconRadar,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   keepPreviousData,
   type UseQueryResult,

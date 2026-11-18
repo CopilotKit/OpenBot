@@ -1,4 +1,4 @@
-import { IconPalette } from "@tabler/icons-react";
+import { IconPalette } from "@/components/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Item,

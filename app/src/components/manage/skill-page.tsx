@@ -3,7 +3,7 @@ import {
   IconChevronRight,
   IconFileOff,
   IconTrash,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
