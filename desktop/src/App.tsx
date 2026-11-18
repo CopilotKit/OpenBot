@@ -1214,7 +1214,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     !local.running &&
     local.at === null &&
     modelCanStart();
-  // Once per ask, whatever the window shows by then.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per ask, whatever the window shows by then.
   useEffect(() => {
     if (!startAsked) return;
     setStartAsked(false);
