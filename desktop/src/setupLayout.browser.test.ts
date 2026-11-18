@@ -105,7 +105,10 @@ const runningTooOld = location.hash === "#local-app-too-old-running";
 const runningFails = location.hash === "#local-running-fails";
 // The update feed has a newer version, so the offer at the top shows too.
 const offered = location.search === "?offer";
-const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld;
+// A build that never updates itself (internal, candidate, or without the updater).
+const internal = location.search === "?internal";
+// Found running by the launch is a relaunch too: an installation set up and started before.
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld;
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -160,7 +163,7 @@ export async function invoke(command, args) {
       kind: "app-too-old",
     };
   if ((connectedProblem || localTooOld || runningTooOld) && command === "app_update_offer")
-    return { version: offered ? "1.2.0" : null, current: "1.1.0", installing: null, updatesItself: true, ready: null };
+    return { version: offered ? "1.2.0" : null, current: "1.1.0", installing: null, updatesItself: !internal, ready: null };
   switch (command) {
     case "windows_restart_pending":
     case "take_ai_connection_change":
@@ -178,7 +181,7 @@ export async function invoke(command, args) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch && !localTooOld ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld && !runningTooOld ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
       if (updateShort)
         throw {
@@ -2190,6 +2193,8 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
     at: string;
     said: string;
     way: { role: "button" | "link"; name: string };
+    /** The window's heading, where the state's screen is OpenBot on this computer running. */
+    heading?: string;
   }[] = [
     {
       name: "connected-app-too-old",
@@ -2220,12 +2225,15 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
       at: "#local-app-too-old",
       said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
       way: { role: "button", name: "Update and restart" },
+      heading: "Update OpenBot",
     },
+    // Found running by a launch that did not start it: the same screen as when Start finds it.
     {
       name: "local-app-too-old-found-running",
       at: "?offer#local-app-too-old-running",
       said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
       way: { role: "button", name: "Update and restart" },
+      heading: "Update OpenBot",
     },
     {
       name: "existing-found-running-fails",
@@ -2288,6 +2296,19 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
               covered: false,
             });
             expect(way?.enabled).toBe(true);
+            // Running, so never "OpenBot is stopped" with a Start: Show OpenBot and Stop OpenBot.
+            if (state.heading) {
+              const screen = await page.evaluate(() => ({
+                heading: document.querySelector("h1")?.textContent?.trim(),
+                buttons: [...document.querySelectorAll("button")].map(
+                  (button) => button.textContent?.trim(),
+                ),
+              }));
+              expect(screen.heading).toBe(state.heading);
+              expect(screen.buttons).not.toContain("Start OpenBot");
+              expect(screen.buttons).toContain("Show OpenBot");
+              expect(screen.buttons).toContain("Stop OpenBot");
+            }
             // One Update and restart: the offer at the top stands back while the card says why.
             if (state.way.name === "Update and restart")
               expect(
@@ -2317,5 +2338,77 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
         }
       }, 30_000);
     }
+  }
+
+  /*
+   * On a build that never updates itself, the line that says so is part of the notice, in the
+   * notice's type, on the connect screen as on the screen for the OpenBot on this computer. Seen on
+   * a Mac: on the connect screen it sat under the notice in body type.
+   */
+  for (const state of [
+    {
+      name: "connected-app-too-old-internal",
+      at: "?internal#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+    },
+    {
+      name: "local-app-too-old-internal",
+      at: "?internal#local-app-too-old",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+    },
+  ]) {
+    test(`${state.name}: "doesn't update itself" is in the notice, in the notice's type`, async () => {
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 800 },
+          colorScheme,
+        });
+        try {
+          await open(page, state.at);
+          await page.getByText(state.said, { exact: false }).waitFor();
+          // The update's own line (Updates, folded under the buttons, says it too).
+          await page
+            .locator('p[role="status"]', { hasText: "doesn't update itself" })
+            .waitFor();
+          await page.waitForTimeout(1200);
+          const placed = await page.evaluate((said) => {
+            const notice = [...document.querySelectorAll(".local-alert")].find(
+              (element) => element.textContent?.includes(said),
+            );
+            const sentence = [...(notice?.querySelectorAll("p") ?? [])].find(
+              (element) => element.textContent?.includes(said),
+            );
+            const line = [
+              ...document.querySelectorAll('p[role="status"]'),
+            ].find((element) =>
+              element.textContent?.includes("doesn't update itself"),
+            );
+            const size = (element: Element | undefined) =>
+              element ? getComputedStyle(element).fontSize : null;
+            return {
+              inside: Boolean(notice && line && notice.contains(line)),
+              line: size(line),
+              notice: size(sentence),
+              updates: [...document.querySelectorAll("button")].filter(
+                (button) => button.textContent?.trim() === "Update and restart",
+              ).length,
+            };
+          }, state.said);
+          expect(placed.notice).not.toBeNull();
+          expect(placed).toEqual({
+            inside: true,
+            line: placed.notice,
+            notice: placed.notice,
+            updates: 0,
+          });
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/${state.name}-${colorScheme}.png`,
+            });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 30_000);
   }
 });

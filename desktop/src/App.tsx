@@ -744,7 +744,19 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           )
         ) {
           // Already up from a previous window: show it, rather than a screen about it.
-          await invoke("show_openbot");
+          try {
+            await invoke("show_openbot");
+          } catch (error) {
+            /*
+             * Up, and needing a newer version of this app: the shell holds it as this session's
+             * and does not show it. It is running, so the window says so as when Start finds the
+             * same (Update OpenBot, with Show OpenBot and Stop OpenBot), never that it stopped.
+             */
+            if (!appTooOld(asProblem(error))) throw error;
+            setRunning(true);
+            recoverFromStart(error);
+            return;
+          }
           setRunning(true);
           return;
         }

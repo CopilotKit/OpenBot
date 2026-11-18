@@ -12,6 +12,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
+import { DOESNT_UPDATE_ITSELF } from "../../shared/desktop-updates";
 import { DEFAULT_HARNESS } from "./harness";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
@@ -1207,6 +1208,35 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
     }
   });
 }
+
+/*
+ * On a build that never updates itself, the line that says so is part of the notice, as on the
+ * screen for the OpenBot on this computer. Seen on a Mac: it sat under the notice in body type, a
+ * second message about the same thing.
+ */
+test("an OpenBot this build is too old for says in its notice that this build doesn't update itself", async () => {
+  const said =
+    "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.";
+  const view = await chooseConnect({
+    check_openbot_address: () => {
+      throw { said, kind: "app-too-old" };
+    },
+    app_update_offer: {
+      version: null,
+      current: "1.1.0",
+      installing: null,
+      updatesItself: false,
+    },
+  });
+  const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  await userEvent.type(field, `${ELSEWHERE}{Enter}`);
+  const line = await view.findByText(DOESNT_UPDATE_ITSELF);
+  const notice = view.getByRole("alert");
+  expect(notice.textContent).toContain(said);
+  expect(notice.contains(line)).toBe(true);
+  expect(view.queryByRole("button", { name: "Update and restart" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+});
 
 test("Cancel while the browser is waited on stops the sign-in and gives the form back", async () => {
   const signIn = deferred<null>();
@@ -4020,6 +4050,53 @@ test("an OpenBot on this computer that raised this app's minimum for a security 
   expect(view.getAllByText(said)).toHaveLength(1);
   expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
   expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+});
+
+/*
+ * The same OpenBot, found already running by a launch that did not start it: the app was quit or
+ * killed and opened again while OpenBot kept running. Seen on a Mac and on Windows: the window said
+ * "OpenBot is stopped" with Start OpenBot, the Update OpenBot card under it, while the server was up
+ * and answering. It is the screen Start shows when it finds the same: Update OpenBot, running, with
+ * Show OpenBot and Stop OpenBot, and nothing starts.
+ */
+test("a launch that finds this computer's OpenBot running and needing a newer app says Update OpenBot, never that it stopped", async () => {
+  setupConnectedLocalStack(
+    "/tmp/local-eval-app-too-old-found-running",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.";
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "already_running") return true;
+    if (command === "show_openbot")
+      throw {
+        said,
+        detail:
+          "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+        kind: "app-too-old",
+      };
+    if (command === "app_update_offer")
+      return {
+        version: null,
+        current: "1.1.0",
+        installing: null,
+        updatesItself: true,
+      };
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByRole("heading", { level: 1, name: "Update OpenBot" });
+  const card = view.getByRole("alert");
+  expect(card.textContent).toContain(said);
+  expect(within(card).queryByRole("heading")).toBeNull();
+  expect(view.queryByText("OpenBot is stopped")).toBeNull();
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Show OpenBot" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Stop OpenBot" })).toBeTruthy();
+  // Running already: nothing is started again.
+  expect(localSequence()).toEqual(["show_openbot"]);
 });
 
 test("relaunch says when Docker Desktop did not start, and Retry opens it again", async () => {
