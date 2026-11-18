@@ -98,24 +98,25 @@ function listed(
   return { task, status };
 }
 
-test("a busy conversation and a conversation with owed work are each one row", () => {
+test("a conversation with owed work is a row, and one only answering the person is not", () => {
   const rows = atWork(
     [
       channel({ id: "c1", busy: true, work: undefined }),
+      channel({ id: "c2", busy: true, work: [] }),
       channel({
-        id: "c2",
+        id: "c3",
         busy: false,
         work: [handoff("2026-11-17T10:00:00Z")],
       }),
     ],
     [],
   );
-  expect(rows).toHaveLength(2);
+  expect(rows.map((row) => row.channelId)).toEqual(["c3"]);
 });
 
 test("a working task whose conversation is in the list too is listed once", () => {
   const rows = atWork(
-    [channel({ id: "c1", busy: true })],
+    [channel({ id: "c1", work: [handoff("2026-11-17T10:00:00Z")] })],
     [listed("working", { channelId: "c1" })],
   );
   expect(rows).toHaveLength(1);
@@ -161,12 +162,13 @@ test("idle conversations and tasks that are not working are left out", () => {
 test("the longest-running comes first", () => {
   const rows = atWork(
     [
-      channel({ id: "none-1", busy: true }),
       channel({ id: "late", work: [handoff("2026-11-17T10:05:00Z")] }),
-      channel({ id: "none-2", busy: true }),
       channel({ id: "early", work: [handoff("2026-11-17T10:00:00Z")] }),
     ],
-    [],
+    [
+      listed("working", { channelId: "none-1" }),
+      listed("working", { channelId: "none-2" }),
+    ],
   );
   expect(rows.map((row) => row.channelId)).toEqual([
     "early",
@@ -178,10 +180,14 @@ test("the longest-running comes first", () => {
 
 /** The place's list drawn over a conversation read and a task read, either of which may fail. */
 function renderPlace({
+  channels = [],
   channelsFail = false,
+  tasks = [],
   tasksFail = false,
 }: {
+  channels?: ChannelSummary[];
   channelsFail?: boolean;
+  tasks?: BotTask[];
   tasksFail?: boolean;
 }) {
   const queryClient = new QueryClient({
@@ -196,17 +202,26 @@ function renderPlace({
   }
   if (!channelsFail) {
     queryClient.setQueryData(channelKeys.list(), {
-      pages: [{ channels: [], nextCursor: null }],
+      pages: [{ channels, nextCursor: null }],
       pageParams: [""],
     });
   }
-  if (!tasksFail) queryClient.setQueryData(taskKeys.list, []);
+  if (!tasksFail) queryClient.setQueryData(taskKeys.list, tasks);
   queryClient.setQueryData(agentKeys.list(false), []);
   queryClient.setQueryData(agentKeys.list(true), []);
   const router = createRouter({
     routeTree: createRootRoute({
       component: () =>
-        createElement(atWorkPlace.List, { scrollRoot: { current: null } }),
+        createElement(
+          "div",
+          null,
+          createElement(
+            "span",
+            { "data-testid": "strip" },
+            atWorkPlace.Badge ? createElement(atWorkPlace.Badge) : null,
+          ),
+          createElement(atWorkPlace.List, { scrollRoot: { current: null } }),
+        ),
     }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
@@ -222,6 +237,32 @@ function renderPlace({
 test("with nothing running the list says so", async () => {
   const view = renderPlace({});
   await view.findByText("Nothing is running right now.");
+});
+
+test("a Bot answering the person's message, in a conversation or a task's, lights nothing", async () => {
+  const view = renderPlace({
+    channels: [
+      channel({ id: "c1", busy: true }),
+      channel({ id: "t1-channel", busy: true }),
+    ],
+    tasks: [listed("ready_for_review", { channelId: "t1-channel" }).task],
+  });
+  await view.findByText("Nothing is running right now.");
+  expect(view.getByTestId("strip").children).toHaveLength(0);
+});
+
+test("work owed by another Bot is listed and pulses the strip", async () => {
+  const view = renderPlace({
+    channels: [
+      channel({
+        id: "c1",
+        summary: "Lead list",
+        work: [handoff("2026-11-17T10:00:00Z")],
+      }),
+    ],
+  });
+  await view.findByText("Lead list");
+  expect(view.getByTestId("strip").children.length).toBeGreaterThan(0);
 });
 
 test("when the conversations can't be read the list says so, not that nothing is running", async () => {

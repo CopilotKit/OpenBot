@@ -38,19 +38,18 @@ function rowOfChannel(channel: ChannelSummary): AtWorkRow {
 }
 
 /**
- * Everything running right now, one row per conversation: a conversation running a turn or owed
- * work by another Bot or a routine, then each working task whose conversation is not already
- * there. Rows with a start time come first, the longest-running at the top; the rest keep the
- * order the list gave them.
+ * Everything running on its own right now, one row per conversation: a conversation owed work by
+ * another Bot or a routine, then each working task whose conversation is not already there. A Bot
+ * answering the message the person just sent is not listed: that reply shows in its conversation.
+ * Rows with a start time come first, the longest-running at the top; the rest keep the order the
+ * list gave them.
  */
 export function atWork(
   channels: readonly ChannelSummary[],
   tasks: readonly ListedTask[],
 ): AtWorkRow[] {
   const rows = channels
-    .filter(
-      (channel) => channel.busy === true || (channel.work?.length ?? 0) > 0,
-    )
+    .filter((channel) => (channel.work?.length ?? 0) > 0)
     .map(rowOfChannel);
   const seen = new Set(rows.map((row) => row.channelId));
   for (const { task, status } of tasks) {
@@ -78,7 +77,10 @@ export function atWork(
   return [...timed, ...rows.filter((row) => row.since === null)];
 }
 
-/** What is running, live: the conversation list and the task list, read as the Needs you board reads them. */
+/**
+ * What is running on its own, live: the conversation list and the task list. A task counts as the
+ * server says, not upgraded to Working by a reply running in its conversation, for the same reason.
+ */
 export function useAtWork(): {
   rows: AtWorkRow[];
   pending: boolean;
@@ -87,9 +89,7 @@ export function useAtWork(): {
 } {
   const channels = useInfiniteQuery(channelListQueryOptions());
   const taskList = useQuery(taskListQueryOptions());
-  const busy = (channelId: string) =>
-    channels.data?.find((channel) => channel.id === channelId)?.busy === true;
-  const tasks = orderTasks(taskList.data ?? [], busy, Date.now());
+  const tasks = orderTasks(taskList.data ?? [], () => false, Date.now());
   return {
     rows: atWork(channels.data ?? [], tasks),
     pending: channels.isPending || taskList.isPending,
