@@ -7,7 +7,7 @@ export interface WhatIfQuestion {
    * The question, 1 to 500 characters once trimmed.
    * @minLength 1
    * @maxLength 500
-   * @pattern ^[^\x00]*\S[^\x00]*$
+   * @pattern ^[^\x00]*[^\s\x00][^\x00]*$
    */
   question: string;
 }

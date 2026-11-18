@@ -38,6 +38,14 @@ export const API_VERSIONS: readonly string[] = ["v2"];
 export const MINIMUM_CLIENTS: Readonly<Partial<Record<ClientKind, string>>> =
   {};
 
+/** The first release of each app that calls /api/v2: nothing in 1.0.3 or before does. */
+export const FIRST_ONE_API_RELEASES: Readonly<Record<ClientKind, string>> = {
+  web: "1.1.0",
+  desktop: "1.1.0",
+  mobile: "1.1.0",
+  recorder: "1.1.0",
+};
+
 /** The contract numbers `release-policy.json` keeps, which `deployment` publishes. */
 export const LAUNCHER_API: number = policy.compatibility.launcherApi;
 export const EXTENSION_API: number = policy.compatibility.extensionApi;

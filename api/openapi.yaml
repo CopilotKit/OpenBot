@@ -20271,7 +20271,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
     BotId:
       name: botId
       in: path
@@ -22145,7 +22145,7 @@ components:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     IdentityProviderAddress:
       type: string
       format: uri
@@ -22178,7 +22178,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The provider's SAML metadata XML, as its identity team supplied it.
     OidcIdentityProviderRequest:
       type: object
@@ -22208,13 +22208,13 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An id for the provider, unique in the organization, such as acme-okta.
     IdentityProviderDomains:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: The email domain whose people it signs in, such as acme.com. Several are separated by commas.
     CreateIdentityProviderRequest:
       description: A SAML or an OIDC provider, by protocol.
@@ -22318,7 +22318,7 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: 'The organization''s settings. Context is read only: it comes back with the settings and is never sent.'
@@ -22629,7 +22629,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -22640,7 +22640,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -22683,7 +22683,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -22758,7 +22758,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object
@@ -23757,6 +23757,8 @@ components:
           type:
             - string
             - 'null'
+        unverified:
+          $ref: '#/components/schemas/UnverifiedModel'
     ModelChoiceInput:
       type: object
       additionalProperties: false
@@ -24911,6 +24913,19 @@ components:
         text:
           type: string
           description: What was said.
+    UnverifiedModel:
+      type: object
+      description: The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.
+      required:
+        - model
+        - label
+      properties:
+        model:
+          type: string
+          description: The chosen model's id.
+        label:
+          type: string
+          description: Its name, as a model picker shows it.
     AppSource:
       type: string
       enum:
@@ -26215,7 +26230,7 @@ components:
               type: string
               minLength: 1
               maxLength: 2000
-              pattern: ^[^\x00]*\S[^\x00]*$
+              pattern: ^[^\x00]*[^\s\x00][^\x00]*$
         approval:
           $ref: '#/components/schemas/SharedAccountApproval'
     BotGrantChangesSaved:
@@ -26250,7 +26265,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What the Bot may do in the app, in a sentence or two, at most 1,000 characters once trimmed.
     BotGrantCheck:
       type: object
@@ -29375,7 +29390,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         slug:
           type: string
@@ -29461,7 +29476,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
     UpdateOrganizationMemberRequest:
       type: object
@@ -29755,7 +29770,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type: string
@@ -29784,7 +29799,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type:
@@ -30140,7 +30155,7 @@ components:
           type: string
           minLength: 1
           maxLength: 6000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The person's answer. Trimmed.
         inConversation:
           type: boolean
@@ -30266,7 +30281,7 @@ components:
       type: string
       minLength: 1
       maxLength: 300
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.
     ApprovalRuleInput:
       type: object
@@ -30647,7 +30662,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The rule in a sentence or two, at most 1,000 characters once trimmed.
     ApprovalRuleDraftWrittenRow:
       type: object
@@ -30974,7 +30989,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The sentence the rules were written from, at most 2,000 characters once trimmed.
     ApprovalRuleDraftBatch:
       type: object
@@ -31058,7 +31073,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance, at most 2,000 characters once trimmed.
     ReviewerGuidanceCheck:
       type: object
@@ -31129,7 +31144,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance to test, at most 2,000 characters once trimmed.
         limit:
           type: integer
@@ -31293,7 +31308,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: 1 to 80 characters once trimmed.
         description:
           type: string
@@ -31620,7 +31635,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The question, 1 to 500 characters once trimmed.
     WhatIfInitiator:
       type: string
@@ -32318,7 +32333,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: Why the Bot declined, in its own words. The trail keeps the first 500 characters.
         request:
           type: string
