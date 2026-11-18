@@ -4,14 +4,22 @@
  * Every operation the app uses calls this with the address, method, headers and serialised body the spec gives it. It
  * goes to the deployment the app was built for, in the organization the signed-in person is working in, with the
  * session's cookie and never the platform's own cookie jar, and a refusal is thrown as an {@link ApiError} in the server's own sentence.
+ * Every request names the app and the OpenBot release it was built from (`OpenBot-Client: mobile/<release>`), and a
+ * refusal of this app as too old (CLIENT_UPDATE_REQUIRED) is also told to the root layout, which shows Update OpenBot.
  */
 import * as Crypto from "expo-crypto";
 import { authClient, serverUrl } from "../auth";
+import {
+  CLIENT_UPDATE_REQUIRED,
+  phoneUpdateDetail,
+  reportUpdateRequired,
+} from "../client-version";
 import {
   createOrganizationAddress,
   type ListedOrganization,
   ORGANIZATION,
 } from "../organization";
+import { clientHeaders } from "../release";
 import { listOrganizations } from "./generated/organizations/organizations";
 
 /** A refusal from the server, with its status and the API's problem code when it gave one. */
@@ -92,13 +100,21 @@ const apiWrite = (url: string, method: string) =>
   url.startsWith("/api/v2/") && method !== "GET";
 
 /** The server's sentence for a refusal: the API's problems say it in `detail`, older routes in `error`. */
-function refusal(body: unknown): { said?: string; code?: string } {
+function refusal(body: unknown): {
+  said?: string;
+  code?: string;
+  minimumVersion?: string;
+} {
   if (!body || typeof body !== "object") return {};
   const field = (name: string) => {
     const value = (body as Record<string, unknown>)[name];
     return typeof value === "string" ? value : undefined;
   };
-  return { said: field("detail") ?? field("error"), code: field("code") };
+  return {
+    said: field("detail") ?? field("error"),
+    code: field("code"),
+    minimumVersion: field("minimumVersion"),
+  };
 }
 
 export async function apiRequest<T>(
@@ -114,6 +130,7 @@ export async function apiRequest<T>(
   // A new key for each write, unless the caller sends its own to retry with.
   if (apiWrite(url, method) && !headers["idempotency-key"])
     headers["idempotency-key"] = Crypto.randomUUID();
+  Object.assign(headers, clientHeaders());
   const cookie = await authClient.getCookie();
   if (cookie) headers.cookie = cookie;
   const address = await inOrganization(url, cookie);
@@ -126,7 +143,12 @@ export async function apiRequest<T>(
   if (response.status === 204) return undefined as T;
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const { said, code } = refusal(body);
+    const { said, code, minimumVersion } = refusal(body);
+    if (code === CLIENT_UPDATE_REQUIRED) {
+      const detail = said ?? phoneUpdateDetail(minimumVersion);
+      reportUpdateRequired(detail);
+      throw new ApiError(detail, response.status, code);
+    }
     throw new ApiError(
       said ?? `Request failed (${response.status}).`,
       response.status,

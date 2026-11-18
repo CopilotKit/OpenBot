@@ -15,7 +15,11 @@ import {
   getRecorderIdentity,
   type RecorderConnectionGrant,
 } from "../shared/generated/recorder";
-import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
+import {
+  OpenBotError,
+  ORGANIZATION_ID,
+  updateRequiredSentence,
+} from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
 import {
   allowsOpenBot,
@@ -361,13 +365,14 @@ async function approve(
     );
   } catch (error) {
     // The Recorder's own sentence for what OpenBot answered (EXCHANGE_REFUSED), or a plain one: a network failure's
-    // message ("Failed to fetch") means nothing here.
+    // message ("Failed to fetch") means nothing here. An OpenBot that serves only newer Recorders says to update.
     return {
       ok: false,
       error:
-        error instanceof OpenBotError
+        updateRequiredSentence(error) ??
+        (error instanceof OpenBotError
           ? (EXCHANGE_REFUSED[error.status] ?? EXCHANGE_FAILED)
-          : UNREACHABLE,
+          : UNREACHABLE),
     };
   }
   const connection: ConnectionRecord = {
@@ -894,7 +899,9 @@ async function desktopConnect(
   } catch (error) {
     return refused(
       error instanceof OpenBotError
-        ? "exchange-refused"
+        ? error.updateRequired
+          ? "client-update-required"
+          : "exchange-refused"
         : "openbot-unreachable",
     );
   }
