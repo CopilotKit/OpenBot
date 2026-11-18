@@ -53,7 +53,7 @@ jobs:
       - id: legs
         env:
           GH_TOKEN: ${{ github.token }}
-          MODE: ${{ github.event_name == 'pull_request' && 'previous' || 'window' }}
+          MODE: window
         run: |
           set -euo pipefail
           gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName,publishedAt,isPrerelease > "$RUNNER_TEMP/releases.json"
