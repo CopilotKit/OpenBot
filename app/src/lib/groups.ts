@@ -15,12 +15,14 @@ import type {
   ConversationMember,
   ConversationMessage,
 } from "@/lib/api/generated/model";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import {
   type AgentChannel,
   channelKeys,
   channelOf,
 } from "@/lib/channels/queries";
+import type { SentFile } from "@/lib/computers/sent-file";
 
 /** A key for one write, so a retry of it is recognised as the same write. */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
@@ -63,6 +65,17 @@ function groupMessageOf(
       ? {}
       : { answeredBy: message.answeredBy }),
     ...(message.consent === undefined ? {} : { consent: message.consent }),
+    ...(message.files?.length
+      ? {
+          files: message.files.map((file) => ({
+            attachmentId: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            url: storedAttachmentUrl(file.id),
+          })),
+        }
+      : {}),
   };
 }
 
@@ -74,7 +87,11 @@ export type GroupMessage = {
   ownerUserId: string;
   agentId: string | null;
   text: string;
-  status: "queued" | "running" | "waiting" | "completed" | "failed";
+  /**
+   * `queued`, `running`, `waiting`, `completed` or `failed`. The list can grow: a status this app
+   * doesn't know draws the line as a plain reply.
+   */
+  status: string;
   createdAt: string;
   /** Why a waiting Bot is waiting, when it is. */
   reason?: string;
@@ -82,6 +99,8 @@ export type GroupMessage = {
   answeredBy?: string;
   /** A Team Bot asking the person whose turn it was to use their own account. */
   consent?: { botId: string; serverId: string };
+  /** The files a Bot sent from its computer with this reply, each drawn as its card. */
+  files?: SentFile[];
 };
 export type GroupPerson = {
   userId: string;

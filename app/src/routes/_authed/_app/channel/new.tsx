@@ -39,6 +39,7 @@ import {
 } from "@/lib/agents/queries";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
+import { useAttachmentLimits } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -209,6 +210,7 @@ function NewConversation({ composition }: { composition: string }) {
   const skillCommands = useSkillCommands(
     group ? "" : (recipients[0]?.id ?? ""),
   );
+  const attachmentLimits = useAttachmentLimits();
 
   const submit = async (draft: ComposerDraft) => {
     const recipient = recipients[0];
@@ -415,6 +417,7 @@ function NewConversation({ composition }: { composition: string }) {
          * for a group: its messages carry words only, so its composer offers no `+`.
          */
         holdsFilesUntilSent={!group}
+        attachmentLimits={attachmentLimits}
         modelPicker={
           <ModelPicker
             catalogue={pickable ? models.data : undefined}

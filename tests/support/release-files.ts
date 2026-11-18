@@ -14,12 +14,18 @@ export function releaseFiles({
   database,
   appVersion = version.slice(1),
   charts = { openbot: "0.3.0", "openbot-bundle": "0.1.0" },
+  requiresDowntime,
 }: {
   version: string;
   database: string;
   /** What each packaged chart says it installs. A release's charts say the release. */
   appVersion?: string;
   charts?: Record<string, string>;
+  /**
+   * The `openbot` chart's `openbot.ai/requires-downtime` annotation. Left out, the chart has none, as
+   * a chart from before it did not.
+   */
+  requiresDowntime?: boolean;
 }): string {
   const work = mkdtempSync(join(tmpdir(), "openbot-release-files-"));
   const directory = join(work, "release");
@@ -28,9 +34,13 @@ export function releaseFiles({
   for (const [name, own] of Object.entries(charts)) {
     const source = join(work, "source", name);
     mkdirSync(join(source, "templates"), { recursive: true });
+    const annotations =
+      name === "openbot" && requiresDowntime !== undefined
+        ? `annotations:\n  openbot.ai/requires-downtime: "${requiresDowntime}"\n`
+        : "";
     writeFileSync(
       join(source, "Chart.yaml"),
-      `apiVersion: v2\nname: ${name}\nversion: ${own}\nappVersion: "${appVersion}"\n`,
+      `apiVersion: v2\nname: ${name}\nversion: ${own}\nappVersion: "${appVersion}"\n${annotations}`,
     );
     writeFileSync(join(source, "values.yaml"), "replicas: 1\n");
     writeFileSync(

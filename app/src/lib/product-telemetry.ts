@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { recordProductEvent } from "@/lib/api/generated/product-events/product-events";
 import { idempotencyKey } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { nudgeMoment } from "@/lib/notices";
 import { organizationId } from "@/lib/organizations/current";
+import { queryClient } from "@/query-client";
 
 export type ResultReference = { threadId: string; messageId: string };
 type ResultAction = "result_viewed" | "result_copied";
@@ -31,6 +33,12 @@ export async function recordResultAction(
       { "Idempotency-Key": idempotencyKey() },
       { keepalive: true },
     );
+    /*
+     * A copied answer is a win, which the server has now recorded: read the preferences again, so a
+     * nudge it makes due shows right after the copy (`lib/notices.ts`). Nothing is read where no
+     * nudge could come of it.
+     */
+    if (kind === "result_copied") nudgeMoment(queryClient);
   } catch (error) {
     // This best-effort observation must not interrupt chat or a successful copy.
     if (error instanceof ClientError)

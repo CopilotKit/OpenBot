@@ -116,12 +116,12 @@ export const CreateIdentityProviderHeader = zod.object({
 export const createIdentityProviderBodyOneIdMax = 200;
 
 export const createIdentityProviderBodyOneIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyOneDomainMax = 2048;
 
 export const createIdentityProviderBodyOneDomainRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyOneIssuerMax = 2048;
 
@@ -136,17 +136,17 @@ export const createIdentityProviderBodyOneEntryPointRegExp = new RegExp(
 export const createIdentityProviderBodyOneMetadataMax = 200000;
 
 export const createIdentityProviderBodyOneMetadataRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoIdMax = 200;
 
 export const createIdentityProviderBodyTwoIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoDomainMax = 2048;
 
 export const createIdentityProviderBodyTwoDomainRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoIssuerMax = 2048;
 
@@ -156,12 +156,12 @@ export const createIdentityProviderBodyTwoIssuerRegExp = new RegExp(
 export const createIdentityProviderBodyTwoClientIdMax = 2048;
 
 export const createIdentityProviderBodyTwoClientIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoClientSecretMax = 2048;
 
 export const createIdentityProviderBodyTwoClientSecretRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const CreateIdentityProviderBody = zod

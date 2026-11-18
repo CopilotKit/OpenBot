@@ -69,9 +69,9 @@ export const ListOrganizationsResponse = zod.object({
             .describe("Its short name, which also addresses it."),
           name: zod.string().describe("What people call it."),
           role: zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
           active: zod
             .boolean()
@@ -118,7 +118,7 @@ export const CreateOrganizationHeader = zod.object({
 export const createOrganizationBodyNameMax = 100;
 
 export const createOrganizationBodyNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createOrganizationBodySlugMin = 2;
 export const createOrganizationBodySlugMax = 48;
@@ -157,9 +157,9 @@ export const CreateOrganizationResponse = zod.object({
       slug: zod.string().describe("Its short name, which also addresses it."),
       name: zod.string().describe("What people call it."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       active: zod
         .boolean()
@@ -232,9 +232,9 @@ export const ListOrganizationMembersResponse = zod.object({
           assignableRoles: zod
             .array(
               zod
-                .enum(["owner", "admin", "member"])
+                .string()
                 .describe(
-                  "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+                  "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
                 ),
             )
             .describe(
@@ -251,9 +251,9 @@ export const ListOrganizationMembersResponse = zod.object({
             .nullable()
             .describe("Their picture's address, when they have one."),
           role: zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
           joinedAt: zod.iso
             .datetime({ offset: true })
@@ -301,7 +301,7 @@ export const UpdateOrganizationHeader = zod.object({
 export const updateOrganizationBodyNameMax = 100;
 
 export const updateOrganizationBodyNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const UpdateOrganizationBody = zod.object({
@@ -325,9 +325,9 @@ export const UpdateOrganizationResponse = zod.object({
       slug: zod.string().describe("Its short name, which also addresses it."),
       name: zod.string().describe("What people call it."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       active: zod
         .boolean()
@@ -397,9 +397,9 @@ export const UpdateOrganizationMemberResponse = zod.object({
       assignableRoles: zod
         .array(
           zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
         )
         .describe(
@@ -416,9 +416,9 @@ export const UpdateOrganizationMemberResponse = zod.object({
         .nullable()
         .describe("Their picture's address, when they have one."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       joinedAt: zod.iso
         .datetime({ offset: true })
@@ -525,7 +525,7 @@ export const ListOrganizationInvitationsResponse = zod.object({
             .enum(["admin", "member"])
             .describe("A role an admin can give a person."),
           status: zod
-            .enum(["pending", "expired", "declined"])
+            .string()
             .describe(
               "pending while it waits for an answer, expired once its seven days ran out, declined when the person turned it down.",
             ),
@@ -614,7 +614,7 @@ export const CreateOrganizationInvitationResponse = zod.object({
         .enum(["admin", "member"])
         .describe("A role an admin can give a person."),
       status: zod
-        .enum(["pending", "expired", "declined"])
+        .string()
         .describe(
           "pending while it waits for an answer, expired once its seven days ran out, declined when the person turned it down.",
         ),
@@ -736,7 +736,7 @@ export const ListInvitationsResponse = zod.object({
             .enum(["admin", "member"])
             .describe("A role an admin can give a person."),
           status: zod
-            .enum(["pending", "expired", "accepted", "declined", "canceled"])
+            .string()
             .describe(
               "pending while it can still be answered. expired once its seven days ran out, accepted or declined once the person answered, canceled when the organization took it back.",
             ),
@@ -805,7 +805,7 @@ export const GetInvitationResponse = zod.object({
         .enum(["admin", "member"])
         .describe("A role an admin can give a person."),
       status: zod
-        .enum(["pending", "expired", "accepted", "declined", "canceled"])
+        .string()
         .describe(
           "pending while it can still be answered. expired once its seven days ran out, accepted or declined once the person answered, canceled when the organization took it back.",
         ),
@@ -873,9 +873,9 @@ export const AcceptInvitationResponse = zod.object({
       slug: zod.string().describe("Its short name, which also addresses it."),
       name: zod.string().describe("What people call it."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       active: zod
         .boolean()

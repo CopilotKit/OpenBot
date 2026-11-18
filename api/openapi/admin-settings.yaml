@@ -12,7 +12,8 @@ paths:
       summary: Read what this OpenBot offers
       description: >-
         Return what this OpenBot offers and how people sign in to it: the
-        edition, the features the apps draw, and the sign-in options. Anybody
+        edition, the features the apps draw, how large an attached file may
+        be, and the sign-in options. Anybody
         may read it, signed in or not, because the sign-in screen reads it
         first. Signed in, it is answered in an organization the caller is a
         member of, and an organization they are not in, the organization
@@ -1005,7 +1006,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
   schemas:
     Deployment:
       type: object
@@ -1083,11 +1084,42 @@ components:
             computers answer 503 to every call. Not isolatedBots: an OpenBot
             whose Bots share one computer has computers (true) and cannot give
             a Bot one of its own (isolatedBots false).
+        attachmentLimits:
+          $ref: '#/components/schemas/AttachmentLimits'
+    AttachmentLimits:
+      type: object
+      description: >-
+        How large a file attached to a message may be, by kind, in bytes. An
+        upload over its kind's limit is refused. Absent, as from an older
+        OpenBot, the limits are 8388608 for an image or a document (a PDF, or
+        a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client
+        reads them again rather than keeping them for good. What a Bot's model
+        is shown of a large file is a separate matter: the file is kept and
+        can be downloaded whatever the model can read of it.
+      required:
+        - imageBytes
+        - documentBytes
+        - fileBytes
+      properties:
+        imageBytes:
+          type: integer
+          minimum: 1
+          description: The largest image.
+        documentBytes:
+          type: integer
+          minimum: 1
+          description: >-
+            The largest document: a PDF, or a Word, Excel or PowerPoint file
+            (.docx, .xlsx, .pptx).
+        fileBytes:
+          type: integer
+          minimum: 1
+          description: The largest text file, or a file of any other kind.
     AllowlistEntry:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: >-
@@ -1227,6 +1259,10 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum: [per-person, shared, none]
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -1372,7 +1408,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -1385,7 +1421,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -1421,7 +1457,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -1491,7 +1527,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object
@@ -1551,7 +1587,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum: [default, organization, role, group, team]
+          x-extensible-enum: [default, organization, role, group, team]
         scopeId:
           type: string
           description: The role, the group's name or the team's id that decided it. Empty otherwise.
@@ -1574,7 +1610,7 @@ components:
               name:
                 type: [string, 'null']
               role:
-                $ref: './common.yaml#/components/schemas/PersonRole'
+                $ref: './common.yaml#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -1696,7 +1732,7 @@ components:
             organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum: [organization, group, team]
+          x-extensible-enum: [organization, group, team]
           description: >-
             Whose policy: the organization's, a team's, or a directory
             group's.
@@ -2139,6 +2175,10 @@ components:
         builtInBots: true
         isolatedBots: false
         botComputers: true
+        attachmentLimits:
+          imageBytes: 104857600
+          documentBytes: 104857600
+          fileBytes: 104857600
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:

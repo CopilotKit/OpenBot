@@ -1,4 +1,9 @@
-import { type BotTask, liveStatus, type TaskStatus } from "./queries";
+import {
+  type BotTask,
+  type KnownTaskStatus,
+  liveStatus,
+  type TaskStatus,
+} from "./queries";
 
 /*
  * The order a person's tasks are listed in, worked out here, away from the screens, so the Bots page,
@@ -7,13 +12,19 @@ import { type BotTask, liveStatus, type TaskStatus } from "./queries";
  */
 
 /** Top to bottom: what to read, what to answer, what to retry, what is running, what is done. */
-export const TASK_ORDER: readonly TaskStatus[] = [
+export const TASK_ORDER: readonly KnownTaskStatus[] = [
   "ready_for_review",
   "needs_input",
   "failed",
   "working",
   "resolved",
 ];
+
+/** A status's place in `TASK_ORDER`. One a newer server sends that this app doesn't know comes last. */
+function rank(status: TaskStatus): number {
+  const at = (TASK_ORDER as readonly string[]).indexOf(status);
+  return at === -1 ? TASK_ORDER.length : at;
+}
 
 /** How long a task the person marked done stays listed. */
 export const RESOLVED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
@@ -110,7 +121,7 @@ export function orderTasks(
     )
     .sort(
       (a, b) =>
-        TASK_ORDER.indexOf(a.status) - TASK_ORDER.indexOf(b.status) ||
+        rank(a.status) - rank(b.status) ||
         time(b.task.updatedAt) - time(a.task.updatedAt),
     );
 }

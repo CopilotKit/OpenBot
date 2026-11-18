@@ -136,6 +136,8 @@ export const getUpdateStandingInstructionsResponseMock =
 export const getGetPreferencesResponseMock = (): Preferences => ({
   messageListEmphasis: "thread",
   selfHostBannerDismissed: false,
+  dismissedNotices: [],
+  noticesDue: [],
   narration: null,
   skin: "openbot",
   proactive: "on",
@@ -144,6 +146,8 @@ export const getGetPreferencesResponseMock = (): Preferences => ({
 export const getUpdatePreferencesResponseMock = (): Preferences => ({
   messageListEmphasis: "thread",
   selfHostBannerDismissed: false,
+  dismissedNotices: [],
+  noticesDue: [],
   narration: null,
   skin: "openbot",
   proactive: "on",

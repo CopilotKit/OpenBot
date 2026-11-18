@@ -1,9 +1,12 @@
+import { SEND_FILE_TOOL } from "@openbot/shared/send-file";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   asksThePerson,
   type TranscriptItem,
 } from "@/components/channels/tool-activity";
 import { isPersonSentMessage } from "@/components/channels/transcript-turns";
+import { readOutcome } from "@/lib/computers/activity";
+import { sentFileOf } from "@/lib/computers/sent-file";
 import { claudeCodeCall } from "@/lib/copilot/coding-calls";
 
 /*
@@ -43,11 +46,18 @@ export const NO_TURN_WORK: TurnWorkFolds = { at: new Map(), inside: new Set() };
 
 /**
  * Whether a call drawn on its own is a step of the work: Claude Code's own tools, the Bot computer's
- * (but not its requests to the person), an app's call, a subtask. Finished, and asking nothing.
+ * (but not its requests to the person, nor a file it sent them), an app's call, a subtask. Finished,
+ * and asking nothing.
+ *
+ * A FILE SENT TO THE PERSON IS PART OF THE ANSWER, NOT A STEP. Folded with the rest, the card for
+ * the CSV a task made sat behind "Worked for 13s", and the thread showed only the answer's words
+ * (found by the end-to-end pass). A send that did not go through is a step like any other.
  */
 function isWorkStep(item: Extract<TranscriptItem, { kind: "tool" }>): boolean {
   if (item.result === undefined || asksThePerson(item.result)) return false;
   const { name, arguments: args } = item.toolCall.function;
+  if (name === SEND_FILE_TOOL && sentFileOf(readOutcome(item.result)))
+    return false;
   if (name.startsWith("mcp__") || name === SUBAGENT_TOOL) return true;
   if (name.startsWith("computer_"))
     return !name.startsWith("computer_request_");

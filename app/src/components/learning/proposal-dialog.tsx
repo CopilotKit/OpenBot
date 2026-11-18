@@ -73,6 +73,26 @@ function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
 }
 
 /**
+ * What the dialog says once a proposal is decided. Nothing while it waits, and nothing for a status a
+ * newer server sends that this app doesn't know.
+ */
+export function decidedNote(
+  status: string,
+  removal: boolean,
+  publishedNote: string,
+): string | null {
+  if (status === "approved")
+    return removal
+      ? "Removed. Bots stop using it from their next conversation."
+      : publishedNote;
+  if (status === "rejected")
+    return removal
+      ? "Rejected. The skill stays."
+      : "Rejected. It won't be published.";
+  return null;
+}
+
+/**
  * One proposed skill: the SKILL.md it publishes, why, and the evidence. With
  * `onDecide` it carries Approve and Reject while the proposal is pending review;
  * without it the dialog is read-only.
@@ -94,7 +114,8 @@ export function ProposalDialog<TKey extends QueryKey>({
   >;
   onDecide?: (decision: "approve" | "reject") => void;
   deciding: boolean;
-  decided?: "approved" | "rejected";
+  /** The status the decision left it in, as the server answered it. */
+  decided?: string;
   error?: Error | null;
   /** What the dialog says once the skill is published; the default is written for Admin. */
   publishedNote?: string;
@@ -186,18 +207,12 @@ export function ProposalDialog<TKey extends QueryKey>({
             </>
           ) : (
             <>
-              {status && status !== "pending_review" && (
+              {status && decidedNote(status, removal, publishedNote) && (
                 <span
                   className="mr-auto text-muted-foreground text-sm"
                   role="status"
                 >
-                  {status === "approved"
-                    ? removal
-                      ? "Removed. Bots stop using it from their next conversation."
-                      : publishedNote
-                    : removal
-                      ? "Rejected. The skill stays."
-                      : "Rejected. It won't be published."}
+                  {decidedNote(status, removal, publishedNote)}
                 </span>
               )}
               <Button onClick={onClose} size="sm" type="button">

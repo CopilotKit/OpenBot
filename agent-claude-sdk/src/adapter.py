@@ -306,15 +306,43 @@ def fitted_result(content):
 
 
 class ModelRefusedError(Exception):
-    """The model provider refused the run, in Claude Code's words for it.
+    """The model provider answered the run with an error, in Claude Code's words for it.
 
-    Claude Code answers a refusal (out of credit, a rate limit, an unknown model, a prompt too long,
-    the API down) with an assistant message of its own, marked with `error`. Streamed as one, it read
-    as the Bot's answer: "API Error: Request rejected (429) · This request would exceed the rate
-    limit …", and the turn finished as if it had worked. It ends the run as a RUN_ERROR instead,
-    coded `OPENBOT_MODEL_REFUSED`, and the server says it in words
-    (server/src/agents/provider-refusal.ts).
+    Claude Code answers a failed request (out of credit, a rate limit, a plan's limit, an unknown
+    model, a prompt too long, the API down, a dropped connection) with an assistant message of its
+    own, marked with `error`. Streamed as one, it read as the Bot's answer: "API Error: Request
+    rejected (429) · This request would exceed the rate limit …", and the turn finished as if it had
+    worked. It ends the run as a RUN_ERROR instead, coded `OPENBOT_MODEL_REFUSED`, and the server says
+    it in words.
+
+    `category` is Claude Code's own name for what went wrong (`error_category`), sent on the
+    RUN_ERROR as `metadata.errorCategory`. Only "refusal" says the model declined to answer; the
+    others say why the request failed. The code stays the one every server reads, so a server that
+    predates the category still places the words as it did.
     """
+
+    def __init__(self, text, category=None):
+        super().__init__(text)
+        self.category = category
+
+
+# What Claude Code calls an error on its message: `AssistantMessageError` in claude-agent-sdk
+# 0.2.152 ("authentication_failed", "billing_error", "rate_limit", "invalid_request",
+# "server_error", "unknown"), and the few more its CLI writes ("model_not_found", "account_on_hold",
+# "oauth_org_not_allowed"). A name, never words: anything else is sent as "unknown".
+CATEGORY = re.compile(r"^[a-z][a-z_]{0,39}$")
+
+
+def error_category(message):
+    """Claude Code's category for a failed message, or "refusal" when the model declined.
+
+    Claude declining to answer is the one real refusal. Claude Code marks it `invalid_request`,
+    the same as a malformed request, and tells them apart only by the message's stop reason.
+    """
+    if getattr(message, "stop_reason", None) == "refusal":
+        return "refusal"
+    error = message.error
+    return error if isinstance(error, str) and CATEGORY.match(error) else "unknown"
 
 
 class ModelUnreachableError(Exception):
@@ -441,6 +469,9 @@ class _Turn:
     model: str | None = None
     # The newest run's input: the whole thread, with every result the browser has sent so far.
     latest: object = None
+    # Calls on the model endpoint to a tool the step did not offer, which Claude Code answers
+    # itself. See `_not_held`.
+    not_held: set[str] = field(default_factory=set)
 
     def result(self, tool_id):
         if tool_id not in self.results:
@@ -969,7 +1000,14 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     logger.warning("The model couldn't be reached: %s", refusal_text(message))
                     raise ModelUnreachableError(unreachable_message(model_address()))
                 if isinstance(message, AssistantMessage) and message.error:
-                    raise ModelRefusedError(refusal_text(message))
+                    category = error_category(message)
+                    if category == "refusal":
+                        logger.warning("The model declined to answer: %s", refusal_text(message))
+                    else:
+                        logger.warning(
+                            "The model request failed (%s): %s", category, refusal_text(message)
+                        )
+                    raise ModelRefusedError(refusal_text(message), category)
                 if (
                     isinstance(message, StreamEvent)
                     and message.event.get("type") == "message_start"
@@ -1124,9 +1162,12 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     RunErrorEvent(message=START_FAILED, code="OPENBOT_HARNESS_START_FAILED")
                 )
                 return
+            category = error.category if isinstance(error, ModelRefusedError) else None
             await turn.queue.put(
                 RunErrorEvent(
                     message=str(error),
+                    # Claude Code's own category, which the server tells the person by.
+                    metadata={"errorCategory": category} if category else None,
                     code="OPENBOT_MODEL_AUTH_REQUIRED"
                     if isinstance(error, ModelAuthenticationError)
                     else "OPENBOT_MODEL_REFUSED"
@@ -1195,9 +1236,41 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             }
         )
 
+    def _not_held(self, event, turn):
+        """Whether this event belongs to a call of a tool this step was not offered.
+
+        On the model endpoint the query holds exactly the step's tools (see `run`). The model can
+        still ask for one it does not hold: an app action it knows by name from the conversation, a
+        tool an earlier step was offered, or one it guessed. Claude Code answers such a call itself,
+        with "No such tool available", and the model carries on in the same query. Upstream streams
+        the call as it starts, before Claude Code has looked at it, and the server ends a run that
+        names a tool the step did not offer: FOUND IN DOGFOODING, a Bot asked to add HubSpot deals
+        to a posted Slack update called `SLACK_UPDATES_A_SLACK_MESSAGE`, which it did not hold, and
+        five minutes of work ended on an error. Nothing of such a call is passed on, so the server
+        only ever hears of calls to tools it offered, and the person reads the model's answer.
+        """
+        if not self._model_only:
+            return False
+        if event.type == EventType.TOOL_CALL_START:
+            if event.tool_call_name in turn.tool_names:
+                return False
+            turn.not_held.add(event.tool_call_id)
+            logger.warning(
+                "Claude called a tool this step did not offer; Claude Code answers it: %s",
+                event.tool_call_name,
+            )
+            return True
+        return (
+            event.type
+            in (EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END, EventType.TOOL_CALL_RESULT)
+            and event.tool_call_id in turn.not_held
+        )
+
     async def _pump_query(self, input_data, turn, fit_results=False):
         async for event in self._run_query(input_data, fit_results=fit_results):
             event = self._named_as_offered(event, turn)
+            if self._not_held(event, turn):
+                continue
             if event.type == EventType.RUN_ERROR and turn.authentication_failed:
                 event = event.model_copy(
                     update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}

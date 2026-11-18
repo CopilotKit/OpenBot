@@ -81,6 +81,7 @@ const routine = (
   id,
   botId: agentId,
   schedule: "Weekdays at 09:00",
+  cron: "0 9 * * 1-5",
   timezone: "UTC",
   instruction: "Post the standup summary.",
   title: null,

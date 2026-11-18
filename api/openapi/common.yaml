@@ -418,6 +418,7 @@ paths:
   /api/v2/organizations/{organizationId}/recorder/activity: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1recorder~1activity' }
   /api/v2/organizations/{organizationId}/product-events: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1product-events' }
   /api/v2/organizations/{organizationId}/app-errors: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1app-errors' }
+  /api/v2/organizations/{organizationId}/nudge-events: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1nudge-events' }
   /api/v2/organizations/{organizationId}/settings/learning: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning' }
   /api/v2/organizations/{organizationId}/settings/learning/create-container: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1create-container' }
   /api/v2/organizations/{organizationId}/settings/learning/overview: { $ref: './learning.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1learning~1overview' }
@@ -828,6 +829,23 @@ components:
         admin governs it: its people, its sign-in and its policy. A member
         uses it. The owner is whoever created the organization; `default`
         has admins and no owner.
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum: [owner, admin, member]
+      description: >-
+        The person's role as a member of the organization, as the server
+        answers it. An owner or an admin governs it: its people, its sign-in
+        and its policy. A member uses it. The list can grow: a client reads a
+        role it doesn't know as a member.
+    NoticeId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+      description: >-
+        A notice OpenBot shows a person once, such as a nudge, by its id:
+        star-on-github is the ask to star OpenBot on GitHub.
+      example: star-on-github
     AssignableRole: { $ref: './accounts.yaml#/components/schemas/AssignableRole' }
     OnboardingStatus: { $ref: './accounts.yaml#/components/schemas/OnboardingStatus' }
     Person: { $ref: './accounts.yaml#/components/schemas/Person' }

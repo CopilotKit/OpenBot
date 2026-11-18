@@ -16,6 +16,7 @@ import {
 } from "@/lib/approvals";
 import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
+import { fileSize, sentFileOf } from "./sent-file";
 
 /**
  * What a Bot has been doing on its computer: the pages it opened and acted on, the commands it ran,
@@ -62,7 +63,13 @@ export type ComputerActivity = {
    * when: the time the page read it would be a guess drawn as a fact.
    */
   at?: number;
-  kind: "command" | "read_file" | "write_file" | "list_files" | "browser";
+  kind:
+    | "command"
+    | "read_file"
+    | "write_file"
+    | "list_files"
+    | "send_file"
+    | "browser";
   /**
    * For a browser step, which one it was (`computer_navigate`, `computer_click` and so on). The pane
    * names it as the transcript does (`ownToolLabel` in `shared/tool-name.ts`).
@@ -448,12 +455,13 @@ export function activityFor(computerId: string): ComputerActivity[] {
   return byComputer.get(computerId) ?? NONE;
 }
 
-/** The four calls that act on the computer behind the screen, and what the pane calls each. */
+/** The calls that act on the computer behind the screen, and what the pane calls each. */
 const KINDS: Record<string, ComputerActivity["kind"]> = {
   computer_run_command: "command",
   computer_read_file: "read_file",
   computer_write_file: "write_file",
   computer_list_files: "list_files",
+  computer_send_file: "send_file",
 };
 
 /**
@@ -860,6 +868,23 @@ export function detailsOf(
         : {}),
       ...notTheBot,
     };
+  if (kind === "send_file") {
+    const sent = sentFileOf(result);
+    return {
+      kind,
+      subject: path,
+      output: sent
+        ? `${sent.name}, ${fileSize(sent.sizeBytes)}`
+        : outputOf(result),
+      // Not sent: the line must not say "Sent" about a file nobody received.
+      ...(result.ok === false &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
+      ...notTheBot,
+    };
+  }
   return {
     kind,
     subject: kind === "list_files" ? path || "the workspace" : path,

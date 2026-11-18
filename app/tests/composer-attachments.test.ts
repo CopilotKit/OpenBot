@@ -4,7 +4,10 @@ import {
   FILE_PICKER_ACCEPT,
   uploadToChannel,
 } from "@/components/channels/composer/attachments";
-import { MAX_IMAGE_BYTES } from "@/lib/channels/attachments";
+import {
+  DEFAULT_ATTACHMENT_LIMITS,
+  MAX_IMAGE_BYTES,
+} from "@/lib/channels/attachments";
 import { problemBody } from "./conversations-api";
 
 /**
@@ -194,14 +197,28 @@ describe("uploadToChannel", () => {
 });
 
 describe("attachmentsConfigFor", () => {
-  test("maxSize is MAX_IMAGE_BYTES", () => {
+  test("maxSize is the largest of the limits the screen used", () => {
     const config = attachmentsConfigFor(
       "chan_1",
       "group_1",
       () => {},
       () => {},
+      DEFAULT_ATTACHMENT_LIMITS,
     );
     expect(config.maxSize).toBe(MAX_IMAGE_BYTES);
+
+    const larger = attachmentsConfigFor(
+      "chan_1",
+      "group_1",
+      () => {},
+      () => {},
+      {
+        imageBytes: 100 * 1024 * 1024,
+        documentBytes: 100 * 1024 * 1024,
+        fileBytes: 1024 * 1024,
+      },
+    );
+    expect(larger.maxSize).toBe(100 * 1024 * 1024);
   });
 
   /**
@@ -220,6 +237,7 @@ describe("attachmentsConfigFor", () => {
       "group_1",
       () => {},
       () => {},
+      DEFAULT_ATTACHMENT_LIMITS,
     );
 
     expect(config.accept).toBe("*/*");

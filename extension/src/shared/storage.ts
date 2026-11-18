@@ -93,6 +93,10 @@ type LocalState = {
   narration?: "on" | "off";
   /** The sites the person keeps out of every recording (sites.ts), sorted: nothing in a tab on one is recorded. */
   excludedSites?: string[];
+  /** The signed security floor this copy last verified, exactly as it was published (background/security-floor.ts). */
+  securityFloor?: string;
+  /** When the security floor was last read from its feed. */
+  securityFloorCheckedAt?: number;
 };
 export type PendingConnect = {
   origin: string;

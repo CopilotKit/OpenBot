@@ -9,6 +9,7 @@ import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { Button } from "@/components/ui/button";
 import { defaultAgentId } from "@/lib/agents/default-agent";
 import {
@@ -242,6 +243,19 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
             {stopped}
           </p>
         ) : null}
+        {/*
+         * The ask to star OpenBot on GitHub, when the server says it is due: this is the screen where
+         * a Bot's answer can be copied, which is one of the wins it follows (`StarPrompt`). Under the
+         * header with the banners, for the same reason as them: the packaged chat owns the space
+         * above its message box. Never while this chat shows an error. As wide as the chat's own
+         * column, with the conversation's composer column's gutters, so it lines up with the message
+         * box under it.
+         */}
+        {stopped || history === "unavailable" ? null : (
+          <div className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] px-4 pt-3 empty:hidden">
+            <StarPrompt />
+          </div>
+        )}
         <div className="min-h-0 flex-1">
           {/*
            * Keyed on the thread as well as the agent. Switching agents was already handled by

@@ -722,6 +722,12 @@ const OWN_TOOLS: Record<string, OwnTool> = {
     attempted: "Save a file",
     subject: "path",
   },
+  computer_send_file: {
+    running: "Sending a file",
+    done: "Sent a file",
+    attempted: "Send a file",
+    subject: "path",
+  },
   computer_run_command: {
     running: "Running a command",
     done: "Ran a command",

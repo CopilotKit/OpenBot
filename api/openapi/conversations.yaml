@@ -1054,7 +1054,9 @@ paths:
       summary: Download an attachment
       description: Return the bytes of a file attached to a message, in the type
         OpenBot recognised it as. Only somebody in the conversation it was sent
-        in, or the person still holding it to send, can read it.
+        in, or the person still holding it to send, can read it. A picture is
+        served to open in place. Every other file, a PDF or a Word, Excel or
+        PowerPoint file among them, is served as a download.
       security:
         - webSession: []
         - appOAuth:
@@ -1714,6 +1716,60 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/nudge-events:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordNudgeEvent
+      summary: Record what the caller did with a nudge
+      description: >-
+        Tell OpenBot that a nudge (a notice OpenBot shows a person once, such
+        as the ask to star OpenBot on GitHub) was shown to the caller, that
+        they followed it, or that they dismissed it, and where. OpenBot adds
+        the moment that made it due, from what it already knows about the
+        caller, so the counts say which moment works. It is best effort: a
+        client sends one per show or answer and waits on nothing. Saving the
+        answer is a separate change to the caller's preferences
+        (`dismissedNotices`). The event counts for the caller and names
+        nothing else. Where this OpenBot has product telemetry switched off,
+        it is accepted and dropped.
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NudgeEvent'
+            examples:
+              clicked:
+                $ref: '#/components/examples/NudgeClicked'
+      responses:
+        '204':
+          description: The event is accepted.
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     ConversationLimit:
@@ -2182,6 +2238,45 @@ components:
             - desktop
             - mobile
           description: Where the caller saw or copied it.
+    NudgeEvent:
+      type: object
+      description: >-
+        What the caller did with a nudge, and where. Names nothing about the
+        person, who is the caller. The moment that made the nudge due is
+        added by OpenBot, not sent.
+      additionalProperties: false
+      required:
+        - nudge
+        - action
+        - place
+        - surface
+      properties:
+        nudge:
+          $ref: './common.yaml#/components/schemas/NoticeId'
+        action:
+          type: string
+          enum:
+            - shown
+            - clicked
+            - dismissed
+          description: >-
+            shown when the nudge was drawn, clicked when they followed it
+            (for the star nudge, opened the repository), and dismissed when
+            they said Not now.
+        place:
+          type: string
+          enum:
+            - card
+            - settings
+          description: >-
+            card for the nudge drawn above the message box, settings for its
+            permanent row in Settings, which is never shown as a card.
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+          description: Where the caller saw or answered it.
     AppError:
       type: object
       description: An error the app hit and did not handle, as the app saw it.
@@ -2391,7 +2486,7 @@ components:
           description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -2426,6 +2521,14 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer
+            with this reply, in the order it sent them. Each is an attachment of the
+            conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:
@@ -2553,7 +2656,7 @@ components:
             server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - needs_input
         - working
         - resolved
@@ -3388,6 +3491,9 @@ components:
     ProductEventViewed:
       summary: "An answer the caller saw in the web app."
       value: {"kind": "result_viewed", "threadId": "6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a", "messageId": "msg_0b1c6f0e", "surface": "web"}
+    NudgeClicked:
+      summary: "The caller opened OpenBot's repository from the star card, in OpenBot Desktop."
+      value: {"nudge": "star-on-github", "action": "clicked", "place": "card", "surface": "desktop"}
     AppErrorBoundary:
       summary: "An error the web app's error screen caught."
       value: {"source": "error_boundary", "type": "TypeError", "message": "Cannot read properties of undefined (reading 'title')", "stack": "TypeError: Cannot read properties of undefined (reading 'title')\n    at BotCard (/assets/route-app-secondary.js:12:345)", "surface": "web", "appVersion": "1.1.0-rc.2"}
