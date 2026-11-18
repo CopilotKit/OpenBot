@@ -230,6 +230,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # A server that refuses to start exits 78 (EX_CONFIG). Docker restarts it like any other exit,
+    # but OpenBot Desktop stops waiting for it at once and shows the sentence it printed.
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"const r = await fetch('http://127.0.0.1:3001/health'); process.exit(r.ok ? 0 : 1)\""]
