@@ -220,10 +220,8 @@ export function NewRoutinePage({
   // Cancel and the back link go to the Routines list it came from: the Bot's own, or every Bot's in
   // Settings.
   const back = routinesOf(presetAgentId);
-  // After a save: from a Bot's page, the chosen Bot's list (it may differ from the preset); from
-  // Settings, which lists every Bot's routines, back to Settings whichever Bot was picked.
-  const after = (agentId: string) =>
-    routinesOf(presetAgentId ? agentId || presetAgentId : undefined);
+  // After a save: the "When it works" of the Bot it was made for, wherever the page was opened from.
+  const after = (agentId: string) => routinesOf(agentId || presetAgentId);
   const agents = useQuery(agentListQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const createFromPlan = useMutation(
@@ -238,9 +236,13 @@ export function NewRoutinePage({
   // row named the event as if it would.
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  const eventSources = personal
-    ? EVENT_SOURCES.filter((source) => source !== "slack")
-    : EVENT_SOURCES;
+  /*
+   * Not "Connected app": nothing sends a connected app's events yet, so a routine started by one
+   * would never run. It comes back when the backend listens for them.
+   */
+  const eventSources = EVENT_SOURCES.filter(
+    (source) => source !== "connector" && !(personal && source === "slack"),
+  );
   const timeZone = browserTimeZone();
   // A write was saved, or its answer was lost. Lock the form to prevent duplicate work.
   const saved = createFromPlan.error instanceof SavedButRefused;
@@ -339,6 +341,7 @@ export function NewRoutinePage({
   const botItems = Object.fromEntries(
     (agents.data ?? []).map((agent) => [agent.id, agent.name]),
   ) as Record<string, string>;
+  const presetName = presetAgentId ? botItems[presetAgentId] : undefined;
 
   return (
     <PageShell
@@ -348,8 +351,12 @@ export function NewRoutinePage({
         linkProps: back,
         disabled: createFromPlan.isPending,
       }}
-      description="Pick a Bot, say what it should do, and choose when it starts."
-      title="New routine"
+      description="Choose when it works on its own, and say what it does then."
+      title={
+        presetName
+          ? `When should ${presetName} work?`
+          : "When should a Bot work?"
+      }
     >
       <form
         noValidate
@@ -359,186 +366,87 @@ export function NewRoutinePage({
           form.handleSubmit();
         }}
       >
-        {/* Sections rather than one card, as New skill is: who does it and what, when it starts,
-            when it is done, and where it shows up. Each is one decision with room for its words. */}
-        <PageSection
-          className="mt-0"
-          description="Pick the Bot that does the work, and say what one run of it is."
-          title="What it does"
-        >
-          <PageCard className="mt-4">
-            <FieldGroup>
-              <form.Field name="agentId">
-                {(field) => {
-                  const isInvalid = field.name in shown;
-                  return (
-                    <Field data-invalid={isInvalid}>
-                      <FieldLabel htmlFor={field.name}>Bot</FieldLabel>
-                      <Select
-                        disabled={saved}
-                        items={botItems}
-                        onValueChange={(value) => {
-                          const next = String(value ?? "");
-                          field.handleChange(next);
-                          // Another Bot is in other conversations: start a new one unless this one is shared.
-                          const current = form.getFieldValue("channelId");
-                          if (
-                            !conversationsWith(channels.data, next).some(
-                              (channel) => channel.id === current,
-                            )
-                          ) {
-                            form.setFieldValue("channelId", NEW_CONVERSATION);
-                          }
-                        }}
-                        value={field.state.value || null}
-                      >
-                        <SelectTrigger
-                          aria-invalid={isInvalid}
-                          aria-describedby={
-                            isInvalid ? errorId(field.name) : undefined
-                          }
-                          className="w-full"
-                          id={field.name}
+        {/* Sections rather than one card, as New skill is: when it works, what it does then, when
+            it is done, and where it shows up. Each is one decision with room for its words. Opened
+            from a Bot, the Bot is already chosen; otherwise it is asked first. */}
+        {presetAgentId ? null : (
+          <PageSection
+            className="mt-0"
+            description="The Bot that does the work."
+            title="Which Bot"
+          >
+            <PageCard className="mt-4">
+              <FieldGroup>
+                <form.Field name="agentId">
+                  {(field) => {
+                    const isInvalid = field.name in shown;
+                    return (
+                      <Field data-invalid={isInvalid}>
+                        <FieldLabel htmlFor={field.name}>Bot</FieldLabel>
+                        <Select
+                          disabled={saved}
+                          items={botItems}
+                          onValueChange={(value) => {
+                            const next = String(value ?? "");
+                            field.handleChange(next);
+                            // Another Bot is in other conversations: start a new one unless this one is shared.
+                            const current = form.getFieldValue("channelId");
+                            if (
+                              !conversationsWith(channels.data, next).some(
+                                (channel) => channel.id === current,
+                              )
+                            ) {
+                              form.setFieldValue("channelId", NEW_CONVERSATION);
+                            }
+                          }}
+                          value={field.state.value || null}
                         >
-                          <SelectValue placeholder="Choose a Bot" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            {(agents.data ?? []).map((agent) => (
-                              <SelectItem key={agent.id} value={agent.id}>
-                                {/* Hidden: the name beside it already says who. */}
-                                <span aria-hidden="true" className="contents">
-                                  <AbstractAvatar
-                                    name={agent.name}
-                                    seed={agent.avatarSeed}
-                                    size={18}
-                                  />
-                                </span>
-                                {agent.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                      {isInvalid ? (
-                        <FieldError id={errorId(field.name)}>
-                          {shown[field.name]}
-                        </FieldError>
-                      ) : null}
-                    </Field>
-                  );
-                }}
-              </form.Field>
-
-              <form.Field name="instruction">
-                {(field) => {
-                  const isInvalid = field.name in shown;
-                  return (
-                    <Field data-invalid={isInvalid}>
-                      <FieldLabel htmlFor={field.name}>What to do</FieldLabel>
-                      <FieldDescription>
-                        Write it as one run of the work. Leave the schedule out.
-                      </FieldDescription>
-                      <Textarea
-                        disabled={saved}
-                        aria-invalid={isInvalid}
-                        aria-describedby={
-                          isInvalid ? errorId(field.name) : undefined
-                        }
-                        id={field.name}
-                        name={field.name}
-                        onBlur={field.handleBlur}
-                        onChange={(event) =>
-                          field.handleChange(event.target.value)
-                        }
-                        placeholder="Send me a summary of yesterday's new leads"
-                        rows={3}
-                        value={field.state.value}
-                      />
-                      {isInvalid ? (
-                        <FieldError id={errorId(field.name)}>
-                          {shown[field.name]}
-                        </FieldError>
-                      ) : null}
-                    </Field>
-                  );
-                }}
-              </form.Field>
-
-              {/* Not drawn without check-ins: a picker with only Act for you asks nothing. Still drawn
-                    for an Only tell you picked before an admin turned them off, to say so. */}
-              <form.Subscribe selector={(state) => state.values.does}>
-                {(does) =>
-                  allowed || does === "tell" ? (
-                    <form.Field name="does">
-                      {(field) => {
-                        // Shown without a touch: the person didn't change it, an admin did.
-                        const isInvalid = field.name in shown;
-                        return (
-                          <Field data-invalid={isInvalid}>
-                            <FieldLabel htmlFor={field.name}>
-                              It should
-                            </FieldLabel>
-                            <Select
-                              disabled={saved}
-                              items={DOES_LABEL}
-                              onValueChange={(value) =>
-                                field.handleChange(value as Does)
-                              }
-                              value={field.state.value}
-                            >
-                              <SelectTrigger
-                                aria-invalid={isInvalid}
-                                aria-describedby={
-                                  isInvalid ? errorId(field.name) : undefined
-                                }
-                                className="w-full"
-                                id={field.name}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  {/* Once check-ins are off, Only tell you can't be chosen. It stays listed:
-                                        the Select resets a value whose item goes away, which would switch
-                                        it to Act for you without asking. */}
-                                  {DOES.map((choice) => (
-                                    <SelectItem
-                                      disabled={choice === "tell" && !allowed}
-                                      key={choice}
-                                      value={choice}
-                                    >
-                                      {DOES_LABEL[choice]}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                            {field.state.value === "tell" ? (
-                              <FieldDescription>
-                                It reads and raises what needs you. It changes
-                                nothing.
-                              </FieldDescription>
-                            ) : null}
-                            {isInvalid ? (
-                              <FieldError id={errorId(field.name)}>
-                                {shown[field.name]}
-                              </FieldError>
-                            ) : null}
-                          </Field>
-                        );
-                      }}
-                    </form.Field>
-                  ) : null
-                }
-              </form.Subscribe>
-            </FieldGroup>
-          </PageCard>
-        </PageSection>
+                          <SelectTrigger
+                            aria-invalid={isInvalid}
+                            aria-describedby={
+                              isInvalid ? errorId(field.name) : undefined
+                            }
+                            className="w-full"
+                            id={field.name}
+                          >
+                            <SelectValue placeholder="Choose a Bot" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {(agents.data ?? []).map((agent) => (
+                                <SelectItem key={agent.id} value={agent.id}>
+                                  {/* Hidden: the name beside it already says who. */}
+                                  <span aria-hidden="true" className="contents">
+                                    <AbstractAvatar
+                                      name={agent.name}
+                                      seed={agent.avatarSeed}
+                                      size={18}
+                                    />
+                                  </span>
+                                  {agent.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        {isInvalid ? (
+                          <FieldError id={errorId(field.name)}>
+                            {shown[field.name]}
+                          </FieldError>
+                        ) : null}
+                      </Field>
+                    );
+                  }}
+                </form.Field>
+              </FieldGroup>
+            </PageCard>
+          </PageSection>
+        )}
 
         <form.Subscribe selector={(state) => state.values.does}>
           {(does) => (
             <PageSection
+              className={presetAgentId ? "mt-0" : undefined}
               description={
                 does === "tell"
                   ? "It looks this often, and tells you when something needs you."
@@ -913,6 +821,118 @@ export function NewRoutinePage({
           )}
         </form.Subscribe>
 
+        <PageSection
+          description="Say what one run of the work is, and whether it acts or only tells you."
+          title="What it does"
+        >
+          <PageCard className="mt-4">
+            <FieldGroup>
+              <form.Field name="instruction">
+                {(field) => {
+                  const isInvalid = field.name in shown;
+                  return (
+                    <Field data-invalid={isInvalid}>
+                      <FieldLabel htmlFor={field.name}>What to do</FieldLabel>
+                      <FieldDescription>
+                        Write it as one run of the work. Leave the schedule out.
+                      </FieldDescription>
+                      <Textarea
+                        disabled={saved}
+                        aria-invalid={isInvalid}
+                        aria-describedby={
+                          isInvalid ? errorId(field.name) : undefined
+                        }
+                        id={field.name}
+                        name={field.name}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        placeholder="Send me a summary of yesterday's new leads"
+                        rows={3}
+                        value={field.state.value}
+                      />
+                      {isInvalid ? (
+                        <FieldError id={errorId(field.name)}>
+                          {shown[field.name]}
+                        </FieldError>
+                      ) : null}
+                    </Field>
+                  );
+                }}
+              </form.Field>
+
+              {/* Not drawn without check-ins: a picker with only Act for you asks nothing. Still drawn
+                    for an Only tell you picked before an admin turned them off, to say so. */}
+              <form.Subscribe selector={(state) => state.values.does}>
+                {(does) =>
+                  allowed || does === "tell" ? (
+                    <form.Field name="does">
+                      {(field) => {
+                        // Shown without a touch: the person didn't change it, an admin did.
+                        const isInvalid = field.name in shown;
+                        return (
+                          <Field data-invalid={isInvalid}>
+                            <FieldLabel htmlFor={field.name}>
+                              It should
+                            </FieldLabel>
+                            <Select
+                              disabled={saved}
+                              items={DOES_LABEL}
+                              onValueChange={(value) =>
+                                field.handleChange(value as Does)
+                              }
+                              value={field.state.value}
+                            >
+                              <SelectTrigger
+                                aria-invalid={isInvalid}
+                                aria-describedby={
+                                  isInvalid ? errorId(field.name) : undefined
+                                }
+                                className="w-full"
+                                id={field.name}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  {/* Once check-ins are off, Only tell you can't be chosen. It stays listed:
+                                        the Select resets a value whose item goes away, which would switch
+                                        it to Act for you without asking. */}
+                                  {DOES.map((choice) => (
+                                    <SelectItem
+                                      disabled={choice === "tell" && !allowed}
+                                      key={choice}
+                                      value={choice}
+                                    >
+                                      {DOES_LABEL[choice]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                            {field.state.value === "tell" ? (
+                              <FieldDescription>
+                                It reads and raises what needs you. It changes
+                                nothing.
+                              </FieldDescription>
+                            ) : null}
+                            {isInvalid ? (
+                              <FieldError id={errorId(field.name)}>
+                                {shown[field.name]}
+                              </FieldError>
+                            ) : null}
+                          </Field>
+                        );
+                      }}
+                    </form.Field>
+                  ) : null
+                }
+              </form.Subscribe>
+            </FieldGroup>
+          </PageCard>
+        </PageSection>
+
         {/* Only tell you is never done: it looks until you stop it. */}
         <form.Subscribe
           selector={(state) => [state.values.does, state.values.starts]}
@@ -967,7 +987,7 @@ export function NewRoutinePage({
         </form.Subscribe>
 
         <PageSection
-          description="Where each run posts, and what the Routines page calls it."
+          description="Where each run posts, and what its Bot's list calls it."
           title="Where it shows up"
         >
           <PageCard className="mt-4">
@@ -1043,7 +1063,7 @@ export function NewRoutinePage({
                     <Field data-invalid={isInvalid}>
                       <FieldLabel htmlFor={field.name}>Name</FieldLabel>
                       <FieldDescription>
-                        Optional. The Routines page shows it by this name.
+                        Optional. Its Bot's list shows it by this name.
                       </FieldDescription>
                       <Input
                         disabled={saved}
@@ -1096,7 +1116,7 @@ export function NewRoutinePage({
               )}
               variant="outline"
             >
-              Go to Routines
+              Go to {routinesBackLabel(after(savedFor))}
             </Button>
           ) : (
             <>

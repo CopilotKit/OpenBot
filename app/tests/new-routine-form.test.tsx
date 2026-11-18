@@ -152,6 +152,9 @@ function serving({
 /** The router of the last `draw()`, to read where a save went. */
 let router: { state: { location: { pathname: string } } };
 
+/** The link that replaces Create after a partial save: to the Bot's When it works. */
+const GO_TO = /^Go to (When it works|Routines)$/;
+
 function draw({ preset = true } = {}) {
   router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -282,9 +285,40 @@ test("the personal edition, which has no Slack, offers no Slack event", async ()
     expect(view.queryByRole("option", { name: "Slack" }) !== null).toBe(
       edition === "team",
     );
+    // Nothing sends a connected app's events yet, so it is never offered.
+    expect(view.queryByRole("option", { name: "Connected app" })).toBeNull();
     view.unmount();
     queryClient.clear();
   }
+});
+
+test("opened from a Bot, it asks when that Bot should work and doesn't ask for the Bot", async () => {
+  serving();
+  const view = draw();
+  expect(
+    await view.findByRole("heading", {
+      level: 1,
+      name: "When should Bot One work?",
+    }),
+  ).toBeTruthy();
+  expect(view.queryByLabelText("Bot")).toBeNull();
+  // When comes before what.
+  const headings = view
+    .getAllByRole("heading", { level: 2 })
+    .map((heading) => heading.textContent);
+  expect(headings.indexOf("When it starts")).toBeLessThan(
+    headings.indexOf("What it does"),
+  );
+});
+
+test("opened with no Bot, it asks for the Bot first", async () => {
+  serving();
+  const view = draw({ preset: false });
+  await view.findByLabelText("Bot");
+  const headings = view
+    .getAllByRole("heading", { level: 2 })
+    .map((heading) => heading.textContent);
+  expect(headings[0]).toBe("Which Bot");
 });
 
 test("When something happens makes a goal with that subscription", async () => {
@@ -700,7 +734,7 @@ test("after a partial save, Create routine gives way to Go to Routines", async (
   await settleReactWork();
   expect(view.queryByRole("button", { name: "Create routine" })).toBeNull();
   // A link drawn as a button, as Cancel is.
-  const goTo = view.getByRole("button", { name: "Go to Routines" });
+  const goTo = view.getByRole("button", { name: GO_TO });
   expect(goTo.tagName).toBe("A");
   expect(goTo.getAttribute("href")).toBe("/bots/bot-1/routines");
 });
@@ -737,7 +771,7 @@ test("a refused schedule takes the goal back, says why, and Create works again",
     "DELETE /api/v2/organizations/default/goals/g1",
   ]);
   // Nothing was kept, so nothing is locked: no Go to Routines, and Create is there to press again.
-  expect(view.queryByRole("button", { name: "Go to Routines" })).toBeNull();
+  expect(view.queryByRole("button", { name: GO_TO })).toBeNull();
   refuse = false;
   await user.click(view.getByRole("button", { name: "Create routine" }));
   await waitFor(() =>
@@ -832,7 +866,7 @@ test("after a partial save, a submit does not make a second goal", async () => {
     "The report has a source link.",
   );
   await user.click(await view.findByRole("button", { name: "Create routine" }));
-  await view.findByRole("button", { name: "Go to Routines" });
+  await view.findByRole("button", { name: GO_TO });
   await settleReactWork();
   // No submit button is left, so Enter alone never submits. Submit the form directly, which is
   // what reaches the guard in onSubmit.
@@ -861,7 +895,7 @@ async function saveForBotTwo(view: ReturnType<typeof draw>) {
 
 test("saving for another Bot lands on that Bot's Routines", async () => {
   serving();
-  const view = draw();
+  const view = draw({ preset: false });
   await saveForBotTwo(view);
   await waitFor(() =>
     expect(router.state.location.pathname).toBe("/bots/bot-2/routines"),
@@ -891,7 +925,7 @@ test("after a partial save, Go to Routines points at the chosen Bot", async () =
       ),
     goalDeletes: false,
   });
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
   await user.type(
     await view.findByLabelText("What to do"),
@@ -903,18 +937,20 @@ test("after a partial save, Go to Routines points at the chosen Bot", async () =
   );
   await choose(view, user, "Bot", "Bot Two");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
-  const goTo = await view.findByRole("button", { name: "Go to Routines" });
+  const goTo = await view.findByRole("button", { name: GO_TO });
   expect(goTo.getAttribute("href")).toBe("/bots/bot-2/routines");
 });
 
-test("saving from the Routines page stays there whichever Bot was picked", async () => {
+test("saving from the every-Bot page lands on the picked Bot's When it works", async () => {
   serving();
   const view = draw({ preset: false });
   await saveForBotTwo(view);
-  await waitFor(() => expect(router.state.location.pathname).toBe("/routines"));
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/bots/bot-2/routines"),
+  );
 });
 
-test("from the Routines page, Go to Routines points at it", async () => {
+test("from the every-Bot page, Go to points at the picked Bot's When it works", async () => {
   serving({
     routines: () =>
       Response.json(
@@ -935,8 +971,8 @@ test("from the Routines page, Go to Routines points at it", async () => {
   );
   await choose(view, user, "Bot", "Bot Two");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
-  const goTo = await view.findByRole("button", { name: "Go to Routines" });
-  expect(goTo.getAttribute("href")).toBe("/routines");
+  const goTo = await view.findByRole("button", { name: GO_TO });
+  expect(goTo.getAttribute("href")).toBe("/bots/bot-2/routines");
 });
 
 /** Saves a goal whose schedule is refused, and returns the Go to Routines link that replaces Create routine. */
@@ -953,7 +989,7 @@ async function partialSave(
     "The report has a source link.",
   );
   await user.click(await view.findByRole("button", { name: "Create routine" }));
-  return view.findByRole("button", { name: "Go to Routines" });
+  return view.findByRole("button", { name: GO_TO });
 }
 
 const refusedSchedule = () =>
@@ -964,8 +1000,9 @@ const refusedSchedule = () =>
 
 test("after a partial save, every field is disabled", async () => {
   serving({ routines: refusedSchedule, goalDeletes: false });
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
+  await choose(view, user, "Bot", "Bot One");
   await partialSave(view, user);
   await settleReactWork();
   const isDisabled = (element: Element) =>
@@ -987,7 +1024,7 @@ test("after a partial save, every field is disabled", async () => {
 
 test("after a partial save, Go to Routines stays on the Bot it was saved for", async () => {
   serving({ routines: refusedSchedule, goalDeletes: false });
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
   await user.type(
     await view.findByLabelText("What to do"),
@@ -999,7 +1036,7 @@ test("after a partial save, Go to Routines stays on the Bot it was saved for", a
   );
   await choose(view, user, "Bot", "Bot Two");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
-  await view.findByRole("button", { name: "Go to Routines" });
+  await view.findByRole("button", { name: GO_TO });
   await settleReactWork();
   // The picker is locked, so the Bot can't be changed to drift the link away from what was saved.
   const picker = view.getByLabelText("Bot");
@@ -1008,9 +1045,9 @@ test("after a partial save, Go to Routines stays on the Bot it was saved for", a
   await settleReactWork();
   expect(view.queryByRole("option", { name: "Bot One" })).toBeNull();
   expect(view.getByLabelText("Bot").textContent).toContain("Bot Two");
-  expect(
-    view.getByRole("button", { name: "Go to Routines" }).getAttribute("href"),
-  ).toBe("/bots/bot-2/routines");
+  expect(view.getByRole("button", { name: GO_TO }).getAttribute("href")).toBe(
+    "/bots/bot-2/routines",
+  );
 });
 
 test("after a partial save, Go to Routines is the only way out in the body", async () => {
@@ -1019,9 +1056,7 @@ test("after a partial save, Go to Routines is the only way out in the body", asy
   const user = userEvent.setup({ document });
   await partialSave(view, user);
   expect(view.queryByRole("button", { name: "Cancel" })).toBeNull();
-  expect(view.getAllByRole("button", { name: "Go to Routines" })).toHaveLength(
-    1,
-  );
+  expect(view.getAllByRole("button", { name: GO_TO })).toHaveLength(1);
 });
 
 /**
@@ -1250,8 +1285,9 @@ test("Done when follows It should: Only tell you does not measure it", async () 
 
 test("Name follows Bot: another Bot has no such check-in", async () => {
   serving({ proactive: { allowed: true, checkIns: [watchingInbox] } });
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
+  await choose(view, user, "Bot", "Bot One");
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
   await choose(view, user, "It should", "Only tell you");
   await refuse(view, user, SAME_CHECK_IN_TEXT);
@@ -1365,7 +1401,7 @@ test("an empty What to do keeps its message while other answers change", async (
 
 test("a long Name keeps its message when the Bot changes", async () => {
   serving();
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Send it");
   await setValue(await view.findByLabelText("Name"), "a".repeat(101));
@@ -1383,8 +1419,9 @@ test("a Name that still clashes keeps its message when the Bot or It should chan
       checkIns: [watchingInbox, { ...watchingInbox, id: "s2", botId: "bot-2" }],
     },
   });
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
+  await choose(view, user, "Bot", "Bot One");
   await user.type(await view.findByLabelText("What to do"), "Watch my inbox");
   await choose(view, user, "It should", "Only tell you");
   await refuse(view, user, SAME_CHECK_IN_TEXT);
@@ -1434,12 +1471,12 @@ test("an uncertain routine save locks the form and links to the chosen Bot", asy
   serving({
     routines: () => Response.json({ error: "Unavailable" }, { status: 503 }),
   });
-  const view = draw();
+  const view = draw({ preset: false });
   const user = userEvent.setup({ document });
   await user.type(await view.findByLabelText("What to do"), "Send the digest");
   await choose(view, user, "Bot", "Bot Two");
   await user.click(await view.findByRole("button", { name: "Create routine" }));
-  const goTo = await view.findByRole("button", { name: "Go to Routines" });
+  const goTo = await view.findByRole("button", { name: GO_TO });
   expect(goTo.getAttribute("href")).toBe("/bots/bot-2/routines");
   expect(view.getByLabelText("Bot").hasAttribute("disabled")).toBe(true);
   expect(view.queryByRole("button", { name: "Create routine" })).toBeNull();
@@ -1470,14 +1507,14 @@ test("Create stays enabled with a message showing, and pressing it goes to the f
   await settleReactWork();
   expect(writes()).toEqual([]);
   expect(create.disabled).toBe(false);
-  // What to do comes first on the page, so it is where the person is taken.
-  const instruction = view.getByLabelText("What to do");
-  expect(document.activeElement).toBe(instruction);
+  // When comes first on the page, so its Time is where the person is taken.
+  const time = view.getByLabelText("Time");
+  expect(document.activeElement).toBe(time);
   // Fixed, the next press goes to the one left.
-  await user.type(instruction, "Send it");
+  await user.type(time, "09:00");
   await user.click(await createButton(view));
   await settleReactWork();
-  expect(document.activeElement).toBe(view.getByLabelText("Time"));
+  expect(document.activeElement).toBe(view.getByLabelText("What to do"));
   expect(writes()).toEqual([]);
 });
 
