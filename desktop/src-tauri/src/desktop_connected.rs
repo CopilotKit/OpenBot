@@ -130,6 +130,20 @@ pub fn relay_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Stri
         .map(|live| live.relay.origin())
 }
 
+/// The relay's entry address, while the window shows OpenBot through it: where the window goes
+/// whenever it comes to the relay from a page of the shell's own. Going straight to the relay's
+/// origin from there, WebKit leaves the window's cookie off, and the relay refuses the page
+/// (`relay` says why). It holds the run's secret, so it is never logged.
+fn relay_entry<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    state(app)
+        .connected
+        .live
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|live| live.relay.entry())
+}
+
 /// The address of the OpenBot the window shows through the relay, while it does.
 pub fn connected_address<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     state(app)
@@ -453,9 +467,9 @@ fn connect_now<R: tauri::Runtime>(
 }
 
 fn show_connected_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Problem> {
-    // Already showing in this session: the window goes back to it.
+    // Already showing in this session: the window goes back to it, through the entry.
     if let Some(origin) = relay_origin(app) {
-        return navigate(app, &origin);
+        return navigate(app, &relay_entry(app).unwrap_or(origin));
     }
     let chosen = chosen(app);
     let Some(address) = chosen.connected_to() else {
@@ -633,7 +647,9 @@ pub fn show_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             .as_ref()
             .is_some_and(|current| crate::same_window_app(current, &destination));
         if !already_showing {
-            let _ = window.navigate(destination);
+            // Onto the relay through its entry, which hands the window its cookie on the way.
+            let entry = relay_entry(app).and_then(|entry| entry.parse::<tauri::Url>().ok());
+            let _ = window.navigate(entry.unwrap_or(destination));
         }
     }
     let _ = window.show();
