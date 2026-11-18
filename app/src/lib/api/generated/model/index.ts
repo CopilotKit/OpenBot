@@ -1558,4 +1558,5 @@ export * from "./whatIfVocabularyTeamsItem";
 export * from "./withholdBotComponentHeaders";
 export * from "./writeComputerFileHeaders";
 export * from "./writtenCapabilityChange";
+export * from "./writtenCapabilityChangeScopeKind";
 export * from "./writtenEgressRule";

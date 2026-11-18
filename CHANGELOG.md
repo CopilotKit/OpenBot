@@ -49,8 +49,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   deprecated, and is removed only once nothing still uses it. Nothing is deprecated yet. See
   [api/README.md](api/README.md#deprecating).
 - **Statuses, roles and scope kinds in API answers can gain values.** The spec declares them open
-  (`x-extensible-enum`): a task's or a run's status, a person's role, a network policy's or a
-  permission switch's scope, and the others listed in `api/accepted-breaking-changes.md`. A script
+  (`x-extensible-enum`): a task's or a run's status, a person's role, a network policy's scope,
+  what decided a person's permission, and the others listed in
+  `api/accepted-breaking-changes.md`. A script
   that reads one should treat a value it doesn't know as "other" rather than fail. The values sent
   today are unchanged.
 

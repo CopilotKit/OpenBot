@@ -135,7 +135,8 @@ enum value it doesn't know as "other" instead of failing. `app/tests/tolerant-re
 
 Only an enum no request carries can be open, because the server checks what a request sends
 against the list. An enum a client also sends, or sends back as it read it (a shared account's
-audience, which is read and then saved again), stays `enum`; a response gets its own open copy
+audience, which is read and then saved again, or the permission switch changes a model wrote, which
+are previewed and then saved), stays `enum`; a response gets its own open copy
 where it needs one, as `PersonRoleAnswer` is for `PersonRole`. `api/openapi-extensible-enums.test.ts`
 fails a request that reaches an open enum.
 

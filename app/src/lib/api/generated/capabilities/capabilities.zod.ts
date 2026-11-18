@@ -441,7 +441,7 @@ export const TranslateCapabilityChangesResponse = zod.object({
       zod
         .object({
           scopeKind: zod
-            .string()
+            .enum(["organization", "role", "group", "team"])
             .describe(
               "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
             ),

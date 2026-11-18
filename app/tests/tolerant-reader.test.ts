@@ -103,7 +103,7 @@ describe.each(cases)(
   ({ address, body, read, contract, value }) => {
     test("the generated function reads it, the new value and fields as sent", async () => {
       answer(address, body);
-      const read_ = await read();
+      const read_: unknown = await read();
       expect(value(read_)).toBe(value(body));
       expect((read_ as Record<string, unknown>).alsoAddedLater).toBe(true);
     });

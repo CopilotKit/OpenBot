@@ -1568,7 +1568,7 @@ components:
       properties:
         scopeKind:
           type: string
-          x-extensible-enum: [organization, role, group, team]
+          enum: [organization, role, group, team]
           description: >-
             Whose switch: the organization's, a member role's, a team's, or a
             directory group's.

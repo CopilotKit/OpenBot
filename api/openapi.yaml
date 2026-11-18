@@ -22790,7 +22790,7 @@ components:
       properties:
         scopeKind:
           type: string
-          x-extensible-enum:
+          enum:
             - organization
             - role
             - group
