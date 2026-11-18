@@ -418,7 +418,7 @@ export const TranslateCapabilityChangesHeader = zod.object({
     ),
 });
 
-export const translateCapabilityChangesBodyTextMax = 500;
+export const translateCapabilityChangesBodyTextMax = 1000;
 
 export const translateCapabilityChangesBodyTextRegExp = new RegExp(
   "^[^\\x00]*\\S[^\\x00]*$",

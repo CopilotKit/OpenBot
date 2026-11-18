@@ -6,7 +6,7 @@ export interface ChangeDescription {
   /**
    * The change in a sentence or two, at most 1,000 characters once trimmed.
    * @minLength 1
-   * @maxLength 500
+   * @maxLength 1000
    * @pattern ^[^\x00]*\S[^\x00]*$
    */
   text: string;

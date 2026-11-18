@@ -206,7 +206,7 @@ export const TranslateBoundaryHeader = zod.object({
     ),
 });
 
-export const translateBoundaryBodyTextMax = 500;
+export const translateBoundaryBodyTextMax = 1000;
 
 export const translateBoundaryBodyTextRegExp = new RegExp(
   "^[^\\x00]*\\S[^\\x00]*$",
