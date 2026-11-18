@@ -1,0 +1,114 @@
+name: Desktop upgrade
+
+# OpenBot Desktop upgrades the back end it runs at Start (desktop/src-tauri/src/upgrade.rs): stop,
+# back the database up, set the previous version aside, lay out and pull the new one, start, and put
+# everything back if any step fails. This runs that code, the app's own, from a real published
+# release to this tree (`upgrade::real_release`): the release laid out from its own source archive
+# and image list, started with the settings Start writes and given something to keep, then this
+# tree's release laid over it the way an internal build lays out the commit it was pinned to. The
+# upgrade must move, what the old release wrote must read back from the new one, and each migration
+# must have run once.
+#
+# A pull request upgrades from the previous release, the one most installations are on. Every
+# night, and on demand, it upgrades from every release of the last 12 months an installation can
+# still be on (desktop/scripts/upgrade-legs.ts), so the window moves as releases are published and
+# age out.
+#
+# On the runner's Docker, which is the engine OpenBot Desktop uses on Linux. The harness takes any
+# engine; Windows and macOS runners have none that runs Linux containers.
+on:
+  pull_request:
+    paths:
+      - "desktop/src-tauri/**"
+      - "desktop/scripts/upgrade-legs.ts"
+      - "docker-compose.yml"
+      - "backend-images.env"
+      - "release-policy.json"
+      - ".github/workflows/desktop-upgrade.yml"
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-upgrade-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  legs:
+    name: releases to upgrade from
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      releases: ${{ steps.legs.outputs.releases }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - id: legs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'pull_request' && 'previous' || 'window' }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName,publishedAt,isPrerelease > "$RUNNER_TEMP/releases.json"
+          releases="$(bun desktop/scripts/upgrade-legs.ts "$MODE" --releases "$RUNNER_TEMP/releases.json")"
+          echo "Upgrading from ($MODE): $releases"
+          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+
+  upgrade:
+    name: upgrade from ${{ matrix.release }}
+    needs: legs
+    if: needs.legs.outputs.releases != '[]'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.legs.outputs.releases) }}
+    env:
+      # The commit GitHub serves this tree's source archive for: the pull request's head, or main's.
+      COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop/src-tauri
+          key: upgrade
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      # This tree's release as an internal build pins it: the server, computer and supervisor images
+      # at the tag backend-images.env names, each by its digest, under the commit's own version.
+      - name: This tree's image list
+        run: |
+          set -euo pipefail
+          tag="$(sed -n 's/^OPENBOT_BACKEND_TAG=//p' backend-images.env | tail -1)"
+          openbot="$(docker buildx imagetools inspect "ghcr.io/copilotkit/openbot:$tag" --format '{{.Manifest.Digest}}')"
+          supervisor="$(docker buildx imagetools inspect "ghcr.io/copilotkit/openbot-supervisor:$tag" --format '{{.Manifest.Digest}}')"
+          jq -n --arg version "internal-${COMMIT::12}" \
+            --arg openbot "ghcr.io/copilotkit/openbot@$openbot" \
+            --arg supervisor "ghcr.io/copilotkit/openbot-supervisor@$supervisor" \
+            '{version: $version, images: {openbot: {reference: $openbot}, server: {reference: $openbot}, "agent-computer": {reference: $openbot}, supervisor: {reference: $supervisor}}}' \
+            > "$RUNNER_TEMP/container-images.json"
+          cat "$RUNNER_TEMP/container-images.json"
+      - name: The upgrade from ${{ matrix.release }} to this tree
+        working-directory: desktop/src-tauri
+        env:
+          OPENBOT_UPGRADE_FROM: ${{ matrix.release }}
+          OPENBOT_UPGRADE_TO_COMMIT: ${{ env.COMMIT }}
+        run: |
+          set -euo pipefail
+          export OPENBOT_UPGRADE_TO_IMAGES="$RUNNER_TEMP/container-images.json"
+          cargo test --locked --lib upgrade::real_release -- --ignored --test-threads=1 --nocapture
