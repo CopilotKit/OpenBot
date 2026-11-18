@@ -35,6 +35,10 @@ jobs:
       ECS_SERVICE: ${{ vars.ECS_SERVICE }}
       ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY }}
       ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+      LANGGRAPH_ECR_REPOSITORY: ${{ vars.LANGGRAPH_ECR_REPOSITORY || 'agent-langgraph' }}
+      LANGGRAPH_ECS_SERVICE: ${{ vars.LANGGRAPH_ECS_SERVICE }}
+      LANGGRAPH_ECS_TASK_FAMILY: ${{ vars.LANGGRAPH_ECS_TASK_FAMILY }}
+      LANGGRAPH_ECS_CONTAINER_NAME: ${{ vars.LANGGRAPH_ECS_CONTAINER_NAME }}
       ECS_SUBNET_IDS: ${{ vars.ECS_SUBNET_IDS }}
       ECS_SECURITY_GROUP_IDS: ${{ vars.ECS_SECURITY_GROUP_IDS }}
       ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP }}
@@ -93,6 +97,42 @@ jobs:
           image="${registry}/${ECR_REPOSITORY}@${digest}"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
+      - name: Build and push LangGraph Bot image to ECR
+        id: langgraph-image
+        run: |
+          set -euo pipefail
+          for name in AWS_REGION LANGGRAPH_ECR_REPOSITORY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Set the GitHub repository variable $name."
+              exit 1
+            fi
+          done
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          image_tag="${SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          tagged_image="${registry}/${LANGGRAPH_ECR_REPOSITORY}:${image_tag}"
+
+          docker buildx build \
+            --file agent-langgraph/Dockerfile \
+            --platform linux/arm64 \
+            --provenance=false \
+            --push \
+            --tag "$tagged_image" \
+            .
+
+          digest="$(aws ecr describe-images \
+            --repository-name "$LANGGRAPH_ECR_REPOSITORY" \
+            --image-ids "imageTag=$image_tag" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::ECR did not return a valid digest for $tagged_image (got: $digest)."
+            exit 1
+          fi
+          image="${registry}/${LANGGRAPH_ECR_REPOSITORY}@${digest}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
       - name: Prepare task definitions
         env:
           IMAGE: ${{ steps.image.outputs.image }}
@@ -138,6 +178,38 @@ jobs:
               else . end
             )
           ' /tmp/deploy-task-definition.json > /tmp/migration-task-definition.json
+
+      - name: Prepare LangGraph Bot task definition
+        env:
+          IMAGE: ${{ steps.langgraph-image.outputs.image }}
+        run: |
+          set -euo pipefail
+          for name in LANGGRAPH_ECS_SERVICE LANGGRAPH_ECS_TASK_FAMILY LANGGRAPH_ECS_CONTAINER_NAME; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Set the GitHub repository variable $name."
+              exit 1
+            fi
+          done
+
+          aws ecs describe-task-definition \
+            --task-definition "$LANGGRAPH_ECS_TASK_FAMILY" \
+            --query taskDefinition \
+            --output json > /tmp/langgraph-task-definition.json
+
+          jq --arg name "$LANGGRAPH_ECS_CONTAINER_NAME" --arg image "$IMAGE" '
+            if any(.containerDefinitions[]; .name == $name) then
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+              | .containerDefinitions |= map(
+                  if .name == $name then
+                    .image = $image
+                    | del(.entryPoint, .command)
+                  else . end
+                )
+            else
+              error("LANGGRAPH_ECS_CONTAINER_NAME does not match a container in the task definition")
+            end
+          ' /tmp/langgraph-task-definition.json > /tmp/deploy-langgraph-task-definition.json
 
       - name: Run database migrations
         id: migrate
@@ -190,6 +262,22 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: Update LangGraph Bot ECS service
+        run: |
+          set -euo pipefail
+          task_definition="$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/deploy-langgraph-task-definition.json \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)"
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$LANGGRAPH_ECS_SERVICE" \
+            --task-definition "$task_definition" \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$LANGGRAPH_ECS_SERVICE"
 
       - name: Update ECS service
         run: |

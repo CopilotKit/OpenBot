@@ -190,10 +190,11 @@ alongside.
 
 **AWS ECS on Fargate.** This repository's [Deploy to ECS workflow](../.github/workflows/deploy-ecs.yml)
 deploys after the `CI` workflow succeeds for a push to `main`. It checks out and builds the exact
-commit CI checked, pushes it to ECR, runs the database migration as a one-off Fargate task, then
-updates the ECS service and waits for it to become stable. The deploy build is a separate build from
-CI's test image. It uses GitHub OIDC rather than long-lived AWS access keys. The workflow assumes you
-have provisioned the AWS resources below; it does not create them.
+commit CI checked, pushes the app and LangGraph Bot images to ECR, runs the database migration as a
+one-off Fargate task, then updates the LangGraph Bot service followed by the app service and waits for
+each to become stable. The deploy builds are separate from CI's test image. It uses GitHub OIDC
+rather than long-lived AWS access keys. The workflow assumes you have provisioned the AWS resources
+below; it does not create them.
 
 Before enabling it:
 
@@ -201,9 +202,10 @@ Before enabling it:
   role. The task definition must use `awsvpc` and `ARM64` to match the image built by this workflow,
   include the application container, and
   reference the RDS connection and application secrets from Secrets Manager. Give its task role and
-  execution role the permissions they need. The GitHub OIDC role needs ECR image-push permissions,
-  ECS describe/register/run/update permissions, and `iam:PassRole` for the task and execution roles;
-  scope its trust policy to this repository's `main` branch.
+  execution role the permissions they need. The GitHub OIDC role needs ECR image-push permissions
+  for both repositories, ECS describe/register/run/update permissions for both services, and
+  `iam:PassRole` for both task definitions' task and execution roles; scope its trust policy to this
+  repository's `main` branch.
 - Configure the ECS service's ALB target group to forward to port `3001` and use `/health` for its
   health check. Permit inbound traffic to the task only from the load balancer. The task needs
   outbound access to ECR, Secrets Manager, and RDS.
@@ -214,6 +216,14 @@ Before enabling it:
   template: the workflow clears any configured container `entryPoint` and `command` for the service
   so the image's `/init` entrypoint starts the API, then adds the shell/migration command only to the
   one-off migration task.
+- Create the `agent-langgraph` ECR repository and a separate ARM64 Fargate task definition and ECS
+  service for the Bot. The Bot container listens on port `4201` and serves `/health` and `/ag-ui`.
+  Make it privately discoverable from the app task (for example with ECS Service Connect or AWS
+  Cloud Map), allow inbound port `4201` only from the app task's security group, and configure its
+  model-provider secret and `MANAGED_AGENT_TOKEN`. Configure the app task with the same
+  `MANAGED_AGENT_TOKEN`, `MANAGED_AGENT_AG_UI_URL` pointing to the private `/ag-ui` URL, and
+  `AGENT_ENDPOINT_ALLOWED_HOSTS` containing the private hostname and port. The workflow deploys the
+  Bot service before the app service; it does not create service discovery or networking resources.
 - Configure these GitHub repository settings. `AWS_ROLE_ARN` is a secret; the rest are variables.
   Subnet and security group IDs are comma-separated lists without spaces.
 
@@ -226,6 +236,10 @@ Before enabling it:
   | `ECS_SERVICE` | ECS service name |
   | `ECS_TASK_FAMILY` | Task definition family to use as the deployment template |
   | `ECS_CONTAINER_NAME` | Application container name in that task definition |
+  | `LANGGRAPH_ECR_REPOSITORY` | LangGraph Bot ECR repository; defaults to `agent-langgraph` |
+  | `LANGGRAPH_ECS_SERVICE` | LangGraph Bot ECS service name, in `ECS_CLUSTER` |
+  | `LANGGRAPH_ECS_TASK_FAMILY` | LangGraph Bot task definition family |
+  | `LANGGRAPH_ECS_CONTAINER_NAME` | LangGraph Bot container name in that task definition |
   | `ECS_SUBNET_IDS` | Subnets used to launch the migration task |
   | `ECS_SECURITY_GROUP_IDS` | Security groups used by the migration task |
   | `ECS_ASSIGN_PUBLIC_IP` | `ENABLED` or `DISABLED` |
