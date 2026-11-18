@@ -316,6 +316,7 @@ const routines: RoutineRecord[] = [
     id: "rt-1",
     botId: fuse.id,
     schedule: "Every weekday at 9:00",
+    cron: "0 9 * * 1-5",
     timezone: "Europe/London",
     instruction: "Send me the headlines",
     title: null,

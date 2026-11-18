@@ -1,9 +1,17 @@
 ag-ui-langgraph==0.0.45
-langgraph
+# The model clients, pinned to the set shared/model-lock.json proved against real models. Unpinned,
+# a fresh resolve takes whatever the LangChain packages released that morning: langchain-anthropic
+# 1.7.11 (2026-11-18) changed the anthropic-version header every Anthropic request carries, and only
+# CI noticed. Move them on purpose, with the model check (docs/releasing.md, "Model lock").
+langgraph==1.2.22
 langchain
-langchain-openai
-langchain-anthropic
-langchain-google-genai
+langchain-core==1.8.2
+langchain-openai==1.8.1
+langchain-anthropic==1.7.10
+# Not imported by the harness, but its version decides the request langchain-anthropic sends,
+# so it moves with the rest of the set rather than on its own.
+anthropic==2.10.0
+langchain-google-genai==4.4.3
 # google-genai 3.0.0 (2026-11-06) moved generateContent from /v1beta to /v1, which the Gemini
 # boundary tests catch. Held on 2.x until the move is checked against the models Bots use.
 google-genai>=2.34,<3

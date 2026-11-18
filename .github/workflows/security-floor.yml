@@ -1,0 +1,132 @@
+name: Security floor
+
+# Raises the security floor: the lowest safe release of OpenBot Desktop, its back end, the phone app
+# and the Recorder (shared/security-floor.ts, docs/releasing.md "Security floor"). Below it, an app
+# shows one notice, "This version of OpenBot has a security problem. Update to keep using it.", and
+# nothing else until it is updated. Used only when a release has a security problem, and never for
+# a company's own OpenBot.
+#
+# Run by hand, after the fixed release is Latest. Signing waits for approval: the `sign` job runs in
+# the protected `security-floor` environment, whose required reviewers approve it, and only that job
+# can read the signing key. It has no write access to anything. The `publish` job, which can write the
+# release, never sees the key.
+#
+# The floor goes on the Latest release beside latest.json, and Downloads sync copies it to
+# downloads.copilotkit.ai/latest/. Each release that becomes Latest carries it on
+# (scripts/release-make-latest.sh).
+on:
+  workflow_dispatch:
+    inputs:
+      desktop:
+        description: Lowest safe OpenBot Desktop release, such as 1.1.2. Empty keeps the published floor; none removes it.
+        type: string
+        default: ""
+        required: false
+      backend:
+        description: Lowest safe back end OpenBot Desktop runs on this computer. Empty keeps the published floor; none removes it.
+        type: string
+        default: ""
+        required: false
+      mobile:
+        description: Lowest safe phone app release. Empty keeps the published floor; none removes it.
+        type: string
+        default: ""
+        required: false
+      recorder:
+        description: Lowest safe Recorder release. Empty keeps the published floor; none removes it.
+        type: string
+        default: ""
+        required: false
+      cloud:
+        description: OpenBot Cloud's addresses the floor applies to, comma-separated https origins. Empty keeps the published list; none empties it.
+        type: string
+        default: ""
+        required: false
+      lower:
+        description: Allow a floor lower than the published one, to undo a floor raised by mistake.
+        type: boolean
+        default: false
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: security-floor
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign the security floor
+    if: github.repository == 'CopilotKit/OpenBot' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: security-floor
+    permissions:
+      contents: read # read the Latest release and its current floor
+    outputs:
+      latest: ${{ steps.latest.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - name: Read the Latest release and its floor
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          names="$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          if grep -qxF security-floor.json <<<"$names"; then
+            gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern security-floor.json --dir "$RUNNER_TEMP/published"
+          fi
+      - name: Sign
+        env:
+          SECURITY_FLOOR_SIGNING_KEY: ${{ secrets.SECURITY_FLOOR_SIGNING_KEY }}
+          FLOOR_DESKTOP: ${{ inputs.desktop }}
+          FLOOR_BACKEND: ${{ inputs.backend }}
+          FLOOR_MOBILE: ${{ inputs.mobile }}
+          FLOOR_RECORDER: ${{ inputs.recorder }}
+          FLOOR_CLOUD: ${{ inputs.cloud }}
+          FLOOR_LOWER: ${{ inputs.lower }}
+          LATEST_RELEASE: ${{ steps.latest.outputs.tag }}
+          PREVIOUS: ${{ runner.temp }}/published/security-floor.json
+          OUT: ${{ runner.temp }}/security-floor.json
+        run: bun scripts/security-floor-sign.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-floor
+          path: ${{ runner.temp }}/security-floor.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish the security floor
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # put the floor on the Latest release
+      actions: write # start Downloads sync
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: security-floor
+          path: ${{ runner.temp }}/signed
+      - name: Put it on the Latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ needs.sign.outputs.latest }}
+        run: scripts/release-security-floor.sh "$LATEST" "$RUNNER_TEMP/signed/security-floor.json"
+      - name: Copy it to downloads.copilotkit.ai
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run downloads-sync.yml -R "$GITHUB_REPOSITORY" --ref main

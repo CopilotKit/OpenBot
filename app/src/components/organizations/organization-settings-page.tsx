@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { isOrganizationAdmin, type KnownRole } from "@/lib/auth/roles";
 import {
   changeMemberRoleMutationOptions,
   leaveOrganizationMutationOptions,
@@ -53,6 +53,7 @@ import {
   useOrganizationChoices,
 } from "@/lib/organizations/queries";
 import {
+  givableRoles,
   initialsOf,
   memberControl,
   personName,
@@ -269,7 +270,7 @@ function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
 /** A member and the role they are about to be given. */
 type RoleChange = {
   member: OrganizationMemberSummary;
-  role: OrganizationMemberSummary["role"];
+  role: KnownRole;
 };
 
 /**
@@ -321,6 +322,7 @@ function MembersSection({
           {members.data.map((member, index) => {
             const control = memberControl(member, viewer);
             const name = personName(member);
+            const roles = givableRoles(member);
             return (
               <Fragment key={member.id}>
                 <Item size="sm">
@@ -342,9 +344,9 @@ function MembersSection({
                         : roleName(member.role)}
                     </ItemDescription>
                   </ItemContent>
-                  {control || member.assignableRoles.length > 0 ? (
+                  {control || roles.length > 0 ? (
                     <ItemActions>
-                      {member.assignableRoles.length > 0 ? (
+                      {roles.length > 0 ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -363,7 +365,7 @@ function MembersSection({
                             align="end"
                             className="w-auto min-w-32"
                           >
-                            {member.assignableRoles.map((role) => (
+                            {roles.map((role) => (
                               <DropdownMenuItem
                                 key={role}
                                 onClick={() => giveRole({ member, role })}

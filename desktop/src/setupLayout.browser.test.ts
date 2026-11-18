@@ -83,7 +83,11 @@ const emit = (name, payload) => {
   for (const listener of fake.listeners[name] ?? []) listener({ payload });
 };
 fake.emit = emit;
-const relaunch = location.hash === "#start";
+// A relaunch whose update this computer has no room for: OpenBot's own (Windows, C: at 7.4 GB), or
+// the back end's, which the window runs first (a Mac at 8.2 GB).
+const updateShort = location.hash === "#update-short";
+const backEndShort = location.hash === "#backend-short";
+const relaunch = location.hash === "#start" || updateShort || backEndShort;
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -138,6 +142,11 @@ export async function invoke(command, args) {
     case "upgrade_due":
       return relaunch ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
+      if (updateShort)
+        throw {
+          said: "There isn't room on this computer for the update, so nothing changed.",
+          shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "7.4", wsl: true, drive: "C:", freeOnDrive: true, updating: true, neededGb: "13" },
+        };
       return new Promise(() => {});
     case "providers":
       // As provider::catalogue lists them.
@@ -178,6 +187,12 @@ export async function invoke(command, args) {
         ? { outcome: "failed", stack: null, reason: "local-command-failed", conflicted: false }
         : { outcome: "completed", stack, reason: null, conflicted: false };
     case "run_local_eval":
+      if (backEndShort && args.action === "update")
+        return {
+          outcome: "blocked", stack: null, reason: "resources-short", readiness: "unknown", licence: "unknown", licenceExpiresAt: null, checksPassed: false,
+          shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "8.2", freeOnDrive: true, mac: true, updating: true, neededGb: "13" },
+        };
+      if (backEndShort) return { ...status("ready", "valid"), updateTo: "0.16.0-rc.13" };
       return status("ready", "valid");
     // OpenBot's own start, the step's last row: it stays there for the test to look at.
     case "start_stack":
@@ -210,7 +225,8 @@ async function buildWindow(): Promise<Window> {
     entrypoints: [new URL("./main.tsx", import.meta.url).pathname],
     target: "browser",
     format: "esm",
-    define: { "process.env.NODE_ENV": '"production"' },
+    // Vite's build-time values, none of them set, as a build without a whitelabel support page.
+    define: { "process.env.NODE_ENV": '"production"', "import.meta.env": "{}" },
     plugins: [
       {
         name: "scripted-native-side",
@@ -1572,6 +1588,104 @@ describe.skipIf(!asked)("Finishing setup when a step stops", () => {
       await page.close();
     }
   }, 40_000);
+});
+
+/*
+ * An update this computer has no room for. On Windows the sentence with the figures sat at the foot
+ * of the window, in a "That didn't finish" box under "OpenBot is stopped / ready to reopen", a row
+ * that said "OpenBot did not start." and a second copy of the logs. What it needs is the heading and
+ * the sentence under it, with Retry beside it, in the window as it opens; the row that stopped says
+ * why; the logs are offered once. For OpenBot's own update, and for the back end's, which the window
+ * runs first. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, light and dark.
+ */
+describe.skipIf(!asked)("an update this computer has no room for", () => {
+  const cases = [
+    {
+      hash: "#update-short",
+      said: "This computer has 7.4 GB of free space on drive C:, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+    },
+    {
+      hash: "#backend-short",
+      said: "This Mac has 8.2 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+    },
+  ];
+  for (const { hash, said } of cases)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`says what it needs first, with Retry beside it (${hash.slice(1)}, ${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 800 },
+          colorScheme,
+        });
+        try {
+          await open(page, hash);
+          // Stopped, whatever it is headed.
+          await page
+            .getByRole("button", { name: "Retry", exact: true })
+            .waitFor();
+          await page.waitForTimeout(600);
+          const shots = process.env.OPENBOT_APP_SHOTS;
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/no-room-${hash.slice(1)}-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+            });
+          const seen = await page.evaluate(() => {
+            const box = (element: Element | null | undefined) => {
+              const rect = element?.getBoundingClientRect();
+              return rect ? { top: rect.top, bottom: rect.bottom } : null;
+            };
+            const lede = document.querySelector("main .lede");
+            const retry = [...document.querySelectorAll("main button")].filter(
+              (button) => button.textContent === "Retry",
+            );
+            const failed = [...document.querySelectorAll("main li")].filter(
+              (row) => row.textContent?.includes("Failed"),
+            );
+            const named = (label: string) =>
+              [...document.querySelectorAll("main button")].filter(
+                (button) => button.textContent === label,
+              ).length;
+            const ledeBox = box(lede);
+            const retryBox = box(retry[0]);
+            const rowsBox = box(document.querySelector("main li"));
+            const text = document.querySelector("main")?.textContent ?? "";
+            return {
+              heading: document.querySelector("main h1")?.textContent,
+              lede: lede?.textContent,
+              retries: retry.length,
+              // Retry under the sentence and above the rows, in the window as it opens.
+              retryUnderSentence: (retryBox?.top ?? 0) > (ledeBox?.bottom ?? 0),
+              retryAboveRows: (retryBox?.bottom ?? 0) < (rowsBox?.top ?? 0),
+              retryInView: (retryBox?.bottom ?? 900) <= 800,
+              failedRows: failed.length,
+              failedRowSaysWhy: failed.some((row) =>
+                row.textContent?.includes("Not enough free space to update."),
+              ),
+              saysDidNotStart: text.includes("did not start"),
+              saysDidNotFinish: text.includes("That didn’t finish"),
+              saysReadyToReopen: text.includes("ready to reopen"),
+              copyLogs: named("Copy logs"),
+              saveToAFile: named("Save to a file"),
+            };
+          });
+          expect(seen).toEqual({
+            heading: "OpenBot needs more free space to update",
+            lede: said,
+            retries: 1,
+            retryUnderSentence: true,
+            retryAboveRows: true,
+            retryInView: true,
+            failedRows: 1,
+            failedRowSaysWhy: true,
+            saysDidNotStart: false,
+            saysDidNotFinish: false,
+            saysReadyToReopen: false,
+            copyLogs: 1,
+            saveToAFile: 1,
+          });
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
 });
 
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */

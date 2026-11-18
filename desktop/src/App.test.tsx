@@ -12,6 +12,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
+import { DEFAULT_HARNESS } from "./harness";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
 type ProgressEvent = {
@@ -1452,7 +1453,10 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
   expect(installationCalls()).toEqual([
     {
       command: "prepare_installation",
-      args: { root: "/tmp/local-eval-install", harness: { id: "langgraph" } },
+      args: {
+        root: "/tmp/local-eval-install",
+        harness: { id: DEFAULT_HARNESS },
+      },
     },
   ]);
   expect(
@@ -1580,7 +1584,7 @@ test("Install prepares the default Bot in the default folder, with no Bot or fol
       (event) =>
         (event as { event: { kind: string } }).event.kind === "harness_chosen",
     ),
-  ).toEqual([{ event: { kind: "harness_chosen", harness: "langgraph" } }]);
+  ).toEqual([{ event: { kind: "harness_chosen", harness: "langgraph_ts" } }]);
   // Once the engine answers, Intelligence sets itself up alongside the install, once.
   await waitFor(() =>
     expect(
@@ -4373,6 +4377,44 @@ test("an upgrade that did not finish says so on the running screen before handin
   );
 });
 
+test("Retry after a refused start shows no refusal while the new start runs", async () => {
+  // Windows under Podman: Retry after the setting was put right kept "That didn't finish" and the
+  // old sentence under Starting OpenBot for the 20 seconds the new start took, until OpenBot opened.
+  setupConnectedLocalStack(
+    "/tmp/retry-clears-refusal",
+    localStatus("ready", "valid"),
+  );
+  const said =
+    "SMTP_HOST is set but MAIL_FROM is not. Set MAIL_FROM to the address OpenBot sends email from, such as OpenBot <openbot@example.com>.";
+  let starts = 0;
+  let answer: () => void = () => {};
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack") {
+      starts += 1;
+      if (starts === 1)
+        throw { said, detail: "the server exited 78 (EX_CONFIG)" };
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return null;
+    }
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await view.findByText(said);
+
+  await userEvent.click(view.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(starts).toBe(2));
+  expect(view.queryByText(said)).toBeNull();
+  expect(view.queryByText("That didn't finish")).toBeNull();
+
+  answer();
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+});
+
 test("relaunch never starts a local stack that is not exactly ready and valid", async () => {
   for (const [readiness, licence, said] of [
     [
@@ -4763,7 +4805,7 @@ function previouslyHostedConfiguration(harness: string) {
 test("an installation an earlier app connected to hosted Intelligence starts at the first screen and keeps its install", async () => {
   const root = "/tmp/previously-hosted";
   setupRootConfiguration(root, async () =>
-    previouslyHostedConfiguration("langgraph"),
+    previouslyHostedConfiguration(DEFAULT_HARNESS),
   );
   withLocalCli(readyLocal());
   const view = await renderApp();
@@ -4796,7 +4838,7 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   expect(getStartStackPayload()).toEqual({
     root,
     ...LOCAL_ADDRESSES,
-    harness: { id: "langgraph" },
+    harness: { id: DEFAULT_HARNESS },
     model: { provider: "openai", login: "api-key", saved: true },
   });
 });
@@ -4817,7 +4859,7 @@ test("a previously hosted installation of another Bot installs the default Bot",
   expect(installationCalls()).toEqual([
     {
       command: "prepare_installation",
-      args: { root, harness: { id: "langgraph" } },
+      args: { root, harness: { id: DEFAULT_HARNESS } },
     },
   ]);
 });
@@ -4935,7 +4977,9 @@ async function reopenAfterUpdate(
   setupConnectedLocalStack(root, localStatus("ready", "valid"), {
     saved: { ...savedOpenAiConfiguration().saved, model: "claude-plan" },
     // Installed with the default Bot, as the window itself installs: what it recorded as finished
-    // has to be installed again all the same.
+    // has to be installed again all the same. Saved by an earlier app, whose default Bot was the
+    // Python LangGraph image (`langgraph`): this window still knows it as the installation it is
+    // returning to, now that the default is the TypeScript one.
     launch: { harness: { id: "langgraph" } },
   });
   const installed = deferred<null>();
@@ -5488,7 +5532,7 @@ test("setup records telemetry without a consent gate and deduplicates viewed ste
   );
   expect(events.slice(0, 3)).toEqual([
     { kind: "step_viewed", step: "welcome" },
-    { kind: "harness_chosen", harness: "langgraph" } as never,
+    { kind: "harness_chosen", harness: "langgraph_ts" } as never,
     { kind: "step_viewed", step: "account" },
   ]);
   expect(events.at(-1)).toEqual({ kind: "step_viewed", step: "model" });
@@ -6517,7 +6561,7 @@ test.each([true, false])(
     expect(getStartStackPayload()).toEqual({
       root: "/tmp/openbot-app-test",
       ...LOCAL_ADDRESSES,
-      harness: { id: "langgraph" },
+      harness: { id: DEFAULT_HARNESS },
       model: {
         provider: "openai-compatible",
         login: "endpoint",
@@ -6722,7 +6766,7 @@ test.each(["http://localhost:11434/v1", "https://models.example/v1"])(
     expect(payload).toEqual({
       root: "/tmp/openbot-app-test",
       ...LOCAL_ADDRESSES,
-      harness: { id: "langgraph" },
+      harness: { id: DEFAULT_HARNESS },
       model: {
         provider: "openai-compatible",
         login: "endpoint",
@@ -6946,7 +6990,7 @@ for (const provider of [
         login: "plan",
         saved: true,
       },
-      harness: { id: "langgraph" },
+      harness: { id: DEFAULT_HARNESS },
     });
     expect(getStartStackPayload()).not.toHaveProperty("apiKey");
   });

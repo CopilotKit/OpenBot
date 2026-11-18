@@ -10,7 +10,7 @@ import {
   useEarlyDownloads,
 } from "./EarlyDownloads";
 import { handover } from "./handover";
-import { DEFAULT_HARNESS, type HarnessChoice } from "./harness";
+import { currentChoice, DEFAULT_HARNESS, type HarnessChoice } from "./harness";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
   LocalIntelligence,
@@ -24,6 +24,13 @@ import {
   offerLocalIntelligence,
   splitStopFailure,
 } from "./localEvalCli";
+import {
+  ROOM_HEADING,
+  ROOM_REASON,
+  resourcesShortSaid,
+  updateRoomShort,
+} from "./localReadiness";
+import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { asProblem, Failure, InlineFailure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
@@ -33,32 +40,31 @@ import {
 } from "./ProviderPicker";
 import { Sections } from "./Sections";
 import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
-import { StartFresh } from "./StartFresh";
-import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import {
+  BehindSlot,
   engineNow,
   goAheadNow,
   handOffNow,
-  pauseOfferNow,
-  BehindSlot,
   INSTALL_BLURB,
   installingBehind,
   type Progress,
+  pauseOfferNow,
   plainInstallSteps,
   SetupProgress,
   StatusLine,
   trayPlace,
 } from "./SetupProgress";
 import { ShuttingDown, useQuitStatus } from "./ShuttingDown";
+import { StartFresh } from "./StartFresh";
 import {
   harnessChoiceEvent,
   modelChoiceEvent,
   recordSetupEvent,
   type SetupStep,
 } from "./telemetry";
+import { choseThisComputer, rememberThisComputer } from "./thisComputer";
 import { UsageDataChoice } from "./UsageDataChoice";
 import { type Hosting, Welcome } from "./Welcome";
-import { choseThisComputer, rememberThisComputer } from "./thisComputer";
 import {
   type Blocker,
   fixesItself,
@@ -715,8 +721,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         ).catch(() => false);
         if (!active) return;
         if (installed) {
-          const key = installationKeyFor(found, installed.harness);
-          setHarness(installed.harness);
+          const saved = installed.harness && currentChoice(installed.harness);
+          const key = installationKeyFor(found, saved);
+          setHarness(saved);
           setPreparation({ key, status: "complete" });
           if (configured?.localEval) {
             setModel(resumedModel);
@@ -920,6 +927,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     }
     setBusy(true);
     setFailure(null);
+    // Why the last Start stopped is not this one's: kept, it stayed under Starting OpenBot through
+    // a Retry until OpenBot opened. This Start says its own reason if it stops too.
+    setRecoveryFailure(null);
     setReleaseNotice(null);
     setBackEndNotice(null);
     setSteps([]);
@@ -1547,6 +1557,19 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     // "Starting OpenBot" over "Updating OpenBot..." read as if nothing were updated. It says why
     // an update has a screen at all, too: this OpenBot runs on this computer (`SelfContainedNote`).
     const updatingSelf = localStarting && releaseDue && !installingAfresh;
+    /*
+     * An update this computer has no room for, OpenBot's own or the back end's: what it needs is
+     * the one thing to read, so it is the heading and the sentence under it, with Retry beside it.
+     * On Windows the sentence sat at the foot of the window in a "That didn't finish" box, under
+     * "OpenBot is stopped" and a row that said "OpenBot did not start.", with the logs twice.
+     */
+    const roomShort =
+      localStarting || installingAfresh
+        ? null
+        : updateRoomShort(
+            displayedFailure?.shortfall,
+            local.stopped ? local.blocked?.shortfall : undefined,
+          );
     return (
       <main>
         <div className="sheet connection-sheet">
@@ -1555,7 +1578,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               ? UPDATING_SELF_CONTAINED
               : localStarting || installingAfresh
                 ? "Starting OpenBot"
-                : "OpenBot is stopped"}
+                : roomShort
+                  ? ROOM_HEADING
+                  : "OpenBot is stopped"}
           </h1>
           <p className="lede">
             {localStarting || installingAfresh
@@ -1563,8 +1588,17 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                 // part takes. "This usually takes a minute or two" sat over "About 3 minutes left"
                 // on Windows G, and the start took four.
                 "OpenBot is getting ready and opens by itself."
-              : "Your installation and saved connections are ready to reopen."}
+              : roomShort
+                ? resourcesShortSaid(roomShort)
+                : "Your installation and saved connections are ready to reopen."}
           </p>
+          {roomShort && (
+            <div className="row room-retry">
+              <button type="button" disabled={busy} onClick={local.retry}>
+                Retry
+              </button>
+            </div>
+          )}
           {freshInstall || (
             <LocalIntelligence
               sequence={local}
@@ -1572,12 +1606,24 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               handOff={handOff}
               open={steps}
               releaseDue={releaseDue}
+              room={
+                roomShort
+                  ? {
+                      reason: ROOM_REASON,
+                      logs: displayedFailure ?? {
+                        said: resourcesShortSaid(roomShort),
+                      },
+                    }
+                  : null
+              }
             />
           )}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           {updatingLine}
-          {displayedFailure && <Failure problem={displayedFailure} />}
+          {displayedFailure && !roomShort && (
+            <Failure problem={displayedFailure} />
+          )}
           {updatingSelf && <SelfContainedNote />}
           {/* While a local step runs, its Cancel is the only control. */}
           {!localStarting && !installingAfresh && (
@@ -1591,7 +1637,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                 >
                   Change AI connection
                 </button>
-                {displayedFailure && (
+                {/* Room is what is short: a repair installs again, and needs room too. */}
+                {displayedFailure && !roomShort && (
                   <button
                     type="button"
                     className="quiet"

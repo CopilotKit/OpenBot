@@ -93,6 +93,49 @@ export function dismissSelfHostBannerMutationOptions(
   });
 }
 
+/**
+ * Answer a notice for this person (a nudge, `lib/notices.ts`), on every device they sign in from.
+ * Either answer is the same answer: never show it again. The server adds the id to the ones already
+ * dismissed, so two devices answering two notices at once both stay answered.
+ *
+ * Patched in onMutate like the self-host banner's, so the card is gone the moment it is pressed,
+ * and put back if the save fails. A card that vanished and came back on the next load would read
+ * as ignoring the click.
+ */
+export function dismissNoticeMutationOptions(
+  queryClient: QueryClient,
+  userId: string | undefined,
+) {
+  const queryKey = userPreferencesQueryOptions(userId).queryKey;
+  return mutationOptions({
+    mutationFn: (notice: string): Promise<UserPreferences> => {
+      if (!userId) throw new Error("Sign in to save your preferences.");
+      return savePreferences(
+        { dismissedNotices: [notice] },
+        "Could not save your preferences",
+      );
+    },
+    onMutate: (notice) => {
+      const previous = queryClient.getQueryData(queryKey);
+      if (previous) {
+        queryClient.setQueryData(queryKey, {
+          ...previous,
+          dismissedNotices: [...(previous.dismissedNotices ?? []), notice],
+          noticesDue: (previous.noticesDue ?? []).filter(
+            (due) => due !== notice,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous)
+        queryClient.setQueryData(queryKey, context.previous);
+    },
+    onSuccess: (preferences) => queryClient.setQueryData(queryKey, preferences),
+  });
+}
+
 export function saveUserPreferencesMutationOptions(
   queryClient: QueryClient,
   userId: string | undefined,

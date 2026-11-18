@@ -1690,7 +1690,7 @@ paths:
         - Organization settings
       operationId: getDeployment
       summary: Read what this OpenBot offers
-      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
+      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
       x-openbot-singleton: true
       security:
         - {}
@@ -3519,7 +3519,7 @@ paths:
         - Conversations
       operationId: getAttachment
       summary: Download an attachment
-      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
       security:
         - webSession: []
         - appOAuth:
@@ -8482,7 +8482,7 @@ paths:
         - Routines
       operationId: createRoutine
       summary: Create a routine
-      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. There is no operation to change a routine: that is done by asking its Bot. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. updateRoutine changes one. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -8536,6 +8536,57 @@ paths:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
       - $ref: '#/components/parameters/RoutineId'
+    patch:
+      tags:
+        - Routines
+      operationId: updateRoutine
+      summary: Change a routine
+      description: 'Change one of the caller''s routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine''s, and its next run is worked out from now. One that does not exist, or is somebody else''s, is not found. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoutineRequest'
+            examples:
+              request:
+                value:
+                  instruction: Summarize my unread mail, today's calendar and the weather.
+                  cron: 30 8 * * 1-5
+      responses:
+        '200':
+          description: The routine, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     delete:
       tags:
         - Routines
@@ -17554,6 +17605,50 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/nudge-events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordNudgeEvent
+      summary: Record what the caller did with a nudge
+      description: 'Tell OpenBot that a nudge (a notice OpenBot shows a person once, such as the ask to star OpenBot on GitHub) was shown to the caller, that they followed it, or that they dismissed it, and where. OpenBot adds the moment that made it due, from what it already knows about the caller, so the counts say which moment works. It is best effort: a client sends one per show or answer and waits on nothing. Saving the answer is a separate change to the caller''s preferences (`dismissedNotices`). The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NudgeEvent'
+            examples:
+              clicked:
+                $ref: '#/components/examples/NudgeClicked'
+      responses:
+        '204':
+          description: The event is accepted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/settings/learning:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -20174,7 +20269,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
     BotId:
       name: botId
       in: path
@@ -21111,13 +21206,14 @@ components:
           $ref: '#/components/schemas/BotInstructions'
         harness:
           type: string
-          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.'
+          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot''s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.'
           enum:
             - ''
             - crewai
             - llamaindex
             - agno
             - langgraph
+            - langgraph-ts
             - google-adk
             - antigravity
             - pydantic-ai
@@ -21437,6 +21533,20 @@ components:
         - admin
         - member
       description: 'The person''s role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.'
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum:
+        - owner
+        - admin
+        - member
+      description: 'The person''s role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn''t know as a member.'
+    NoticeId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+      description: 'A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.'
+      example: star-on-github
     AssignableRole:
       type: string
       enum:
@@ -21494,7 +21604,7 @@ components:
             - 'null'
           description: The picture their identity provider gave, when it gave one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         needsName:
           type: boolean
           description: Whether they have still to choose what OpenBot calls them, because their name is missing or is only their address.
@@ -21627,6 +21737,7 @@ components:
       required:
         - messageListEmphasis
         - selfHostBannerDismissed
+        - dismissedNotices
         - narration
         - skin
         - proactive
@@ -21636,6 +21747,21 @@ components:
         selfHostBannerDismissed:
           type: boolean
           description: Whether they closed the banner offering help self-hosting OpenBot.
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: The notices they answered, either way, by id. A notice in this list is never shown to them again, on any device. Empty until they answer one.
+          items:
+            $ref: '#/components/schemas/NoticeId'
+        noticesDue:
+          type: array
+          readOnly: true
+          maxItems: 64
+          uniqueItems: true
+          description: The notices OpenBot would show them now, by id, worked out by the server from the edition and how they have used OpenBot. A notice they dismissed is never here. Absent from a server that works out none.
+          items:
+            $ref: '#/components/schemas/NoticeId'
         narration:
           description: Whether they narrate their recordings in OpenBot's browser, which opens the microphone only when on. Null until they choose, which the browser asks before their first recording.
           oneOf:
@@ -21660,6 +21786,13 @@ components:
           $ref: '#/components/schemas/MessageListEmphasis'
         selfHostBannerDismissed:
           type: boolean
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: 'Notices they answered, by id. Added to the ones already dismissed: a notice is never taken back off the list.'
+          items:
+            $ref: '#/components/schemas/NoticeId'
         narration:
           $ref: '#/components/schemas/OnOff'
         skin:
@@ -21842,7 +21975,7 @@ components:
           description: Who they are there, such as their GitHub login, when the service said.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - needs_reconnect
           description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
@@ -22010,7 +22143,7 @@ components:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     IdentityProviderAddress:
       type: string
       format: uri
@@ -22043,7 +22176,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The provider's SAML metadata XML, as its identity team supplied it.
     OidcIdentityProviderRequest:
       type: object
@@ -22073,13 +22206,13 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An id for the provider, unique in the organization, such as acme-okta.
     IdentityProviderDomains:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: The email domain whose people it signs in, such as acme.com. Several are separated by commas.
     CreateIdentityProviderRequest:
       description: A SAML or an OIDC provider, by protocol.
@@ -22157,11 +22290,13 @@ components:
         botComputers:
           type: boolean
           description: 'Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).'
+        attachmentLimits:
+          $ref: '#/components/schemas/AttachmentLimits'
     AllowlistEntry:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: 'The organization''s settings. Context is read only: it comes back with the settings and is never sent.'
@@ -22310,6 +22445,13 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum:
+            - per-person
+            - shared
+            - none
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -22465,7 +22607,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -22476,7 +22618,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -22519,7 +22661,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -22594,7 +22736,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object
@@ -22672,7 +22814,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum:
+          x-extensible-enum:
             - default
             - organization
             - role
@@ -22713,7 +22855,7 @@ components:
                   - string
                   - 'null'
               role:
-                $ref: '#/components/schemas/PersonRole'
+                $ref: '#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -22869,7 +23011,7 @@ components:
           description: organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum:
+          x-extensible-enum:
             - organization
             - group
             - team
@@ -23579,6 +23721,8 @@ components:
           type:
             - string
             - 'null'
+        unverified:
+          $ref: '#/components/schemas/UnverifiedModel'
     ModelChoiceInput:
       type: object
       additionalProperties: false
@@ -23671,6 +23815,26 @@ components:
       minLength: 1
       maxLength: 1000
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+    AttachmentLimits:
+      type: object
+      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
+      required:
+        - imageBytes
+        - documentBytes
+        - fileBytes
+      properties:
+        imageBytes:
+          type: integer
+          minimum: 1
+          description: The largest image.
+        documentBytes:
+          type: integer
+          minimum: 1
+          description: 'The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).'
+        fileBytes:
+          type: integer
+          minimum: 1
+          description: The largest text file, or a file of any other kind.
     ConversationWork:
       type: object
       description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
@@ -24057,6 +24221,27 @@ components:
         personId:
           type: string
           description: The person who is now in the conversation.
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
     ConversationMessage:
       type: object
       description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
@@ -24095,7 +24280,7 @@ components:
           description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -24129,6 +24314,12 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:
@@ -24195,27 +24386,6 @@ components:
           type: string
           description: Names the message being written, so the files of two windows are counted apart.
           maxLength: 200
-    Attachment:
-      type: object
-      description: A file held for a message, or sent with one.
-      required:
-        - id
-        - name
-        - mimeType
-        - sizeBytes
-      properties:
-        id:
-          type: string
-          description: The attachment's id.
-        name:
-          type: string
-          description: The file's name.
-        mimeType:
-          type: string
-          description: The type OpenBot recognised it as.
-        sizeBytes:
-          type: integer
-          minimum: 0
     VoiceCallRequest:
       type: object
       additionalProperties: false
@@ -24426,7 +24596,7 @@ components:
           description: The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - needs_input
         - working
         - resolved
@@ -24689,6 +24859,19 @@ components:
         text:
           type: string
           description: What was said.
+    UnverifiedModel:
+      type: object
+      description: The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.
+      required:
+        - model
+        - label
+      properties:
+        model:
+          type: string
+          description: The chosen model's id.
+        label:
+          type: string
+          description: Its name, as a model picker shows it.
     AppSource:
       type: string
       enum:
@@ -25993,7 +26176,7 @@ components:
               type: string
               minLength: 1
               maxLength: 2000
-              pattern: ^[^\x00]*\S[^\x00]*$
+              pattern: ^[^\x00]*[^\s\x00][^\x00]*$
         approval:
           $ref: '#/components/schemas/SharedAccountApproval'
     BotGrantChangesSaved:
@@ -26028,7 +26211,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What the Bot may do in the app, in a sentence or two, at most 1,000 characters once trimmed.
     BotGrantCheck:
       type: object
@@ -26478,7 +26661,7 @@ components:
         status:
           type: string
           description: 'Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.'
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - dismissed
@@ -27387,7 +27570,7 @@ components:
       description: 'What was sent: a Bot''s reply, a question it asked, an approval it needs, or what the person''s Bots'' check-ins found that needs them.'
     DeliveryState:
       type: string
-      enum:
+      x-extensible-enum:
         - queued
         - running
         - accepted
@@ -27598,12 +27781,11 @@ components:
           type:
             - string
             - 'null'
-          enum:
+          x-extensible-enum:
             - succeeded
             - failed
             - skipped
             - waiting
-            - null
           description: How it ended, or null while it is still open. Only failed is a failure.
         at:
           type:
@@ -27618,6 +27800,7 @@ components:
         - id
         - botId
         - schedule
+        - cron
         - timezone
         - instruction
         - title
@@ -27637,6 +27820,9 @@ components:
         schedule:
           type: string
           description: When it runs, as text to show.
+        cron:
+          type: string
+          description: 'The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.'
         timezone:
           type: string
           description: The IANA time zone the schedule is read in.
@@ -27741,6 +27927,34 @@ components:
       properties:
         routine:
           $ref: '#/components/schemas/Routine'
+    UpdateRoutineRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: What to change. Only the fields sent change, and at least one must be sent.
+      properties:
+        title:
+          type: string
+          description: A new name, at most 100 characters. Empty takes the name away, and the routine is called by what it does.
+          maxLength: 100
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: What the Bot does on each run from now on. At most 2,000 characters.
+        cron:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: 'A new schedule, as five cron fields: minute, hour, day of month, month, day of week. The same rules as a new routine''s.'
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: A new IANA time zone to read the schedule in.
     RoutineSwitch:
       type: object
       required:
@@ -27777,7 +27991,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - running
             - succeeded
             - failed
@@ -27945,7 +28159,7 @@ components:
           description: When it last ran, or null.
         lastStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -28123,7 +28337,7 @@ components:
           description: Where it can be opened, or null.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - open
             - dismissed
             - started
@@ -28411,7 +28625,7 @@ components:
           description: When it is done. May be empty.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - paused
             - completed
@@ -28590,7 +28804,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -29086,7 +29300,7 @@ components:
           type: string
           description: What people call it.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         active:
           type: boolean
           description: 'Whether the caller is working in this one: the organization their session works in, or for an app''s token the one its OpenBot-Organization header names, else the caller''s own. Always false for a request made with an API key.'
@@ -29122,7 +29336,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         slug:
           type: string
@@ -29157,7 +29371,7 @@ components:
           type: array
           description: The roles the caller may give this member, their current one left out. The server's verdict. Empty when the caller may not change this member's role.
           items:
-            $ref: '#/components/schemas/PersonRole'
+            $ref: '#/components/schemas/PersonRoleAnswer'
         id:
           type: string
           description: The person's id.
@@ -29175,7 +29389,7 @@ components:
             - 'null'
           description: Their picture's address, when they have one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         joinedAt:
           type: string
           format: date-time
@@ -29208,7 +29422,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
     UpdateOrganizationMemberRequest:
       type: object
@@ -29262,7 +29476,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - declined
@@ -29360,7 +29574,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - accepted
@@ -29502,7 +29716,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type: string
@@ -29531,7 +29745,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type:
@@ -29621,7 +29835,7 @@ components:
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
-      enum:
+      x-extensible-enum:
         - pending
         - approved
         - denied
@@ -29887,7 +30101,7 @@ components:
           type: string
           minLength: 1
           maxLength: 6000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The person's answer. Trimmed.
         inConversation:
           type: boolean
@@ -30013,7 +30227,7 @@ components:
       type: string
       minLength: 1
       maxLength: 300
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.
     ApprovalRuleInput:
       type: object
@@ -30394,7 +30608,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The rule in a sentence or two, at most 1,000 characters once trimmed.
     ApprovalRuleDraftWrittenRow:
       type: object
@@ -30721,7 +30935,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The sentence the rules were written from, at most 2,000 characters once trimmed.
     ApprovalRuleDraftBatch:
       type: object
@@ -30805,7 +31019,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance, at most 2,000 characters once trimmed.
     ReviewerGuidanceCheck:
       type: object
@@ -30876,7 +31090,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance to test, at most 2,000 characters once trimmed.
         limit:
           type: integer
@@ -31040,7 +31254,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: 1 to 80 characters once trimmed.
         description:
           type: string
@@ -31367,7 +31581,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The question, 1 to 500 characters once trimmed.
     WhatIfInitiator:
       type: string
@@ -31774,7 +31988,7 @@ components:
           description: The id of the person who asked.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - declined
@@ -32065,7 +32279,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: Why the Bot declined, in its own words. The trail keeps the first 500 characters.
         request:
           type: string
@@ -32647,7 +32861,7 @@ components:
           description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - waiting
             - taken
             - completed
@@ -32741,7 +32955,7 @@ components:
           description: The image it runs now.
     ComputerState:
       type: string
-      enum:
+      x-extensible-enum:
         - absent
         - starting
         - ready
@@ -33848,7 +34062,7 @@ components:
         - $ref: '#/components/schemas/PersonRealBrowserOpened'
     SignInStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - pending
         - filling
         - code_required
@@ -34472,6 +34686,37 @@ components:
           minLength: 1
           maxLength: 32
           pattern: ^v?\d+(?:\.\d+){1,3}(?:-[a-z]+(?:\.\d{1,9})?)?$
+    NudgeEvent:
+      type: object
+      description: What the caller did with a nudge, and where. Names nothing about the person, who is the caller. The moment that made the nudge due is added by OpenBot, not sent.
+      additionalProperties: false
+      required:
+        - nudge
+        - action
+        - place
+        - surface
+      properties:
+        nudge:
+          $ref: '#/components/schemas/NoticeId'
+        action:
+          type: string
+          enum:
+            - shown
+            - clicked
+            - dismissed
+          description: shown when the nudge was drawn, clicked when they followed it (for the star nudge, opened the repository), and dismissed when they said Not now.
+        place:
+          type: string
+          enum:
+            - card
+            - settings
+          description: card for the nudge drawn above the message box, settings for its permanent row in Settings, which is never shown as a card.
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+          description: Where the caller saw or answered it.
     LearningSpaceId:
       type: string
       description: A Learning space's id in the backend (its container).
@@ -34785,7 +35030,7 @@ components:
           description: Whether it adds a skill, changes one, or removes one.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending_review
             - approved
             - rejected
@@ -35057,7 +35302,7 @@ components:
           format: uuid
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - freezing
             - batching
@@ -35610,7 +35855,7 @@ components:
           type: boolean
         syncStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -35916,6 +36161,7 @@ components:
         - llamaindex
         - agno
         - langgraph
+        - langgraph-ts
         - google-adk
         - antigravity
         - pydantic-ai
@@ -41528,6 +41774,8 @@ components:
       value:
         messageListEmphasis: thread
         selfHostBannerDismissed: false
+        dismissedNotices: []
+        noticesDue: []
         narration: null
         skin: openbot
         proactive: 'on'
@@ -41647,6 +41895,10 @@ components:
         builtInBots: true
         isolatedBots: false
         botComputers: true
+        attachmentLimits:
+          imageBytes: 104857600
+          documentBytes: 104857600
+          fileBytes: 104857600
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
@@ -43214,6 +43466,7 @@ components:
           - id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
             botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
             schedule: Weekdays at 09:00
+            cron: 0 9 * * 1-5
             timezone: America/New_York
             instruction: Summarize my unread mail and today's calendar.
             title: Morning brief
@@ -43237,6 +43490,7 @@ components:
           id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           schedule: Weekdays at 09:00
+          cron: 0 9 * * 1-5
           timezone: America/New_York
           instruction: Summarize my unread mail and today's calendar.
           title: Morning brief
@@ -44863,6 +45117,13 @@ components:
               at BotCard (/assets/route-app-secondary.js:12:345)
         surface: web
         appVersion: 1.1.0-rc.2
+    NudgeClicked:
+      summary: The caller opened OpenBot's repository from the star card, in OpenBot Desktop.
+      value:
+        nudge: star-on-github
+        action: clicked
+        place: card
+        surface: desktop
     LearningConfigurationExample:
       summary: Learning on, every Bot learning into the space OpenBot assigned, people reviewing their own.
       value:

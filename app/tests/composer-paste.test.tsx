@@ -318,13 +318,16 @@ test("a full-size composer stages an image pasted alongside text", async () => {
     expect(queryByLabelText("Remove chart.png")).not.toBeNull(),
   );
   // All the way through the upload rather than stalled as a placeholder: the tile only draws an
-  // `<img>` once `onUpload` has answered with a URL to point it at. The upload answers with the
-  // form a sent message stores; the tile loads the file from the API's address for it, never from
-  // the address that form spells.
+  // `<img>` once `onUpload` has answered. A picture the server took is drawn from the file on this
+  // device, never fetched back from the server it just went up to, nor from the address the stored
+  // form spells.
   await waitFor(() =>
     expect(
-      container.querySelector('img[alt="chart.png"]')?.getAttribute("src"),
-    ).toBe("/api/v2/organizations/default/attachments/attachment-id"),
+      container
+        .querySelector('img[alt="chart.png"]')
+        ?.getAttribute("src")
+        ?.startsWith("blob:"),
+    ).toBe(true),
   );
   expect(uploads).toEqual(["chart.png"]);
 });

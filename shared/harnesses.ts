@@ -129,10 +129,14 @@ export const EARLIER_HARNESS_NAMES: Readonly<
  * picked: what it is, what runs it, and that any other agent can be brought along, with the article
  * the name reads with ("an AWS Strands agent"). Atai's wording and punctuation, November 10. Shown
  * only: the starter is still stored, and told to the Bot, as "Everyday life. Powered by <name>.".
+ *
+ * The subtitle is itself in parentheses, so a name with its own ("LangGraph (TypeScript)") reads
+ * without them ("a LangGraph TypeScript agent") rather than nesting one pair inside the other.
  */
 export function starterSubtitle(name: string): string {
-  const article = /^[AEIOU]/.test(name) ? "an" : "a";
-  return `Everyday life agent. (powered by ${article} ${name} agent; you can bring your own agent from any stack.)`;
+  const plain = name.replace(/\s*\(([^()]*)\)/g, " $1").trim();
+  const article = /^[AEIOU]/.test(plain) ? "an" : "a";
+  return `Everyday life agent. (powered by ${article} ${plain} agent; you can bring your own agent from any stack.)`;
 }
 
 /** Every name a harness the installer can run has had, with the harness it belongs to now. */
@@ -179,6 +183,16 @@ export function withCurrentFrameworkNames(title: string): string {
  * framework it is told it runs on.
  */
 export const OPENBOT_HARNESS_NAME = "OpenBot";
+
+/**
+ * The engine a new Bot that runs inside OpenBot is made on, by harness id: OpenBot's own LangGraph
+ * agent in TypeScript (`agent-langgraph-ts`).
+ *
+ * The New Bot sheet sends it with a Bot that has no address, and the server records it on that Bot.
+ * The server still decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and
+ * a deployment whose administrator switched the default back runs its Bots on the built-in agent.
+ */
+export const DEFAULT_BOT_ENGINE = "langgraph-ts";
 
 /**
  * A framework a person may declare for an agent they run themselves, by id: any named harness, never

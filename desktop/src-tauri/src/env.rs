@@ -162,6 +162,28 @@ impl Ports {
         Ok(ports)
     }
 
+    /**
+    [`Ports::read`], for a Start whose Bot listens on `harness` inside its container.
+
+    The Bot's host port is recorded beside the container port it was published for
+    (`PICKED_HARNESS_PORT`). Where the two are the same, the host port was only that Bot's own
+    port, and a Bot that listens somewhere else gets its own port instead. Without this, an update
+    that moved the default Bot from the Python LangGraph image (4206) to the TypeScript one (4215)
+    kept publishing 4206 on the host, and nothing answered on 4215 there. A recorded host port that
+    differs from its container port (one a Start moved off a port somebody else held, or one set
+    by hand in `.env`) is kept, whichever Bot runs.
+    */
+    pub fn read_for_harness(root: &Path, harness: Option<u16>) -> std::io::Result<Self> {
+        let mut ports = Self::read(root)?;
+        let recorded = read_already_set(&root.join(".env"), &["PICKED_HARNESS_PORT"])?
+            .get("PICKED_HARNESS_PORT")
+            .and_then(|value| value.parse::<u16>().ok());
+        if recorded.is_some() && ports.harness == recorded && harness != recorded {
+            ports.harness = None;
+        }
+        Ok(ports)
+    }
+
     pub fn settings(&self) -> BTreeMap<String, String> {
         let mut settings: BTreeMap<_, _> = [
             ("APP_PORT", self.app),
@@ -771,6 +793,9 @@ pub fn compose(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
+            // Where the ChatGPT plan's model calls go; see `crate::plan::CHATGPT_PLAN_URL`.
+            // Emptied on any other answer, which is also what stops that service being started.
+            "CHATGPT_PLAN_HARNESS_URL",
             "OPENBOT_MODEL_OAUTH_FILE",
             "BOT_PROVIDER",
             /*
@@ -840,6 +865,16 @@ pub fn compose(
         ModelCredential::ChatGptPlan { store } => {
             if !store.trim().is_empty() {
                 env.insert("CHATGPT_AUTH_FILE".into(), CHATGPT_STORE_INSIDE.into());
+                /*
+                 * The Bot is the TypeScript LangGraph image, which sends a plan's model calls to
+                 * the Python image that holds the Codex transport, and so do the server's own
+                 * Bots. Both read this address; the token is the deployment's MANAGED_AGENT_TOKEN,
+                 * which every one of them already has.
+                 */
+                env.insert(
+                    "CHATGPT_PLAN_HARNESS_URL".into(),
+                    crate::plan::CHATGPT_PLAN_URL.into(),
+                );
             }
         }
         ModelCredential::ProviderOAuth {
@@ -1389,7 +1424,9 @@ pub const REMOVED_WHEN_UNSET: [&str; 12] = [
     "AGENT_BOT_MODEL",
     // What earlier Desktops wrote for the two Bots that shipped in their own containers, agent-bot
     // and agent-langgraph: a host port and an image for the first, an image for the second. Neither
-    // Bot exists now, and nothing reads these.
+    // Bot exists now, and nothing reads these. `LANGGRAPH_IMAGE` is written again, pinned to the
+    // ChatGPT plan's model service, whenever the release publishes that image
+    // (`crate::deployment::OPTIONAL_IMAGE_VARIABLES`), and taken out when it does not.
     "BOT_PORT",
     "BOT_IMAGE",
     "LANGGRAPH_IMAGE",

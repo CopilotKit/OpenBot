@@ -124,3 +124,25 @@ FROM consumption c LEFT JOIN result_messages t
 -- No matching execution is unknown coverage, not evidence of success/failure.
 -- No view/copy is unobserved consumption, not dissatisfaction. Notification
 -- open and usefulness have no event here; do not infer them from delivery.
+
+-- F. Nudges (the ask to star OpenBot on GitHub, and any later one): people shown,
+-- following and dismissing, per nudge, place and the win that made it due. Each
+-- event_id is one person, nudge, action and place, so counts are people. Clicked
+-- is following the nudge (for the star nudge, opening the repository), not a
+-- GitHub star; GitHub's own count is the outcome. 'settings' has no shown event.
+SELECT properties.nudge_id AS nudge,
+       properties.nudge_place AS place,
+       properties.nudge_moment AS moment,
+       count(DISTINCT if(event='oss.runtime.openbot.nudge_shown',
+                         properties.event_id, NULL)) AS people_shown,
+       count(DISTINCT if(event='oss.runtime.openbot.nudge_clicked',
+                         properties.event_id, NULL)) AS people_clicked,
+       count(DISTINCT if(event='oss.runtime.openbot.nudge_dismissed',
+                         properties.event_id, NULL)) AS people_dismissed
+FROM events
+WHERE event IN ('oss.runtime.openbot.nudge_shown',
+                'oss.runtime.openbot.nudge_clicked',
+                'oss.runtime.openbot.nudge_dismissed')
+  AND properties.app_id='openbot' AND properties.environment='production'
+  AND properties.event_id IS NOT NULL
+GROUP BY nudge, place, moment;

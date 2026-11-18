@@ -136,6 +136,10 @@ against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when 
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://127.0.0.1:4201/`.
 
+`LANGGRAPH_TS_AG_UI_URL` is the same for the TypeScript LangGraph engine (`agent-langgraph-ts`),
+which new Bots run on: the image does not carry it either. Set it, with `MANAGED_AGENT_TOKEN`, only
+when that engine is reachable from this container; unset, new Bots run on the built-in engine.
+
 **Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
 Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
