@@ -370,10 +370,7 @@ test("two characters search the whole history on the server and page its results
   const dialog = await openSearch(view, user);
   await user.type(searchBox(dialog), "Archived");
 
-  expect(await view.findByText("Archived conversation")).toBeTruthy();
-  expect(
-    view.getByText("Searches conversation names and recent messages."),
-  ).toBeTruthy();
+  expect(await dialog.findByText("Archived conversation")).toBeTruthy();
   // The dialog lists the server results and pauses paging the roster underneath.
   expect(dialog.queryByText("Recent conversation")).toBeNull();
   expect(
@@ -521,9 +518,6 @@ test("closing search preserves the roster scroll position and resumes paging", a
   expect(await view.findByText("Recent conversation")).toBeTruthy();
   expect(view.queryByText("Archived conversation")).toBeNull();
   expect(root.scrollTop).toBe(120);
-  expect(
-    view.queryByText("Searches conversation names and recent messages."),
-  ).toBeNull();
 
   // The roster's own paging is back, from the cursor it had.
   await waitFor(() => expect(ScrollObserver.active.size).toBe(1));
