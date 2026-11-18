@@ -1,0 +1,4 @@
+{
+  "$comment": "The Ed25519 public keys a security floor must be signed with, each the raw 32 bytes in base64 (shared/security-floor.ts, desktop/src-tauri/src/security_floor.rs, docs/releasing.md \"Security floor\"). Where the floor is read lives with each app, never here: shared/ ships in every self-hosted OpenBot.",
+  "keys": []
+}
