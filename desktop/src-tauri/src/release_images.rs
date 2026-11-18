@@ -7,8 +7,9 @@ The list it copies is made here, from the same calls Install and the back end's 
 it cannot name one image fewer than the app pulls:
 
 - OpenBot's own: `preparation::installation_pull_set`, which asks Compose for the images of the
-  services this app runs, with each Bot this release can install picked in turn, and adds the two
-  sign-in images. Compose reads the release's `docker-compose.yml`, with the images pinned by its
+  services this app runs, with each Bot this release can install picked in turn (the Claude plan's
+  image among them), and the ChatGPT plan's image, which no Bot choice names.
+  Compose reads the release's `docker-compose.yml`, with the images pinned by its
   `container-images.json`, exactly as it does beside an installation.
 - The bundled back end's: `local_images::cli_images`, read from the very CLI the installer carries.
   The runtime repositories are named at the release's tag, because that is how the app reads them
@@ -121,6 +122,13 @@ pub fn release_images(compose: &Path, manifest: &Path, cli: &str) -> Result<Rele
             })?;
         images.extend(pulled);
     }
+    // The ChatGPT plan's image: no Bot is it, and Install pulls it only on a ChatGPT plan, so no
+    // choice above names it. The app pulls it for everybody on one (`preparation::PLAN_IMAGES`).
+    // The Claude plan's is a Bot, so the choices above name it.
+    images.insert(crate::deployment::reference(
+        &release,
+        crate::plan::CHATGPT_SIGN_IN_IMAGE,
+    )?);
     for repository in &back_end.tagged {
         images.insert(format!("{repository}:{}", back_end.release));
     }
@@ -190,7 +198,7 @@ mod tests {
             "ghcr.io/copilotkit/openbot-server@sha256:fce3ffc51b12c075642a8b37d00d6137d85f418cd8d43d28456757b173d7eef9",
             "ghcr.io/copilotkit/openbot-agent-computer@sha256:7e5e93c2a29d7450efed1f492f870e2e497bc031da6919473c2a21f657ea227a",
             "pgvector/pgvector:pg17",
-            // The two sign-in images.
+            // The Claude sign-in's image, and the ChatGPT plan's.
             "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:1f007dc9712f86b899410b12c414ff0218eeec11e941c9b3680629df54c407bc",
             "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:7ae4c62fed073506a0a709776640cbb55030da6c8a928603ff649d5d891936fa",
             // A Bot a person may pick.
