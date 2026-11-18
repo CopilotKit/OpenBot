@@ -4,6 +4,7 @@
 import type { AttachmentLimits } from "./attachmentLimits";
 import type { DeploymentAuthProvidersItem } from "./deploymentAuthProvidersItem";
 import type { DeploymentEdition } from "./deploymentEdition";
+import type { MinimumClients } from "./minimumClients";
 
 /**
  * What this OpenBot offers and how people sign in to it.
@@ -36,4 +37,23 @@ export interface Deployment {
   /** Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false). */
   botComputers: boolean;
   attachmentLimits?: AttachmentLimits;
+  /**
+   * The API versions this OpenBot serves, by major, such as v2. An app that speaks none of them can't use it: when they are all newer than the app's, the app needs an update; when they are all older, this OpenBot does. Absent from a release before it was published, which serves v2.
+   * @minItems 1
+   * @items.pattern ^v[1-9][0-9]{0,3}$
+   */
+  api?: string[];
+  minimumClients?: MinimumClients;
+  /** The part of minimumClients raised because of a security problem in older releases: for each app named, the minimum is there for security. Absent or empty when none is. */
+  securityMinimumClients?: MinimumClients;
+  /**
+   * The version of what OpenBot Desktop supplies when it starts this OpenBot on its own computer. It changes when Desktop must supply something new.
+   * @minimum 1
+   */
+  launcherApi?: number;
+  /**
+   * The version of what the OpenBot Recorder and this OpenBot exchange.
+   * @minimum 1
+   */
+  extensionApi?: number;
 }

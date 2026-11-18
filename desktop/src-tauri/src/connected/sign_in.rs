@@ -1279,6 +1279,49 @@ mod tests {
         assert!(session.access().is_err());
     }
 
+    /// Every request the shell itself makes to the OpenBot names this app, `OpenBot-Client:
+    /// desktop/<version>`: the two questions before sign-in, the code exchange, the first call
+    /// after it, a refresh, and sign-out's revocations. Only the person's browser, which opens the
+    /// authorization address, is not the app.
+    #[test]
+    fn every_request_the_shell_makes_names_this_app() {
+        let openbot = FakeOpenBot::start(Shape::Current);
+        let session = openbot.sign_in(in_memory());
+        let access = session.access().unwrap();
+        openbot.expire_access_tokens();
+        session.after_refused(&access).unwrap();
+        session.sign_out().unwrap();
+
+        let named = format!("desktop/{}", crate::client_version::app_version());
+        let shells: Vec<_> = openbot
+            .seen()
+            .into_iter()
+            .filter(|seen| seen.path != "/api/auth/oauth2/authorize")
+            .collect();
+        let asked: Vec<String> = shells
+            .iter()
+            .map(|seen| format!("{} {}", seen.method, seen.path))
+            .collect();
+        for path in [
+            "GET /api/v2/organizations/default/deployment",
+            "GET /.well-known/oauth-authorization-server/api/auth",
+            "POST /api/auth/oauth2/token",
+            "GET /api/copilotkit/info",
+            "POST /api/auth/oauth2/revoke",
+        ] {
+            assert!(asked.iter().any(|seen| seen == path), "{path}: {asked:?}");
+        }
+        for seen in &shells {
+            assert_eq!(
+                seen.header("openbot-client"),
+                Some(named.as_str()),
+                "{} {}",
+                seen.method,
+                seen.path
+            );
+        }
+    }
+
     /// Nothing shaped like a token reaches a file under the app's configuration folder or a line
     /// of the log, through a sign-in, a refresh, a refused refresh and a sign-out.
     #[test]

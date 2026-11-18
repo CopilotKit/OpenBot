@@ -33,6 +33,10 @@ export const getGetDeploymentResponseMock = (): Deployment => ({
     documentBytes: 104857600,
     fileBytes: 104857600,
   },
+  api: ["v2"],
+  minimumClients: { desktop: "1.2.0" },
+  launcherApi: 1,
+  extensionApi: 1,
 });
 
 export const getGetOrganizationSettingsResponseMock =

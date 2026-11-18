@@ -448,6 +448,7 @@ fn client() -> reqwest::Result<Client> {
     Client::builder()
         .timeout(DEADLINES.handoff)
         .redirect(reqwest::redirect::Policy::none())
+        .default_headers(crate::client_version::headers())
         .build()
 }
 

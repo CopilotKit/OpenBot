@@ -1,4 +1,10 @@
 import {
+  type ClientKind,
+  type Compatibility,
+  compatibility,
+  RELEASE,
+} from "@openbot/shared/client-version";
+import {
   type QueryClient,
   queryOptions,
   useQuery,
@@ -103,11 +109,58 @@ export async function readDeployment(options: {
   }
 }
 
+/** An app as `compatibility` reads it: its kind, its release, and the API versions it speaks. */
+export type CompatibleApp = {
+  kind: ClientKind;
+  version: string;
+  speaks?: readonly string[];
+};
+
+/** This app: the web app, the release it was built from, speaking this release's API versions. */
+export const THIS_APP: CompatibleApp = { kind: "web", version: RELEASE };
+
 export const deploymentKeys = {
   all: ["deployment"] as const,
   capabilities: () => ["deployment", "capabilities"] as const,
   attachmentLimits: () => ["deployment", "attachment-limits"] as const,
+  compatibility: (app: CompatibleApp) =>
+    [
+      "deployment",
+      "compatibility",
+      { kind: app.kind, version: app.version, speaks: app.speaks ?? null },
+    ] as const,
 };
+
+/**
+ * Whether this app and the OpenBot it talks to can work together, as that OpenBot's `deployment`
+ * says: the API versions it serves and the oldest release of each app it serves
+ * (`compatibility` in shared/client-version.ts, which every OpenBot app decides by).
+ *
+ * `deployment` is the one read an OpenBot never refuses for the app's version, so this is how a page
+ * finds out before anything else fails. Read again every so often and when the tab is looked at
+ * again, like the attachment limits, because the OpenBot can be upgraded while the tab stays open.
+ * Not answered (an OpenBot from before the v2 API, or one that failed to answer) is not a verdict:
+ * the screens say their own failures as they always did.
+ *
+ * `app` is this app; a test names another to see the other verdicts drawn.
+ */
+export function deploymentCompatibilityQueryOptions(
+  app: CompatibleApp = THIS_APP,
+) {
+  return queryOptions({
+    queryKey: deploymentKeys.compatibility(app),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    queryFn: async ({ signal }): Promise<Compatibility> =>
+      compatibility(
+        await readDeployment({
+          signal,
+          fallback: "Couldn't load which apps OpenBot serves.",
+        }),
+        app,
+      ),
+  });
+}
 
 /**
  * How large an attached file may be, as this server says, read again every so often.
