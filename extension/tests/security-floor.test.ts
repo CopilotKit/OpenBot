@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import {
-  SECURITY_FLOOR_ADDRESSES,
-  SECURITY_FLOOR_SENTENCE,
-} from "@openbot/shared/security-floor";
+import { SECURITY_FLOOR_SENTENCE } from "@openbot/shared/security-floor";
 import cases from "../../shared/fixtures/security-floor/cases.json";
 import { installRecording } from "../src/background/recording";
 import { installRouter } from "../src/background/router";
@@ -11,6 +8,7 @@ import {
   SECURITY_FLOOR_ALARM,
 } from "../src/background/security-floor";
 import { IDLE_STATE, type RecorderState } from "../src/protocol/messages";
+import { SECURITY_FLOOR_ADDRESSES } from "../src/shared/security-floor-addresses";
 import type { ConnectionRecord, DrainRecord } from "../src/shared/storage";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 

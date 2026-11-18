@@ -20,6 +20,7 @@ import {
 } from "@openbot/shared/security-floor";
 import type { PageResponse, PageToBackground } from "../protocol/messages";
 import { normaliseOpenBotOrigin } from "../shared/origin";
+import { SECURITY_FLOOR_ADDRESSES } from "../shared/security-floor-addresses";
 import { readLocal, writeLocal } from "../shared/storage";
 import { type ConnectionLoss, currentConnection } from "./connection";
 import { desktopAddress } from "./native-host";
@@ -51,7 +52,7 @@ export type FloorControls = {
 export type FloorDeps = {
   /** The keys a floor must be signed with; the ones built into the Recorder unless a test passes its own. */
   keys?: readonly string[];
-  /** Where the floor is read; shared/security-floor.json's addresses by default. */
+  /** Where the floor is read; the Recorder's own (shared/security-floor-addresses.ts) by default. */
   addresses?: readonly string[];
   /** How the feed is read: the browser's own request unless a test passes its feed (shared/security-floor.ts). */
   read?: Parameters<typeof refreshSecurityFloor>[0]["fetch"];
@@ -153,7 +154,7 @@ export function installSecurityFloor<C extends FloorControls>(
     const floor = await refreshSecurityFloor({
       ...options,
       ...(deps.read ? { fetch: deps.read } : {}),
-      ...(deps.addresses ? { addresses: deps.addresses } : {}),
+      addresses: deps.addresses ?? SECURITY_FLOOR_ADDRESSES,
     });
     await writeLocal("securityFloorCheckedAt", deps.now());
     await act(floor);

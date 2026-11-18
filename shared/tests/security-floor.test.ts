@@ -6,7 +6,6 @@ import {
   floorApplies,
   heldSecurityFloor,
   refreshSecurityFloor,
-  SECURITY_FLOOR_ADDRESSES,
   verifySecurityFloor,
 } from "../security-floor";
 
@@ -38,7 +37,10 @@ function feed(answers: Record<string, string | number>) {
   }) as typeof fetch;
 }
 
-const [mirror, github] = SECURITY_FLOOR_ADDRESSES;
+// Where an app reads the floor: its mirror first, then the release. Each app names its own.
+const mirror = "https://mirror.floor.example/latest/security-floor.json";
+const github = "https://release.floor.example/latest/security-floor.json";
+const SECURITY_FLOOR_ADDRESSES = [mirror, github];
 
 describe("verifying a floor", () => {
   for (const c of cases.cases) {
@@ -54,13 +56,6 @@ describe("verifying a floor", () => {
 
   test("no floor verifies against an app with no keys", async () => {
     expect((await verifySecurityFloor(doc("current"), [])).ok).toBe(false);
-  });
-
-  test("the apps are published with the addresses next to the update feed", () => {
-    expect(SECURITY_FLOOR_ADDRESSES).toEqual([
-      "https://downloads.copilotkit.ai/latest/security-floor.json",
-      "https://github.com/CopilotKit/OpenBot/releases/latest/download/security-floor.json",
-    ]);
   });
 });
 
@@ -104,6 +99,7 @@ describe("keeping the floor", () => {
     const online = await refreshSecurityFloor({
       store,
       keys,
+      addresses: SECURITY_FLOOR_ADDRESSES,
       fetch: feed({ [mirror]: doc("current") }),
     });
     expect(online?.serial).toBe(2);
@@ -111,6 +107,7 @@ describe("keeping the floor", () => {
     const offline = await refreshSecurityFloor({
       store,
       keys,
+      addresses: SECURITY_FLOOR_ADDRESSES,
       fetch: feed({}),
     });
     expect(belowFloor(offline, "desktop", "1.1.1")).toBe("1.1.2");
@@ -121,6 +118,7 @@ describe("keeping the floor", () => {
     const floor = await refreshSecurityFloor({
       store,
       keys,
+      addresses: SECURITY_FLOOR_ADDRESSES,
       fetch: feed({ [mirror]: doc("older") }),
     });
     expect(floor?.serial).toBe(2);
@@ -139,6 +137,7 @@ describe("keeping the floor", () => {
       const floor = await refreshSecurityFloor({
         store,
         keys,
+        addresses: SECURITY_FLOOR_ADDRESSES,
         fetch: feed({ [mirror]: doc(name), [github]: doc(name) }),
       });
       expect(floor?.serial).toBe(1);
@@ -148,7 +147,12 @@ describe("keeping the floor", () => {
 
   test("a first launch that has never reached the feed runs", async () => {
     const { store, held } = memoryStore();
-    const floor = await refreshSecurityFloor({ store, keys, fetch: feed({}) });
+    const floor = await refreshSecurityFloor({
+      store,
+      keys,
+      addresses: SECURITY_FLOOR_ADDRESSES,
+      fetch: feed({}),
+    });
     expect(floor).toBeNull();
     expect(belowFloor(floor, "desktop", "0.0.1")).toBeNull();
     expect(held()).toBeNull();
@@ -159,6 +163,7 @@ describe("keeping the floor", () => {
     const floor = await refreshSecurityFloor({
       store,
       keys,
+      addresses: SECURITY_FLOOR_ADDRESSES,
       fetch: feed({ [mirror]: 404, [github]: doc("current") }),
     });
     expect(floor?.serial).toBe(2);
@@ -172,7 +177,12 @@ describe("keeping the floor", () => {
       return new Response(doc("current"));
     }) as unknown as typeof fetch;
     expect(
-      await refreshSecurityFloor({ store, keys: [], fetch: counting }),
+      await refreshSecurityFloor({
+        store,
+        keys: [],
+        addresses: SECURITY_FLOOR_ADDRESSES,
+        fetch: counting,
+      }),
     ).toBeNull();
     expect(asked).toBe(0);
   });

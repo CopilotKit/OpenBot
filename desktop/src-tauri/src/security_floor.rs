@@ -52,14 +52,22 @@ whatever its environment says.
 pub const TEST_FLOOR: &str = "OPENBOT_TEST_SECURITY_FLOOR";
 pub const TEST_KEY: &str = "OPENBOT_TEST_SECURITY_FLOOR_KEY";
 
-/// `shared/security-floor.json`: the keys a floor must be signed with, and where it is read.
+/// `shared/security-floor.json`: the keys a floor must be signed with.
 const CONFIG: &str = include_str!("../../../shared/security-floor.json");
 
 #[derive(Deserialize)]
 struct Config {
     keys: Vec<String>,
-    addresses: Vec<String>,
 }
+
+/// Where the floor is read, in order: beside the update feed on downloads.copilotkit.ai, then on
+/// the Latest GitHub release. Kept with the app, never in shared/, which every self-hosted OpenBot
+/// ships. tests/security-floor-addresses.test.ts holds it equal to the Recorder's and the phone
+/// app's.
+pub const ADDRESSES: [&str; 2] = [
+    "https://downloads.copilotkit.ai/latest/security-floor.json",
+    "https://github.com/CopilotKit/OpenBot/releases/latest/download/security-floor.json",
+];
 
 fn config() -> Config {
     serde_json::from_str(CONFIG).expect("shared/security-floor.json is the floor's configuration")
@@ -83,11 +91,9 @@ pub fn key_bytes(text: &str) -> Option<[u8; 32]> {
         .ok()
 }
 
-/// Where the floor is read, in order: beside the update feed on downloads.copilotkit.ai, then on
-/// the Latest GitHub release.
+/// `ADDRESSES`, parsed.
 pub fn addresses() -> Vec<reqwest::Url> {
-    config()
-        .addresses
+    ADDRESSES
         .iter()
         .filter_map(|address| reqwest::Url::parse(address).ok())
         .collect()

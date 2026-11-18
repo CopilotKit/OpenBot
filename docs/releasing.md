@@ -927,8 +927,10 @@ app and the Recorder connected to a company's server ignore the floor, and so do
 
 - **The document.** `security-floor.json`, beside `latest.json` on the Latest release, and copied by
   Downloads sync to `downloads.copilotkit.ai/latest/security-floor.json`. The apps read it from
-  there first and from `releases/latest/download/security-floor.json` when that fails
-  ([`shared/security-floor.json`](../shared/security-floor.json) lists both).
+  there first and from `releases/latest/download/security-floor.json` when that fails. Each app
+  names both itself, never `shared/`, which every self-hosted OpenBot ships
+  ([`tests/security-floor-addresses.test.ts`](../tests/security-floor-addresses.test.ts) holds the
+  copies equal).
 - **Its own signature.** Tauri signs each installer, and nothing signs `latest.json` itself, so a
   field there would be unauthenticated. The floor is `{ "payload": <base64>, "signature": <base64> }`:
   the signature is Ed25519 over the payload's exact bytes. An app reads nothing in the payload until

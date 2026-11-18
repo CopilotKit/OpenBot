@@ -20,6 +20,7 @@ import {
   refreshSecurityFloor,
   type SecurityFloor,
 } from "./security-floor";
+import { SECURITY_FLOOR_ADDRESSES } from "./security-floor-addresses";
 
 /** Ed25519 as RFC 8032 has it (no ZIP 215 leniency), for a phone with no WebCrypto Ed25519. */
 export const nobleVerify: Ed25519Verify = async (
@@ -78,7 +79,7 @@ export async function refreshedFloorDecision(
     store: check.store,
     keys: check.keys,
     verify: check.verify ?? nobleVerify,
-    ...(check.addresses ? { addresses: check.addresses } : {}),
+    addresses: check.addresses ?? SECURITY_FLOOR_ADDRESSES,
     ...(check.fetch ? { fetch: check.fetch } : {}),
   });
   return floorDecision(floor, check);

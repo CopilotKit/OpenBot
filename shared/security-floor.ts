@@ -7,7 +7,9 @@
  * beside `latest.json`). The updater's own `latest.json` can't carry it: Tauri's signatures cover the
  * installers, not the feed, so a field there would be unauthenticated. So the floor carries its own
  * Ed25519 signature over the exact bytes of its payload, and an app acts on it only once that
- * signature verifies against a key built into the app (`security-floor.json` in this folder).
+ * signature verifies against a key built into the app (`security-floor.json` in this folder). Each
+ * app names where it reads the floor itself (`SECURITY_FLOOR_ADDRESSES` in the Recorder and the phone
+ * app, `ADDRESSES` in security_floor.rs); tests/security-floor-addresses.test.ts holds them equal.
  *
  * Only up: an app keeps the floor with the highest `serial` it has verified and ignores any with a
  * lower or equal one, so a replayed old floor can't lift a block. Offline, the kept floor still
@@ -30,9 +32,6 @@ export const SECURITY_FLOOR_KIND = "openbot-security-floor";
 
 /** The Ed25519 public keys a floor must be signed with: each the raw 32 bytes, in base64. */
 export const SECURITY_FLOOR_KEYS: readonly string[] = config.keys;
-
-/** Where the floor is read, in order. */
-export const SECURITY_FLOOR_ADDRESSES: readonly string[] = config.addresses;
 
 /** The largest floor read. A real one is a few hundred bytes. */
 export const SECURITY_FLOOR_LARGEST = 64 * 1024;
@@ -301,16 +300,19 @@ export async function heldSecurityFloor({
  * Reads the published floor and keeps it when it verifies and its serial is higher than the kept
  * one's. Answers the floor that holds now: the new one, or the kept one when the published one is
  * older, unsigned, tampered with, missing or can't be reached.
+ *
+ * `addresses` come from the app, never from shared/: every self-hosted OpenBot ships shared/, and
+ * nothing it runs may name where CopilotKit publishes the floor.
  */
 export async function refreshSecurityFloor({
   store,
   keys,
   verify,
-  addresses = SECURITY_FLOOR_ADDRESSES,
+  addresses,
   fetch: get = fetch,
   timeoutMs = 30_000,
 }: FloorOptions & {
-  addresses?: readonly string[];
+  addresses: readonly string[];
   fetch?: typeof fetch;
   timeoutMs?: number;
 }): Promise<SecurityFloor | null> {

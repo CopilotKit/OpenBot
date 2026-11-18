@@ -12,10 +12,10 @@ import { join } from "node:path";
 import cases from "../../shared/fixtures/security-floor/cases.json";
 import {
   type FloorStore,
-  SECURITY_FLOOR_ADDRESSES,
   verifySecurityFloor,
   webCryptoVerify,
 } from "../src/security-floor";
+import { SECURITY_FLOOR_ADDRESSES } from "../src/security-floor-addresses";
 import {
   floorDecision,
   heldFloorDecision,
@@ -57,7 +57,7 @@ function feed(answers: Record<string, string>) {
   return { fetch: get, asked };
 }
 
-const [mirror, github] = SECURITY_FLOOR_ADDRESSES;
+const [mirror, github] = SECURITY_FLOOR_ADDRESSES as [string, string];
 const phone = (release: string, origin = CLOUD) => ({
   origin,
   release,
