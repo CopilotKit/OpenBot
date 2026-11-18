@@ -26,8 +26,9 @@ export function ChannelItemContent({
   pinned?: boolean;
   revealing?: boolean;
 }) {
-  const primaryText = `text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
-  const secondaryText = "text-[12px] leading-4 text-muted-foreground";
+  // Figma's conversation row: a regular 14px line under a 12px one in the secondary ink, 4px apart.
+  const primaryText = `text-sm ${unread ? "font-semibold" : "font-normal"}`;
+  const secondaryText = "text-xs text-muted-foreground";
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -67,7 +68,7 @@ export function ChannelItemContent({
           ) : null}
         </div>
         <div
-          className={`mt-px truncate ${emphasis === "thread" ? primaryText : secondaryText}`}
+          className={`mt-1 truncate ${emphasis === "thread" ? primaryText : secondaryText}`}
           title={title}
         >
           {displayedTitle}

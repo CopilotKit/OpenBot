@@ -370,7 +370,7 @@ test("Your apps and Add an app are sections of the page itself, spaced as every 
   for (const section of [yours, add]) {
     // Not a section inside another, and no spacing of its own.
     expect(section.parentElement?.closest("section")).toBeNull();
-    expect(section.className.split(/\s+/)).toEqual(["mt-12"]);
+    expect(section.className.split(/\s+/)).toEqual(["mt-9"]);
   }
   // The search is at the top of the page's first section, above them both.
   const search = view.getByRole("textbox", { name: "Search connections" });

@@ -1,0 +1,27 @@
+/*
+ * What every alternate skin was drawn on, before OpenBot's own look moved to Sora on a 16px scale.
+ *
+ * The colours need nothing here: the old palette is still `:root` in theme.css and only OpenBot's
+ * own look replaces it. Type does, because Tailwind reads it from one set of variables for every
+ * skin. So a skin starts from Inter at the sizes it had, each Tailwind's default times 15/16
+ * (`text-sm` 13.125px), with Tailwind's own line heights and no tightening. A skin that sets its own
+ * face (OpenFuse's `--font-sans`) still wins: its selector is as specific as this one and comes
+ * later.
+ */
+:root[data-skin] {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-brand: var(--font-sans);
+  --text-xs: 0.703125rem; /* 11.25px */
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-xs--letter-spacing: normal;
+  --text-sm: 0.8203125rem; /* 13.125px */
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0546875rem; /* 16.875px */
+  --text-xl: 1.171875rem; /* 18.75px */
+  --text-2xl: 1.40625rem; /* 22.5px */
+  --text-3xl: 1.7578125rem; /* 28.125px */
+  --text-3xl--line-height: calc(2.25 / 1.875);
+  --text-4xl: 2.109375rem; /* 33.75px */
+  --tracking-heading: normal;
+}

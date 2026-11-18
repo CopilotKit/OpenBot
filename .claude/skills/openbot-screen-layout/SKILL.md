@@ -46,12 +46,17 @@ Four components make the frame. They compose in this order and nest no other way
 ```
 PageShell        the page: header (title, description, action, backButton) then children
   PageSection    a titled group of unrelated decisions, with a deliberately large gap above it
-    PageRows     the grouped card: rounded-lg border bg-card
-      Item       one row, size="sm", divided from its neighbours by <Separator />
+    PageRows     the column of rows: each row its own white card (rounded-card), 2px apart
+      Item       one row, size="sm"
     PageEmpty    what a section says when it has nothing to list
 ```
 
-`PageShell` takes a `width`: `prose` (`max-w-3xl`, 768px) is the default, and every
+This is the November 2026 redesign (Figma "Master screens"): Sora on Tailwind's 16px type scale,
+cool neutral grays, ink-black pill buttons, and rows as separate 20px-cornered cards. The tokens
+are in `theme.css`, scoped to OpenBot's own look (`:root:not([data-skin])`); the alternate skins
+keep the old palette and type through `skins/legacy-base.css`.
+
+`PageShell` takes a `width`: `prose` (`max-w-page`, Figma's 700px column plus the 16px gutter) is the default, and every
 configuration screen uses it so no screen is wider than another. Sentences inside it are held to
 `max-w-prose`, so the column has room for a label beside its control without stretching the text.
 `wide` (`max-w-5xl`) exists for one screen — `admin/audit.tsx`, because an audit log is a table to be
@@ -65,22 +70,22 @@ components above; a screen that sets its own is drifting.
 | Between | Gap | Where it lives |
 |---------|-----|----------------|
 | Page edge (top / sides / bottom) | 48 / 16 / 64px | `PageShell` column (`pt-12` or `pt-8` under the bar, `px-4`, `pb-16`) |
-| Title → description | 8px | `PageShell` header |
-| Title block → first content | 32px | `PageShell`: `[&>header+*]:mt-8` |
+| Title → description | 4px | `PageShell` header (20px semibold title, light 14px description) |
+| Title block → first content | 36px | `PageShell`: `[&>header+*]:mt-9` |
 | Title → tabs, tabs → content | 24px, then 32px | `PageShell`: `[&>header+nav]`, `[&>header+nav+*]` |
-| Section → section | 48px | `PageSection` (`mt-12`) |
-| Section heading → description | 4px | `PageSection` |
-| Heading block → section content | 16px | `PageRows` / `PageEmpty` (`mt-4`) |
+| Section → section | 36px | `PageSection` (`mt-9`) |
+| Section heading → description | 4px | `PageSection` (16px semibold heading, light 14px description) |
+| Heading block → section content | 12px | `PageRows` / `PageEmpty` (`mt-3`) |
 | Controls stacked inside a section | 12px | the screen, with `gap-3` |
-| A row in `PageRows` | 65px with a description, never under 56px | `Item` (`px-4 py-3.5 gap-3`), `PageRows` (`min-h-14`) |
-| Divider between rows | inset 16px from both edges | `PageRows`, on every horizontal `Separator` inside it |
+| A row in `PageRows` | 84px with a 44px tile, never under 56px | `Item` (`p-5 gap-3`), `PageRows` (`min-h-14`) |
+| Row → row | 2px | `PageRows` (`gap-0.5`); each row is its own card |
 
-The 32px under the title is deliberately tighter than the 48px between sections: the title belongs
-to the page it introduces. Those `PageShell` selectors outrank the first child's own `mt-*`, so a
-section or notice keeps its usual margin everywhere else and loses it only at the top.
+The title sits as far above the first section as the sections sit from each other, Figma's 36px.
+Those `PageShell` selectors outrank the first child's own `mt-*`, so a section or notice keeps its
+usual margin everywhere else and loses it only at the top.
 
 A page with one section gives that section no `title`: the page title already names it, and a second
-heading 32px below the first says the same thing twice. Put the description on `PageShell` instead
+heading 36px below the first says the same thing twice. Put the description on `PageShell` instead
 (`connections.index.tsx`). A count or filter that belongs to a search sits on the search's row, not
 on a line of its own.
 
@@ -100,17 +105,19 @@ the action is right there. A search with no results uses `IconSearch` and "No ma
    page's one primary verb, on the title's baseline.
 3. Group the page's decisions into `PageSection`s, each with a `title` and, where the grouping is not
    self-evident, a `description`.
-4. Give each section one `PageRows` card. Rows go inside it as `Item size="sm"`, with `<Separator />`
-   between them and none after the last. `PageRows` is a card with dividers, not a stack of cards —
-   gaps between rows are the wrong shape.
+4. Give each section one `PageRows`. Rows go inside it as `Item size="sm"`; `PageRows` makes each
+   one a white card and spaces them 2px apart, so a screen sets no gap and draws no card of its own.
+   A new screen puts no `<Separator />` between rows. Older screens still have them, from when this
+   was one card divided by lines; `PageRows` hides them, so they can be removed as screens are
+   touched. A row drawn `variant="outline"` stays an outline (Figma's row for something not set up).
 5. Read `admin/plugins/index.tsx` for the whole pattern end to end, and
    `admin/plugins/$key.tsx` or `admin/components/$name.tsx` for a screen with several sections and
    mixed row kinds.
 
 ### Procedure 2: Compose a row
 
-1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a 16px glyph
-   on a 32px muted tile. It is what makes a card of rows scannable; a row without one reads as a
+1. `ItemMedia variant="icon"` holds a leading icon from `@tabler/icons-react`, drawn as a 20px glyph
+   on a 44px tile (`bg-tile`, `rounded-tile`). It is what makes a column of rows scannable; a row without one reads as a
    paragraph. Pass the bare icon — the variant sizes and colours it — and use plain `ItemMedia` only
    for something that is its own picture, such as a Bot's avatar.
 2. `ItemContent` holds `ItemTitle` and, where the row needs a second line, `ItemDescription`.
@@ -151,8 +158,10 @@ itself when the dialog changes something.
 ### Procedure 4: Sizes and variants
 
 1. `Item size="sm"` for rows inside a card. `default` only for a row standing on its own.
-2. `Button size="sm"` for a control inside a row or a dialog footer; `lg` for a page's own actions;
-   `icon-sm` for a control floating over artwork.
+2. Buttons are pills in 14px semibold. `Button size="sm"` (32px, Figma's secondary) for a control
+   inside a row or a dialog footer; `default` (36px, Figma's primary) for a page's own action;
+   `lg` (40px) where a page has one large call to action; `icon-sm` for a control floating over
+   artwork.
 3. `Item variant` — pick **one for the whole screen**. `muted` is a fill with no border; `outline` is
    a border with no fill; `default` is neither. Mixing two of them on one screen reads as two
    different kinds of list, and the reader looks for a distinction that is not there.
@@ -189,10 +198,12 @@ itself when the dialog changes something.
 ## Units
 
 The root is the browser's 16px, so Tailwind's spacing, sizes and widths are their documented values
-(`p-4` is 16px, `max-w-3xl` is 768px) and land on its 4px grid. Text is the exception: `styles.css`
-sets every `--text-*` to Tailwind's default times 15/16, so `text-sm` is 13.125px and body text is
-15px. That is the scale this app has always read at; do not size text in px or rem by hand to match
-the docs.
+(`p-4` is 16px, `max-w-3xl` is 768px) and land on its 4px grid. Text is on Tailwind's own scale too,
+which is Figma's: `text-xs` 12px, `text-sm` 14px, `text-base` 16px, `text-xl` 20px, and `text-3xl`
+32px (Figma's H1, not Tailwind's 30). `text-xs` carries Figma's -4% tracking and 1.35 line height
+itself; a heading takes `tracking-heading`. Do not size text in px or rem by hand. The alternate
+skins still read the old 15px scale (`skins/legacy-base.css`), so a size written by hand would be
+wrong in one of them.
 
 Even so, never hardcode a pixel constant derived from a Tailwind token, and never compute a ratio
 from one. Measure the element — `offsetWidth`, `clientWidth`, a `ResizeObserver` — and scale from what
@@ -221,8 +232,8 @@ is actually on screen. The root was once 15px, and every constant taken from the
 
 | Signal | What it means | Do instead |
 |--------|---------------|------------|
-| A hand-written `rounded-lg border border-border bg-card` div wrapping rows | `PageRows` re-implemented, and it will drift from the other seven screens | Use `PageRows` |
-| Rows separated by `gap-*` instead of `<Separator />` | A stack of cards rather than one card of rows | `<Separator />` between rows, none after the last |
+| A hand-written `rounded-card bg-card` div wrapping rows, or a `gap-*` between them | `PageRows` re-implemented, and it will drift from every other screen | Use `PageRows`, which draws the cards and the 2px between them |
+| A `<Separator />` added between rows on a new screen | The old one-card-with-dividers shape; `PageRows` hides it anyway | Leave it out |
 | `width="wide"` on anything that is not a table | Prose width is the default for a reason; wide was for the audit log | Leave `width` alone |
 | A `max-w-*`, `p-*` or text size invented for one screen | A fifth container width, which is what this layout exists to stop | Reach for the existing component |
 | Children on an element passed to `Item`'s `render` | They replace the row's own children; the row draws empty | Pass a childless element |
@@ -255,6 +266,9 @@ is actually on screen. The root was once 15px, and every constant taken from the
   state instead of computed from the query. Derive it on every render.
 - **Two screens that should match do not**: one of them drew its own container. Diff the two against
   `admin/plugins/index.tsx` and delete whichever hand-drawn wrapper is not `PageRows`.
+- **A block inside `PageRows` turned into a card of its own**: `PageRows` makes every direct child a
+  card. Something that belongs to a row (a preview under a setting, a row's expanded detail) goes
+  inside that row's wrapper, not beside it.
 - **The layout genuinely cannot express the screen**: stop and say so rather than bending it
   silently. A deviation with a stated reason and a comment is fine; an undocumented fifth way to draw
   a card is what this skill exists to prevent.

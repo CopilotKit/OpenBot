@@ -4,6 +4,8 @@
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/figtree";
 @import "./theme.css";
 @import "./skins/skins.css";
 
@@ -15,6 +17,226 @@
 @source "../node_modules/streamdown/dist/*.js";
 /* Its code plugin, which Streamdown's docs say to scan the same way. */
 @source "../node_modules/@streamdown/code/dist/*.js";
+
+/*
+ * OpenBot's own frame (Figma "Master screens"): the window sits 12px inside a near-black field of
+ * square-pixel dither, CopilotKit's pixelation. The sidebar and the page are two pieces of one
+ * window with 18px outer corners; where they meet, the field bites a small curved notch out of the
+ * sidebar's top and bottom corners, and a bump of it marks the active row at the window's left edge.
+ *
+ * Drawn here rather than in the sidebar primitive because the primitive also frames Admin and
+ * Settings under every skin, and only OpenBot's own look has this frame. Below 768px the sidebar is
+ * a sheet and the page fills the screen, so there is no frame to draw.
+ *
+ * Its knobs are here rather than in theme.css, which holds only shadcn's tokens: the field's colour
+ * (Figma's ink), the dither tile and how strongly it shows, and the colour of the page's soft shapes
+ * (Figma's #7D8DC5 at 15%).
+ */
+:root {
+  --frame: oklch(0.172 0.007 258.4);
+  --frame-dither: url("./assets/patterns/pixel-dither.png");
+  --frame-dither-opacity: 0.3;
+  --backdrop-shape: oklch(0.653 0.086 271.6 / 15%);
+}
+
+@media (min-width: 768px) {
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] {
+    position: relative;
+    isolation: isolate;
+    padding: --spacing(3);
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--frame-dither);
+    background-size: 340px 340px;
+    opacity: var(--frame-dither-opacity);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-container"] {
+    top: --spacing(3);
+    bottom: --spacing(3);
+    left: --spacing(3);
+    height: auto;
+    padding: 0;
+  }
+
+  /*
+   * Collapsed, the sidebar slides out past the window's left edge. The rule above pins it 12px in,
+   * which also overrode the primitive's own way out, so the page grew under a sidebar that stayed.
+   * Out by its width, the 12px frame and the 30px notches that hang past its right edge, and a
+   * little more, so no tip of them is left showing.
+   */
+  :root:not([data-skin])
+    [data-slot="sidebar"][data-state="collapsed"]
+    [data-slot="sidebar-container"] {
+    left: calc(var(--sidebar-width) * -1 - 48px);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-inner"] {
+    position: relative;
+    border-radius: 18px 0 0 18px;
+  }
+
+  /*
+   * The notches, top and bottom, where the sidebar meets the page: Figma's "Window / Decoration".
+   *
+   * Both halves meet half a pixel past the seam, on the middle of the page's 1px left border, which
+   * starts at the seam and so is centred half a pixel to its right. Meeting at the seam itself put
+   * the notch's point beside the line rather than on it.
+   */
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::before,
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::after {
+    content: "";
+    position: absolute;
+    right: -0.5px;
+    width: 30px;
+    height: 16px;
+    pointer-events: none;
+    background-color: var(--frame);
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::before {
+    top: 0;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::after {
+    bottom: 0;
+    transform: scaleY(-1);
+  }
+
+  /*
+   * The page's half of each notch, the same curve mirrored, so the field dips between two rounded
+   * corners (Figma's "Window / Bottom Decoration" pair, at the page's left edge). Drawn from the
+   * sidebar's container rather than inside the page: the container sits above the page, so the
+   * notch covers the page's 1px left border instead of letting it show through as a pale line, and
+   * it leaves with the sidebar when the sidebar is hidden, when the page takes all four corners.
+   */
+  :root:not([data-skin]) [data-slot="sidebar-container"]::before,
+  :root:not([data-skin]) [data-slot="sidebar-container"]::after {
+    content: "";
+    position: absolute;
+    left: calc(100% + 0.5px);
+    width: 30px;
+    height: 16px;
+    pointer-events: none;
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-container"]::before {
+    top: 0;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 1 30 0)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-container"]::after {
+    bottom: 0;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 -1 30 16)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main {
+    margin: 0;
+    border: 0;
+    border-left: 1px solid var(--sidebar-border);
+    border-radius: 0 18px 18px 0;
+    box-shadow: none;
+    isolation: isolate;
+  }
+
+  :root:not([data-skin])
+    [data-slot="sidebar-wrapper"]:has(
+      > [data-slot="sidebar"][data-state="collapsed"]
+    )
+    > main {
+    border-left: 0;
+    border-radius: 18px;
+  }
+
+  /*
+   * The active row's mark: a bump of the field, 14px deep and 52px tall, into the sidebar's left edge,
+   * with a short pale bar in it. The row sits 8px in from the sidebar's edge, so the bump starts 8px
+   * outside it. Every destination and conversation in the sidebar is a router link, which marks
+   * itself `data-status="active"`; the header's links (the name, New conversation) are left out.
+   */
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::before,
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    pointer-events: none;
+  }
+
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::before {
+    left: -8px;
+    width: 14px;
+    height: 52px;
+    translate: 0 -50%;
+    background-color: var(--frame);
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 52'%3E%3Cpath d='M0 0C0 9 10 13 10 26C10 39 0 43 0 52Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::after {
+    left: -6px;
+    width: 3px;
+    height: 13px;
+    translate: 0 -50%;
+    border-radius: 9999px;
+    background-color: var(--sidebar);
+  }
+
+  /*
+   * The page's backdrop: three soft periwinkle shapes, Figma's "Hero / Background shapes", drawn as
+   * radial gradients rather than blurred ellipses so the compositor never has to blur 1,000px.
+   */
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+      radial-gradient(closest-side, var(--backdrop-shape), transparent)
+      calc(100% + 120px) 8% / 860px 820px no-repeat,
+      radial-gradient(closest-side, var(--backdrop-shape), transparent)
+      calc(100% + 40px) calc(100% + 220px) / 640px 560px no-repeat,
+      radial-gradient(closest-side, var(--backdrop-shape), transparent) 22%
+      calc(100% + 260px) / 940px 920px no-repeat;
+  }
+}
 
 /*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
@@ -37,6 +259,26 @@
   )
   > main {
   padding-top: 40px;
+}
+
+/*
+ * OpenBot's own look in that window (Figma "Master screens", drawn for the Mac app): the buttons
+ * get a band of their own across the top of the sidebar, and the name and + start on the next row
+ * at the sidebar's usual inset, rather than beside the buttons. The band is centred on the buttons:
+ * the frame is 12px, the buttons' middle is 32.5px down (`TRAFFIC_LIGHTS`), so the band is twice
+ * the 20.5px between them, 41px. Figma's band is 48px; matching it means moving the buttons, which
+ * every skin and the setup screens share, so that is a separate change. The header stays the drag
+ * handle the desktop makes it, band included.
+ */
+:root[data-desktop-titlebar="overlay"]:not([data-skin]) {
+  --desktop-titlebar-band: 41px;
+}
+
+:root[data-desktop-titlebar="overlay"]:not([data-skin])
+  [data-slot="sidebar-header"][data-titlebar-band] {
+  height: calc(var(--spacing) * 12 + var(--desktop-titlebar-band));
+  padding-top: calc(var(--spacing) * 2 + var(--desktop-titlebar-band));
+  padding-left: --spacing(2);
 }
 
 /* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */

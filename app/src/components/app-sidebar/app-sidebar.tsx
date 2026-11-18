@@ -58,6 +58,7 @@ import {
   recordingTooltip,
   useLiveRecording,
 } from "../browser/browser-nav-item";
+import { OpenBotLogo } from "../edition/openbot-logo";
 import { navigationRender } from "../edition/team-features-dialog";
 import { OpenBotVersion } from "../layout/openbot-version";
 import { Button } from "../ui/button";
@@ -208,6 +209,12 @@ function ChannelRow({
   });
   return (
     <motion.div
+      /*
+       * The frame marks the open conversation at the window's edge (styles.css). On this wrapper
+       * rather than the row's link, whose `content-visibility` clips anything drawn outside it.
+       */
+      className="relative"
+      data-sidebar-row=""
       animate={{ opacity: 1, transform: "translateY(0px)" }}
       initial={{
         opacity: 0,
@@ -354,18 +361,16 @@ function PrimaryNavItem({
 }) {
   return (
     <SidebarMenuItem>
+      {/*
+       * The page that is open is marked at the window's edge by the frame (styles.css), not by a
+       * fill, as Figma draws it.
+       */}
       <SidebarMenuButton
-        className="hover:bg-foreground/5 h-10"
-        render={(props) => (
-          <Link
-            {...props}
-            to={item.to}
-            activeProps={{ className: "bg-foreground/5" }}
-          />
-        )}
+        className="hover:bg-foreground/5 h-9"
+        render={(props) => <Link {...props} to={item.to} />}
         tooltip={tooltip}
       >
-        <div className="size-[28px] flex items-center justify-center">
+        <div className="size-[28px] flex items-center justify-center [&_svg]:size-[18px]">
           <item.icon />
         </div>
         <span className="text-sm">{item.label}</span>
@@ -434,14 +439,21 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar variant="inset" {...props}>
-      <SidebarHeader className="h-12 p-2">
+      {/*
+       * In OpenBot Desktop on a Mac this header carries a band of its own for the window's buttons
+       * (styles.css, `data-titlebar-band`). Admin's and Settings' headers keep Back to app on the
+       * buttons' row, as Figma draws them.
+       */}
+      <SidebarHeader className="h-12 p-2" data-titlebar-band="">
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
             {/* The same hover as every other row in the sidebar, not the menu button's accent tint. */}
+            {/* The orb and the name in Figtree, Figma's "Brand / Logo". */}
             <SidebarMenuButton
-              className="font-semibold text-[14px] tracking-tighter h-full leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground"
+              className="gap-2 font-brand font-bold text-base h-8 py-1 leading-tight hover:bg-foreground/5 hover:text-sidebar-foreground active:bg-foreground/5 active:text-sidebar-foreground [&_svg]:size-6"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
+                  <OpenBotLogo />
                   <BrandName>{appConfig.brand.productName}</BrandName>
                 </Link>
               )}
@@ -450,7 +462,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 is nearly the sidebar's own colour. */}
             <Button
               aria-label="New conversation"
-              className="aspect-square h-full w-auto hover:bg-foreground/5 dark:hover:bg-foreground/5"
+              className="size-8 hover:bg-foreground/5 dark:hover:bg-foreground/5"
               size="icon"
               variant="ghost"
               render={(props) => (
@@ -472,7 +484,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarGroup className="gap-px">
             <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
+              {/* Figma's search: a white pill with no outline. */}
+              <InputGroup className="bg-card text-sm rounded-full h-9 border-transparent shadow-none dark:bg-input/30">
                 <InputGroupInput
                   aria-label="Search conversations"
                   aria-describedby={

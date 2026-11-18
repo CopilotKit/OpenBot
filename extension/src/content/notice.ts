@@ -10,15 +10,15 @@ export const NOTICE_TAG = "openbot-recorder-notice";
 
 export const NOTICE_TOKENS = {
   light: {
-    "--background": "oklch(0.983 0.003 286.4)",
-    "--foreground": "oklch(0.108 0.015 220.9)",
+    "--background": "oklch(0.985 0 0)",
+    "--foreground": "oklch(0.172 0.007 258.4)",
     "--card": "oklch(1 0 0)",
-    "--card-foreground": "oklch(0.108 0.015 220.9)",
-    "--border": "oklch(0.894 0.014 286.1)",
-    "--primary": "oklch(0.108 0.015 220.9)",
+    "--card-foreground": "oklch(0.172 0.007 258.4)",
+    "--border": "oklch(0.172 0.007 258.4 / 8%)",
+    "--primary": "oklch(0.172 0.007 258.4)",
     "--primary-foreground": "oklch(1 0 0)",
-    "--secondary": "oklch(0.956 0.005 286.3)",
-    "--muted-foreground": "oklch(0.506 0.013 285.9)",
+    "--secondary": "oklch(0.962 0.007 277.2)",
+    "--muted-foreground": "oklch(0.172 0.007 258.4 / 60%)",
     "--destructive": "oklch(0.504 0.178 22.9)",
     "--ring": "oklch(0.644 0.167 276.1)",
   },

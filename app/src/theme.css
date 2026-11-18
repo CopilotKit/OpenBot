@@ -3,29 +3,33 @@
 :root {
   color-scheme: light;
   /*
-   * Three surfaces, darkest to lightest, the way Linear draws them: the frame (the sidebar's tint,
-   * which the window edge shares), the panel the page sits in, and the white cards on it. The frame
-   * is CopilotKit's pale lavender, the grays lean towards its lilac, the ring is its periwinkle, and
-   * the selected sidebar row is a lilac tint. Only shadcn's own tokens, so a stock shadcn theme drops in.
+   * OpenBot's own look, the November 2026 redesign (Figma "Master screens"), in shadcn's tokens only
+   * so a stock shadcn theme still drops in. Three surfaces, darkest to lightest: the frame (the
+   * sidebar's cool gray, Figma's `--sidebar/bg`, which also backs a row's icon tile), the pale page
+   * (`--bg-secondary`), and the white cards on it. Text and the primary button are Figma's near-black
+   * ink (`--text-primary`); secondary text and borders are that ink at 60% and 8%, so they read the
+   * same on the page, a card and a tile. The pale fills are the secondary button (`#f1f2f7`) and the
+   * chips (`#eff2f6`); `--input` is the pale blue-gray Figma gives a switch that is off. The ring
+   * stays CopilotKit's periwinkle.
    */
-  --background: oklch(0.983 0.003 286.4);
-  --foreground: oklch(0.108 0.015 220.9);
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.172 0.007 258.4);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.108 0.015 220.9);
+  --card-foreground: oklch(0.172 0.007 258.4);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.108 0.015 220.9);
-  --primary: oklch(0.108 0.015 220.9);
+  --popover-foreground: oklch(0.172 0.007 258.4);
+  --primary: oklch(0.172 0.007 258.4);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.956 0.005 286.3);
-  --secondary-foreground: oklch(0.108 0.015 220.9);
-  --muted: oklch(0.956 0.005 286.3);
-  --muted-foreground: oklch(0.506 0.013 285.9);
-  --accent: oklch(0.956 0.005 286.3);
-  --accent-foreground: oklch(0.108 0.015 220.9);
+  --secondary: oklch(0.962 0.007 277.2);
+  --secondary-foreground: oklch(0.172 0.007 258.4);
+  --muted: oklch(0.96 0.006 255.5);
+  --muted-foreground: oklch(0.172 0.007 258.4 / 60%);
+  --accent: oklch(0.962 0.007 277.2);
+  --accent-foreground: oklch(0.172 0.007 258.4);
   --destructive: oklch(0.504 0.178 22.9);
   --success: oklch(0.514 0.1 167.2);
-  --border: oklch(0.894 0.014 286.1);
-  --input: oklch(0.894 0.014 286.1);
+  --border: oklch(0.172 0.007 258.4 / 8%);
+  --input: oklch(0.878 0.022 263.2);
   --ring: oklch(0.644 0.167 276.1);
   --chart-1: oklch(0.869 0.022 252.894);
   --chart-2: oklch(0.554 0.046 257.417);
@@ -42,13 +46,13 @@
   --empty-pattern: url("./assets/patterns/dot-matrix.svg");
   --empty-pattern-color: oklch(0.746 0.117 279.9);
   --empty-pattern-opacity: 0.25;
-  --sidebar: oklch(0.948 0.011 286.2);
-  --sidebar-foreground: oklch(0.108 0.015 220.9);
-  --sidebar-primary: oklch(0.108 0.015 220.9);
+  --sidebar: oklch(0.936 0.009 264.5);
+  --sidebar-foreground: oklch(0.172 0.007 258.4);
+  --sidebar-primary: oklch(0.172 0.007 258.4);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
-  --sidebar-accent-foreground: oklch(0.108 0.015 220.9);
-  --sidebar-border: oklch(0.894 0.014 286.1);
+  --sidebar-accent: oklch(1 0 0 / 60%);
+  --sidebar-accent-foreground: oklch(0.172 0.007 258.4);
+  --sidebar-border: oklch(0.172 0.007 258.4 / 8%);
   --sidebar-ring: oklch(0.644 0.167 276.1);
 }
 
@@ -56,7 +60,10 @@
   color-scheme: dark;
   --empty-pattern-color: oklch(0.832 0.085 281.4);
   --empty-pattern-opacity: 0.15;
-  /* The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest. */
+  /*
+   * The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest. Not yet
+   * redrawn for the redesign, whose dark theme is still to come.
+   */
   --background: oklch(0.182 0.023 296.6);
   --foreground: oklch(0.956 0.005 286.3);
   --card: oklch(0.212 0.028 297.1);
@@ -103,8 +110,8 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  /* "Inter Variable" is the face @fontsource-variable/inter loads; plain Inter matches only one installed locally. */
-  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
+  /* The face is a token, so a skin that sets `--font-sans` is set in it. */
+  font-family: var(--font-sans);
 }
 
 /*
@@ -122,25 +129,34 @@ body {
  */
 
 /*
- * Text is sized on a 15px base while everything else is on Tailwind's 16px rem.
+ * Type, on Tailwind's own 16px scale, which is Figma's: Body/3 is `text-xs` (12px), Body/2 and the
+ * sidebar are `text-sm` (14px), Body/1 and H3 are `text-base` (16px), H2 is `text-xl` (20px). H1 is
+ * 32px, so `text-3xl` is 32px rather than Tailwind's 30.
  *
- * The root stays at the browser's 16px so spacing, sizes and radii land on Tailwind's 4px grid
- * (`p-4` is 16px, `h-8` is 32px). Only type keeps the scale it had under the old 15px root: each
- * size below is Tailwind's default multiplied by 15/16, so `text-sm` is still 13.125px. Line
- * heights are Tailwind's own unitless ratios and scale with them. `body` reads `--text-base`, so
- * unclassed text is 15px too.
+ * Not `inline`, so every size and face is read through its variable, and the alternate skins put
+ * back the 15px scale and Inter they were drawn in (`:root[data-skin]` in skins/legacy-base.css).
+ *
+ * Sora runs wide, and Figma tightens it by 4% at 12px and in every heading: `--text-xs` carries
+ * that itself, and a heading takes `tracking-heading`. Body text at 12 and 14px sits at Figma's 1.35.
  */
-@theme inline {
-  --text-xs: 0.703125rem; /* 11.25px */
-  --text-sm: 0.8203125rem; /* 13.125px */
-  --text-base: 0.9375rem; /* 15px */
-  --text-lg: 1.0546875rem; /* 16.875px */
-  --text-xl: 1.171875rem; /* 18.75px */
-  --text-2xl: 1.40625rem; /* 22.5px */
-  --text-3xl: 1.7578125rem; /* 28.125px */
-  --text-4xl: 2.109375rem; /* 33.75px */
+@theme {
+  --font-sans: "Sora Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
-  --font-sans: "Inter Variable", sans-serif;
+  --font-brand: "Figtree Variable", var(--font-sans);
+  --text-xs--line-height: 1.35;
+  --text-xs--letter-spacing: -0.04em;
+  --text-sm--line-height: 1.35;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 1.12;
+  --tracking-heading: -0.04em;
+  /* A row card and the tile behind its icon (Figma: 20px and 12px). */
+  --radius-card: 1.25rem;
+  --radius-tile: 0.75rem;
+  /* The page column: Figma's 700px of content, with the 16px gutter either side. */
+  --container-page: 45.75rem;
+}
+
+@theme inline {
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

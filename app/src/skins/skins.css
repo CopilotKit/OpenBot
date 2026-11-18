@@ -4,6 +4,7 @@
  * for dark, or dark mode would show the skin's light value. `app/tests/skins.test.ts` holds every
  * skin to that.
  */
+@import "./legacy-base.css";
 @import "./openduet/skin.css";
 @import "./opendots/skin.css";
 @import "./openfuse/skin.css";

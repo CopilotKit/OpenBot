@@ -72,6 +72,12 @@ export function SidebarShell({
   return (
     <SidebarProvider
       className={cn(SIDEBAR_GUTTER, className)}
+      /*
+       * In OpenBot Desktop on a Mac, the window moves by the frame around the sidebar and the page
+       * (OpenBot's own look draws one, styles.css). Bare: only a press on the wrapper itself, the
+       * frame, drags; the desktop reads this and leaves every other page alone.
+       */
+      data-desktop-drag=""
       data-resizing={resizing ? "" : undefined}
       onOpenChange={setOpen}
       open={open}

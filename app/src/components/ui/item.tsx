@@ -34,7 +34,7 @@ function ItemSeparator({
 }
 
 const itemVariants = cva(
-  "group/item flex w-full flex-wrap items-center rounded-lg border dark:border-transparent text-sm transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [a]:transition-colors [a]:hover:bg-muted",
+  "group/item flex w-full flex-wrap items-center rounded-card border dark:border-transparent text-sm transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [a]:transition-colors [a]:hover:bg-muted",
   {
     variants: {
       variant: {
@@ -43,13 +43,13 @@ const itemVariants = cva(
         muted: "border-transparent bg-muted/50",
       },
       /*
-       * Linear's settings row: 16px in from every edge and 12px between media, text and actions.
-       * A title over a one-line description comes to 65px, a single line to 48px.
+       * Figma's row card: 20px in from every edge and 12px between the icon tile, the text and the
+       * actions. A 44px tile beside a title and a one-line description comes to 84px.
        */
       size: {
-        default: "gap-3 px-4 py-3.5",
-        sm: "gap-3 px-4 py-3.5",
-        xs: "gap-2 px-2.5 py-2 in-data-[slot=dropdown-menu-content]:p-0",
+        default: "gap-3 p-5",
+        sm: "gap-3 p-5",
+        xs: "gap-2 rounded-lg px-2.5 py-2 in-data-[slot=dropdown-menu-content]:p-0",
       },
     },
     defaultVariants: {
@@ -84,13 +84,13 @@ function Item({
 }
 
 const itemMediaVariants = cva(
-  "flex shrink-0 items-center justify-center gap-2 group-has-data-[slot=item-description]/item:translate-y-0.5 group-has-data-[slot=item-description]/item:self-start [&_svg]:pointer-events-none",
+  "flex shrink-0 items-center justify-center gap-2 [&_svg]:pointer-events-none",
   {
     variants: {
       variant: {
         default: "bg-transparent",
-        // A 32px tile behind a 16px glyph, so a column of rows reads as a column of marks.
-        icon: "size-8 rounded-md bg-background text-muted-foreground ring-1 ring-border group-data-[size=xs]/item:size-6 [&_svg:not([class*='size-'])]:size-4",
+        // A 44px tile behind a 20px glyph, so a column of rows reads as a column of marks.
+        icon: "size-11 rounded-tile bg-sidebar text-foreground dark:bg-muted group-data-[size=xs]/item:size-6 group-data-[size=xs]/item:rounded-md [&_svg:not([class*='size-'])]:size-5 group-data-[size=xs]/item:[&_svg:not([class*='size-'])]:size-4",
         image:
           "size-10 overflow-hidden rounded-sm group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 [&_img]:size-full [&_img]:object-cover",
       },
@@ -121,7 +121,7 @@ function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="item-content"
       className={cn(
-        "flex flex-1 flex-col gap-0.5 group-data-[size=xs]/item:gap-0 [&+[data-slot=item-content]]:flex-none",
+        "flex flex-1 flex-col gap-2 group-data-[size=xs]/item:gap-0 [&+[data-slot=item-content]]:flex-none",
         className,
       )}
       {...props}
@@ -134,7 +134,8 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="item-title"
       className={cn(
-        "line-clamp-1 flex w-fit items-center gap-2 text-sm leading-snug font-medium underline-offset-4",
+        // Figma's H3: 16px semibold, tightened. A dropdown's row keeps the 14px label it had.
+        "line-clamp-1 flex w-fit items-center gap-2 text-base leading-tight font-semibold tracking-heading underline-offset-4 group-data-[size=xs]/item:text-sm group-data-[size=xs]/item:leading-snug group-data-[size=xs]/item:font-medium group-data-[size=xs]/item:tracking-normal",
         className,
       )}
       {...props}

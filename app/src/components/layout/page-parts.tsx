@@ -56,18 +56,18 @@ export function PageColumn({
           className={cn(
             /*
              * The page's rhythm lives here, so a screen gets it by being a child rather than by
-             * choosing a margin. The title block sits 32px above whatever comes first, tighter than
-             * the 48px between sections, so the heading reads as part of the page it introduces
-             * rather than as one more block at the same distance as all the others. Tabs are the
-             * exception: they belong to the title, so they sit 24px under it and the content 32px
-             * under them. These outrank the child's own `mt-*`, which is the point: a first section
-             * or notice keeps its usual margin everywhere else and loses it only here.
+             * choosing a margin. The title block sits 36px above whatever comes first, the same
+             * distance Figma puts between sections. Tabs are the exception: they belong to the
+             * title, so they sit 24px under it and the content 32px under them. These outrank the
+             * child's own `mt-*`, which is the point: a first section or notice keeps its usual
+             * margin everywhere else and loses it only here.
              */
             "mx-auto flex w-full flex-col px-4 pb-16",
-            "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
+            "[&>header+*]:mt-9 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
             // Without a bar above it the heading keeps the full original space.
             bar ? "pt-8" : "pt-12",
-            "max-w-3xl",
+            // Figma's 700px column, plus the gutter.
+            "max-w-page",
             className,
           )}
         >
@@ -89,10 +89,11 @@ export function PageHeader({
   title: string;
 }) {
   return (
-    <header className="flex flex-col gap-2" data-slot="page-header">
+    // Figma's H2 over a light 14px line, 4px apart.
+    <header className="flex flex-col gap-1" data-slot="page-header">
       <div className="flex flex-row items-center justify-between gap-4">
         <h1
-          className="font-semibold text-2xl tracking-tight"
+          className="font-semibold text-xl leading-tight tracking-heading"
           data-slot="page-title"
         >
           {title}
@@ -100,7 +101,7 @@ export function PageHeader({
         {action}
       </div>
       {description ? (
-        <p className="text-pretty text-muted-foreground text-sm leading-relaxed">
+        <p className="text-pretty font-light text-muted-foreground text-sm">
           {description}
         </p>
       ) : null}
@@ -132,19 +133,27 @@ export function PageSection({
   title?: string;
 }) {
   return (
-    <section className={cn("mt-12", className)} id={id}>
+    <section className={cn("mt-9", className)} id={id}>
       {title ? (
-        <div className="flex min-h-8 flex-row items-center justify-between gap-4">
+        <div
+          className={cn(
+            "flex flex-row items-center justify-between gap-4",
+            // Tall enough for a small button only when there is one, so a bare heading sits 12px over its rows.
+            action ? "min-h-8" : null,
+          )}
+        >
           {/*
-           * Close to body size and lighter than the page title, so the sections read as parts of
-           * the page rather than as a second row of titles competing with it.
+           * Body size and lighter than the page title, so the sections read as parts of the page
+           * rather than as a second row of titles competing with it.
            */}
-          <h2 className="font-semibold text-base">{title}</h2>
+          <h2 className="font-semibold text-base leading-tight tracking-heading">
+            {title}
+          </h2>
           {action}
         </div>
       ) : null}
       {description ? (
-        <p className="mt-1 text-pretty text-muted-foreground text-sm leading-relaxed">
+        <p className="mt-1 text-pretty font-light text-muted-foreground text-sm">
           {description}
         </p>
       ) : null}
@@ -154,11 +163,13 @@ export function PageSection({
 }
 
 /**
- * The card that rows live in.
+ * The column that rows live in.
  *
- * Rows are `<Item size="sm">` with a `<Separator />` between them; this is only the border around
- * them. Rendering nothing when there is nothing is deliberate — an empty bordered box reads as a
- * thing that failed to load, where absence reads as nothing to see yet.
+ * Rows are `<Item size="sm">`, each drawn as a card of its own, 2px from the next (Figma's settings
+ * and Bot screens). Screens still put a `<Separator />` between rows, from when this was one card
+ * divided by lines; it is not drawn here, so a screen does not have to change to get the new shape.
+ * Rendering nothing when there is nothing is deliberate — an empty box reads as a thing that failed
+ * to load, where absence reads as nothing to see yet.
  */
 export function PageRows({
   children,
@@ -168,22 +179,21 @@ export function PageRows({
   className?: string;
 }) {
   return (
-    /*
-     * The rows are squared off and the card clips them. `Item` carries `rounded-lg` of its own, which
-     * inside a card of divided rows painted a hover as a floating pill: a middle row has no corners,
-     * and the first and last cannot be concentric with the card while sitting a border inside it.
-     *
-     * Every row is at least 56px, whatever it holds. A title over a description is 65px; a lone
-     * line would be 48px and look stunted beside it, so it is held up to the floor. A description
-     * that wraps to a second line still grows the row rather than being clipped.
-     */
     <div
+      data-slot="page-rows"
       className={cn(
-        "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
-        "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
-        // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
-        // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
-        "[&_[data-slot=separator][data-orientation=horizontal]]:mx-4 [&_[data-slot=separator][data-orientation=horizontal]]:w-auto",
+        "mt-3 flex flex-col gap-0.5",
+        /*
+         * The card is put on each child rather than on `Item`, because a screen may wrap each row
+         * (Admin wraps a row and its divider to stagger them in), and the wrapper is what sits in
+         * this column. A row drawn `variant="outline"` stays an outline, as Figma draws a row that
+         * is not set up yet.
+         */
+        "[&>*:not([data-slot=separator])]:overflow-hidden [&>*:not([data-slot=separator])]:rounded-card",
+        "[&>*:not([data-slot=separator],[data-variant=outline])]:bg-card",
+        "[&_[data-slot=item]]:min-h-14",
+        // The old dividers, between rows or inside a row's wrapper.
+        "[&>[data-slot=separator][data-orientation=horizontal]]:hidden [&>*>[data-slot=separator][data-orientation=horizontal]]:hidden",
         className,
       )}
     >
@@ -210,12 +220,7 @@ export function PageCard({
   footer?: React.ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "rounded-lg border border-border bg-card p-4 dark:border-transparent",
-        className,
-      )}
-    >
+    <div className={cn("rounded-card bg-card p-5", className)}>
       {children}
       {footer ? (
         <div className="mt-6 flex justify-end gap-2">{footer}</div>
@@ -247,7 +252,7 @@ export function PageEmpty({
 }) {
   return (
     // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
-    <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-border">
+    <Empty className="relative isolate mt-3 overflow-hidden rounded-card border border-border">
       {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
       <div aria-hidden className="empty-pattern" />
       <EmptyHeader>

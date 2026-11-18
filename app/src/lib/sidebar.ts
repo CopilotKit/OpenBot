@@ -41,7 +41,7 @@ export function applySidebarOpen(open: boolean, effects: SidebarEffects) {
  * the rail measures as the drag starts, nor than `SIDEBAR_MIN_WIDTH`; never wider than
  * `SIDEBAR_MAX_WIDTH`, past which a roster stops being a column beside the work and becomes the work.
  */
-export const SIDEBAR_WIDTH = "340px";
+export const SIDEBAR_WIDTH = "280px";
 export const SIDEBAR_WIDTH_STORAGE_KEY = "openbot-sidebar-width";
 /**
  * Where the app's own width was kept when each shell had one. Read when the shared width was never

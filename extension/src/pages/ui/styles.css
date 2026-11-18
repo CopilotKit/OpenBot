@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
 @import "../../../../app/src/theme.css";
 @source "../../../../app/src/components/ui";
 @source "../../../../app/src/components/layout/page-parts.tsx";
