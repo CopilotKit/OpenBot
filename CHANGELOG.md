@@ -260,6 +260,12 @@ override or a Helm values file has to say.
   told the task on its next turn. A turn you run in a task's thread marks it Working, and its
   answer is posted in the conversation that asked. Ask the Bot to add to a task or stop one, and
   its answer is drawn as that task's card; when your words fit no task or several, it asks which.
+- **A task you are replying in reads Working, whoever started it.** While a Bot answers what you
+  typed in a check-in's task, the task is no longer counted as waiting on you, so the badge and
+  Needs you agree. The API's task carries `answeringYou` while that reply is all that runs, so a
+  list of work running on its own can leave it out. **Marking a task done also closes the cards
+  its Bot asked with**, not only its questions, so nothing in its conversation is left waiting on
+  you.
   A stopped task is never tried again, and the conversation that asked is told how many steps had
   finished.
 - **Agents.** A new Agents page in the main menu lists the agents Bots hand work to: one that runs
