@@ -326,6 +326,15 @@ pub struct Shortfall {
     /// drive C:" (`EngineCheck::free_on_drive`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub free_on_drive: bool,
+    /// That drive is this Mac's own disk (`windows::mac_drive`): "This Mac has 7.5 GB of free space".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mac: bool,
+    /// What is short is room for an update (`update_room`), not for a first setup: `needed_gb` is
+    /// what the update needs free where `disk_gb` was measured.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub updating: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needed_gb: Option<String>,
 }
 
 /// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
@@ -336,7 +345,8 @@ fn shown(value: f64) -> String {
 }
 
 impl Shortfall {
-    fn named(&self) -> bool {
+    /// Something is short, or recovering from being short.
+    pub fn named(&self) -> bool {
         self.cpu || self.memory || self.disk || self.recovering
     }
 }
@@ -1074,6 +1084,9 @@ pub enum Terms {
         /// That figure is what is free on `drive` (`Shortfall::free_on_drive`).
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         free_on_drive: bool,
+        /// The drive is this Mac's own disk (`Shortfall::mac`).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        mac: bool,
         /// What was measured, for the desktop's usage data only. Never sent to the window.
         #[serde(skip)]
         measured: EngineMeasure,
@@ -1713,8 +1726,8 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
 }
 
 /**
-What Windows says of the drive that holds the engine's disk, for the tests, in place of
-`windows::podman_machine_drive` and `windows::docker_data_drive`. For the whole process, so a check
+What Windows or a Mac says of the drive that holds the engine's disk, for the tests, in place of
+`windows::podman_machine_drive`, `windows::docker_data_drive` and `windows::mac_drive`. For the whole process, so a check
 on another thread reads it too, and a test never reads the drives of the computer it runs on: the
 Windows runner measured its own C: in a check made on another thread. Tests that set it run in a
 process of their own (`StartLab`).
@@ -1724,13 +1737,18 @@ static MACHINE_DRIVE: std::sync::Mutex<Option<crate::windows::MachineDrive>> =
     std::sync::Mutex::new(None);
 
 /**
-The drive that holds the engine's disk on Windows, and what is free on it: the Podman machine
-`address` names (`podman_machine_drive`), or Docker Desktop's disks (`docker_data_drive`). Both are
-sparse virtual disks of about a terabyte, so a container's own free space says nothing of the drive.
-Measured whether or not the engine answers: the drive is there either way.
+The drive that holds the engine's disk, and what is free on it: on Windows the Podman machine
+`address` names (`podman_machine_drive`), or Docker Desktop's disks (`docker_data_drive`); on a Mac
+its own disk (`mac_drive`). All are sparse virtual disks of 64 GB to a terabyte, so a container's own
+free space says nothing of the drive. Measured whether or not the engine answers: the drive is there
+either way.
 */
 #[cfg(not(test))]
 fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
+    // A Mac's own disk, under Docker Desktop's and Podman's machine disk alike.
+    if cfg!(target_os = "macos") {
+        return crate::windows::mac_drive();
+    }
     if address.engine == crate::engine::Engine::Docker {
         return crate::windows::docker_data_drive();
     }
@@ -1857,9 +1875,18 @@ impl EngineCheck {
         }
         short.drive = self.drive.as_ref().and_then(|drive| drive.drive.clone());
         // k3s's own line is inside the machine, whatever the drive has.
-        short.free_on_drive =
-            short.disk && !short.nearly_full && short.drive.is_some() && self.free_on_drive();
+        short.free_on_drive = short.disk && !short.nearly_full && self.drive_named();
+        short.mac = short.free_on_drive && self.drive.as_ref().is_some_and(|drive| drive.mac);
         short
+    }
+
+    /// The free disk that counts is a drive the window can name: `C:`, or this Mac's disk.
+    fn drive_named(&self) -> bool {
+        self.free_on_drive()
+            && self
+                .drive
+                .as_ref()
+                .is_some_and(|drive| drive.drive.is_some() || drive.mac)
     }
 
     /// `4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 983.2 GiB in a container, 120.0 GiB free on
@@ -1878,10 +1905,11 @@ impl EngineCheck {
             None => "free disk not measured".to_owned(),
         });
         if let Some(drive) = &self.drive {
-            let on = drive
-                .drive
-                .as_deref()
-                .unwrap_or("the drive that holds its disk");
+            let on = match (drive.drive.as_deref(), drive.mac) {
+                (Some(letter), _) => letter,
+                (None, true) => "this Mac's disk",
+                (None, false) => "the drive that holds its disk",
+            };
             said.push(format!("{} GiB free on {on}", gib(drive.free)));
         }
         match self.pressure {
@@ -1974,12 +2002,10 @@ pub fn engine_size_terms() -> Option<Terms> {
         disk: short.disk,
         wsl: check.wsl(),
         disk_gb: free.filter(|_| short.disk).map(gib),
-        free_on_drive: short.disk
-            && check.free_on_drive()
-            && check
-                .drive
-                .as_ref()
-                .is_some_and(|drive| drive.drive.is_some()),
+        free_on_drive: short.disk && check.drive_named(),
+        mac: short.disk
+            && check.drive_named()
+            && check.drive.as_ref().is_some_and(|drive| drive.mac),
         measured: EngineMeasure {
             cpus,
             memory_bytes: memory,
@@ -2031,6 +2057,8 @@ sparse disk of Docker Desktop or a Podman machine on Windows shows about a terab
 drive under it has. Windows G had 938.3 GiB in a container and 15 GB on C:, and the setup took C:
 down to 11.8 GB. That setup is not started: the report says the drive is short, with its numbers,
 and the downloads behind it hold until there is room (`early_downloads::hold_for_room`).
+
+And an update the computer has no room for (`update_room`): not started, said the same way.
 */
 fn checked_call(
     command: &str,
@@ -2048,6 +2076,16 @@ fn checked_call(
                 "[local check] {command} not started: the drive that holds the engine's disk has less than OpenBot needs"
             );
             crate::early_downloads::hold_for_room();
+            return Ok(short_of_drive(short));
+        }
+    }
+    // An update the computer has no room for is not started: nothing is downloaded, paused or
+    // changed, and the report says what is short with its numbers (`update_room`).
+    if command == "local update" {
+        let database = *INSTALLATION_DATABASE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(short) = update_room_of(&before, database) {
             return Ok(short_of_drive(short));
         }
     }
@@ -2104,6 +2142,115 @@ pub fn drive_short() -> Option<Shortfall> {
         crate::early_downloads::room_again();
     }
     short
+}
+
+/**
+ROOM FOR AN UPDATE, checked before an update does anything: before the back end's `local update`
+(`checked_call`) and before OpenBot's own update stops, backs up or downloads (`upgrade::run`).
+
+The first setup's 40 GiB is what the back end needs free before it is installed. An installation
+already uses part of that, so an update is held to what the update itself writes, beside what is
+there, until it removes what it replaced:
+
+- New images: an update downloads at most `MOST_AN_UPDATE_DOWNLOADS` (every image of OpenBot's and
+  the back end's changed), and an image takes `update_ready::ON_DISK` times its download on disk.
+- The database, twice: the backup `upgrade` writes before anything changes (`upgrade::DUMP`, a
+  `pg_dump` of it), and the copy a failed update restores into before it swaps it in
+  (`stack::restore_runtime_database`). Measured when OpenBot can (`installation_database`), and
+  counted as `UNMEASURED_DATABASE` when not.
+
+Then the same lines `update_ready` holds its downloads to: inside the engine, what is left keeps
+`update_ready::KEEP_FREE_PERCENT` of its disk free, below which k3s removes the back end's images;
+and on the computer's drive under the engine's disk, the update takes at most half of what is free.
+That drive runs out first on a Mac: its Docker disk is a sparse file that shows room whatever the
+Mac has, and an update on a Mac with 7.5 GB free of 926 GB filled it mid-update and broke Docker's
+disk ("Detected aborted journal").
+
+CPUs and memory are the first setup's (`MIN_ENGINE_CPUS`, `MIN_ENGINE_MEMORY_BYTES`).
+*/
+pub const MOST_AN_UPDATE_DOWNLOADS: u64 = 1_700_000_000;
+pub const UNMEASURED_DATABASE: u64 = GIB;
+
+/// Bytes an update writes, with a database of `database` bytes (`update_room`).
+pub fn update_needs(database: Option<u64>) -> u64 {
+    MOST_AN_UPDATE_DOWNLOADS * crate::update_ready::ON_DISK
+        + 2 * database.unwrap_or(UNMEASURED_DATABASE)
+}
+
+/// The size of OpenBot's own database, as the window last measured it, for the back end's update.
+static INSTALLATION_DATABASE: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+/// The size of this installation's database, for the room an update needs (`update_needs`).
+pub fn installation_database(bytes: Option<u64>) {
+    *INSTALLATION_DATABASE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = bytes;
+}
+
+/// Bytes as whole GiB, rounded up: what an update needs is never said as less than it is.
+fn whole_gib(bytes: u64) -> String {
+    bytes.div_ceil(GIB).to_string()
+}
+
+/// What `check` is short of for an update writing `needs` bytes (see `update_needs`). Anything not
+/// measured is not judged. The drive under the engine's disk is said first: it is what the person
+/// frees, and what runs out first.
+fn update_shortfall(check: &EngineCheck, needs: u64) -> Shortfall {
+    let (cpus, memory) = check.size.unwrap_or((u64::MAX, u64::MAX));
+    let mut short = engine_shortfall(cpus, memory, None);
+    short.podman = check.podman;
+    short.wsl = check.wsl();
+    short.updating = true;
+    let on_drive = needs.saturating_mul(2);
+    let in_engine = check.disk.map(|disk| {
+        (
+            disk,
+            needs.saturating_add(disk.size / 100 * crate::update_ready::KEEP_FREE_PERCENT),
+        )
+    });
+    if let Some(drive) = check.drive.as_ref().filter(|drive| drive.free < on_drive) {
+        short.disk = true;
+        short.disk_gb = Some(gib(drive.free));
+        short.needed_gb = Some(whole_gib(on_drive));
+        short.drive = drive.drive.clone();
+        short.mac = drive.mac;
+        short.free_on_drive = drive.drive.is_some() || drive.mac;
+    } else if let Some((disk, needed)) = in_engine.filter(|(disk, needed)| disk.free < *needed) {
+        short.disk = true;
+        short.disk_gb = Some(gib(disk.free));
+        short.needed_gb = Some(whole_gib(needed));
+    }
+    short
+}
+
+/**
+The update's preflight on `address`: what it is short of for an update, with a database of
+`database` bytes (`update_needs`), or nothing when it has room. Logged either way, as
+`[local check] before an update: ...`.
+*/
+pub fn update_room(address: &crate::engine::Address, database: Option<u64>) -> Option<Shortfall> {
+    update_room_of(&EngineCheck::of(address), database)
+}
+
+fn update_room_of(check: &EngineCheck, database: Option<u64>) -> Option<Shortfall> {
+    let needs = update_needs(database);
+    let short = update_shortfall(check, needs);
+    let said = format!(
+        "[local check] before an update: {}; the update writes about {} GiB, with {}",
+        check.said(),
+        whole_gib(needs),
+        database.map_or("the database not measured".to_owned(), |bytes| format!(
+            "a database of {} GiB",
+            gib(bytes)
+        ))
+    );
+    if short.named() {
+        log::warn!("{said}; not started, short of {short:?}");
+        Some(short)
+    } else {
+        log::info!("{said}; room");
+        None
+    }
 }
 
 /// A setup OpenBot did not start, for a drive short of disk (`checked_call`): blocked on resources,
@@ -3976,13 +4123,38 @@ fn stop_tree(child: &mut Child, grace: Duration, failure: Failure) -> Failure {
 ///
 /// A cancel can arrive before its call has registered: the window sends both, and nothing orders
 /// them. So a cancel for an unknown attempt is kept, and the call finds itself already cancelled.
-static IN_FLIGHT: std::sync::Mutex<Vec<(String, Cancel)>> = std::sync::Mutex::new(Vec::new());
+static IN_FLIGHT: std::sync::Mutex<Vec<(String, Cancel, Kind)>> = std::sync::Mutex::new(Vec::new());
 
 /// At most this many attempts are remembered, so cancels for calls that never come cannot grow
 /// the list without bound.
 const REMEMBERED: usize = 64;
 
-fn in_flight() -> std::sync::MutexGuard<'static, Vec<(String, Cancel)>> {
+/// Whose shutdown a `stop_for_shutdown` is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShutdownBy {
+    Stop,
+    Quit,
+}
+
+/**
+What a call in `IN_FLIGHT` is, which decides what may cancel it.
+
+- A call the window asked for: every Stop and Quit cancels it, and the window can.
+- A stop of the stack, a Stop's or Quit's own: nothing cancels it. Another Stop leaves it to finish
+  and waits its turn; cancelling it only cut a stop short for the later one to start again, and
+  the earlier Stop said some services didn't stop. Quit waits for a Stop's and takes its answer
+  as its own (`a_stops_answer`), and refuses one a Stop starts once Quit has begun. Quit used to
+  cancel a Stop's and run its own: on Windows cancelling is a hard kill, which runs none of the
+  CLI's cleanup, so the killed CLI's lock outlived it, Quit's own stop was refused as busy
+  (`local_command_busy`), and the stack was left running.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Call,
+    Shutdown(ShutdownBy),
+}
+
+fn in_flight() -> std::sync::MutexGuard<'static, Vec<(String, Cancel, Kind)>> {
     IN_FLIGHT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -4015,7 +4187,8 @@ Refuse new calls and cancel the running ones, until the returned guard is droppe
 Cancelling once is not enough. A status or start the window sends while Stop is taking OpenBot's
 containers down would otherwise take its turn ahead of the shutdown's own stop, or start after it
 and leave the stack running. So every call registered while closing is cancelled before it begins,
-except the shutdown's own (`stop_for_shutdown`).
+except the shutdown's own (`stop_for_shutdown`). A stop of the stack already running for another
+Stop or for Quit is left to finish (`Kind`).
 */
 pub fn closing_for_stop() -> Closing {
     STOPPING.fetch_add(1, Ordering::SeqCst);
@@ -4023,8 +4196,8 @@ pub fn closing_for_stop() -> Closing {
     Closing(())
 }
 
-/// As `closing_for_stop`, for good. Quitting also cancels a Stop's own stop, so Quit never waits
-/// behind it; Quit runs its own.
+/// As `closing_for_stop`, for good. A Stop's own stop already running is left to finish, and Quit
+/// takes its answer (`stop_for_shutdown`); one a Stop starts later is refused.
 pub fn close_for_quit() {
     close_for_quit_reporting(|| {});
 }
@@ -4043,6 +4216,8 @@ Except an update that has begun changing the release with Helm, or a repair of o
 True when it waited for one.
 */
 pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
+    // Before anything else, and read under the lock a Stop's own stop registers with, so it is
+    // either refused there or already on record for Quit to wait for.
     QUITTING.store(true, Ordering::SeqCst);
     cancel_all();
     let mut finishing = Some(finishing);
@@ -4084,38 +4259,146 @@ impl Drop for Running {
     }
 }
 
-/// An attempt's place in `IN_FLIGHT`, removed however the call ends.
-struct Attempt(Cancel);
+/// An attempt's place in `IN_FLIGHT`, removed however the call ends, and for a Stop's own stop of
+/// the stack, its place in `STOPS`.
+struct Attempt(Cancel, Option<Arc<StopOfTheStack>>);
+
+/**
+A Stop's own stop of the stack, from the moment it is let through until it ends, and its answer.
+
+Quit waits on these rather than cancel them (`Kind`), and answers with theirs.
+*/
+#[derive(Default)]
+struct StopOfTheStack {
+    /// Whether it has ended, and what it answered if it got as far as answering.
+    done: std::sync::Mutex<(bool, Option<Result<Report, Failure>>)>,
+    ended: std::sync::Condvar,
+}
+
+impl StopOfTheStack {
+    fn done(&self) -> std::sync::MutexGuard<'_, (bool, Option<Result<Report, Failure>>)> {
+        self.done
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Every Stop's own stop of the stack let through and not yet ended.
+static STOPS: std::sync::Mutex<Vec<Arc<StopOfTheStack>>> = std::sync::Mutex::new(Vec::new());
+
+fn stops() -> std::sync::MutexGuard<'static, Vec<Arc<StopOfTheStack>>> {
+    STOPS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 impl Attempt {
     /// Read under the same lock `cancel_all` takes, so a call registering as closing begins is
     /// either refused here or cancelled there.
     fn register(id: &str) -> Self {
-        Self::enter(id, true)
+        Self::enter(id, Kind::Call)
     }
 
-    fn register_for_shutdown(id: &str) -> Self {
-        Self::enter(id, false)
+    fn register_for_shutdown(id: &str, by: ShutdownBy) -> Self {
+        Self::enter(id, Kind::Shutdown(by))
     }
 
-    fn enter(id: &str, refused_while_closing: bool) -> Self {
+    fn enter(id: &str, kind: Kind) -> Self {
         let mut held = in_flight();
-        let cancel = match held.iter().position(|(attempt, _)| attempt == id) {
-            Some(index) => held.remove(index).1,
-            None => Cancel::default(),
+        let earlier = held
+            .iter()
+            .position(|(attempt, _, _)| attempt == id)
+            .map(|index| held.remove(index).1);
+        let cancel = match kind {
+            Kind::Call => earlier.unwrap_or_default(),
+            // Not even a cancel sent ahead for its id stops a stop of the stack.
+            Kind::Shutdown(_) => Cancel::default(),
         };
-        if refused_while_closing && closed() {
+        let refused = match kind {
+            Kind::Call => closed(),
+            // Once Quit has begun it stops the stack itself, and a Stop's would only hold it up.
+            Kind::Shutdown(ShutdownBy::Stop) => QUITTING.load(Ordering::SeqCst),
+            Kind::Shutdown(ShutdownBy::Quit) => false,
+        };
+        if refused {
             cancel.cancel();
         }
-        held.push((id.to_owned(), cancel.clone()));
-        Self(cancel)
+        // On record before the lock is let go, so a Quit beginning now waits for it.
+        let stop = (kind == Kind::Shutdown(ShutdownBy::Stop) && !refused).then(|| {
+            let stop = Arc::new(StopOfTheStack::default());
+            stops().push(stop.clone());
+            stop
+        });
+        held.push((id.to_owned(), cancel.clone(), kind));
+        Self(cancel, stop)
+    }
+
+    /// What the call answered, for a Quit waiting on this Stop's stop of the stack.
+    fn answered(&self, answer: &Result<Report, Failure>) {
+        if let Some(stop) = &self.1 {
+            stop.done().1 = Some(answer.clone());
+        }
     }
 }
 
 impl Drop for Attempt {
     fn drop(&mut self) {
-        in_flight().retain(|(_, cancel)| !Arc::ptr_eq(&cancel.0, &self.0 .0));
+        in_flight().retain(|(_, cancel, _)| !Arc::ptr_eq(&cancel.0, &self.0 .0));
+        if let Some(stop) = self.1.take() {
+            stops().retain(|other| !Arc::ptr_eq(other, &stop));
+            stop.done().0 = true;
+            stop.ended.notify_all();
+        }
     }
+}
+
+/**
+Quit's answer when a Stop is already stopping the stack: that stop's, once it has ended, within
+`bound`. None when no Stop's stop is running, or none got as far as answering: Quit then runs its
+own.
+
+Quit used to cancel it and run its own. Cancelling cuts the CLI short, which on Windows is a hard
+kill that leaves the CLI's lock behind, so Quit's own stop was refused as busy and the stack kept
+running. Waiting for it costs Quit no more than its own stop would have: a stop takes about 12 s on
+macOS and 13 s on Windows (measured on OpenBot 1.1.0), and `bound` is the two minutes Quit allows
+its own stop (`Limits::for_quit`).
+
+When `bound` runs out first, Quit says the stop did not finish in time (`Failure::Timeout`) and
+leaves that stop running: it is the CLI's own `local stop`, and cut short it would leave the stack
+half stopped, so it finishes on its own after OpenBot has exited.
+*/
+fn a_stops_answer(bound: Duration) -> Option<Result<Report, Failure>> {
+    let running: Vec<_> = stops().clone();
+    if running.is_empty() {
+        return None;
+    }
+    log::info!("[quit] a Stop is already stopping the backend: waiting for it");
+    let deadline = Instant::now() + bound;
+    let mut answer = None;
+    for stop in running {
+        let mut done = stop.done();
+        while !done.0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                log::warn!(
+                    "[quit] the Stop's stop of the backend did not end within {bound:?}; it carries on"
+                );
+                return Some(Err(Failure::Timeout));
+            }
+            done = stop
+                .ended
+                .wait_timeout(done, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        match done.1.clone() {
+            // The stack is stopped: nothing a later Stop's stop says changes that.
+            Some(Ok(report)) if report.outcome == Outcome::Completed => return Some(Ok(report)),
+            Some(other) => answer = Some(other),
+            None => {}
+        }
+    }
+    answer
 }
 
 /// Held by the one call that is running. The CLI refuses a second `local` command while one is in
@@ -4216,16 +4499,23 @@ pub fn run_installed_with(
     run_attempt(attempt, Attempt::register(attempt), action, stack, limits)
 }
 
-/// `stop` for Stop or Quit itself: the one call let through while closing. A later Quit still
-/// cancels it.
+/// `stop` for Stop or Quit itself: the one call let through while closing, and never cancelled.
+/// Quit's answers with a Stop's already running when there is one (`a_stops_answer`), and a
+/// Stop's is refused once Quit has begun.
 pub fn stop_for_shutdown(
     attempt: &str,
     stack: &StackId,
+    by: ShutdownBy,
     limits: Limits,
 ) -> Result<Report, Failure> {
+    if by == ShutdownBy::Quit {
+        if let Some(answer) = a_stops_answer(limits.timeout) {
+            return answer;
+        }
+    }
     run_attempt(
         attempt,
-        Attempt::register_for_shutdown(attempt),
+        Attempt::register_for_shutdown(attempt, by),
         Action::Stop,
         stack,
         limits,
@@ -4235,6 +4525,18 @@ pub fn stop_for_shutdown(
 fn run_attempt(
     id: &str,
     attempt: Attempt,
+    action: Action,
+    stack: &StackId,
+    limits: Limits,
+) -> Result<Report, Failure> {
+    let answer = run_turn(id, &attempt, action, stack, limits);
+    attempt.answered(&answer);
+    answer
+}
+
+fn run_turn(
+    id: &str,
+    attempt: &Attempt,
     action: Action,
     stack: &StackId,
     limits: Limits,
@@ -5536,24 +5838,28 @@ pub fn list_installed(attempt: &str) -> Result<Listing, Failure> {
 /// Stop one call, whether or not it has started yet.
 pub fn cancel(attempt: &str) {
     let mut held = in_flight();
-    match held.iter().find(|(id, _)| id == attempt) {
-        Some((_, cancel)) => cancel.cancel(),
+    match held.iter().find(|(id, _, _)| id == attempt) {
+        Some((_, _, Kind::Shutdown(_))) => {}
+        Some((_, cancel, _)) => cancel.cancel(),
         None => {
             if held.len() >= REMEMBERED {
                 held.remove(0);
             }
             let cancel = Cancel::default();
             cancel.cancel();
-            held.push((attempt.to_owned(), cancel));
+            held.push((attempt.to_owned(), cancel, Kind::Call));
         }
     }
 }
 
-/// Stop every call in progress, before Stop or Quit asks the CLI to stop. Each stops its own
-/// process tree, and a call still waiting for its turn never starts.
+/// Stop every call the window asked for, before Stop or Quit asks the CLI to stop. Each stops its
+/// own process tree, and a call still waiting for its turn never starts. A stop of the stack
+/// already running, a Stop's or Quit's, is left to finish (`Kind`).
 pub fn cancel_all() {
-    for (_, cancel) in in_flight().iter() {
-        cancel.cancel();
+    for (_, cancel, kind) in in_flight().iter() {
+        if *kind == Kind::Call {
+            cancel.cancel();
+        }
     }
 }
 
@@ -7292,7 +7598,7 @@ mod tests {
             Err(Failure::Unavailable)
         );
         // The attempt is gone however the call ended.
-        assert!(!in_flight().iter().any(|(id, _)| id == "no-cli-attempt"));
+        assert!(!in_flight().iter().any(|(id, _, _)| id == "no-cli-attempt"));
     }
 
     #[test]
@@ -7341,7 +7647,7 @@ mod tests {
         let attempt = Attempt::register("early-attempt");
         assert!(attempt.0.requested());
         drop(attempt);
-        assert!(!in_flight().iter().any(|(id, _)| id == "early-attempt"));
+        assert!(!in_flight().iter().any(|(id, _, _)| id == "early-attempt"));
     }
 
     #[test]
@@ -7535,7 +7841,7 @@ mod tests {
         assert_eq!(list_installed("list-during-stop"), Err(Failure::Cancelled));
         // The shutdown's own stop is the one call allowed through; this build then has no CLI.
         assert_eq!(
-            stop_for_shutdown("the-shutdown", &stack, Limits::for_quit()),
+            stop_for_shutdown("the-shutdown", &stack, ShutdownBy::Stop, Limits::for_quit()),
             Err(Failure::Unavailable)
         );
         let second = closing_for_stop();
@@ -7553,20 +7859,22 @@ mod tests {
     }
 
     #[test]
-    fn quitting_closes_for_good_and_cancels_a_stop_in_progress() {
+    fn quitting_closes_for_good_and_leaves_a_stop_in_progress_to_finish() {
         if crate::test_support::isolated_process(
-            "local_eval::tests::quitting_closes_for_good_and_cancels_a_stop_in_progress",
+            "local_eval::tests::quitting_closes_for_good_and_leaves_a_stop_in_progress_to_finish",
         ) {
             return;
         }
         let stack = StackId::parse("local-abc123").unwrap();
         let stopping = closing_for_stop();
-        let stops = Attempt::register_for_shutdown("stop-in-progress");
+        let stops = Attempt::register_for_shutdown("stop-in-progress", ShutdownBy::Stop);
         close_for_quit();
         assert!(
-            stops.0.requested(),
-            "Quit does not wait behind Stop's own stop"
+            !stops.0.requested(),
+            "Quit cut a Stop's stop of the stack short"
         );
+        // It ended without answering, so Quit runs its own.
+        drop(stops);
         drop(stopping);
         drop(closing_for_stop());
         assert_eq!(
@@ -7574,9 +7882,138 @@ mod tests {
             Err(Failure::Cancelled)
         );
         assert_eq!(
-            stop_for_shutdown("quit-shutdown", &stack, Limits::for_quit()),
+            stop_for_shutdown(
+                "quit-shutdown",
+                &stack,
+                ShutdownBy::Quit,
+                Limits::for_quit()
+            ),
             Err(Failure::Unavailable)
         );
+        // Once quitting, a Stop's own stop is refused: Quit stops the stack itself.
+        assert_eq!(
+            stop_for_shutdown(
+                "stop-after-quit",
+                &stack,
+                ShutdownBy::Stop,
+                Limits::for_quit()
+            ),
+            Err(Failure::Cancelled)
+        );
+    }
+
+    /// Who may cancel what (`Kind`): Stop and Quit cancel only the window's calls. Nothing, not a
+    /// Stop, a Quit, or a cancel sent for its id, cancels a stop of the stack, a Stop's or Quit's.
+    #[test]
+    fn nothing_cancels_a_stop_of_the_stack() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::nothing_cancels_a_stop_of_the_stack",
+        ) {
+            return;
+        }
+        cancel("quit-own");
+        cancel("stop-own");
+        let window = Attempt::register("window-call");
+        let stop_own = Attempt::register_for_shutdown("stop-own", ShutdownBy::Stop);
+        let quit_own = Attempt::register_for_shutdown("quit-own", ShutdownBy::Quit);
+        assert!(!stop_own.0.requested(), "a cancel sent ahead for its id");
+        assert!(!quit_own.0.requested(), "a cancel sent ahead for its id");
+
+        let stopping = closing_for_stop();
+        cancel_all();
+        assert!(window.0.requested());
+        // A second Stop's own stop, while the first's runs, is let through to wait its turn.
+        let second_stop = Attempt::register_for_shutdown("second-stop", ShutdownBy::Stop);
+        drop(stopping);
+        cancel("stop-own");
+        cancel("quit-own");
+        close_for_quit();
+        for (attempt, which) in [
+            (&stop_own, "a Stop's"),
+            (&second_stop, "a second Stop's"),
+            (&quit_own, "Quit's"),
+        ] {
+            assert!(
+                !attempt.0.requested(),
+                "{which} stop of the stack was cut short"
+            );
+        }
+        // Once quitting, a Stop's is refused before it starts: Quit stops the stack itself.
+        let late = Attempt::register_for_shutdown("late-stop", ShutdownBy::Stop);
+        assert!(late.0.requested());
+        assert!(
+            late.1.is_none(),
+            "Quit would wait for a stop that never runs"
+        );
+    }
+
+    fn completed() -> Report {
+        normalize(
+            Action::Stop,
+            0,
+            {
+                let mut done = envelope();
+                done["command"] = json!("local stop");
+                done.to_string()
+            }
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    /// Quit during a Stop's stop of the stack waits for it and answers with it, without running the
+    /// CLI again: a second `local stop` behind one cut short was what the CLI refused as busy.
+    #[test]
+    fn quit_waits_for_a_stops_stop_and_answers_with_it() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_waits_for_a_stops_stop_and_answers_with_it",
+        ) {
+            return;
+        }
+        let stack = StackId::parse("local-abc123").unwrap();
+        let stopping = Attempt::register_for_shutdown("stop-running", ShutdownBy::Stop);
+        // Held here, in STOPS and by the attempt: Quit holds one more while it waits.
+        let held = stopping.1.clone().unwrap();
+        close_for_quit();
+        let quitting = std::thread::spawn(move || {
+            stop_for_shutdown("quit-own", &stack, ShutdownBy::Quit, Limits::for_quit())
+        });
+        let until = Instant::now() + Duration::from_secs(30);
+        while Arc::strong_count(&held) < 4 {
+            assert!(
+                Instant::now() < until,
+                "Quit never waited for the Stop's stop"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!quitting.is_finished(), "Quit ran its own stop meanwhile");
+        stopping.answered(&Ok(completed()));
+        drop(stopping);
+        // This build has no CLI: an answer of Quit's own would be Unavailable.
+        assert_eq!(quitting.join().unwrap(), Ok(completed()));
+    }
+
+    /// When a Stop's stop of the stack outlasts Quit's bound, Quit says so and leaves it running.
+    #[test]
+    fn quit_says_when_a_stops_stop_outlasts_its_bound_and_leaves_it_running() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_says_when_a_stops_stop_outlasts_its_bound_and_leaves_it_running",
+        ) {
+            return;
+        }
+        let stack = StackId::parse("local-abc123").unwrap();
+        let stopping = Attempt::register_for_shutdown("stop-running", ShutdownBy::Stop);
+        close_for_quit();
+        assert_eq!(
+            stop_for_shutdown(
+                "quit-own",
+                &stack,
+                ShutdownBy::Quit,
+                short(Duration::from_millis(300))
+            ),
+            Err(Failure::Timeout)
+        );
+        assert!(!stopping.0.requested(), "Quit cut the Stop's stop short");
     }
 
     #[test]
@@ -10565,6 +11002,7 @@ overlay 164506208 20481024 135620148 14% /
                 drive: None,
                 disk_gb: Some("1".into()),
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure {
                     cpus: 8,
                     memory_bytes: 8 * GIB,
@@ -10584,6 +11022,7 @@ overlay 164506208 20481024 135620148 14% /
                 drive: Some("C:".into()),
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure::default(),
             })
             .unwrap(),
@@ -11158,6 +11597,7 @@ fn main() {
                 drive: None,
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure {
                     cpus: 2,
                     memory_bytes: 22011707392,
@@ -11179,6 +11619,7 @@ fn main() {
                 drive: Some("C:".into()),
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: EngineMeasure {
                     cpus: 2,
                     memory_bytes: 22011707392,
@@ -11241,6 +11682,7 @@ fn main() {
             log_folder: Some(&logs),
             home: Some(&home),
             engine: engine_in_use(),
+            server_log: None,
         });
 
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
@@ -11272,6 +11714,7 @@ fn main() {
         Some(crate::windows::MachineDrive {
             drive: Some("C:".into()),
             free: tenths * GIB / 10 + GIB / 100,
+            mac: false,
         })
     }
 
@@ -11555,8 +11998,146 @@ fn main() {
             Some(crate::windows::MachineDrive {
                 drive: Some("C:".into()),
                 free,
+                mac: false,
             }),
         );
+    }
+
+    /// What `statvfs` answers for the home folder of a 926 GB Mac with 7.5 GB free, as `df -h ~`
+    /// said it on the Mac whose update filled its disk: 4 KiB fragments, the free ones counted.
+    #[cfg(unix)]
+    fn full_mac_statvfs() -> libc::statvfs {
+        // SAFETY: statvfs is plain data; every field the free space is read from is set below.
+        let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+        stats.f_frsize = 4096;
+        stats.f_bsize = 4096;
+        stats.f_blocks = (926 * GIB / 4096) as _;
+        stats.f_bfree = (75 * GIB / 10 / 4096) as _;
+        stats.f_bavail = (75 * GIB / 10 / 4096) as _;
+        stats
+    }
+
+    /// An update, on the Mac above: Docker Desktop 4.67.0 with 10 CPUs and 20.5 GiB, and its sparse
+    /// disk showing 900 GiB free in a container, whatever the Mac has.
+    #[cfg(unix)]
+    fn update_on_a_full_mac(lab: &StartLab, free: u64) {
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 900 * KIB_PER_GIB),
+            None,
+            Some(crate::windows::MachineDrive {
+                drive: None,
+                free,
+                mac: true,
+            }),
+        );
+        // OpenBot's own database, as the window measured it: 52 MiB.
+        installation_database(Some(52 * 1024 * 1024));
+    }
+
+    /**
+    The Mac that updated to 1.1.0 with 7.5 GB free of 926 GB. Docker's disk showed room, so nothing
+    stopped the update, which filled the Mac mid-way and broke Docker's disk. The back end's update
+    is checked first now, against the Mac's own disk: it is not started, the CLI never runs, and the
+    report says what the Mac has and what the update needs.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn an_update_on_a_mac_short_of_disk_is_not_started_and_says_the_macs_figures() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_update_on_a_mac_short_of_disk_is_not_started_and_says_the_macs_figures",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("update-full-mac");
+        let free = crate::early_downloads::statvfs_free(&full_mac_statvfs());
+        update_on_a_full_mac(&lab, free);
+        std::fs::write(lab.fixture.root.join("scenario"), "0\n{}").unwrap();
+        let stack = StackId::parse("local-abc123").unwrap();
+        let report = run_installed("full-mac", Action::Update, &stack).unwrap();
+        assert_eq!(lab.fixture.argv(), None, "the backend's update ran");
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["outcome"], json!("blocked"));
+        assert_eq!(wire["reason"], json!("resources-short"));
+        // 4 x 1.7 GB of images and the 52 MiB database twice, 6.9 GB, at most half of what is free.
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "7.5", "freeOnDrive": true, "mac": true,
+                "updating": true, "neededGb": "13"
+            })
+        );
+        let logged = checks_logged();
+        assert!(
+            logged.iter().any(
+                |entry| entry.starts_with("WARN [local check] before an update:")
+                    && entry.contains("7.5 GiB free on this Mac's disk")
+                    && entry.contains("not started")
+            ),
+            "{logged:?}"
+        );
+    }
+
+    /// The same update with room on the Mac and in Docker: the preflight lets it through.
+    #[test]
+    fn an_update_with_room_on_the_drive_and_in_the_engine_is_let_through() {
+        let check = EngineCheck {
+            podman: false,
+            size: Some((10, 22011707392)),
+            disk: Some(Disk {
+                size: 1006 * GIB,
+                free: 900 * GIB,
+            }),
+            drive: Some(crate::windows::MachineDrive {
+                drive: None,
+                free: 60 * GIB,
+                mac: true,
+            }),
+            pressure: None,
+        };
+        assert_eq!(update_room_of(&check, Some(52 * 1024 * 1024)), None);
+        // C: on Windows at 12 GB free, under the 13 GB an update needs free there: refused, said
+        // as C:'s.
+        let windows_g = EngineCheck {
+            drive: Some(crate::windows::MachineDrive {
+                drive: Some("C:".into()),
+                free: 12 * GIB,
+                mac: false,
+            }),
+            ..check.clone()
+        };
+        let short = update_room_of(&windows_g, Some(0)).unwrap();
+        assert_eq!(
+            (short.drive.as_deref(), short.free_on_drive, short.mac),
+            (Some("C:"), true, false)
+        );
+        assert_eq!(short.needed_gb.as_deref(), Some("13"));
+        // Docker Desktop's own disk limit, the Mac with room: what is short is inside Docker, and
+        // the update needs its images and the database, and the 15% k3s keeps free, there.
+        let small_docker = EngineCheck {
+            disk: Some(Disk {
+                size: 64 * GIB,
+                free: 12 * GIB,
+            }),
+            ..check.clone()
+        };
+        let short = update_room_of(&small_docker, Some(0)).unwrap();
+        assert_eq!(
+            (
+                short.disk_gb.as_deref(),
+                short.needed_gb.as_deref(),
+                short.free_on_drive
+            ),
+            (Some("12"), Some("16"), false)
+        );
+        // An engine with too little memory for OpenBot is short for an update too.
+        let small = EngineCheck {
+            size: Some((4, 2 * GIB)),
+            ..check
+        };
+        assert!(update_room_of(&small, Some(0)).unwrap().memory);
     }
 
     /**

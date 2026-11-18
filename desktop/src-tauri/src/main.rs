@@ -1600,18 +1600,107 @@ fn detect_engine<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> engine::EngineS
     status
 }
 
+/**
+What on this computer is in the way of OpenBot, for the setup window.
+
+Async, with the probes on a blocking thread. Tauri runs a command without `async` on the main
+thread (https://v2.tauri.app/develop/calling-rust/#async-commands), which on Windows is the
+window's own. This was such a command, running PowerShell, `wsl.exe` and `docker` with no limit,
+so any probe that hung held the setup window "Not Responding" while "Checking your saved setup"
+waited on it. Each probe is now bounded too (`win::blocker`, `win::nested_virtualization_blocker`,
+`DOCKER_ANSWERS`).
+*/
 #[tauri::command]
-fn windows_blocker<R: tauri::Runtime>(
+async fn windows_blocker<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<Option<win::Blocker>, Problem> {
-    // The rest of the machine is ready: ask WSL whether it can start a VM at all, unless Docker
-    // already answers, which proves it can.
-    let result = win::blocker().map(|found| {
+    windows_blocker_from(app, windows_blocker_here).await
+}
+
+/// `docker version` answers in well under a second when Docker is up and fails as fast when it is
+/// not; one still waiting after ten has nothing useful to say, and the WSL question that follows
+/// it is asked instead.
+const DOCKER_ANSWERS: std::time::Duration = std::time::Duration::from_secs(10);
+/// Past three seconds `docker version` is slow: well over its usual second, under a third of its
+/// limit.
+const DOCKER_SLOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The rest of the machine is ready: ask WSL whether it can start a VM at all, unless Docker
+/// already answers, which proves it can. Only on Windows, the one place either is asked. `tell`
+/// hears that Windows's own servicing holds the check, and of probes that ran long or timed out.
+fn windows_blocker_here(tell: &dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem> {
+    win::blocker(tell).map(|found| {
         found.or_else(|| {
-            (!openbot_desktop_lib::docker_desktop::answers())
-                .then(win::nested_virtualization_blocker)
+            if !cfg!(target_os = "windows") {
+                return None;
+            }
+            let asked = std::time::Instant::now();
+            let answers = openbot_desktop_lib::docker_desktop::answers_within(DOCKER_ANSWERS);
+            if let Some(heard) = win::heard_of(
+                telemetry::WindowsProbeKind::Docker,
+                answers.is_none(),
+                asked.elapsed(),
+                DOCKER_SLOW,
+            ) {
+                tell(heard);
+            }
+            (answers != Some(true))
+                .then(|| win::nested_virtualization_blocker(tell))
                 .flatten()
         })
+    })
+}
+
+/// The Windows check, given what to tell while it runs (`win::Heard`).
+type WindowsCheck = fn(&dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem>;
+
+/// The window's event for "Windows is busy installing an update, and the check waits on it".
+const WINDOWS_BUSY_EVENT: &str = "setup:windows-busy";
+
+/// `windows_blocker`, with `check` run on a blocking thread rather than the one that asked:
+/// `WINDOWS_BUSY_EVENT` sent to the window whenever it says Windows is busy, and a probe that ran
+/// long or timed out recorded in usage data (`windows_probe`) and the log.
+async fn windows_blocker_from<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    check: WindowsCheck,
+) -> Result<Option<win::Blocker>, Problem> {
+    let telling = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        check(&|heard| match heard {
+            win::Heard::ServicingBusy => {
+                log::info!("[windows check] Windows's servicing is busy; the check waits on it");
+                let _ = telling.emit(WINDOWS_BUSY_EVENT, ());
+            }
+            win::Heard::Probe {
+                probe,
+                outcome,
+                duration_ms,
+            } => {
+                log::warn!(
+                    "[windows check] the {} probe was {} after {duration_ms} ms",
+                    probe.as_str(),
+                    match outcome {
+                        telemetry::WindowsProbeOutcome::Slow => "slow",
+                        telemetry::WindowsProbeOutcome::TimedOut => "stopped",
+                    }
+                );
+                desktop_telemetry::record(
+                    &telling,
+                    telemetry::EventData::WindowsProbe {
+                        probe,
+                        outcome,
+                        duration_ms,
+                    },
+                );
+            }
+        })
+    })
+    .await
+    .unwrap_or_else(|error| {
+        Err(Problem::with(
+            "OpenBot could not check Windows setup. Close and reopen OpenBot to try again.",
+            error.to_string(),
+        ))
     });
     if cfg!(target_os = "windows") {
         use telemetry::WindowsStageOutcome as Outcome;
@@ -1693,6 +1782,11 @@ async fn windows_restart_pending(app: tauri::AppHandle) -> Result<bool, Problem>
     let Ok(data) = app.path().app_local_data_dir() else {
         return Ok(false);
     };
+    // Nothing recorded, nothing owed: Windows is not asked when it last started, which is a CIM
+    // query, on every launch.
+    if !win::restart_path(&data).exists() {
+        return Ok(false);
+    }
     tauri::async_runtime::spawn_blocking(move || Ok(win::restart_pending(&data, &win::boot()?)))
         .await
         .map_err(|error| {
@@ -1865,6 +1959,14 @@ impl upgrade::Steps for DesktopSteps {
         );
     }
 
+    fn room(&mut self) -> Result<(), Problem> {
+        let database = installation_database_bytes(&self.root, &self.address);
+        match local_eval::update_room(&self.address, database) {
+            Some(short) => Err(upgrade::short_problem(short)),
+            None => Ok(()),
+        }
+    }
+
     fn stop(&mut self) -> Result<(), Problem> {
         self.own_containers();
         stop_for_update(&self.app, &self.root)
@@ -1971,7 +2073,14 @@ async fn upgrade_and_start(
     desktop_connected::local_only(&app)?;
     let asked = std::time::Instant::now();
     log::info!("[update] asked to update the installation in {root} and start it");
-    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    let selected = stack::root_from(&root);
+    let ran = upgrade_and_start_now(app, root, api_url, gateway_ws_url, model, harness)
+        .await
+        .map(|mut outcome| {
+            outcome.notice = outcome.notice.map(|notice| explained(notice, &selected));
+            outcome
+        })
+        .map_err(|problem| explained(problem, &selected));
     if let Ok(outcome) = &ran {
         log::info!(
             "[update] {} from {} to {}{}",
@@ -2076,6 +2185,19 @@ async fn upgrade_and_start_now(
         .update_cancelled
         .load(std::sync::atomic::Ordering::SeqCst);
     match ran {
+        // Nothing changed: the version it had is as it was. Retry checks again once there is room.
+        upgrade::Ran::Short(problem) => {
+            report_line(
+                &app,
+                "release",
+                false,
+                engine::StepLine::here(problem.said.clone()).logged(format!(
+                    "{}: not started, short of room",
+                    upgrade::moved_log(&planned)
+                )),
+            );
+            Err(problem)
+        }
         upgrade::Ran::Moved => {
             report_line(
                 &app,
@@ -3136,7 +3258,27 @@ async fn prepare_installation(
             refused_not_failed(problem),
         );
     }
-    prepared
+    prepared.map_err(|problem| explained(problem, &selected))
+}
+
+/// `problem` with the plain line for a disk that ran out above its raw output
+/// (`Problem::explained`), said for this computer and the engine the installation in `root` runs
+/// on.
+fn explained(problem: Problem, root: &Path) -> Problem {
+    let podman = preparation::saved_engine(root) == Some(engine::Engine::Podman);
+    problem.explained(std::env::consts::OS, podman)
+}
+
+/// The size of the database of the installation in `root` on `address`, for the room an update
+/// needs (`stack::database_bytes`). Nothing when it cannot be measured.
+fn installation_database_bytes(root: &Path, address: &engine::Address) -> Option<u64> {
+    let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        root,
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    )
+    .ok()?;
+    stack::database_bytes(address, root, &secrets)
 }
 
 async fn prepare_installation_inner(
@@ -4279,7 +4421,10 @@ async fn start_stack<R: tauri::Runtime>(
     let failures = desktop_telemetry::failures_recorded(&app);
     setup_phase("start");
     let telemetry_app = app.clone();
-    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness).await;
+    let selected = stack::root_from(&root);
+    let started = start_stack_now(app, root, api_url, gateway_ws_url, model, harness)
+        .await
+        .map_err(|problem| explained(problem, &selected));
     logging::outcome("start", asked, &started);
     // Every way Start can fail sends one `setup_failed`: a row that failed has sent it already,
     // and any other return (a failed `compose up` among them) sends it here.
@@ -5362,7 +5507,11 @@ fn intelligence_limits(kind: Shutdown) -> local_eval::Limits {
 /// The Intelligence step both production paths run, chosen here so they cannot drift apart.
 fn intelligence_step(kind: Shutdown) -> impl FnOnce(&Path) -> Result<(), String> {
     let limits = intelligence_limits(kind);
-    move |root: &Path| stop_local_eval(root, limits)
+    let by = match kind {
+        Shutdown::Stop => local_eval::ShutdownBy::Stop,
+        Shutdown::Quit => local_eval::ShutdownBy::Quit,
+    };
+    move |root: &Path| stop_local_eval(root, by, limits)
 }
 
 fn root_for_stop(shell: &Shell, fallback_root: &Path) -> PathBuf {
@@ -5463,12 +5612,16 @@ where
 }
 
 /// The production Intelligence step for Stop and Quit, within `limits`.
-fn stop_local_eval(root: &Path, limits: local_eval::Limits) -> Result<(), String> {
+fn stop_local_eval(
+    root: &Path,
+    by: local_eval::ShutdownBy,
+    limits: local_eval::Limits,
+) -> Result<(), String> {
     #[cfg(test)]
     INTELLIGENCE_TIMEOUT.with(|used| used.set(Some(limits.timeout)));
     let attempt = format!("openbot-shutdown-{:016x}", rand::random::<u64>());
-    stop_local_eval_with(root, local_eval::cancel_all, |stack| {
-        local_eval::stop_for_shutdown(&attempt, stack, limits)
+    stop_local_eval_with(root, by, local_eval::cancel_all, |stack| {
+        local_eval::stop_for_shutdown(&attempt, stack, by, limits)
     })
 }
 
@@ -5494,12 +5647,22 @@ stack's containers are never touched here; only the CLI stops what the CLI start
 
 Calls already in flight are cancelled first, whoever owns the stack: cancelling ends only this
 app's own CLI processes, never the stack, and a `start` left running could otherwise hold the stop
-behind it, finish after it and leave the stack running, or outlive the app as an orphan.
+behind it, finish after it and leave the stack running, or outlive the app as an orphan. A stop of
+the stack already running, another Stop's or Quit's, is never cancelled (`local_eval::Kind`): a
+Stop waits its turn behind it, and Quit waits for a Stop's and answers with it.
+
+A Stop's own stop comes back cancelled only when Quit had already begun: Quit refuses it, since
+Quit stops the stack itself. That is not a stop that failed, and the Stop does not say it was.
 
 Every way this can fail is said in fixed words. There is no CLI output to repeat, and none would
 be repeated if there were.
 */
-fn stop_local_eval_with<A, S>(root: &Path, cancel_all: A, stop: S) -> Result<(), String>
+fn stop_local_eval_with<A, S>(
+    root: &Path,
+    by: local_eval::ShutdownBy,
+    cancel_all: A,
+    stop: S,
+) -> Result<(), String>
 where
     A: FnOnce(),
     S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
@@ -5522,6 +5685,7 @@ where
         Err(local_eval::Failure::Unavailable) => {
             Err("this build has no command-line tool to stop the backend OpenBot created".into())
         }
+        Err(local_eval::Failure::Cancelled) if by == local_eval::ShutdownBy::Stop => Ok(()),
         Err(failure) => Err(not_stopped(wire_name(failure))),
     }
 }
@@ -5627,7 +5791,11 @@ impl uninstall::Computer for ThisComputerAtUninstall {
 
     fn stop_backend(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
         local_eval::use_engine(engine);
-        stop_local_eval(root, local_eval::Limits::for_quit())
+        stop_local_eval(
+            root,
+            local_eval::ShutdownBy::Quit,
+            local_eval::Limits::for_quit(),
+        )
     }
 
     /// The CLI's `local delete` for the stack OpenBot created, found as the stop finds it. A stack
@@ -6386,11 +6554,12 @@ where
 /**
 Quit's cleanup, then `intelligence` last, as in `stop_everything_then`.
 
-Local evaluation closes for good here, which also cancels a Stop's own CLI stop, so Quit never
-waits behind one. The order is host processes, Compose down, on Linux the Podman API this session
-started, and only then Intelligence, with no lock held. So Quit's Intelligence cap starts after all
-of that: 120 seconds for the CLI, its turn included, plus up to five seconds of grace to stop the
-CLI's process tree if it overruns.
+Local evaluation closes for good here. A Stop's own CLI stop already running is left to finish, and
+Quit's Intelligence step answers with it rather than start another (`local_eval::stop_for_shutdown`).
+The order is host processes, Compose down, on Linux the Podman API this session started, and only
+then Intelligence, with no lock held. So Quit's Intelligence cap starts after all of that: 120
+seconds for the CLI, its turn or the Stop's stop included, plus up to five seconds of grace to stop
+the CLI's process tree if its own overruns.
 
 `progress` hears OpenBot's part start and end, then Intelligence's. Intelligence has a row only
 when a stack OpenBot created is recorded, which is when its step stops anything; it is asked either
@@ -8659,6 +8828,29 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         let found = engine::detect();
         found.address.filter(|_| found.responding)
     });
+    // The server container's recent log, for what a model provider really said: the server keeps
+    // those words in its own log (`model-provider-refused`), and only there. Only an OpenBot this
+    // session started, whose engine and folder it knows, as Restart asks.
+    let server_log = {
+        let shell = app.state::<Shell>();
+        let root = shell.root.lock().unwrap().clone();
+        let address = shell
+            .containers
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|owned| Some(&owned.root) == root.as_ref())
+            .map(|owned| owned.address.clone());
+        match (root, address) {
+            (Some(root), Some(address)) => Some(stack::service_log(
+                &address,
+                &root,
+                "server",
+                troubleshooting::SERVER_LOG_LINES,
+            )),
+            _ => None,
+        }
+    };
     let text = troubleshooting::gather(troubleshooting::Sources {
         desktop: format!(
             "OpenBot Desktop {} ({})",
@@ -8673,6 +8865,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         log_folder: folder.as_deref(),
         home: home.as_deref(),
         engine,
+        server_log,
     });
     log::info!("[logs] gathered troubleshooting logs");
     text
@@ -9777,6 +9970,13 @@ fn local_eval_answer(
              backend's tool would take Podman's default connection"
         );
         return Ok(local_eval::Report::engine_not_answering());
+    }
+    // The room the back end's update needs counts OpenBot's own database (`update_room`).
+    if action == local_eval::Action::Update {
+        local_eval::installation_database(
+            local_eval::engine_in_use()
+                .and_then(|address| installation_database_bytes(root, &address)),
+        );
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
     if action == local_eval::Action::Status
@@ -18063,6 +18263,123 @@ mod tests {
         );
     }
 
+    /// The Windows check runs on a blocking thread, never the one that asked: Tauri runs a command
+    /// that is not `async` on the main thread, which is the window's, and the window then stops
+    /// painting for as long as a probe takes.
+    #[test]
+    fn the_windows_check_runs_off_the_thread_that_asked() {
+        static RAN_ON: Mutex<Option<std::thread::ThreadId>> = Mutex::new(None);
+        fn check(_tell: &dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem> {
+            *RAN_ON.lock().unwrap() = Some(std::thread::current().id());
+            Ok(Some(win::Blocker::WslNoKernel))
+        }
+        let app = tauri::test::mock_app();
+        let found =
+            tauri::async_runtime::block_on(windows_blocker_from(app.handle().clone(), check));
+        assert_eq!(found, Ok(Some(win::Blocker::WslNoKernel)));
+        let ran_on = RAN_ON.lock().unwrap().expect("the check ran");
+        assert_ne!(ran_on, std::thread::current().id());
+    }
+
+    /// While Windows's servicing holds the check, the window hears so, to say it in words; and a
+    /// probe that ran long or out of time is in usage data as `windows_probe`, by name, outcome and
+    /// duration only.
+    #[test]
+    fn a_check_held_by_windows_servicing_tells_the_window_and_usage_data() {
+        use tauri::Listener;
+        use telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
+        fn check(tell: &dyn Fn(win::Heard)) -> Result<Option<win::Blocker>, Problem> {
+            tell(win::Heard::ServicingBusy);
+            tell(win::Heard::Probe {
+                probe: Probe::WslFeature,
+                outcome: Outcome::TimedOut,
+                duration_ms: 30_004,
+            });
+            tell(win::Heard::Probe {
+                probe: Probe::WslSystemStart,
+                outcome: Outcome::Slow,
+                duration_ms: 21_500,
+            });
+            Ok(None)
+        }
+        let app = tauri::test::mock_builder()
+            .manage(desktop_telemetry::DesktopTelemetry::for_tests(
+                temp_root("openbot-windows-probe-telemetry"),
+                true,
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let (heard, hearing) = std::sync::mpsc::channel();
+        app.listen_any(WINDOWS_BUSY_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+        let found =
+            tauri::async_runtime::block_on(windows_blocker_from(app.handle().clone(), check));
+        assert_eq!(found, Ok(None));
+        hearing
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the window was told Windows is busy");
+        let probes: Vec<_> = app
+            .state::<desktop_telemetry::DesktopTelemetry>()
+            .queued()
+            .into_iter()
+            .filter(|event| matches!(event, telemetry::EventData::WindowsProbe { .. }))
+            .collect();
+        assert_eq!(
+            probes,
+            [
+                telemetry::EventData::WindowsProbe {
+                    probe: Probe::WslFeature,
+                    outcome: Outcome::TimedOut,
+                    duration_ms: 30_004,
+                },
+                telemetry::EventData::WindowsProbe {
+                    probe: Probe::WslSystemStart,
+                    outcome: Outcome::Slow,
+                    duration_ms: 21_500,
+                },
+            ]
+        );
+        let wire = serde_json::to_value(&probes[0]).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "kind": "windows_probe",
+                "probe": "wsl_feature",
+                "outcome": "timed_out",
+                "duration_ms": 30_004
+            })
+        );
+    }
+
+    /// The command the window calls, through Tauri's own IPC: still answers, now as an async
+    /// command. Off Windows there is nothing in the way.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn the_windows_check_answers_through_ipc_as_an_async_command() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![windows_blocker])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let answer = tauri::test::get_ipc_response(
+            &window,
+            tauri::webview::InvokeRequest {
+                cmd: "windows_blocker".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.into(),
+            },
+        )
+        .map(|body| body.deserialize::<serde_json::Value>().unwrap());
+        assert_eq!(answer, Ok(serde_json::Value::Null));
+    }
+
     /// Windows: Podman also answers on Docker's pipe, so a CLI not told the engine finds "the Docker
     /// address answers with Podman" and declines (`engine_mismatch`), which the account screen shows
     /// as "Couldn't check your CopilotKit account". Over an installation already prepared, Install
@@ -18803,6 +19120,7 @@ mod tests {
 
             let result = stop_local_eval_with(
                 &root,
+                local_eval::ShutdownBy::Stop,
                 || phases.borrow_mut().push("cancel-all".to_string()),
                 |stack| {
                     phases.borrow_mut().push(format!("stop:{}", stack.as_str()));
@@ -18815,7 +19133,11 @@ mod tests {
             assert_eq!(phases.into_inner(), ["cancel-all"], "{ownership:?}");
             // The production adapter too: had it tried, this build's missing CLI would have failed.
             assert_eq!(
-                stop_local_eval(&root, local_eval::Limits::for_quit()),
+                stop_local_eval(
+                    &root,
+                    local_eval::ShutdownBy::Quit,
+                    local_eval::Limits::for_quit()
+                ),
                 Ok(()),
                 "{ownership:?}"
             );
@@ -18833,6 +19155,7 @@ mod tests {
 
         let result = stop_local_eval_with(
             &root,
+            local_eval::ShutdownBy::Stop,
             || phases.borrow_mut().push("cancel-all".to_string()),
             |stack| {
                 phases.borrow_mut().push(format!("stop:{}", stack.as_str()));
@@ -18852,7 +19175,7 @@ mod tests {
             Some(local_eval_state::Ownership::Created),
         );
         let failed = |result: Result<local_eval::Report, local_eval::Failure>| {
-            stop_local_eval_with(&root, || {}, move |_| result)
+            stop_local_eval_with(&root, local_eval::ShutdownBy::Stop, || {}, move |_| result)
                 .expect_err("a stop that did not complete is reported")
         };
 
@@ -18875,11 +19198,37 @@ mod tests {
             failed(Ok(local_eval_report(local_eval::Outcome::Failed, None))),
             "the backend's command-line tool did not stop the backend (failed)"
         );
+        // Only Quit cancels a Stop's own stop, and Quit then stops the stack itself.
+        assert_eq!(
+            stop_local_eval_with(
+                &root,
+                local_eval::ShutdownBy::Stop,
+                || {},
+                |_| { Err(local_eval::Failure::Cancelled) }
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            stop_local_eval_with(
+                &root,
+                local_eval::ShutdownBy::Quit,
+                || {},
+                |_| { Err(local_eval::Failure::Cancelled) }
+            ),
+            Err("the backend's command-line tool did not stop the backend (cancelled)".into())
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn quit_reports_a_created_stack_this_build_cannot_stop() {
+        // Quit answers with a Stop's stop of the stack when one is running, and which are is
+        // process-wide: another test's would be taken for this one's.
+        if test_support::isolated_process(
+            "tests::quit_reports_a_created_stack_this_build_cannot_stop",
+        ) {
+            return;
+        }
         let root = local_eval_root(
             "openbot-local-eval-quit-no-cli",
             Some(local_eval_state::Ownership::Created),
@@ -18892,7 +19241,13 @@ mod tests {
             &root,
             |_| Ok(0),
             |_| Err("compose down refused".to_string()),
-            |root| stop_local_eval(root, local_eval::Limits::for_quit()),
+            |root| {
+                stop_local_eval(
+                    root,
+                    local_eval::ShutdownBy::Quit,
+                    local_eval::Limits::for_quit(),
+                )
+            },
         );
 
         assert_eq!(
@@ -19054,6 +19409,246 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A CLI whose `local stop` takes the stack from running to stopped only once the test lets it,
+    /// recording each stop that began and each that finished. One cut short leaves the stack
+    /// "stopping", half stopped, as a real stop cancelled partway would. The tests below never
+    /// depend on how long it takes; it only gives a cancel that should not happen time to land.
+    ///
+    /// Like the CLI, it holds a lock while a `local` command runs and answers `local_command_busy`
+    /// while another holds it. A stop killed partway leaves the lock behind, as the CLI's does on
+    /// Windows, where stopping a process tree is a hard kill that runs none of its cleanup.
+    const STOPPING_CLI: &str = r##"
+use std::{env, fs, io::Write, time::{Duration, Instant}};
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--warm") { return; }
+    let here = env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let mut calls = fs::OpenOptions::new().create(true).append(true).open(here.join("calls")).unwrap();
+    assert_eq!(args[..2], ["local", "stop"], "{args:?}");
+    let stack = &args[3];
+    if fs::OpenOptions::new().write(true).create_new(true).open(here.join("lock")).is_err() {
+        writeln!(calls, "busy {}", std::process::id()).unwrap();
+        println!(r#"{{"version":1,"command":"local stop","status":"blocked","error":null,"nextAction":{{"reason":"local_command_busy","resumeCommand":"copilotkit local stop --stack {stack} --json"}},"diagnostics":[]}}"#);
+        std::process::exit(2);
+    }
+    writeln!(calls, "began {}", std::process::id()).unwrap();
+    fs::write(here.join("stack"), "stopping").unwrap();
+    let until = Instant::now() + Duration::from_secs(60);
+    while !here.join("release").exists() {
+        assert!(Instant::now() < until, "never released");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Stopping takes a while once it may: a stop cancelled meanwhile is cut short here.
+    std::thread::sleep(Duration::from_millis(500));
+    fs::write(here.join("stack"), "stopped").unwrap();
+    writeln!(calls, "finished {}", std::process::id()).unwrap();
+    fs::remove_file(here.join("lock")).unwrap();
+    println!(r#"{{"version":1,"command":"local stop","status":"completed","stack":{{"id":"{stack}","installedRelease":"0.15.0","step":"ready","urls":{{"api":"http://localhost:8082","dashboard":"http://intelligence.localhost:8080","gateway":"ws://[::1]:4401"}},"failedStep":null,"update":null}},"auth":{{"running":false}},"nextAction":null,"error":null,"diagnostics":[]}}"#);
+}
+"##;
+
+    /// A local Intelligence OpenBot created, stopped through the production Stop and Quit steps
+    /// by `STOPPING_CLI`. Sets the process's CLI, so only in an isolated test.
+    struct StoppingBackend {
+        cli: PathBuf,
+        root: PathBuf,
+    }
+
+    impl StoppingBackend {
+        fn new(label: &str) -> Self {
+            let cli = temp_root(&format!("{label}-cli"));
+            std::fs::create_dir_all(&cli).unwrap();
+            std::fs::write(cli.join("cli.rs"), STOPPING_CLI).unwrap();
+            let program = cli.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
+            crate::test_support::compile_fixture(&cli.join("cli.rs"), &program);
+            use sha2::Digest;
+            let digest: String = sha2::Sha256::digest(std::fs::read(&program).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+            std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", digest);
+            std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY");
+            let root = local_eval_root(label, Some(local_eval_state::Ownership::Created));
+            std::fs::write(cli.join("stack"), "running").unwrap();
+            Self { cli, root }
+        }
+
+        fn stack(&self) -> String {
+            std::fs::read_to_string(self.cli.join("stack")).unwrap()
+        }
+
+        fn calls(&self, what: &str) -> usize {
+            std::fs::read_to_string(self.cli.join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.starts_with(what))
+                .count()
+        }
+
+        /// Until a CLI stop is running, holding the stack half stopped.
+        fn wait_for_a_stop_running(&self) {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while self.calls("began") == 0 {
+                assert!(std::time::Instant::now() < until, "no stop began");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        fn let_stops_finish(&self) {
+            std::fs::write(self.cli.join("release"), "").unwrap();
+        }
+
+        fn stop(
+            &self,
+            shell: &std::sync::Arc<Shell>,
+            closed: Option<std::sync::mpsc::Sender<()>>,
+        ) -> std::thread::JoinHandle<Stopped> {
+            let (shell, root) = (shell.clone(), self.root.clone());
+            std::thread::spawn(move || {
+                stop_everything_then(
+                    &shell,
+                    &root,
+                    |_| Ok(0),
+                    move |_| {
+                        if let Some(closed) = closed {
+                            closed.send(()).unwrap();
+                        }
+                        Ok(())
+                    },
+                    intelligence_step(Shutdown::Stop),
+                )
+            })
+        }
+
+        fn quit(
+            &self,
+            shell: &std::sync::Arc<Shell>,
+            closed: Option<std::sync::mpsc::Sender<()>>,
+        ) -> std::thread::JoinHandle<Stopped> {
+            let (shell, root) = (shell.clone(), self.root.clone());
+            std::thread::spawn(move || {
+                exit_cleanup_then(
+                    &shell,
+                    &root,
+                    |_| Ok(0),
+                    move |_| {
+                        if let Some(closed) = closed {
+                            closed.send(()).unwrap();
+                        }
+                        Ok(())
+                    },
+                    intelligence_step(Shutdown::Quit),
+                )
+            })
+        }
+    }
+
+    impl Drop for StoppingBackend {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.cli);
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /**
+    Stop pressed twice, from the menu and from Settings, while the first is asking the CLI to stop
+    the local Intelligence. The second Stop used to cancel the first one's CLI stop: the first then
+    said some of OpenBot's services didn't stop. Both now finish, neither says anything failed, and
+    the stack is stopped.
+    */
+    #[test]
+    fn two_stops_at_once_stop_the_backend_and_neither_reports_a_failure() {
+        if test_support::isolated_process(
+            "tests::two_stops_at_once_stop_the_backend_and_neither_reports_a_failure",
+        ) {
+            return;
+        }
+        let backend = StoppingBackend::new("openbot-two-stops");
+        let shell = std::sync::Arc::new(Shell::default());
+        let first = backend.stop(&shell, None);
+        backend.wait_for_a_stop_running();
+        let (closed, second_closed) = std::sync::mpsc::channel();
+        let second = backend.stop(&shell, Some(closed));
+        // The second Stop has closed local evaluation and is taking OpenBot's containers down.
+        second_closed.recv().unwrap();
+        backend.let_stops_finish();
+
+        assert_eq!(first.join().unwrap(), Stopped::default());
+        assert_eq!(second.join().unwrap(), Stopped::default());
+        assert_eq!(backend.stack(), "stopped");
+        assert_eq!(
+            backend.calls("began"),
+            backend.calls("finished"),
+            "a stop was cut short"
+        );
+    }
+
+    /**
+    Stop pressed while Quit is asking the CLI to stop the local Intelligence. Quit's own stop is
+    never cancelled: Quit finishes it and says nothing failed, and the Stop leaves it to Quit.
+    */
+    #[test]
+    fn a_stop_during_quit_leaves_quits_own_stop_to_finish() {
+        if test_support::isolated_process(
+            "tests::a_stop_during_quit_leaves_quits_own_stop_to_finish",
+        ) {
+            return;
+        }
+        let backend = StoppingBackend::new("openbot-stop-during-quit");
+        let shell = std::sync::Arc::new(Shell::default());
+        let quitting = backend.quit(&shell, None);
+        backend.wait_for_a_stop_running();
+        let (closed, stop_closed) = std::sync::mpsc::channel();
+        let stopping = backend.stop(&shell, Some(closed));
+        stop_closed.recv().unwrap();
+        backend.let_stops_finish();
+
+        assert_eq!(quitting.join().unwrap(), Stopped::default());
+        assert_eq!(stopping.join().unwrap(), Stopped::default());
+        assert_eq!(backend.stack(), "stopped");
+        // Quit's stop was the only one, and it ran to the end.
+        assert_eq!((backend.calls("began"), backend.calls("finished")), (1, 1));
+    }
+
+    /**
+    Quit while a Stop is asking the CLI to stop the local Intelligence. Quit used to cancel that
+    stop and run its own; on Windows the cancel is a hard kill, the killed CLI's lock outlived it,
+    and Quit's own stop was refused as busy, leaving the stack running. Quit now waits for the
+    Stop's stop and takes its answer as its own: one stop, run to the end, and neither says
+    anything failed.
+    */
+    #[test]
+    fn quit_during_a_stop_waits_for_its_stop_and_takes_its_answer() {
+        if test_support::isolated_process(
+            "tests::quit_during_a_stop_waits_for_its_stop_and_takes_its_answer",
+        ) {
+            return;
+        }
+        let backend = StoppingBackend::new("openbot-quit-during-stop");
+        let shell = std::sync::Arc::new(Shell::default());
+        let stopping = backend.stop(&shell, None);
+        backend.wait_for_a_stop_running();
+        let (closed, quit_closed) = std::sync::mpsc::channel();
+        let quitting = backend.quit(&shell, Some(closed));
+        // Quit has closed local evaluation for good and is taking OpenBot's containers down.
+        quit_closed.recv().unwrap();
+        backend.let_stops_finish();
+
+        assert_eq!(stopping.join().unwrap(), Stopped::default());
+        assert_eq!(quitting.join().unwrap(), Stopped::default());
+        assert_eq!(backend.stack(), "stopped");
+        // The Stop's stop was the only one, and it ran to the end.
+        assert_eq!(
+            (
+                backend.calls("began"),
+                backend.calls("finished"),
+                backend.calls("busy")
+            ),
+            (1, 1, 0)
+        );
+    }
+
     #[test]
     fn stop_closes_local_eval_before_anything_else_and_reopens_after() {
         // Closing is process-wide, and Quit's never reopens.
@@ -19107,6 +19702,13 @@ mod tests {
 
     #[test]
     fn stop_and_quit_choose_their_own_limits_for_the_real_adapter() {
+        // Another test's Quit closes local evaluation for the rest of its process, and a Stop's own
+        // stop is then left to Quit rather than run.
+        if test_support::isolated_process(
+            "tests::stop_and_quit_choose_their_own_limits_for_the_real_adapter",
+        ) {
+            return;
+        }
         assert_eq!(
             intelligence_limits(Shutdown::Stop).timeout,
             local_eval::Limits::for_action(local_eval::Action::Stop).timeout
@@ -19876,6 +20478,7 @@ mod tests {
             app: tauri::App<tauri::test::MockRuntime>,
             window: tauri::WebviewWindow<tauri::test::MockRuntime>,
             previous_runtime: Option<std::ffi::OsString>,
+            previous_config: Option<std::ffi::OsString>,
         }
 
         impl Fixture {
@@ -19889,6 +20492,11 @@ mod tests {
                 std::fs::create_dir_all(&runtime).unwrap();
                 let previous_runtime = std::env::var_os("XDG_RUNTIME_DIR");
                 std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+                // Podman's configuration home too, where a local Podman Start writes OpenBot's
+                // drop-in. Otherwise every fixture, each in its own process at once, writes the
+                // runner's real ~/.config/containers, and one replaces the file under another.
+                let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+                std::env::set_var("XDG_CONFIG_HOME", base.join("config"));
                 let a = base.join("a");
                 let b = base.join("b");
                 write_installed_deployment(&a);
@@ -20031,6 +20639,7 @@ fn main() {
                     app,
                     window,
                     previous_runtime,
+                    previous_config,
                 }
             }
 
@@ -20153,6 +20762,10 @@ fn main() {
                 match &self.previous_runtime {
                     Some(runtime) => std::env::set_var("XDG_RUNTIME_DIR", runtime),
                     None => std::env::remove_var("XDG_RUNTIME_DIR"),
+                }
+                match &self.previous_config {
+                    Some(config) => std::env::set_var("XDG_CONFIG_HOME", config),
+                    None => std::env::remove_var("XDG_CONFIG_HOME"),
                 }
                 println!(
                     "CONTAINER_CLEANUP={}",
@@ -20487,6 +21100,16 @@ fn main() {
                 std::fs::write(fixture.a.join("fail-up"), "").unwrap();
             }
             fixture.start(&fixture.a, false);
+            // A local Podman Start wrote OpenBot's drop-in under this fixture's own configuration
+            // home, so fixtures running at once never share one.
+            #[cfg(target_os = "linux")]
+            if podman && !case.contains("named") {
+                assert!(fixture
+                    .base
+                    .join("config")
+                    .join(engine::local_api::HOST_LOOPBACK_CONFIG)
+                    .is_file());
+            }
             let owner =
                 std::fs::read_to_string(fixture.a.join("fixture-containers-running")).unwrap();
             std::fs::write(fixture.base.join("docker-ready"), "").unwrap();

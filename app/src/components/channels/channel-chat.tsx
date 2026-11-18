@@ -60,6 +60,7 @@ import {
 } from "@/lib/channels/queries";
 import { runReply } from "@/lib/channels/run-reply";
 import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
+import { turnDidWork } from "@/lib/channels/turn-did-work";
 import {
   onRunStartedAway,
   onTurnFinishedAway,
@@ -103,6 +104,7 @@ import {
   readThreadMessages,
   withCurrentA2uiVersions,
 } from "@/lib/copilot/thread-messages";
+import { useAttachmentLimits } from "@/lib/deployment/queries";
 import {
   useConnectionLost,
   useReconnected,
@@ -471,10 +473,27 @@ function toAttachmentPart(attachment: Attachment) {
   const { source } = attachment;
   const mimeType =
     source.type === "url" && source.mimeType ? source.mimeType : undefined;
+  /*
+   * The type the server found and the file's size go with the part, so a transcript decides how to
+   * show a picture without fetching it: one over `LARGEST_PICTURE_DRAWN_INLINE` is drawn as its
+   * file, where a thumbnail would download all of it (up to 100MB) for every reader.
+   */
+  const size =
+    typeof attachment.size === "number" && Number.isFinite(attachment.size)
+      ? attachment.size
+      : undefined;
   return {
     type: attachmentModality(attachment.type, mimeType),
-    source: { type: "url" as const, value: attachmentUrl(attachmentId) },
-    metadata: filename ? { attachmentId, filename } : { attachmentId },
+    source: {
+      type: "url" as const,
+      value: attachmentUrl(attachmentId),
+      ...(mimeType ? { mimeType } : {}),
+    },
+    metadata: {
+      attachmentId,
+      ...(filename ? { filename } : {}),
+      ...(size !== undefined ? { sizeBytes: size } : {}),
+    },
   };
 }
 
@@ -766,6 +785,15 @@ export function ChannelChat({
         setRunError((shown) => shown ?? failed);
       }
 
+      /*
+       * A READ THAT FAILED ON OPENING IS ASKED AGAIN BEFORE IT IS ANNOUNCED. Its deadline is short so
+       * the message waiting behind it is not held up, and a read that was only slow (a link busy
+       * with a large picture going up or coming down) used to say "Couldn't load earlier messages"
+       * about a conversation that had lost nothing. So a failed read here releases the gate as
+       * before and hands over to the refresh below, which tries again the same way it does for a
+       * Bot's turn and says the history is unavailable only when every try has failed.
+       */
+      let askAgain = false;
       try {
         const stored = await readThreadMessages(
           channel.threadId,
@@ -789,12 +817,14 @@ export function ChannelChat({
          * it that nothing accounts for. Set even when nothing was restored: a thread whose every turn
          * is unreadable is exactly the case where silence would read as "this conversation is empty".
          */
-        if (isCurrent) {
+        if (isCurrent && stored.availability === "unavailable") {
+          askAgain = true;
+          // Still an unanswered read for the reconnect to ask again about, whatever the retries do.
+          unanswered.current = true;
+        } else if (isCurrent) {
           setUnreadable(stored.unreadable);
-          setHistoryAvailability(stored.availability);
-          // A gateway snapshot may be partial; neither it nor a later send proves this read succeeded.
-          setHistoryReadFailed(stored.availability === "unavailable");
-          if (stored.availability === "unavailable") unanswered.current = true;
+          setHistoryAvailability("ready");
+          setHistoryReadFailed(false);
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
@@ -803,6 +833,7 @@ export function ChannelChat({
         // Release even on join/restore failure; the gate orders messages, not withholds them.
         openJoinGate.current();
       }
+      if (askAgain && current) pullHistoryRef.current?.();
     })();
 
     return () => {
@@ -1028,6 +1059,7 @@ export function ChannelChat({
   useConversationActivity(runtimeAgentId, agent.messages);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
+  const attachmentLimits = useAttachmentLimits();
   /*
    * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
    * model, so only it gets a picker; a Bot on its own framework picks its own model.
@@ -1505,7 +1537,15 @@ export function ChannelChat({
      * is the retry, the same way a failed composer send has always put its words back while the
      * transcript kept the turn.
      */
-    if (turnFailure.current !== null) {
+    /*
+     * EXCEPT A TURN THAT HAD ALREADY DONE SOMETHING. Its message was sent and acted on, so it is
+     * not handed back to be sent again: run again, it would repeat what already ran. The notice
+     * under it says what went wrong. See `turnDidWork`.
+     */
+    if (
+      turnFailure.current !== null &&
+      !turnDidWork(target.messages, existingMessageIds)
+    ) {
       throw new Error(turnFailure.current);
     }
     return target.messages
@@ -1859,6 +1899,7 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
                 <StarterSuggestions

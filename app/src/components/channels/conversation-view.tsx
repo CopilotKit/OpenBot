@@ -1,5 +1,3 @@
-import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
-import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { Message } from "@ag-ui/core";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import {
@@ -26,6 +24,9 @@ import {
 } from "@/components/channels/composer";
 import { StillWorkingError } from "@/components/channels/composer/queue";
 import { NotifyPrompt } from "@/components/notifications/notify-prompt";
+import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "../../lib/new-id";
 
 /** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
@@ -41,6 +42,7 @@ export function ConversationView({
   commands,
   channelId,
   holdsFilesUntilSent = false,
+  attachmentLimits,
   disabled = false,
   onSendHeld,
   pending = false,
@@ -84,6 +86,8 @@ export function ConversationView({
    * creates the conversation. See `Composer`.
    */
   holdsFilesUntilSent?: boolean;
+  /** How large a picked file may be, forwarded to the composer (`useAttachmentLimits`). */
+  attachmentLimits?: ComposerAttachmentLimits;
   disabled?: boolean;
   /** Writing is open and sending waits on the caller; forwarded to the composer. */
   onSendHeld?: () => void;
@@ -553,6 +557,7 @@ export function ConversationView({
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
           holdsFilesUntilSent={holdsFilesUntilSent}
+          {...(attachmentLimits ? { attachmentLimits } : {})}
           {...(commands ? { commands } : {})}
           className="relative w-full mt-auto"
           compact

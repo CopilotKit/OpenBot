@@ -34,6 +34,7 @@ import {
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
+import { SentFileCard } from "./sent-file-card";
 import { Composer, toAgentOptions } from "./composer";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
@@ -332,22 +333,32 @@ function GroupLine({
             {message.text || "This Bot couldn't answer."}
           </p>
         ) : (
-          <Bubble
-            align="start"
-            aria-busy={message.status === "running"}
-            variant="ghost"
-            className="w-full"
-          >
-            <BubbleContent className="w-full">
-              <BotMarkdown
-                components={markdownComponents}
-                plugins={markdownPlugins}
-                remarkPlugins={replyRemarkPlugins}
-              >
-                {message.text}
-              </BotMarkdown>
-            </BubbleContent>
-          </Bubble>
+          <>
+            <Bubble
+              align="start"
+              aria-busy={message.status === "running"}
+              variant="ghost"
+              className="w-full"
+            >
+              <BubbleContent className="w-full">
+                <BotMarkdown
+                  components={markdownComponents}
+                  plugins={markdownPlugins}
+                  remarkPlugins={replyRemarkPlugins}
+                >
+                  {message.text}
+                </BotMarkdown>
+              </BubbleContent>
+            </Bubble>
+            {/*
+             * The files the Bot sent from its computer with this reply, each as the card a
+             * conversation of its own draws, under its words: the reply is all a group keeps of a
+             * turn, so without them the file was a name in the words and nothing to open.
+             */}
+            {message.files?.map((file) => (
+              <SentFileCard file={file} key={file.attachmentId} />
+            ))}
+          </>
         )}
       </MessageContent>
     </MessageRow>

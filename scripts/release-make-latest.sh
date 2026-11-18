@@ -27,6 +27,8 @@
 # Only when publish-release.yml said the release becomes Latest, and only when no newer release has
 # become Latest since (scripts/release-becomes-latest.sh). Making it Latest also starts Downloads
 # sync, so downloads.copilotkit.ai serves the same signed installers; the job needs `actions: write`.
+# And it removes the installers of every older release from GitHub
+# (scripts/release-older-installers.sh), with the job's `contents: write`.
 set -euo pipefail
 
 : "${RELEASE_TAG:?RELEASE_TAG must name the release}"
@@ -34,6 +36,17 @@ set -euo pipefail
 make_latest="${MAKE_LATEST:-false}"
 delay="${FEED_RETRY_DELAY:-15}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+older_failed=false
+
+# Ends a run that got this far. The feed is checked whatever happened to the older installers, and
+# a removal that failed then fails the run.
+finish() {
+  if [ "$older_failed" = true ]; then
+    echo "::error::$RELEASE_TAG is Latest, but the installers of older releases were not all removed. Run scripts/release-older-installers.sh github again (docs/releasing.md, \"Older installers\")."
+    exit 1
+  fi
+  exit 0
+}
 
 # Whether a feed is for `version` and lists `platform` with a URL and a signature.
 lists() {
@@ -103,6 +116,14 @@ if [ "$make_latest" = true ]; then
       # here rather than by the release changing. It also runs every six hours in case this fails.
       gh workflow run downloads-sync.yml -R "$GITHUB_REPOSITORY" --ref main
       echo "Started Downloads sync, which copies its signed installers to downloads.copilotkit.ai."
+      # A fresh install from an older installer lays out this release's server stack, which an
+      # older app may not set up as it needs, so the installers of every older release go
+      # (scripts/release-older-installers.sh). Their feeds, updater archives, image lists and
+      # source stay, for the installs that update and repair from them. A failure here does not
+      # stop the feed check below; the run fails after it, so it is seen and run again.
+      if ! "$root/scripts/release-older-installers.sh" github; then
+        older_failed=true
+      fi
     else
       echo "A newer release is already Latest, so $RELEASE_TAG stays as it is."
     fi
@@ -115,7 +136,7 @@ fi
 current="$(latest_tag)"
 if [ "$current" != "$RELEASE_TAG" ]; then
   echo "$RELEASE_TAG is not the latest release, so installed apps do not read its feed. Not checking it."
-  exit 0
+  finish
 fi
 
 # Read back what installed apps will read: the release's own feed, compiled into them, fetched the
@@ -137,7 +158,7 @@ for attempt in 1 2 3 4 5; do
     done < <("$root/scripts/release-update-feed.sh" --platforms)
     if [ "${#unlisted[@]}" -eq 0 ]; then
       echo "$endpoint serves latest.json for $expected, for every platform."
-      exit 0
+      finish
     fi
   fi
   if [ "$attempt" -lt 5 ]; then sleep "$delay"; fi

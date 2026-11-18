@@ -165,13 +165,51 @@ def provider_name() -> str:
     return "Your model provider"
 
 
+# The kinds of refusal the server names: `errorCategory`, as the Claude harness sends Claude Code's.
+ERROR_CATEGORIES = frozenset(
+    {
+        "rate_limit",
+        "billing_error",
+        "server_error",
+        "invalid_request",
+        "authentication_failed",
+        "model_not_found",
+        "outdated_client",
+        "refusal",
+        "unknown",
+    }
+)
+
+
+def provider_category(error: BaseException) -> str | None:
+    """The kind of refusal the provider's error names itself, when it is one the server names.
+
+    OpenBot's own sign-in proxy (a Google or xAI sign-in on the desktop) reads the provider's
+    status and puts the kind in its error's `type`: Google's RESOURCE_EXHAUSTED is `rate_limit`,
+    UNAVAILABLE `server_error`, NOT_FOUND `model_not_found`. Of the providers' own types, only
+    OpenAI's `server_error` is one of these names, and it means the same.
+    """
+    for link in _links(error):
+        body = getattr(link, "body", None)
+        kind = body.get("type") if isinstance(body, dict) else None
+        if isinstance(kind, str) and kind in ERROR_CATEGORIES:
+            return kind
+    return None
+
+
 def billing_refusal(error: BaseException) -> str | None:
     """The refusal as a person should read it, when the provider is out of credit or at its limit.
 
     Told as that, with which provider and in its own words, rather than as "sign in again", which
     an account with no credit cannot fix. None for any other error, which keeps its own handling.
+
+    Not when the error names another kind itself (`provider_category`). Google's free tier answers
+    its daily limit with "You exceeded your current quota, please check your plan and billing
+    details", which reads as out of credit and is a limit that resets.
     """
     if not provider_refusal(error):
+        return None
+    if provider_category(error) not in (None, "billing_error"):
         return None
     said = _provider_detail(error) or str(error)
     if not BILLING.search(f"{said} {error}"):
@@ -397,10 +435,15 @@ class ToolAwareAgent(WholeThreadAgent):
                 # Raised, it ended the response stream after RUN_STARTED with no terminal event,
                 # and the provider's reason never reached anyone. Coded as a refusal, so the server
                 # tells it in words and keeps the provider's for its log (provider-refusal.ts).
+                # The kind, when the error names it, goes with them as `errorCategory`.
                 message = provider_message(error)
+                category = provider_category(error)
                 logger.warning("The model provider refused the run: %s", message)
                 yield RunErrorEvent(
-                    type=EventType.RUN_ERROR, message=message, code="OPENBOT_MODEL_REFUSED"
+                    type=EventType.RUN_ERROR,
+                    message=message,
+                    code="OPENBOT_MODEL_REFUSED",
+                    **({"metadata": {"errorCategory": category}} if category else {}),
                 )
             elif ended:
                 raise

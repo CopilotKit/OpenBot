@@ -110,6 +110,14 @@ export type Shortfall = {
   drive?: string;
   /** `diskGb` is what is free on `drive`, which ran short rather than the machine's own disk. */
   freeOnDrive?: boolean;
+  /** That drive is this Mac's own disk, under Docker Desktop's or Podman's machine disk. */
+  mac?: boolean;
+  /**
+   * What is short is room for an update (`local_eval::update_room`): `neededGb` is what the
+   * update needs free where `diskGb` was measured.
+   */
+  updating?: boolean;
+  neededGb?: string;
 };
 
 /** How far an unfinished update got, as the CLI recorded it (`local_eval::UpdateState`). */

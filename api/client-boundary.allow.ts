@@ -173,7 +173,7 @@ export const ALLOWED: Allowed[] = [
     why: "the development server's proxy of /api",
   },
   {
-    file: "app/src/components/channels/chat-transcript.tsx",
+    file: "app/src/components/channels/attachment-view.tsx",
     what: "fetch()",
     rule: "transport",
     why: "asks with HEAD whether a sent document is still there, at the address the generated client builds (getGetAttachmentUrl)",
@@ -264,6 +264,12 @@ export const ALLOWED: Allowed[] = [
     what: "/api/attachments/{}",
     rule: "stored-format",
     why: "the form a sent message keeps its attachment in; the app reads it at the API's address",
+  },
+  {
+    file: "app/src/lib/markdown.tsx",
+    what: "/api/",
+    rule: "transport",
+    why: "tells a link in a Bot's words that points at the server apart from a page of the app, so the browser opens it rather than the app's router; it calls nothing",
   },
   // Clients already released.
   {
