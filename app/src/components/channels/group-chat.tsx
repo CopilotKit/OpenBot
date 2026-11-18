@@ -70,6 +70,20 @@ export function GroupChat({ channelId }: { channelId: string }) {
   );
   const bots = group.data?.bots ?? [];
   const names = new Map(bots.map((bot) => [bot.id, bot.name]));
+  // The people in it, as its members list names them: a person's line is headed with who sent it.
+  const people = new Map(
+    (group.data?.people ?? []).map((person) => [
+      person.userId,
+      person.name || person.email,
+    ]),
+  );
+  const speakerName = (message: GroupMessage) => {
+    if (message.agentId)
+      return names.get(message.agentId) ?? "A Bot no longer here";
+    if (message.ownerUserId === me?.id) return "You";
+    // Use current members only, so a person's name is hidden when they leave.
+    return people.get(message.ownerUserId) || "Someone who left";
+  };
   const messages = group.data?.messages ?? [];
   const [replyTo, setReplyTo] = useState<MessageReply | null>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -77,11 +91,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
     messages.map((message) => [
       message.id,
       {
-        author: message.agentId
-          ? (names.get(message.agentId) ?? "A Bot no longer here")
-          : message.ownerUserId === me?.id
-            ? "You"
-            : "Someone else",
+        author: speakerName(message),
         ...(message.agentId ? { botId: message.agentId } : {}),
       },
     ]),
@@ -221,13 +231,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
                 key={message.id}
                 message={message}
                 onReply={chooseReply}
-                name={
-                  message.agentId
-                    ? (names.get(message.agentId) ?? "A Bot no longer here")
-                    : message.ownerUserId === me?.id
-                      ? "You"
-                      : "Someone else"
-                }
+                name={speakerName(message)}
                 answeredBy={
                   message.answeredBy
                     ? (names.get(message.answeredBy) ?? "another Bot")
