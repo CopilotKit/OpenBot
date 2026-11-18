@@ -1830,8 +1830,54 @@ fn stop_computers_now(engine: &Address, root: &Path) -> Result<bool, String> {
     Err(command_said(&stopped.stderr))
 }
 
+/// How long Compose gives the server to stop before it kills it, in seconds.
+///
+/// Asked to stop, the server finishes what it is doing: it waits for the requests in flight and the
+/// Bots' answers under way (six seconds at most, outside a cluster), stops an answer still going the
+/// way a person's Stop does (two and a half), and closes its sockets. Compose's own ten would kill a
+/// server still at that. Fifteen covers it, and a server with nothing to finish leaves at once.
+pub const SERVER_STOP_SECONDS: &str = "15";
+
+/// Stop the server on its own, before anything it is using.
+///
+/// FOUND ON DESKTOP. `compose down` stops every container at once, so a Bot's harness went away while
+/// the server was finishing the answer the Bot was giving, and the answer ended in "Couldn't reach"
+/// the Bot. The server finishes its answers when it is asked to stop, and it can only do that while
+/// the Bots, their computers and the database are still there. A failure here is logged and the rest
+/// is still stopped: `compose down` stops the server too.
+fn stop_server_first(engine: &Address, root: &Path) {
+    if !root.join("docker-compose.yml").is_file() {
+        return;
+    }
+    let stopped = crate::logging::timed("stop the server", || {
+        let output = compose_command(engine, root, &Secrets::new())
+            .args([
+                "-f",
+                "docker-compose.yml",
+                "--profile",
+                OPENBOT_PROFILE,
+                "stop",
+                "--timeout",
+                SERVER_STOP_SECONDS,
+                "server",
+            ])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(command_said(&output.stderr))
+        }
+    });
+    if let Err(error) = stopped {
+        log::warn!("[compose down] could not stop the server first: {error}");
+    }
+}
+
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     crate::logging::timed("compose down", || {
+        // The server first, so it can finish what it is doing with everything it uses still there.
+        stop_server_first(engine, root);
         // Stop the supervisor and its runtime-created computers before removing the Compose stack.
         if !stop_computers(engine, root)? {
             return Ok(());
@@ -7317,6 +7363,13 @@ fn main() {
                 if std::path::Path::new(".fixture-config-failure").exists() { std::process::exit(17); }
                 print!("{}", std::fs::read_to_string(".fixture-config").unwrap());
             }
+            Some("compose")
+                if actual == ["compose", "--profile", "openbot", "stop", "--timeout", "15", "server"] => {
+                if root.join(".fixture-server-stop-failure").exists() {
+                    eprintln!("fixture server stop refused");
+                    std::process::exit(17);
+                }
+            }
             Some("compose") if actual == ["compose", "stop", "supervisor"] => {
                 if root.join(".fixture-supervisor-stop-failure").exists() {
                     eprintln!("fixture supervisor stop refused");
@@ -11415,6 +11468,9 @@ fn main() {
             let log = std::fs::read_to_string(record).unwrap();
             println!("{} shutdown trace:\n{log}", address.engine.binary());
             assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+            let server = log
+                .find("compose -f docker-compose.yml --profile openbot stop --timeout 15 server")
+                .unwrap();
             let config = log.find("config --format json").unwrap();
             let supervisor = log
                 .find("compose -f docker-compose.yml stop supervisor")
@@ -11425,12 +11481,36 @@ fn main() {
                 .find("--profile harness --profile openbot down")
                 .unwrap();
             assert!(
-                config < supervisor
+                server < config
+                    && config < supervisor
                     && supervisor < snapshot
                     && snapshot < computers
                     && computers < teardown,
                 "{log}"
             );
+        }
+    }
+
+    /// A server that can't be stopped on its own first still leaves the rest to stop: `compose down`
+    /// stops it with everything else, as it did before the server was stopped first.
+    #[test]
+    fn stop_with_a_server_that_wont_stop_first_still_stops_everything() {
+        if crate::test_support::isolated_process(
+            "stack::tests::stop_with_a_server_that_wont_stop_first_still_stops_everything",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let (root, record) =
+                computer_shutdown_race_root(&path, &format!("root-{}", address.engine.binary()));
+            std::fs::write(root.join(".fixture-server-stop-failure"), "").unwrap();
+            down(&address, &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(log.contains("--profile openbot stop --timeout 15 server"), "{log}");
+            assert!(log.contains("--profile harness --profile openbot down"), "{log}");
+            assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+            assert!(root.join("stack.down").exists());
         }
     }
 
@@ -11453,7 +11533,8 @@ fn main() {
                 "{error}"
             );
             let log = std::fs::read_to_string(&record).unwrap();
-            assert_eq!(log.lines().count(), 2, "{log}");
+            // The server's own stop, its namespace, then the supervisor's stop that failed.
+            assert_eq!(log.lines().count(), 3, "{log}");
             assert!(
                 !log.contains("ps --quiet") && !log.contains("harness down"),
                 "{log}"
