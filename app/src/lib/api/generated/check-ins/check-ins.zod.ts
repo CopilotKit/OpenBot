@@ -88,7 +88,7 @@ export const ListCheckInsResponse = zod.object({
             .datetime({ offset: true })
             .nullable()
             .describe("When it last ran, or null."),
-          lastStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+          lastStatus: zod.string(),
           lastError: zod
             .string()
             .nullable()
@@ -306,7 +306,7 @@ export const CreateCheckInResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it last ran, or null."),
-      lastStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+      lastStatus: zod.string(),
       lastError: zod
         .string()
         .nullable()
@@ -470,7 +470,7 @@ export const UpdateCheckInResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it last ran, or null."),
-      lastStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+      lastStatus: zod.string(),
       lastError: zod
         .string()
         .nullable()
@@ -707,7 +707,7 @@ export const ListCheckInItemsResponse = zod.object({
             .nullable()
             .describe("Where it can be opened, or null."),
           status: zod
-            .enum(["open", "dismissed", "started", "superseded"])
+            .string()
             .describe(
               "open until the person starts or hides it. superseded is the Bot's own: a later check-in cleared it as no longer needed.",
             ),
@@ -803,7 +803,7 @@ export const StartCheckInItemResponse = zod.object({
         .nullable()
         .describe("Where it can be opened, or null."),
       status: zod
-        .enum(["open", "dismissed", "started", "superseded"])
+        .string()
         .describe(
           "open until the person starts or hides it. superseded is the Bot's own: a later check-in cleared it as no longer needed.",
         ),
@@ -895,7 +895,7 @@ export const DismissCheckInItemResponse = zod.object({
         .nullable()
         .describe("Where it can be opened, or null."),
       status: zod
-        .enum(["open", "dismissed", "started", "superseded"])
+        .string()
         .describe(
           "open until the person starts or hides it. superseded is the Bot's own: a later check-in cleared it as no longer needed.",
         ),

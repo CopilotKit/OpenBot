@@ -1055,7 +1055,7 @@ export const ListConversationMessagesResponse = zod.object({
             "What was said. Empty while another person's Bot is still writing it.",
           ),
         status: zod
-          .enum(["queued", "running", "waiting", "completed", "failed"])
+          .string()
           .describe(
             "Where a Bot's reply stands. A person's message is completed.",
           ),

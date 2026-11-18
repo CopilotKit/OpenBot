@@ -5,7 +5,7 @@ import {
   updatePerson,
 } from "@/lib/api/generated/people/people";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { type Person, peopleKeys } from "./queries";
+import { type Person, peopleKeys, personOf } from "./queries";
 
 const FALLBACK = "Could not update that person";
 
@@ -19,15 +19,17 @@ export function setPersonRoleMutationOptions(queryClient: QueryClient) {
       userId: string;
       role: "admin" | "member";
     }): Promise<Person> =>
-      (
-        await updatePerson(
-          organizationId(),
-          variables.userId,
-          { role: variables.role },
-          { "Idempotency-Key": idempotencyKey() },
-          { fallback: FALLBACK },
-        )
-      ).person,
+      personOf(
+        (
+          await updatePerson(
+            organizationId(),
+            variables.userId,
+            { role: variables.role },
+            { "Idempotency-Key": idempotencyKey() },
+            { fallback: FALLBACK },
+          )
+        ).person,
+      ),
     onSuccess: () => invalidatePeople(queryClient),
   });
 }
@@ -44,14 +46,16 @@ export function setPersonAccessMutationOptions(queryClient: QueryClient) {
       userId: string;
       revoked: boolean;
     }): Promise<Person> =>
-      (
-        await (variables.revoked ? revokePersonAccess : restorePersonAccess)(
-          organizationId(),
-          variables.userId,
-          { "Idempotency-Key": idempotencyKey() },
-          { fallback: FALLBACK },
-        )
-      ).person,
+      personOf(
+        (
+          await (variables.revoked ? revokePersonAccess : restorePersonAccess)(
+            organizationId(),
+            variables.userId,
+            { "Idempotency-Key": idempotencyKey() },
+            { fallback: FALLBACK },
+          )
+        ).person,
+      ),
     onSuccess: () => invalidatePeople(queryClient),
   });
 }
