@@ -7,6 +7,10 @@ from a client, and say why on the line: the date, the change as oasdiff words it
 
 Once the change is on the base branch, oasdiff no longer reports it and its line matches nothing.
 
+CI also holds the spec to the last release's, with these same lines, except any that says "no
+release serves it": that reason is about the release, so it is checked against the release. Write
+it in those words when it is the reason, and the release run fails if the release does serve it.
+
 - 2026-11-14 GET /api/v2/organizations/{organizationId}/bots added the pattern `^[A-Za-z0-9_-]+$` to the `query` request parameter `cursor`. The server only issues cursors in URL-safe base64 and has always refused any other cursor with 400, so no request that worked stops working.
 - 2026-11-14 GET /api/v2/organizations/{organizationId}/reactions added the pattern `^[A-Za-z0-9_-]+$` to the `query` request parameter `cursor`. The same cursor, and the same refusal of any other.
 - 2026-11-14 POST /api/v2/organizations/{organizationId}/bots request property `harness` was restricted to a list of enum values. The server has always refused a harness outside OpenBot's harness list with 400; the enum is that list, and api/openapi-harnesses.test.ts keeps the two the same.
