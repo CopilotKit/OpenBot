@@ -5,6 +5,7 @@ import {
 } from "@openbot/shared/person-time-zone";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo } from "react";
+import { withClientName } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   organizationHeaders,
@@ -50,8 +51,9 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
    * it in the one named, when the person is a member of it.
    */
   const organization = useCurrentOrganizationId();
+  // And this app, as every request to OpenBot names it (lib/client.ts).
   const headers = useMemo(
-    () => organizationHeaders(organization),
+    () => withClientName(organizationHeaders(organization)),
     [organization],
   );
 
