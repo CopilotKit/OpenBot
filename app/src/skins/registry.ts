@@ -1,4 +1,5 @@
 import { appConfig } from "@/lib/generated/application-config";
+import { kitebot } from "./kitebot";
 import { opendots } from "./opendots";
 import { openduet } from "./openduet";
 import { openfuse } from "./openfuse";
@@ -22,6 +23,7 @@ export const SKINS: Record<SkinId, Skin> = {
   openduet,
   opendots,
   openfuse,
+  kitebot,
 };
 
 export function useActiveSkin(): Skin {

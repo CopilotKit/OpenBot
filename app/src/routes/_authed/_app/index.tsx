@@ -59,6 +59,7 @@ import { newId } from "@/lib/new-id";
 import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
 import { queryClient } from "@/query-client";
+import { useActiveSkin } from "@/skins/registry";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
@@ -109,6 +110,8 @@ export const Route = createFileRoute("/_authed/_app/")({
 });
 
 function RouteComponent() {
+  // A skin may draw its own section under the composer in place of Explore Bots.
+  const { home: SkinHome } = useActiveSkin();
   const { data: user } = useQuery(currentUserQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const {
@@ -385,79 +388,84 @@ function RouteComponent() {
          * composer, not the place to browse: more than four would push the composer up every time
          * somebody shared another Bot, so the rest are one "All Bots" away. Every state below
          * reserves the same two rows, so the composer above it does not move when the list settles.
+         * A skin may draw its own section here instead (`Skin.home`).
          */}
-        <div className="mt-10 w-full max-w-2xl">
-          {loading || capabilities.isPending ? (
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
-            </>
-          ) : explore?.length ? (
-            // Wins over `failed`: a failed background refetch does not clear TanStack Query's
-            // cached `data`, so a stale list here beats an error card claiming there is
-            // nothing to explore, which would be false while this list is still populated.
-            <section aria-labelledby="explore-agents-heading">
-              <div className="flex flex-row items-center justify-between gap-4">
-                <h2
-                  id="explore-agents-heading"
-                  className="font-semibold text-base"
-                >
-                  Explore Bots
-                </h2>
-                {explore.length > EXPLORE_SHOWN ? (
-                  <Link
-                    className="text-muted-foreground text-sm hover:text-foreground"
-                    to="/bots"
+        {SkinHome ? (
+          <SkinHome />
+        ) : (
+          <div className="mt-10 w-full max-w-2xl">
+            {loading || capabilities.isPending ? (
+              <>
+                <h2 className="font-semibold text-base">Explore Bots</h2>
+                <Skeleton className="mt-4 h-[140px]" />
+              </>
+            ) : explore?.length ? (
+              // Wins over `failed`: a failed background refetch does not clear TanStack Query's
+              // cached `data`, so a stale list here beats an error card claiming there is
+              // nothing to explore, which would be false while this list is still populated.
+              <section aria-labelledby="explore-agents-heading">
+                <div className="flex flex-row items-center justify-between gap-4">
+                  <h2
+                    id="explore-agents-heading"
+                    className="font-semibold text-base"
                   >
-                    All Bots
-                  </Link>
-                ) : null}
-              </div>
-              <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
-                {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
-                  <li className="min-w-0" key={agent.id}>
-                    <Link search={{ agent: agent.id }} to="/channel/new">
-                      <AgentCard agent={agent} appearance="row" />
+                    Explore Bots
+                  </h2>
+                  {explore.length > EXPLORE_SHOWN ? (
+                    <Link
+                      className="text-muted-foreground text-sm hover:text-foreground"
+                      to="/bots"
+                    >
+                      All Bots
                     </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : personal ? null : failed && agents === undefined ? (
-            // `agents === undefined` narrows this to "the query has never once returned
-            // successfully" — not merely "the last request errored". `?.length` alone can't
-            // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
-            // never clears `data` on a failed background refetch, so once the query has
-            // resolved even one response, `agents` stays defined and `explore`'s emptiness is a
-            // fact about that response, not a symptom of the failure. Rendering the destructive
-            // card there would say the opposite of what a populated composer beside it (still
-            // working off that same, successfully loaded `agents`) proves.
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
-                <EmptyHeader>
-                  <EmptyTitle className="text-destructive">
-                    Couldn't load the Bots shared with you.
-                  </EmptyTitle>
-                </EmptyHeader>
-              </Empty>
-            </>
-          ) : (
-            // Reached both when the query never failed and `explore` is genuinely empty, and
-            // when it failed but `agents` is defined — a loaded, empty slice either way. Same
-            // plain copy for both: an empty roster is a fact, not an error.
-            <>
-              <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed">
-                <EmptyHeader>
-                  <EmptyTitle className="text-muted-foreground">
-                    Nobody has shared a Bot with you yet.
-                  </EmptyTitle>
-                </EmptyHeader>
-              </Empty>
-            </>
-          )}
-        </div>
+                  ) : null}
+                </div>
+                <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
+                  {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
+                    <li className="min-w-0" key={agent.id}>
+                      <Link search={{ agent: agent.id }} to="/channel/new">
+                        <AgentCard agent={agent} appearance="row" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : personal ? null : failed && agents === undefined ? (
+              // `agents === undefined` narrows this to "the query has never once returned
+              // successfully" — not merely "the last request errored". `?.length` alone can't
+              // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
+              // never clears `data` on a failed background refetch, so once the query has
+              // resolved even one response, `agents` stays defined and `explore`'s emptiness is a
+              // fact about that response, not a symptom of the failure. Rendering the destructive
+              // card there would say the opposite of what a populated composer beside it (still
+              // working off that same, successfully loaded `agents`) proves.
+              <>
+                <h2 className="font-semibold text-base">Explore Bots</h2>
+                <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
+                  <EmptyHeader>
+                    <EmptyTitle className="text-destructive">
+                      Couldn't load the Bots shared with you.
+                    </EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
+              </>
+            ) : (
+              // Reached both when the query never failed and `explore` is genuinely empty, and
+              // when it failed but `agents` is defined — a loaded, empty slice either way. Same
+              // plain copy for both: an empty roster is a fact, not an error.
+              <>
+                <h2 className="font-semibold text-base">Explore Bots</h2>
+                <Empty className="mt-4 h-[140px] border border-dashed">
+                  <EmptyHeader>
+                    <EmptyTitle className="text-muted-foreground">
+                      Nobody has shared a Bot with you yet.
+                    </EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
+              </>
+            )}
+          </div>
+        )}
       </div>
       {/* A Bot already working somewhere, and the way to it. Nothing while every Bot is idle. */}
       <WorkingNow channels={channels.data} />

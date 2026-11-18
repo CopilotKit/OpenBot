@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Avatar from "boring-avatars";
 import { memo, type ReactNode } from "react";
-import { useBotLook } from "@/components/agents/bot-look";
+import { drawsBotMark, useBotLook } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
@@ -16,10 +16,10 @@ import { cn } from "@/lib/utils";
  * `typing` overlays a working indicator at the bottom-right — three bouncing dots, so a channel
  * whose agent is mid-turn reads as busy from the roster without moving the row's layout.
  *
- * Where Bots are orbs (`useBotLook`), each is drawn from its `avatarSeed`, as `AbstractAvatar`
- * draws it, so a Bot is one color everywhere; a skin that has not opted in keeps the faces. The orbs
- * are hidden from screen readers: the row beside the avatar names the conversation, and an id read
- * aloud would name nothing.
+ * Where Bots are orbs or kites (`useBotLook`), each is drawn from its `avatarSeed`, as
+ * `AbstractAvatar` draws it, so a Bot is one color everywhere; a skin that has not opted in keeps the
+ * faces. The orbs and kites are hidden from screen readers: the row beside the avatar names the
+ * conversation, and an id read aloud would name nothing.
  */
 export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
@@ -30,7 +30,8 @@ export const ChannelAvatar = memo(function ChannelAvatar({
   size?: number;
   typing?: boolean;
 }) {
-  const orbs = useBotLook() === "orb";
+  const look = useBotLook();
+  const orbs = drawsBotMark(look);
   const face = orbs ? orbFace : boringFace;
   const avatar =
     participantIds.length === 1 ? (
@@ -38,7 +39,15 @@ export const ChannelAvatar = memo(function ChannelAvatar({
     ) : (
       <GroupFaces
         face={face}
-        layout={orbs ? ORB_PAIR : participantIds.length === 2 ? 2 : 3}
+        layout={
+          look === "kite"
+            ? KITE_PAIR
+            : orbs
+              ? ORB_PAIR
+              : participantIds.length === 2
+                ? 2
+                : 3
+        }
         participantIds={participantIds}
         size={size}
       />
@@ -74,6 +83,8 @@ const LAYOUTS = {
 type Layout = {
   diameter: number;
   at: readonly (readonly [number, number])[];
+  /** Whether a face is cut out where a later one covers it. Faces that never overlap need no cut. */
+  overlaps?: boolean;
 };
 
 /** The orbs' group: the first two Bots side by side, overlapping by a third of an orb. */
@@ -83,6 +94,19 @@ const ORB_PAIR: Layout = {
     [0, 0.2],
     [0.4, 0.2],
   ],
+};
+
+/**
+ * The kites' group: the first two Bots flying at different heights, clear of each other. A circle
+ * cut out of a diamond leaves a broken kite, so kites are spaced so that nothing covers them.
+ */
+const KITE_PAIR: Layout = {
+  diameter: 0.56,
+  at: [
+    [0, 0.1],
+    [0.44, 0.34],
+  ],
+  overlaps: false,
 };
 
 function boringFace(id: string, size: number) {
@@ -133,7 +157,8 @@ function GroupFaces({
   return (
     <div className="relative size-full">
       {shown.map((id, i) => {
-        const cuts = at.slice(i + 1).map(([x, y]) => {
+        const covering = layout.overlaps === false ? [] : at.slice(i + 1);
+        const cuts = covering.map(([x, y]) => {
           const cx = x - at[i][0] + diameter / 2;
           const cy = y - at[i][1] + diameter / 2;
           const r = diameter / 2 + gap;

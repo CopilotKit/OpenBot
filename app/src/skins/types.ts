@@ -1,5 +1,6 @@
 import type { SkinId } from "@openbot/shared/user-preferences";
 import type { ComponentType, ReactNode } from "react";
+import type { BotLook } from "@/components/agents/bot-look";
 
 /*
  * The ids live in `shared/` because the choice is saved on the person's account and the server
@@ -25,13 +26,18 @@ export type Skin = {
    */
   Frame?: ComponentType<{ children: ReactNode }>;
   /**
-   * How this skin draws a Bot: as its orb, with the orb, name and role at the top of a conversation,
-   * or as the generated face. Absent, a face.
+   * How this skin draws a Bot: as its orb or its kite, with that mark, the Bot's name and role at the
+   * top of a conversation, or as the generated face. Absent, a face.
    */
-  botLook?: "orb" | "face";
+  botLook?: BotLook;
   /**
    * Screens only this skin has, served at `/s/<key>`. They draw OpenBot's existing data; a skin
    * adds no endpoint. A key the active skin does not have goes home.
    */
   screens?: Record<string, ComponentType>;
+  /**
+   * Drawn on the home page under the composer, in place of OpenBot's Explore Bots. It reads
+   * OpenBot's existing data, as a screen does.
+   */
+  home?: ComponentType;
 };

@@ -32,18 +32,29 @@ export const ORB_PALETTES: readonly OrbColors[] = [
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
 
-/**
- * A Bot's palette, from its seed (`avatarSeed`, the Bot's id unless set). Never from its name, so
- * renaming a Bot keeps its color. A 32-bit FNV-1a hash spreads similar ids across the eight.
- */
-export function orbPalette(seed: string): OrbColors {
-  // No seed has no identity to keep, so it gets the first palette rather than whatever the hash of
-  // nothing happens to land on.
-  if (!seed) return ORB_PALETTES[0];
+/** A 32-bit FNV-1a hash of a seed, which spreads similar ids apart. */
+export function seedHash(seed: string): number {
   let hash = FNV_OFFSET;
   for (let i = 0; i < seed.length; i++) {
     hash ^= seed.charCodeAt(i);
     hash = Math.imul(hash, FNV_PRIME);
   }
-  return ORB_PALETTES[(hash >>> 0) % ORB_PALETTES.length];
+  return hash >>> 0;
+}
+
+/**
+ * Which of the eight colours a Bot is, from its seed (`avatarSeed`, the Bot's id unless set). Never
+ * from its name, so renaming a Bot keeps its color. The orb and the Kite Bot kite both read this one
+ * slot, so a Bot keeps its colour whichever way a skin draws it.
+ */
+export function paletteSlot(seed: string): number {
+  // No seed has no identity to keep, so it gets the first slot rather than whatever the hash of
+  // nothing happens to land on.
+  if (!seed) return 0;
+  return seedHash(seed) % ORB_PALETTES.length;
+}
+
+/** A Bot's orb palette, from its seed (`paletteSlot`). */
+export function orbPalette(seed: string): OrbColors {
+  return ORB_PALETTES[paletteSlot(seed)];
 }

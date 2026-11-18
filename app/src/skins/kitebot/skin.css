@@ -1,0 +1,86 @@
+/*
+ * Kite Bot. OpenBot's shell in black, white and grey, so the Bots are the colour on the page: each
+ * is a kite in its own colours (components/agents/kite). Lines are hairline greys, selection is a
+ * neutral step with a breath of violet, and the one accent is OpenBot's violet, on focus alone.
+ * Corners are a little tighter than OpenBot's, to sit with the kite's sharp ones, and text is set
+ * with greyscale smoothing, which keeps small grey labels crisp on white and on black.
+ *
+ * Every token is set for both. A skin's `:root[data-skin]` outranks OpenBot's `.dark`, so a token set
+ * only for light would leak into dark.
+ */
+
+:root[data-skin="kitebot"] {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f2f2;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f2f2f2;
+  --muted-foreground: #666666;
+  --accent: #f0f0f0;
+  --accent-foreground: #0a0a0a;
+  --destructive: #c4321f;
+  --success: #18794e;
+  --border: #ebebeb;
+  --input: #dcdcdc;
+  --ring: #6430ab;
+  --radius: 0.5rem;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ededed;
+  --sidebar-accent-foreground: #0a0a0a;
+  --sidebar-border: #ebebeb;
+  --sidebar-ring: #6430ab;
+  --kitebot-selection: #f4effb;
+}
+
+:root[data-skin="kitebot"].dark {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --card: #111111;
+  --card-foreground: #ededed;
+  --popover: #141414;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #0a0a0a;
+  /* Lighter than the cards, as shadcn's dark fills are, so a button or badge never reads as a hole. */
+  --secondary: #1c1c1c;
+  --secondary-foreground: #ededed;
+  --muted: #1c1c1c;
+  --muted-foreground: #a1a1a1;
+  --accent: #222222;
+  --accent-foreground: #ededed;
+  --destructive: #ff7a68;
+  --success: #3ccf8e;
+  --border: #242424;
+  --input: #2e2e2e;
+  --ring: #b598f3;
+  --radius: 0.5rem;
+  --sidebar: #000000;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #ededed;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent: #1a1a1a;
+  --sidebar-accent-foreground: #ededed;
+  --sidebar-border: #1f1f1f;
+  --sidebar-ring: #b598f3;
+  --kitebot-selection: #2a2140;
+}
+
+:root[data-skin="kitebot"] ::selection {
+  background: var(--kitebot-selection);
+}
+
+:root[data-skin="kitebot"] body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

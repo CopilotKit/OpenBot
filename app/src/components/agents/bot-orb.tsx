@@ -1,4 +1,6 @@
 import type { CSSProperties } from "react";
+import { useBotLook } from "@/components/agents/bot-look";
+import { BotKite } from "@/components/agents/kite/bot-kite";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { orbPalette } from "@/lib/orb-palette";
 
@@ -15,6 +17,9 @@ const STATIC_MAX_SIZE = 32;
  * each run a blur and a backdrop filter on every frame. A larger orb, or one whose Bot is working,
  * is the live `AgentOrb` drawing the same sphere, in the palette as it is in every state. Neither
  * moves under reduced motion: `AgentOrb` honours it, and the still orb has nothing to move.
+ *
+ * Where Bots are kites (`useBotLook`, the Kite Bot skin), this draws the Bot's kite in its place, so
+ * every spot that draws a Bot's mark follows the skin.
  */
 export function BotOrb({
   seed,
@@ -27,6 +32,10 @@ export function BotOrb({
   size?: number;
   state?: "idle" | "working" | "waiting";
 }) {
+  const look = useBotLook();
+  if (look === "kite") {
+    return <BotKite name={name} seed={seed} size={size} state={state} />;
+  }
   const colors = orbPalette(seed);
 
   if (size <= STATIC_MAX_SIZE && state === "idle") {

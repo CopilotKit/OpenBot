@@ -1344,7 +1344,7 @@ components:
       enum: ['on', 'off']
     SkinId:
       type: string
-      enum: [openbot, openduet, opendots, openfuse]
+      enum: [openbot, openduet, opendots, openfuse, kitebot]
       description: How OpenBot looks. openbot is OpenBot as it is without a skin.
     Preferences:
       type: object

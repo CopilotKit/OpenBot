@@ -1,6 +1,7 @@
 import { createRouter } from "@tanstack/react-router";
 import { ReportedErrorComponent } from "./lib/error-reporting";
 import { parseSearchText } from "./lib/search-text";
+import { pageTransitionTypes } from "./lib/view-transition";
 import type { RouterContext } from "./router-context";
 import { routeTree } from "./routeTree.gen";
 
@@ -15,6 +16,8 @@ export const router = createRouter({
   parseSearch: parseSearchText,
   // The router's own error screen, which also tells OpenBot what it caught (lib/error-reporting.tsx).
   defaultErrorComponent: ReportedErrorComponent,
+  // Going to another page cross-fades the page instead of swapping it (lib/view-transition.ts).
+  defaultViewTransition: { types: pageTransitionTypes },
 });
 
 declare module "@tanstack/react-router" {

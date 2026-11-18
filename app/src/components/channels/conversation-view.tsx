@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useBotLook } from "@/components/agents/bot-look";
+import { drawsBotMark, useBotLook } from "@/components/agents/bot-look";
 import {
   ChatTranscript,
   skillLabels,
@@ -126,7 +126,7 @@ export function ConversationView({
   restoring?: boolean;
   /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
-   * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
+   * where Bots are orbs or kites (`useBotLook`); elsewhere the transcript starts at its first message.
    */
   intro?: ReactNode;
   /**
@@ -153,7 +153,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
-  const orbs = useBotLook() === "orb";
+  const orbs = drawsBotMark(useBotLook());
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 
