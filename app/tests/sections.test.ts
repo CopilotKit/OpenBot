@@ -30,7 +30,8 @@ test.each(["/botsy", "/teams", "/channelled"])(
   },
 );
 
-test("only Conversations has a panel", () => {
+test("Conversations and Bots have a panel, and the other sections none", () => {
   expect(sectionHasPanel("conversations")).toBe(true);
-  expect(sectionHasPanel("bots")).toBe(false);
+  expect(sectionHasPanel("bots")).toBe(true);
+  expect(sectionHasPanel("routines")).toBe(false);
 });

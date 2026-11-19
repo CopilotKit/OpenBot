@@ -162,17 +162,17 @@ function sidebarState(view: ReturnType<typeof render>) {
 }
 
 test("on a page whose section has no panel, that section is current and the panel is folded away", async () => {
-  const { view } = renderApp("/bots");
-  const bots = await view.findByRole("link", { name: "Bots" });
-  expect(bots.getAttribute("aria-current")).toBe("page");
+  const { view } = renderApp("/routines");
+  const routines = await view.findByRole("link", { name: "Routines" });
+  expect(routines.getAttribute("aria-current")).toBe("page");
   expect(sidebarState(view)).toBe("collapsed");
 });
 
 test("Conversations brings its panel back without leaving the page", async () => {
-  const { view, router, user } = renderApp("/bots");
+  const { view, router, user } = renderApp("/routines");
   await user.click(await view.findByRole("button", { name: "Conversations" }));
   expect(sidebarState(view)).toBe("expanded");
-  expect(router.state.location.pathname).toBe("/bots");
+  expect(router.state.location.pathname).toBe("/routines");
   expect(
     view
       .getByRole("button", { name: "Conversations" })
@@ -181,8 +181,8 @@ test("Conversations brings its panel back without leaving the page", async () =>
 });
 
 test("⌘B on a page with no panel opens Conversations' panel", async () => {
-  const { view, user } = renderApp("/bots");
-  await view.findByRole("link", { name: "Bots" });
+  const { view, user } = renderApp("/routines");
+  await view.findByRole("link", { name: "Routines" });
   await user.keyboard("{Meta>}b{/Meta}");
   expect(sidebarState(view)).toBe("expanded");
   expect(

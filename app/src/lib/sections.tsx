@@ -16,8 +16,8 @@ import {
  * The sidebar's sections: one icon each on the strip. Conversations first, then the main menu's own
  * destinations (`lib/navigation.ts`), in that list's order.
  *
- * A section may have a panel beside the strip. Only Conversations has one so far; a section without
- * one folds the panel away and its page takes the width.
+ * A section may have a panel beside the strip: Conversations and Bots do. A section without one folds
+ * the panel away and its page takes the width.
  */
 export const CONVERSATIONS = "conversations";
 
@@ -48,9 +48,9 @@ export function sectionForPath(
   return route?.id ?? null;
 }
 
-/** Whether a section has a panel beside the strip. */
+/** Whether a section has a panel beside the strip: Conversations and Bots so far. */
 export function sectionHasPanel(id: SectionId): boolean {
-  return id === CONVERSATIONS;
+  return id === CONVERSATIONS || id === "bots";
 }
 
 /** The addresses of the sections this person has, from the main menu. */

@@ -23,7 +23,6 @@ import {
   isChannelSearchable,
   normalizeChannelSearch,
 } from "@/lib/channels/queries";
-import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
@@ -309,8 +308,6 @@ export function ConversationsPanel() {
   const emphasis = useMessageListEmphasis();
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
-  // One socket for the app, opened where the roster is kept live.
-  useChannelEvents();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
   const scrollRoot = useRef<HTMLDivElement>(null);

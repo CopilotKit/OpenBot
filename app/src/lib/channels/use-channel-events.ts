@@ -12,7 +12,6 @@ import {
 } from "@/lib/notifications/reply-notice";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import { type BotTask, taskKeys } from "@/lib/tasks/queries";
-import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -20,6 +19,7 @@ import {
   type ChannelWork,
   channelKeys,
 } from "./queries";
+import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 
 /**
  * Keep the roster live.
@@ -467,6 +467,40 @@ export function applyToRoster(
   if (line) botSaidOffTheList(activity.channelId, line);
 }
 
+/**
+ * Apply one event to every Bot's list the Bots panel has open (`channelKeys.byBot`), as
+ * {@link applyToRoster} does to the roster. A list that holds the conversation is patched in place. A
+ * list that does not is read again when its Bot is in the conversation (by the roster, which the
+ * event was just applied to), or when the roster does not know the conversation either. Another
+ * Bot's list is left alone.
+ */
+export function applyToBotLists(
+  queryClient: QueryClient,
+  activity: ChannelActivityEvent,
+): void {
+  const roster = queryClient.getQueryData<ChannelCache>(channelKeys.list());
+  const inIt = roster?.pages
+    .flatMap((page) => page.channels)
+    .find((channel) => channel.id === activity.channelId)?.agentIds;
+  for (const query of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: channelKeys.byBots() })) {
+    const botId = query.queryKey[2];
+    const data = query.state.data as ChannelCache | undefined;
+    if (typeof botId !== "string" || !data) continue;
+    const patched = applyChannelEvent(data, activity);
+    if (patched !== "unknown") {
+      if (patched !== data) queryClient.setQueryData(query.queryKey, patched);
+      continue;
+    }
+    if (inIt === undefined || inIt.includes(botId))
+      void queryClient.invalidateQueries({
+        queryKey: channelKeys.byBot(botId),
+        exact: true,
+      });
+  }
+}
+
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
@@ -493,6 +527,7 @@ export function useChannelEvents() {
         // Recover events missed while the socket was disconnected.
         void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
         void queryClient.invalidateQueries({ queryKey: channelKeys.details() });
+        void queryClient.invalidateQueries({ queryKey: channelKeys.byBots() });
       };
 
       socket.onmessage = (message) => {
@@ -506,6 +541,9 @@ export function useChannelEvents() {
           void queryClient.invalidateQueries({
             queryKey: channelKeys.details(),
           });
+          void queryClient.invalidateQueries({
+            queryKey: channelKeys.byBots(),
+          });
           return;
         }
 
@@ -516,6 +554,7 @@ export function useChannelEvents() {
         });
 
         applyToRoster(queryClient, activity);
+        applyToBotLists(queryClient, activity);
 
         // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
         noticeChannelEvent(activity, queryClient, (channelId) => {
