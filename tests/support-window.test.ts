@@ -180,14 +180,23 @@ describe("a deprecation's sunset", () => {
     return copy;
   };
 
-  test("today's spec deprecates nothing, so nothing is held", () => {
-    expect(deprecations(spec)).toEqual([]);
+  test("is found on each element today's spec marks, a request body's property included, each with a sunset date", () => {
+    const today = deprecations(spec);
+    expect(today.map((found) => found.where)).toContain(
+      "/components/schemas/UpdatePersonRequest/properties/role",
+    );
+    for (const { sunset } of today)
+      expect(String(sunset)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   test("is found on the operation that names it", () => {
-    expect(deprecations(deprecated("2027-12-01"))).toEqual([
-      { where, sunset: "2027-12-01" },
-    ]);
+    expect(deprecations(spec)).not.toContainEqual(
+      expect.objectContaining({ where }),
+    );
+    expect(deprecations(deprecated("2027-12-01"))).toContainEqual({
+      where,
+      sunset: "2027-12-01",
+    });
   });
 
   test("is required, and must be a date", () => {
@@ -263,7 +272,19 @@ test("this tree holds the window", () => {
       ),
     ],
     {
-      env: { ...process.env, SUPPORT_WINDOW_NOW: RELEASE_DAY.toISOString() },
+      env: {
+        ...process.env,
+        SUPPORT_WINDOW_NOW: RELEASE_DAY.toISOString(),
+        // The releases' specs are read from the fixtures, never fetched: a deprecation in this
+        // tree's spec makes the check look each release's spec up, and a test never reaches the
+        // network. No release spec is kept there, so a deprecation is served from the release
+        // being prepared.
+        SUPPORT_WINDOW_RELEASE_SPECS: join(
+          import.meta.dir,
+          "fixtures",
+          "support-window",
+        ),
+      },
       stdout: "pipe",
       stderr: "pipe",
     },
