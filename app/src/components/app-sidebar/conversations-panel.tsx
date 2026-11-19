@@ -347,10 +347,10 @@ function ViewMenu({
             }
             value={view}
           >
-            <DropdownMenuRadioItem value="compact">
+            <DropdownMenuRadioItem closeOnClick value="compact">
               Compact
             </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="detailed">
+            <DropdownMenuRadioItem closeOnClick value="detailed">
               Detailed
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>

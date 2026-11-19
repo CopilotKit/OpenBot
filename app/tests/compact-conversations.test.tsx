@@ -240,6 +240,8 @@ test("View › Detailed brings back the Bot's name, and this browser remembers i
   expect(window.localStorage.getItem(CONVERSATION_VIEW_STORAGE_KEY)).toBe(
     "detailed",
   );
+  // Picking a view is the menu's whole job, so picking one closes it.
+  await waitFor(() => expect(view.queryByRole("menu")).toBeNull());
 });
 
 test("a browser that chose Detailed opens Detailed", async () => {
