@@ -187,6 +187,12 @@ or a script has to say.
   a rate limit, never as out of credit, and the model list loads when OpenBot starts.
 - **A turn that failed after it did something isn't sent again.** On every engine, a message whose
   Bot had already said something or called a tool stays sent when the turn fails.
+- **A Bot asks for the app a request needs instead of searching around it.** Asked about what is
+  kept in an app it has no tools for, such as a team's GitHub repositories, a Bot shows that app's
+  card first, which connects it or asks an admin for it, instead of searching the public web and
+  missing what is private. A page that comes back not found on the web and could be private, such
+  as a private repository's 404, gets the same card instead of "it may not exist". So does telling
+  a Bot that something is private, which a Bot handing its work to tasks used to answer with a 👍.
 - **Bots reach other Bots, plan engines and MCP servers on a connection of their own**, so a second
   message a few seconds after the first no longer fails with "Couldn't reach" the Bot. A built-in
   Bot's tool calls are no longer lost under load.

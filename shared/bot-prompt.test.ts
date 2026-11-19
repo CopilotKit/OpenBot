@@ -273,6 +273,46 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     );
   });
 
+  test("what is kept in an app the Bot holds nothing for starts with that app's card, and so does a not-found that could be private", () => {
+    // Found on the Desktop: a Bot made to follow a company's repositories held no GitHub tools,
+    // searched the web, met a private repository as GitHub's 404 and told the person it was
+    // probably private or did not exist. The card that connects GitHub was one call away.
+    for (const brought of [false, true]) {
+      const [howTo] = workingGuidance({ brought, untrusted: "" });
+      const said = flat(howTo ?? "");
+      expect(said).toContain(
+        "when a request needs what is in an app you hold no tools for, call show_app_access with that app's name before you look on the web",
+      );
+      expect(said).toContain("the web shows only the public part of it");
+      // A 404 from a site that hides what is private is not an answer, and neither is a guess. Only
+      // on the web: a not-found from the app's own tools is the app answering for their account.
+      expect(said).toContain(
+        "when something you looked for on the web comes back not found, or with no access, and could be private",
+      );
+      expect(said).toContain("a repository that answers 404");
+      expect(said).toContain(
+        "that has not shown it is missing, so never say it does not exist",
+      );
+      expect(said).toContain(
+        "never leave the person only a guess that it is private",
+      );
+      // Being told it is private is the same cue, never news that asks nothing.
+      expect(said).toContain(
+        "call it too when the person tells you something is private",
+      );
+      expect(said).toContain("call it once for each app");
+      // A Bot that does not hold the card still names the app to connect.
+      expect(said).toContain(
+        "without that tool, say which app would need connecting",
+      );
+      // Beside the rule that nothing found is not nothing there, before the work: a 404 page is
+      // an answer that came back, not a failed call.
+      const card = said.indexOf("show_app_access");
+      expect(card).toBeGreaterThan(said.indexOf("a search that finds nothing"));
+      expect(card).toBeLessThan(said.indexOf("when a call fails"));
+    }
+  });
+
   test("a claim needs a tool result, and an app change is read back once before it is called done", () => {
     const said = flat(HOW_TO_WORK_GUIDANCE);
     expect(said).toContain(
