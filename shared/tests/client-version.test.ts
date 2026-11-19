@@ -1,25 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import policy from "../../release-policy.json";
 import { version } from "../../package.json";
+import policy from "../../release-policy.json";
+import { countedClients } from "../api-deprecations";
 import {
   API_VERSIONS,
   belowMinimum,
   CLIENT_KINDS,
   type ClientKind,
   clientToken,
+  clientTokens,
   clientUpdateDetail,
   compareVersions,
   compatibility,
   EXTENSION_API,
+  FIRST_ONE_API_RELEASES,
   LAUNCHER_API,
   MINIMUM_CLIENTS,
   parseClientHeader,
   RELEASE,
   SECURITY_UPDATE_SENTENCE,
-  clientTokens,
-  FIRST_ONE_API_RELEASES,
 } from "../client-version";
-import { countedClients } from "../api-deprecations";
 import cases from "../fixtures/client-version/cases.json";
 
 describe("which app is asking", () => {

@@ -291,7 +291,24 @@ export interface ReleaseIdentity {
   distributionId?: string;
   repository?: string;
   channel?: string;
-  lastAppliedMigration?: string | null;
+  /** The server's last applied migration: an object on servers that report it, a bare name on
+   * earlier ones, absent on older ones still. */
+  lastAppliedMigration?:
+    | { name: string; hash?: string; createdAt?: string | number }
+    | string
+    | null;
+}
+/** The name of the last migration a server reports, whichever shape it reports it in. */
+export function lastMigrationName(identity: ReleaseIdentity | null) {
+  const migration = identity?.lastAppliedMigration;
+  if (typeof migration === "string") return migration || null;
+  if (
+    migration &&
+    typeof migration === "object" &&
+    typeof migration.name === "string"
+  )
+    return migration.name || null;
+  return null;
 }
 /** What the running server says on /release, read from inside its container. */
 export async function runningIdentity(

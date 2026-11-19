@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import published from "../fixtures/releases/published-v1.1.0.json";
-import { identityMatches } from "../kubernetes-promotion";
+import { identityMatches, lastMigrationName } from "../kubernetes-promotion";
 import { parseReleaseManifest } from "../release-manifest";
 
 // What the published v1.1.0 server answers on /release, read from a running pod of
@@ -34,5 +34,33 @@ describe("running release identity", () => {
     expect(identityMatches({ ...served, channel: "internal" }, manifest)).toBe(
       false,
     );
+  });
+});
+
+describe("last applied migration", () => {
+  test("read from the object a current server reports, the name an earlier one reported, or nothing", () => {
+    // A server with the internal status listener answers /release with an object.
+    expect(
+      lastMigrationName({
+        ...served,
+        lastAppliedMigration: {
+          name: "0137_ai_connections",
+          hash: "9f2c4e1a7b3d5f60",
+          createdAt: 1763452800000,
+        },
+      }),
+    ).toBe("0137_ai_connections");
+    expect(
+      lastMigrationName({
+        ...served,
+        lastAppliedMigration: "0132_bot_task_runs",
+      }),
+    ).toBe("0132_bot_task_runs");
+    // v1.1.0's server, above, names none.
+    expect(lastMigrationName(served)).toBeNull();
+    expect(
+      lastMigrationName({ ...served, lastAppliedMigration: null }),
+    ).toBeNull();
+    expect(lastMigrationName(null)).toBeNull();
   });
 });

@@ -4,6 +4,7 @@
  * or anything a person wrote.
  */
 import {
+  lastMigrationName,
   type ReleaseIdentity,
   runningIdentity,
   serverDeployment,
@@ -39,10 +40,25 @@ export function productTarget(config: AgentConfig) {
   };
 }
 
-/** What the running server says on /release, or null when there is no server to ask. */
+/** The server's internal status Service, which answers /release to the agent's namespace without
+ * pods/exec (the chart's `server.internalStatus`, which the agent's pins switch on). */
+export function internalReleaseUrl(config: AgentConfig) {
+  return `http://${config.product.releaseName}-server-internal.${config.product.namespace}.svc:9464/release`;
+}
+
+/** What the running server says on /release, or null when there is no server to ask. It asks the
+ * internal status Service first, and from inside the server's container where a release has none. */
 export async function readIdentity(
   config: AgentConfig,
 ): Promise<ReleaseIdentity | null> {
+  try {
+    const response = await fetch(internalReleaseUrl(config), {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.ok) return (await response.json()) as ReleaseIdentity;
+  } catch {
+    // No internal status Service on this release: read it from inside the container.
+  }
   try {
     const target = productTarget(config);
     const deployment = await serverDeployment(target, run);
@@ -109,8 +125,8 @@ export async function collectHeartbeat(options: {
         ? unknown(intelligenceChart.slice("intelligence-".length))
         : "none",
     },
-    lastAppliedMigration: identity?.lastAppliedMigration
-      ? clip(identity.lastAppliedMigration, 512)
+    lastAppliedMigration: lastMigrationName(identity)
+      ? clip(lastMigrationName(identity) ?? "", 512)
       : null,
     flux: {
       helmReleases: release

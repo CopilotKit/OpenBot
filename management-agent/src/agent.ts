@@ -359,7 +359,26 @@ export class ManagementAgent {
       ...imageParts(selectedImage(manifest)),
       tag: manifest.version,
     };
-    return promotionValues(manifest, image);
+    return {
+      ...promotionValues(manifest, image),
+      // The server's internal status port, open to the agent's namespace only, so the agent reads
+      // /release without pods/exec. A chart without it ignores the value.
+      server: {
+        ...promotionValues(manifest, image).server,
+        internalStatus: {
+          enabled: true,
+          allowFrom: [
+            {
+              namespaceSelector: {
+                matchLabels: {
+                  "kubernetes.io/metadata.name": this.config.agentNamespace,
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
   }
 
   private async applyRelease(
