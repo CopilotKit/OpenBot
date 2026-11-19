@@ -33,8 +33,14 @@ function ItemSeparator({
   );
 }
 
+/*
+ * The UI Kit's "Action Card": a row of its own, white, tinted under the pointer when it opens
+ * something (a link, or a button that opens a dialog), and `variant="outline"` is its Empty state,
+ * an outline with no fill for something not set up yet. Its colours, the heading's lines and the gap
+ * at the end are tokens in theme.css, which the alternate skins set back to theirs.
+ */
 const itemVariants = cva(
-  "group/item flex w-full flex-wrap items-center rounded-card border dark:border-transparent text-sm transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [a]:transition-colors [a]:hover:bg-muted",
+  "group/item flex w-full flex-wrap items-center rounded-card border dark:border-transparent text-sm transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [a]:transition-colors [a]:hover:bg-row-hover [button]:hover:bg-row-hover",
   {
     variants: {
       variant: {
@@ -43,12 +49,13 @@ const itemVariants = cva(
         muted: "border-transparent bg-muted/50",
       },
       /*
-       * Figma's row card: 20px in from every edge and 12px between the icon tile, the text and the
-       * actions. A 44px tile beside a title and a one-line description comes to 84px.
+       * Figma's row card: 20px in from every edge, its 1px edge counted in (`--spacing-row`), and
+       * 12px between the icon tile, the text and the actions. A 44px tile beside a title and a
+       * one-line description comes to 84px.
        */
       size: {
-        default: "gap-3 p-5",
-        sm: "gap-3 p-5",
+        default: "gap-3 p-row",
+        sm: "gap-3 p-row",
         xs: "gap-2 rounded-lg px-2.5 py-2 in-data-[slot=dropdown-menu-content]:p-0",
       },
     },
@@ -135,7 +142,7 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="item-title"
       className={cn(
         // Figma's H3: 16px semibold, tightened. A dropdown's row keeps the 14px label it had.
-        "line-clamp-1 flex w-fit items-center gap-2 text-base leading-tight font-semibold tracking-heading underline-offset-4 group-data-[size=xs]/item:text-sm group-data-[size=xs]/item:leading-snug group-data-[size=xs]/item:font-medium group-data-[size=xs]/item:tracking-normal",
+        "line-clamp-1 flex w-fit items-center gap-2 text-base leading-heading font-semibold tracking-heading underline-offset-4 group-data-[size=xs]/item:text-sm group-data-[size=xs]/item:leading-snug group-data-[size=xs]/item:font-medium group-data-[size=xs]/item:tracking-normal",
         className,
       )}
       {...props}
@@ -161,7 +168,7 @@ function ItemActions({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="item-actions"
-      className={cn("flex items-center gap-2", className)}
+      className={cn("flex items-center gap-row-actions", className)}
       {...props}
     />
   );

@@ -305,6 +305,80 @@ body {
     0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
     0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
   --menu-shadow-sub: var(--menu-shadow);
+  /*
+   * Cards and rows ("Action Card", "Bot Card"): a heading's lines at 1.12, a row tinted #f1f2f7
+   * under the pointer whether it is a link or opens a dialog, a Bot card turning the page's
+   * #fafafa, and 12px between the things at a row's end.
+   */
+  --leading-heading: 1.12;
+  --color-row-hover: var(--secondary);
+  --color-bot-card-hover: var(--background);
+  --spacing-row-actions: 0.75rem;
+  --spacing-row: calc(1.25rem - 1px);
+  /*
+   * Checkbox ("Checkbox label"): 16px with 4px corners, white inside; ink when ticked or half
+   * ticked, #31363a under the pointer; focused, a 2px #d8dee9 band round it in place of its edge;
+   * disabled, the frame's gray with a faint edge and a gray tick; invalid, tinted red with a red
+   * edge, and red when ticked. Its edge at rest is not the kit's ink at 20%, which is about 1.5:1
+   * on white: an unticked box is nothing but its edge (checkbox.tsx).
+   */
+  --color-check-bg: var(--card);
+  --color-check-border: var(--muted-foreground);
+  --color-check-border-hover: var(--foreground);
+  --color-check-checked-hover: var(--color-primary-hover);
+  --color-check-focus-border: transparent;
+  --color-check-focus-ring: var(--color-field-focus);
+  --check-focus-ring: 2px;
+  --color-check-invalid-bg: color-mix(
+    in oklab,
+    var(--destructive) 20%,
+    transparent
+  );
+  --check-invalid-ring: 0px;
+  --color-check-checked-invalid: var(--destructive);
+  --color-check-disabled-bg: var(--sidebar);
+  --color-check-disabled-border: color-mix(
+    in oklab,
+    var(--foreground) 12%,
+    transparent
+  );
+  --color-check-checked-disabled: var(--sidebar);
+  --color-check-disabled: var(--color-field-disabled);
+  --check-disabled-opacity: 1;
+  --check-shadow: 0 0 #0000;
+  /*
+   * Tabs ("Tabs", Clear): a #f1f2f7 pill holding pill tabs, the chosen one white, labelled in 14px
+   * regular and gray until chosen. M (the default) is 40px with the tabs 4px in, 16px to a side and
+   * 8px from icon to label; S is 32px, 2px in, 12px to a side and 4px apart (tabs.tsx).
+   */
+  --color-tabs: var(--secondary);
+  --color-tab-active: var(--card);
+  --spacing-tabs: 2.5rem;
+  --spacing-tabs-pad: 0.25rem;
+  --spacing-tab-x: 1rem;
+  --spacing-tab-gap: 0.5rem;
+  --spacing-tab-edge: 0.75rem;
+  --radius-tabs: calc(infinity * 1px);
+  --radius-tab: calc(infinity * 1px);
+  --tab-weight: 400;
+  --tab-trim: 0px;
+  --tab-active-shadow: 0 0 #0000;
+  /* A table's column names ("Table header"): 12px regular in #51595f. */
+  --color-table-head: color-mix(in oklab, var(--foreground) 65%, var(--card));
+  --text-table-head-size: 0.75rem;
+  --table-head-weight: 400;
+  /*
+   * Badges ("Badges"): Icon+Text is a 32px pill in its colour at 20%, the icon in that colour and
+   * the label in ink, 8px in beside the icon and 12px at the end. Numeric is a 24px ink circle with
+   * the count in 12px. The kit's own greens and oranges, until it settles on one of each.
+   */
+  --color-badge-success: oklch(0.741 0.145 169.4);
+  --color-badge-warning: oklch(0.68 0.19 46.5);
+  --color-badge-destructive: var(--destructive);
+  --spacing-badge-count: 1.5rem;
+  --spacing-badge-count-x: 0.25rem;
+  --text-badge-count: 0.75rem;
+  --badge-count-weight: 400;
 }
 
 @theme inline {

@@ -12,10 +12,22 @@ const twMerge = extendTailwindMerge({
   extend: {
     theme: {
       container: ["page"],
-      radius: ["card", "tile", "field", "field-sm", "menu", "menu-item"],
+      leading: ["heading"],
+      radius: [
+        "card",
+        "tile",
+        "field",
+        "field-sm",
+        "menu",
+        "menu-item",
+        "tab",
+        "tabs",
+      ],
       shadow: ["composer"],
       // The primitives' measures (theme.css), so a call site's `h-8` replaces a field's `h-field`.
       spacing: [
+        "badge-count",
+        "badge-count-x",
         "button-edge",
         "button-edge-sm",
         "button-icon",
@@ -37,8 +49,17 @@ const twMerge = extendTailwindMerge({
         "menu-item-x",
         "menu-item-y",
         "menu-label-y",
+        "row",
+        "row-actions",
         "select-pad",
+        "tab-edge",
+        "tab-gap",
+        "tab-x",
+        "tabs",
+        "tabs-pad",
       ],
+      // The font sizes, so a call site's `text-sm` replaces a count's `text-badge-count`.
+      text: ["badge-count", "table-head-size"],
       tracking: ["heading"],
     },
   },

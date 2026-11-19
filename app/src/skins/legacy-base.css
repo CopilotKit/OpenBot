@@ -33,7 +33,9 @@
  * icons and a tighter end beside one, and its link is underlined under the pointer; an outlined
  * button keeps its border. A field is shorter, with a `--input` border that stays put under the
  * pointer, the periwinkle focus ring outside it and a muted placeholder. A menu has the smaller
- * corners, a hairline and a short shadow, and tighter rows.
+ * corners, a hairline and a short shadow, and tighter rows. A tickbox shows what is under it and
+ * fades when disabled; tabs are shorter, squarer and medium weight; a table names its columns in
+ * 14px medium; a count is a small 11px pill.
  */
 :root[data-skin] {
   --color-primary-hover: color-mix(in oklab, var(--primary) 85%, transparent);
@@ -107,6 +109,51 @@
   --menu-shadow-sub:
     0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
     0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  --leading-heading: 1.25;
+  --color-row-hover: var(--muted);
+  --color-bot-card-hover: color-mix(in oklab, var(--card) 70%, transparent);
+  --spacing-row-actions: 0.5rem;
+  --spacing-row: 1.25rem;
+
+  --color-check-bg: transparent;
+  --color-check-border-hover: var(--muted-foreground);
+  --color-check-checked-hover: var(--primary);
+  --color-check-focus-border: var(--ring);
+  --color-check-focus-ring: color-mix(in oklab, var(--ring) 50%, transparent);
+  --check-focus-ring: 3px;
+  --color-check-invalid-bg: transparent;
+  --check-invalid-ring: 3px;
+  --color-check-checked-invalid: var(--primary);
+  --color-check-disabled-bg: transparent;
+  --color-check-disabled-border: var(--muted-foreground);
+  --color-check-checked-disabled: var(--primary);
+  --color-check-disabled: var(--primary-foreground);
+  --check-disabled-opacity: 0.5;
+  --check-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+
+  --color-tabs: var(--muted);
+  --color-tab-active: var(--background);
+  --spacing-tabs: 2rem;
+  --spacing-tabs-pad: 3px;
+  --spacing-tab-x: 0.375rem;
+  --spacing-tab-gap: 0.375rem;
+  --spacing-tab-edge: 0.25rem;
+  --radius-tabs: var(--radius);
+  --radius-tab: calc(var(--radius) * 0.8);
+  --tab-weight: 500;
+  --tab-trim: 1px;
+  --tab-active-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+
+  --color-table-head: var(--muted-foreground);
+  --text-table-head-size: 0.875rem;
+  --table-head-weight: 500;
+
+  --spacing-badge-count: auto;
+  --spacing-badge-count-x: 0.375rem;
+  --text-badge-count: 11px;
+  --badge-count-weight: 500;
 }
 :root[data-skin].dark {
   --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);

@@ -18,16 +18,16 @@ export function AgentCard({
        * between the two, and a row reads the name and what the Bot is for in one glance.
        *
        * Figma's "Bot Card": a white card with a 44px avatar, the name in 16px and two lines of what
-       * the Bot is for. Every card is two lines tall whatever its description, so a grid of them
-       * keeps its rows even.
+       * the Bot is for, turning the page's colour under the pointer. Every card is two lines tall
+       * whatever its description, so a grid of them keeps its rows even.
        */
-      <div className="flex min-w-0 items-center gap-3 rounded-card bg-card p-5 transition-colors hover:bg-card/70">
+      <div className="flex min-w-0 items-center gap-3 rounded-card bg-card p-5 transition-colors hover:bg-bot-card-hover">
         <div aria-hidden="true" className="flex shrink-0">
           <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={44} />
         </div>
         <div className="flex min-w-0 flex-col gap-2">
           <span
-            className="truncate font-semibold text-base leading-tight tracking-heading"
+            className="truncate font-semibold text-base leading-heading tracking-heading"
             title={agent.name}
           >
             {agent.name}

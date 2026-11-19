@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { Badge } from "@/components/ui/badge";
 import {
   type BotAttention,
   botAttentionQueryOptions,
@@ -298,15 +299,23 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
   const bots = attention.data ?? [];
   const waiting = waitingAcross(bots);
   if (waiting > 0) {
+    const label = `${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`;
+    if (!onIcon) {
+      return (
+        <Badge
+          aria-label={label}
+          className="ml-auto"
+          role="img"
+          variant="count"
+        >
+          {waiting}
+        </Badge>
+      );
+    }
     return (
       <span
-        aria-label={`${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`}
-        className={cn(
-          "rounded-full bg-primary font-medium text-primary-foreground tabular-nums",
-          onIcon
-            ? "grid h-4 min-w-4 place-items-center px-1 text-[10px] leading-none"
-            : "ml-auto px-1.5 text-[11px]",
-        )}
+        aria-label={label}
+        className="grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-medium text-[10px] text-primary-foreground tabular-nums leading-none"
         role="img"
       >
         {waiting}

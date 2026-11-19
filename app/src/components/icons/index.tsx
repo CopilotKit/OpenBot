@@ -191,6 +191,7 @@ import {
   MicOff01Icon,
   MicrosoftTeamsIcon,
   MinusSignCircleIcon,
+  MinusSignIcon,
   Moon02Icon,
   MoreHorizontalIcon,
   Mortarboard02Icon,
@@ -442,6 +443,7 @@ export const IconMessageQuestion = defineIcon(
 export const IconMessages = defineIcon("messages", Message02Icon);
 export const IconMicrophone = defineIcon("microphone", Mic01Icon);
 export const IconMicrophoneOff = defineIcon("microphone-off", MicOff01Icon);
+export const IconMinus = defineIcon("minus", MinusSignIcon);
 export const IconMoon = defineIcon("moon", Moon02Icon);
 export const IconNetwork = defineIcon("network", NetworkIcon);
 export const IconNotes = defineIcon("notes", Note01Icon);
