@@ -13,7 +13,7 @@
 //! Unix has no equivalent problem and no equivalent flag, so there the wrapper is the identity.
 
 use std::io::Read;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -77,14 +77,12 @@ pub fn output_watching(
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return Err(error);
             }
         }
         if Instant::now() >= until {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop(&mut child);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!("still running after {limit:?}, so it was stopped"),
@@ -114,6 +112,21 @@ pub fn output_watching(
             format!("exited with {status} but its output stayed open"),
         )),
     }
+}
+
+/// Stop `child` and reap it. On Windows, also stop what it started: `podman machine ssh` runs
+/// `ssh.exe`, which kept waiting for a password nobody could type after `podman` itself was killed.
+/// `taskkill /T` reaches the processes `child` still parents, as `local_eval::stop_tree` does.
+fn stop(child: &mut Child) {
+    #[cfg(windows)]
+    let _ = command("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Everything `pipe` says until it closes, read on a thread of its own.
@@ -206,6 +219,23 @@ mod tests {
         // Past the moment it would have finished: killed, not abandoned to run on.
         std::thread::sleep(Duration::from_secs(3));
         assert!(!marker.exists(), "the probe ran on after its limit");
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
+
+    /// What the command started is stopped with it. `podman machine ssh` timed out with its
+    /// `ssh.exe` still waiting on a password prompt, and every retry left one more behind.
+    #[test]
+    #[cfg(windows)]
+    fn a_command_stopped_at_its_limit_takes_what_it_started_with_it() {
+        let cli = crate::test_support::probe_cli("output-within-tree");
+        let error = output_within(command(&cli).arg("parent"), Duration::from_secs(1)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut, "{error}");
+        // The child sleeps two seconds, then leaves `probe-child-outlived` beside it.
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(
+            !cli.with_file_name("probe-child-outlived").exists(),
+            "the command's child ran on after its limit"
+        );
         let _ = std::fs::remove_dir_all(cli.parent().unwrap());
     }
 

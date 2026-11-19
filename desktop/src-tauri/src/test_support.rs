@@ -119,6 +119,12 @@ fn main() {
             eprint!("said on stderr");
             std::process::exit(3);
         }
+        Some("parent") => {
+            let child = me.with_file_name(format!("probe-child{}", std::env::consts::EXE_SUFFIX));
+            std::fs::copy(&me, &child).unwrap();
+            std::process::Command::new(&child).spawn().unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
         Some("hang") => {
             std::thread::sleep(std::time::Duration::from_secs(2));
             std::fs::write(&args[1], "outlived its limit").unwrap();
