@@ -255,6 +255,9 @@ or a script has to say.
   shows Updating with no buttons during an update.
 - **Launching OpenBot while it quits** opens it again once it has quit, where it stayed on Shutting
   down.
+- **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
+  again when it is gone. On Windows, after Podman was removed, the window stayed on "Setting up this
+  computer" after sign-in, because Install took the old install as done.
 - **The first Start after Install** waits up to two minutes for the container engine, instead of
   sending you back to Install.
 - On Windows, checking your saved setup no longer freezes the window while Windows finishes an
