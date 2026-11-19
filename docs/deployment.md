@@ -192,7 +192,9 @@ alongside.
 deploys after the `CI` workflow succeeds for a push to `main`. It checks out and builds the exact
 commit CI checked, pushes the app and LangGraph Bot images to ECR, runs the database migration as a
 one-off Fargate task, then updates the LangGraph Bot service followed by the app service and waits for
-each to become stable. The deploy builds are separate from CI's test image. It uses GitHub OIDC
+each to become stable. If the LangGraph Bot service does not stabilize, the workflow reports ECS
+service events and task/container failure details to help diagnose the deployment. The deploy builds
+are separate from CI's test image. It uses GitHub OIDC
 rather than long-lived AWS access keys. The workflow assumes you have provisioned the AWS resources
 below; it does not create them.
 
