@@ -715,7 +715,7 @@ test("the first screen offers OpenBot (Self-Contained), then OpenBot for Busines
       (item) => item.textContent,
     ),
   ).toEqual([
-    "A Mac or a 64-bit Windows PC",
+    "A Mac, or a 64-bit Windows or Linux PC",
     "16 GB of memory or more",
     "4 CPU cores or more",
     "40 GB of free disk space",

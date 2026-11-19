@@ -22,6 +22,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **OpenBot Desktop for Linux can set up OpenBot (Self-Contained).** The Linux installer now carries
+  the CopilotKit CLI, as the Mac and Windows ones do, and finds it where a .deb, .rpm or AppImage
+  puts it. Sign-in used to stop at once with "Sign-in didn't finish". It needs Docker Engine;
+  Docker Desktop on Linux and rootless Podman are not supported. The first setup screen now lists
+  Linux as well.
 - **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
   again when it is gone. On Windows, after Podman was removed, the window stayed on "Setting up this
   computer" after sign-in, because Install took the old install as done.

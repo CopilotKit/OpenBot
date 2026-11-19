@@ -59,7 +59,7 @@ const CLOUDS = [
  * 16 GB, room for that plus the person's own apps, as decided with David on 13 Nov 2026.
  */
 export const SELF_CONTAINED_NEEDS = [
-  "A Mac or a 64-bit Windows PC",
+  "A Mac, or a 64-bit Windows or Linux PC",
   "16 GB of memory or more",
   "4 CPU cores or more",
   "40 GB of free disk space",
