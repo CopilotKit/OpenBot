@@ -803,6 +803,45 @@ fn a_short_disk_tells_the_window_the_drive_the_engine_can_move_to() {
     assert!(serde_json::to_value(last).unwrap().get("moveTo").is_none());
 }
 
+/// Box A: the move freed C: while the machine was still starting on D:, the next look at the disk
+/// started the image pulls, and all three failed on "Cannot connect to Podman". While the disk
+/// moves, nothing starts, however much room there is; once the move is done, the downloads start.
+#[test]
+fn downloads_wait_while_the_engines_disk_moves() {
+    let _table = table_to_myself();
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let moving = moving();
+    let job_started = started.clone();
+    std::thread::scope(|scope| {
+        let running = scope.spawn(move || {
+            run(
+                vec![Job {
+                    key: "images",
+                    size: Some(0),
+                    also: Vec::new(),
+                    work: Box::new(move || {
+                        job_started.store(true, Ordering::SeqCst);
+                        Ok(())
+                    }),
+                }],
+                Needed::default(),
+                || Some(u64::MAX),
+                |_| None,
+                &|_| {},
+                Duration::from_millis(5),
+            )
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !started.load(Ordering::SeqCst),
+            "a download started while the engine's disk was moving"
+        );
+        drop(moving);
+        running.join().unwrap();
+    });
+    assert!(started.load(Ordering::SeqCst));
+}
+
 /// A download that fails is said as failed, and the others still finish.
 #[test]
 fn a_download_that_fails_is_said_and_the_others_finish() {

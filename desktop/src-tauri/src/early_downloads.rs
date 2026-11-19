@@ -1284,10 +1284,31 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
     jobs
 }
 
+/// The engine's disk is moving to another drive (`moving`).
+static MOVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Held while the engine's disk moves (`move_engine_here` in `main.rs`). The space check waits until
+/// it is dropped: the move frees the old drive before the machine has started again, and the
+/// downloads that room lets start would pull into an engine that does not answer yet.
+pub struct Moving(());
+
+/// The engine's disk starts moving, until the answer is dropped.
+pub fn moving() -> Moving {
+    MOVING.store(true, std::sync::atomic::Ordering::SeqCst);
+    Moving(())
+}
+
+impl Drop for Moving {
+    fn drop(&mut self) {
+        MOVING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Run `jobs` once `free` says there is `needed` free, all at once, saying where they are through
 /// `said` while they run. With less free, nothing starts: the window is told the numbers and the
 /// drive `move_to` names for the whole need (a drive the engine's disk can move to, or None), and
-/// `free` is asked again every `recheck`.
+/// `free` is asked again every `recheck`. While the engine's disk moves (`moving`), nothing is
+/// asked or started.
 pub fn run(
     jobs: Vec<Job>,
     needed: Needed,
@@ -1302,6 +1323,11 @@ pub fn run(
         return;
     }
     loop {
+        // The disk is moving: the room it frees comes before the engine answers again.
+        if MOVING.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(recheck);
+            continue;
+        }
         match free() {
             Some(free) if free < needed.total() => {
                 let move_to = move_to(needed.total());

@@ -3534,6 +3534,8 @@ async fn move_engine_here(app: tauri::AppHandle) -> Result<(), Problem> {
         .join(acquire::MACHINE);
     let to = win::drive_of(&target.to_string_lossy());
     let (moved, now_on) = tauri::async_runtime::spawn_blocking(move || {
+        // The downloads wait until the machine has started again, wherever the disk ends up.
+        let _moving = early_downloads::moving();
         let machine_drive =
             || win::podman_machine_drive(acquire::MACHINE).and_then(|machine| machine.drive);
         log::info!(
