@@ -23925,6 +23925,22 @@ components:
           type:
             - string
             - 'null'
+        defaultModel:
+          type: object
+          description: The Bot default saved when the conversation was created. Absent when it follows the deployment default.
+          required:
+            - model
+            - effort
+            - source
+          properties:
+            model:
+              type: string
+            effort:
+              type:
+                - string
+                - 'null'
+            source:
+              type: string
         unverified:
           $ref: '#/components/schemas/UnverifiedModel'
     ModelChoiceInput:

@@ -1017,6 +1017,7 @@ export * from "./modelCatalogueProvider";
 export * from "./modelCatalogueSource";
 export * from "./modelCatalogueViewParameter";
 export * from "./modelChoice";
+export * from "./modelChoiceDefaultModel";
 export * from "./modelChoiceForbiddenResponse";
 export * from "./modelChoiceInput";
 export * from "./modelFailedResponse";

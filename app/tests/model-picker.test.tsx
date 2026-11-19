@@ -115,7 +115,7 @@ beforeAll(() => {
             `${runs.label} doesn't take that thinking effort.`,
           );
         await pendingWrite;
-        saved[channelId] = { model, effort };
+        saved[channelId] = { ...saved[channelId], model, effort };
       }
       // As the server answers a pick: one no longer offered reads as the default, and is kept.
       const pick = saved[channelId] ?? { model: null, effort: null };
@@ -469,14 +469,19 @@ test("a conversation with no pick shows the default", async () => {
   );
 });
 
-test("a Bot default is inherited until a conversation has its own pick", async () => {
+test("a conversation shows its starting default until it has its own pick", async () => {
   const botDefault = {
     model: "gpt-6.1-terra",
     effort: "high",
     source: "openai",
   };
+  saved["conversation-a"] = {
+    model: null,
+    effort: null,
+    defaultModel: botDefault,
+  };
   const { result } = renderHook(
-    () => useConversationModel("conversation-a", catalogue, botDefault),
+    () => useConversationModel("conversation-a", catalogue),
     { wrapper },
   );
   await waitFor(() =>
@@ -489,7 +494,7 @@ test("a Bot default is inherited until a conversation has its own pick", async (
     result.current.choose({ model: catalogue.default, effort: null });
     await result.current.beforeSend();
   });
-  expect(saved["conversation-a"]).toEqual({
+  expect(saved["conversation-a"]).toMatchObject({
     model: catalogue.default,
     effort: null,
   });

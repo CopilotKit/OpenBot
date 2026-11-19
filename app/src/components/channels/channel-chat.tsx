@@ -1076,7 +1076,6 @@ export function ChannelChat({
   const runModel = useConversationModel(
     channel.id,
     picksModel ? models.data : undefined,
-    botProfile?.defaultModel,
   );
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of

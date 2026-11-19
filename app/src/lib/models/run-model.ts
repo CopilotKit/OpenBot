@@ -64,14 +64,13 @@ export function unverifiedModelNotice(picked: string, now: string): string {
 export function useConversationModel(
   channelId: string,
   catalogue: ModelCatalogue | undefined,
-  botModel?: AgentProfile["defaultModel"],
 ) {
-  const botDefault = offeredBotDefault(botModel, catalogue);
   const choosable = catalogue?.choosable === true;
   const saved = useQuery({
     ...conversationModelQueryOptions(channelId),
     enabled: choosable,
   });
+  const botDefault = offeredBotDefault(saved.data?.defaultModel, catalogue);
   const save = useMutation(setConversationModelMutationOptions(queryClient));
   const pendingSave = useRef<Promise<ConversationModel> | null>(null);
   const picked = save.isPending ? save.variables.pick : saved.data;
@@ -118,7 +117,7 @@ export function useConversationModel(
       .then((fresh) => {
         if (fresh.models.some((option) => option.id === before)) return;
         const defaultModel =
-          offeredBotDefault(botModel, fresh)?.model ?? fresh.default;
+          offeredBotDefault(data.defaultModel, fresh)?.model ?? fresh.default;
         const now =
           fresh.models.find((option) => option.id === defaultModel)?.label ??
           defaultModel;

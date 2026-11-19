@@ -135,9 +135,9 @@ export function DefaultModelSection({
             <DialogHeader>
               <DialogTitle>Default model</DialogTitle>
               <DialogDescription>
-                OpenBot uses the conversation’s model and thinking level first,
-                then this Bot’s default. If neither is set, it uses the
-                deployment default.
+                This setting applies to new conversations. Each conversation
+                keeps its starting model and thinking level, and any choice you
+                make in that conversation takes priority.
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-1 grid gap-3 py-1">

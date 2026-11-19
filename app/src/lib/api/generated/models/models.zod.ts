@@ -134,6 +134,16 @@ export const GetModelChoiceResponse = zod
   .object({
     model: zod.string().nullable(),
     effort: zod.string().nullable(),
+    defaultModel: zod
+      .object({
+        model: zod.string(),
+        effort: zod.string().nullable(),
+        source: zod.string(),
+      })
+      .optional()
+      .describe(
+        "The Bot default saved when the conversation was created. Absent when it follows the deployment default.",
+      ),
     unverified: zod
       .object({
         model: zod.string().describe("The chosen model's id."),
@@ -231,6 +241,16 @@ export const ReplaceModelChoiceResponse = zod
   .object({
     model: zod.string().nullable(),
     effort: zod.string().nullable(),
+    defaultModel: zod
+      .object({
+        model: zod.string(),
+        effort: zod.string().nullable(),
+        source: zod.string(),
+      })
+      .optional()
+      .describe(
+        "The Bot default saved when the conversation was created. Absent when it follows the deployment default.",
+      ),
     unverified: zod
       .object({
         model: zod.string().describe("The chosen model's id."),
