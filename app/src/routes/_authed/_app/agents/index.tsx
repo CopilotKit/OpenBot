@@ -16,6 +16,9 @@ import { botAgentListQueryOptions } from "@/lib/bot-agents/queries";
  * The agents Bots hand work to. `/agents?new` and `/agents?agent=<id>` were the coworker screen's
  * links, and still lead to New Bot and to that Bot's page. Adding and changing an agent are search
  * parameters, so the list stays mounted behind the sheet and Back closes it.
+ *
+ * HIDDEN FOR NOW. The page is out of the menu (`hidden` in `lib/navigation.ts`) and its address
+ * sends people home. To bring it back, drop both.
  */
 export const Route = createFileRoute("/_authed/_app/agents/")({
   validateSearch: z.object({
@@ -26,6 +29,7 @@ export const Route = createFileRoute("/_authed/_app/agents/")({
   }),
   beforeLoad: ({ search }) => {
     if (isLegacyAgentsLink(search)) throw redirect(legacyAgentsTarget(search));
+    throw redirect({ to: "/", replace: true });
   },
   component: AgentsPage,
 });

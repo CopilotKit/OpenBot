@@ -203,7 +203,6 @@ test.each(["user", "admin"] as const)(
     // What a person makes and comes back to, beside Bots, in the order of the eight.
     expect(links(footer).map(({ to }) => to)).toEqual([
       "/bots",
-      "/agents",
       "/routines",
       "/memory",
       "/skills",
@@ -258,12 +257,13 @@ test.each([
 test("Admin is in the list for admins only", () => {
   const ids = (role: string | undefined) =>
     navigationFor(role).map((item) => item.id);
-  expect(ids("admin")).toEqual(NAVIGATION.map((item) => item.id));
+  expect(ids("admin")).toEqual(
+    NAVIGATION.filter((item) => item.id !== "agents").map((item) => item.id),
+  );
   expect(ids("user")).not.toContain("admin");
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
     "bots",
-    "agents",
     "routines",
     "memory",
     "skills",
@@ -271,6 +271,19 @@ test("Admin is in the list for admins only", () => {
     "teams",
     "settings",
   ]);
+});
+
+/*
+ * Agents are what a Bot hands work to, which most people never turn on, and the word reads as
+ * another name for a Bot. Hidden for now: not in the menu for anybody, and its page sends people
+ * home (agents-page.test.tsx). A Bot's own Agents page, where handing work out is switched on, stays.
+ */
+test("Agents is hidden from the menu in every edition, for every role", () => {
+  for (const edition of ["team", "personal"] as const)
+    for (const role of ["user", "admin", undefined])
+      expect(navigationFor(role, edition).map((item) => item.id)).not.toContain(
+        "agents",
+      );
 });
 
 test("Teams is in the menu under the person's name for everybody in a team edition, admin or not, and never in the personal edition", async () => {
@@ -359,7 +372,6 @@ test("the personal edition has Admin, and the feature list beside it", () => {
   // Routines and Skills are in the main menu, as in the team edition. Memory isn't offered.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
-    "agents",
     "routines",
     "skills",
     "connections",
@@ -370,7 +382,6 @@ test("the personal edition has Admin, and the feature list beside it", () => {
   // Admin is still for an admin only, in this edition as in the other.
   expect(navigationFor("user", "personal").map((item) => item.id)).toEqual([
     "bots",
-    "agents",
     "routines",
     "skills",
     "connections",

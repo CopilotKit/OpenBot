@@ -66,6 +66,8 @@ export type NavigationItem =
       teamOnly?: boolean;
       /** Shown only where OpenBot offers memory (see `offersMemory`). */
       memoryOnly?: boolean;
+      /** Kept in the list but shown to nobody, for now. Its page sends people home. */
+      hidden?: boolean;
     }
   | {
       /**
@@ -104,11 +106,14 @@ export const NAVIGATION: readonly NavigationItem[] = [
   },
   {
     // The agents Bots hand work to: the organization's, and a person's own private ones.
+    // Hidden for now: most people never hand work out, and "Agents" beside "Bots" reads as another
+    // name for a Bot. A Bot's own Agents page, where handing work out is switched on, stays.
     id: "agents",
     label: "Agents",
     to: "/agents",
     icon: IconSitemap,
     section: "primary",
+    hidden: true,
   },
   {
     id: "routines",
@@ -181,9 +186,12 @@ export function navigationFor(
   edition: "team" | "personal" = "team",
 ): readonly NavigationItem[] {
   const offered = NAVIGATION.filter(
-    (item) =>
-      item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
+    (item) => item.kind === "dialog" || !item.hidden,
   )
+    .filter(
+      (item) =>
+        item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
+    )
     .filter(
       (item) =>
         item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),

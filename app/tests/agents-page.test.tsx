@@ -152,9 +152,13 @@ const guard = AgentsRoute.options.beforeLoad as unknown as (input: {
   search: Record<string, unknown>;
 }) => unknown;
 
-test("/agents on its own is the Agents page, and the old links still lead to the Bots", () => {
-  expect(guard({ search: {} })).toBeUndefined();
+/*
+ * The Agents page is hidden for now (`hidden` in lib/navigation.ts): /agents on its own sends people
+ * home. The old links still lead to the Bots.
+ */
+test("/agents on its own goes home while the page is hidden, and the old links still lead to the Bots", () => {
   for (const [search, to] of [
+    [{}, "/"],
     [{ new: true }, "/bots"],
     [{ agent: "agent_1" }, "/bots/$agentId"],
   ] as const) {
