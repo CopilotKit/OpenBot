@@ -275,41 +275,9 @@ jobs:
             --service "$LANGGRAPH_ECS_SERVICE" \
             --task-definition "$task_definition" \
             --force-new-deployment
-          if ! aws ecs wait services-stable \
+          aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
-            --services "$LANGGRAPH_ECS_SERVICE"; then
-            echo "::error::LangGraph Bot ECS service did not become stable."
-            aws ecs describe-services \
-              --cluster "$ECS_CLUSTER" \
-              --services "$LANGGRAPH_ECS_SERVICE" \
-              --query 'services[0].{status:status,desiredCount:desiredCount,runningCount:runningCount,pendingCount:pendingCount,deployments:deployments[*].{status:status,taskDefinition:taskDefinition,desiredCount:desiredCount,runningCount:runningCount,pendingCount:pendingCount,failedTasks:failedTasks}}' \
-              --output json
-            echo "Recent ECS service events:"
-            aws ecs describe-services \
-              --cluster "$ECS_CLUSTER" \
-              --services "$LANGGRAPH_ECS_SERVICE" \
-              --query 'services[0].events[0:10].[createdAt,message]' \
-              --output table
-
-            for desired_status in RUNNING STOPPED; do
-              task_arns="$(aws ecs list-tasks \
-                --cluster "$ECS_CLUSTER" \
-                --service-name "$LANGGRAPH_ECS_SERVICE" \
-                --desired-status "$desired_status" \
-                --query 'taskArns[:10]' \
-                --output text)"
-              if [ -n "$task_arns" ] && [ "$task_arns" != "None" ]; then
-                read -r -a task_arn_array <<< "$task_arns"
-                echo "LangGraph Bot $desired_status tasks:"
-                aws ecs describe-tasks \
-                  --cluster "$ECS_CLUSTER" \
-                  --tasks "${task_arn_array[@]}" \
-                  --query 'tasks[*].{taskArn:taskArn,lastStatus:lastStatus,desiredStatus:desiredStatus,healthStatus:healthStatus,stopCode:stopCode,stoppedReason:stoppedReason,containers:containers[*].{name:name,lastStatus:lastStatus,healthStatus:healthStatus,exitCode:exitCode,reason:reason}}' \
-                  --output json
-              fi
-            done
-            exit 1
-          fi
+            --services "$LANGGRAPH_ECS_SERVICE"
 
       - name: Update ECS service
         run: |
