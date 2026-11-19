@@ -5,7 +5,7 @@
  * Only an app too old for its OpenBot is stopped, with "Update OpenBot". Anything else decides nothing: the screens say
  * what failed, as they always have.
  */
-import { ApiError, DEPLOYMENT_ORGANIZATION_ID } from "./api/request";
+import { ApiError, deploymentOrganization } from "./api/request";
 import { getDeployment } from "./api/generated/organization-settings/organization-settings";
 import {
   CLIENT_UPDATE_REQUIRED,
@@ -18,7 +18,7 @@ import { RELEASE } from "./release";
 export async function checkVersion(): Promise<VersionVerdict> {
   let deployment: Awaited<ReturnType<typeof getDeployment>>;
   try {
-    deployment = await getDeployment(DEPLOYMENT_ORGANIZATION_ID);
+    deployment = await getDeployment(await deploymentOrganization());
   } catch (error) {
     if (error instanceof ApiError && error.code === CLIENT_UPDATE_REQUIRED)
       return error.security

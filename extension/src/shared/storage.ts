@@ -17,6 +17,9 @@ export type ConnectionRecord = {
   user: RecorderUser;
   via: RecorderConnectVia;
   connectedAt: number;
+  /** The organization OpenBot made the connection in, as its grant named it: every request of this connection goes
+   * there (`organizationOf`). Absent from a grant of an OpenBot older than organizations, which means `default`. */
+  organizationId?: string;
   /** Who hears the person, for a connection the Recorder's launcher made (launcher.ts): `external` when the browser has
    * no microphone and OpenBot passes each phrase in. Absent: the Recorder hears the microphone itself, as always. */
   narration?: Narration;
