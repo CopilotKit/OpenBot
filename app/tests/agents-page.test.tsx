@@ -224,10 +224,11 @@ test("a Bot's Agents page doesn't offer Hand work to agents while task threads a
 });
 
 /*
- * No Bot is offered handing work out, whatever it was set to, so the switch would do nothing for a
- * Bot that was already handing work out: it is hidden there too, and its agents still read.
+ * OpenBot runs every Bot as one that does the work itself while task threads are hidden, whatever it
+ * was set to. A Bot set to hand work out draws the page of a Bot that does the work itself, on its
+ * default agent, and saving it says so.
  */
-test("a Bot that already hands work to agents shows no switch while task threads are hidden", async () => {
+test("a Bot set to hand work to agents shows the Agents page of a Bot that does the work itself", async () => {
   delegation = {
     botId: BOT.id,
     mode: "orchestrate",
@@ -240,12 +241,29 @@ test("a Bot that already hands work to agents shows no switch while task threads
     ],
     canManage: true,
   };
+  const user = userEvent.setup({ document });
   const view = draw(<BotDelegation agent={BOT} />);
 
-  const list = await view.findByRole("list", { name: "Agents it may use" });
-  expect(within(list).getByText("Pipeline analyst")).toBeTruthy();
+  const own = await view.findByRole("button", { name: /^OpenBot/ });
+  expect(own.getAttribute("aria-pressed")).toBe("true");
+  expect(view.getAllByText("Runs on").length).toBeGreaterThan(0);
   expect(view.queryByRole("switch")).toBeNull();
   expect(view.queryByText("Hand work to agents")).toBeNull();
+  expect(view.queryByText("Handing out work")).toBeNull();
+  expect(view.queryByRole("list", { name: "Agents it may use" })).toBeNull();
+  expect(view.queryByLabelText("Model")).toBeNull();
+
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(seen.some((each) => each.line.startsWith("PUT"))).toBe(true),
+  );
+  expect(seen.find((each) => each.line.startsWith("PUT"))?.body).toEqual({
+    mode: "self",
+    model: null,
+    effort: null,
+    instructions: "",
+    agentIds: ["bag_openbot"],
+  });
 });
 
 test("the Hand work to agents switch saves on its own, keeping the agent the Bot ran on as its default, and the agents ticked after it save with Save", async () => {
@@ -316,7 +334,7 @@ test("an agent private to somebody else reads as such, and the Bot's manager can
     canManage: true,
   };
   const user = userEvent.setup({ document });
-  const view = draw(<BotDelegation agent={BOT} />);
+  const view = draw(<BotDelegation agent={BOT} offerTaskThreads />);
 
   const list = await view.findByRole("list", { name: "Agents it may use" });
   expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
@@ -395,7 +413,7 @@ test("somebody who can't change the Bot doesn't see how it hands out work", asyn
     ],
     canManage: false,
   };
-  const view = draw(<BotDelegation agent={BOT} />);
+  const view = draw(<BotDelegation agent={BOT} offerTaskThreads />);
   const list = await view.findByRole("list", { name: "Agents it may use" });
   expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
   expect(view.queryAllByText(/How it hands out work/)).toHaveLength(0);

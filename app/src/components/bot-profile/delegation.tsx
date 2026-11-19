@@ -46,6 +46,7 @@ import {
   type Delegation,
   TASK_THREADS_OFFERED,
   whereItRuns,
+  workingMode,
 } from "@/lib/bot-agents/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
@@ -72,7 +73,8 @@ type Choice = Pick<
  * agents it may use while it answers quickly. One form, saved together, because the switch means
  * nothing without the agents it switches to.
  *
- * The switch is drawn only while task threads are offered (`TASK_THREADS_OFFERED`), for every Bot.
+ * While task threads are not offered (`TASK_THREADS_OFFERED`), there is no switch and every Bot is
+ * drawn as one that does the work itself, on the agent it runs on.
  */
 export function BotDelegation({
   agent,
@@ -126,11 +128,12 @@ function DelegationForm({
   const save = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const editable = saved.canManage;
 
-  const orchestrate = saved.mode === "orchestrate";
+  // A Bot set to hand work out reads as doing the work itself, on its default, while that is hidden.
+  const orchestrate = workingMode(saved, offerTaskThreads) === "orchestrate";
   const toggle = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const [runsOn, setRunsOn] = useState(saved.agents[0]?.id ?? "");
   const [chosen, setChosen] = useState<string[]>(
-    saved.mode === "orchestrate" ? saved.agents.map((each) => each.id) : [],
+    orchestrate ? saved.agents.map((each) => each.id) : [],
   );
   const [model, setModel] = useState(saved.model ?? DEFAULT_MODEL);
   const [instructions, setInstructions] = useState(saved.instructions);
