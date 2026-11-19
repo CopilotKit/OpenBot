@@ -78,6 +78,21 @@ export function AccountLabel() {
 }
 
 /**
+ * The account row at the top of the account menu: avatar, name, the release the server runs, and
+ * the organization being worked in. Not a menu item: it says whose menu this is.
+ */
+export function AccountRow() {
+  return (
+    <div
+      className="flex min-w-0 items-center gap-2 px-2 py-1.5"
+      data-slot="account-row"
+    >
+      <AccountLabel />
+    </div>
+  );
+}
+
+/**
  * The account menu's popup: at least as wide as the account row, and wider where a row's words need
  * it (an organization's long name), up to 24rem and never past the window's edge.
  */

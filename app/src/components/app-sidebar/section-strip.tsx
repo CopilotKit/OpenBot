@@ -29,8 +29,8 @@ import { BotsNavBadge } from "../bot-profile/attention";
 import { RecordingDot, useLiveRecording } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
 import {
-  AccountLabel,
   AccountMenu,
+  AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
 } from "./account-label";
@@ -129,9 +129,7 @@ function StripAccount() {
         side="right"
         sideOffset={8}
       >
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <AccountLabel />
-        </div>
+        <AccountRow />
         <DropdownMenuSeparator />
         {organizationChoices ? (
           <OrganizationMenuItems
