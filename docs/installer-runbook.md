@@ -288,11 +288,22 @@ agreement and Install again.
   .\desktop\scripts\reset-test-machine.ps1 -RemoveApp
   ```
 
+  If OpenBot is installed in another folder, set `OPENBOT_ROOT` to that folder first. Then the
+  script finds that installation and its `engine` folder:
+
+  ```powershell
+  $env:OPENBOT_ROOT = 'F:\openbot'
+  ```
+
 They remove:
 - OpenBot's containers, volumes and networks, and the Podman machine OpenBot made;
 - the Intelligence stack OpenBot created, and the CopilotKit CLI sign-in;
 - the evaluation agreement record, `~/OpenBot`, and the app's own data;
+- on Windows, the `engine` folder in `~/OpenBot`, which holds the Podman machine's disk;
 - with `--remove-app` / `-RemoveApp`, the app itself.
+
+If the Windows script cannot remove the machine `openbot`, it stops before it deletes `~/OpenBot`
+and says what to do. Remove the machine with `podman machine rm -f openbot`. Then run the script again.
 
 They keep:
 - Docker Desktop, Podman and WSL;
@@ -342,6 +353,7 @@ results in the PR or the issue for the build.
 | A fixed download address gives the unsigned build | That platform's signing run was not approved, or failed. Approve it, or run it again from the release tag with `release-tag` set; its attach step replaces both names. |
 | A fixed download address gives an older release | `latest/download` follows the release marked Latest. A candidate or beta is never Latest, a stable release becomes Latest only once both signing runs have attached their installers, and a patch released while a newer release is out does not become Latest. |
 | Windows setup stops with a virtualization message | The machine cannot run WSL 2. Use an x64 PC or an x64 VM with nested virtualization. |
+| On Windows, OpenBot says the computer needs 40 GB free, but the install folder's drive has room | The Podman machine `openbot` is on another drive, usually C:, and the space check measures that drive. If the message shows **Move OpenBot's storage to F:**, select it. Every WSL distro stops for a moment, Docker Desktop included. If it does not, free space on C:. The log lines that start with `[engine move]` show each step of a move. |
 | Setup returns to Install after sign-in | The saved sign-in no longer works. Sign in again. |
 | A step shows **Retry** | Select it once. If it fails again, open **Technical details** and copy them into the issue. |
 | Apps cannot be connected, and `.env` has no `COMPOSIO_API_KEY` | The installation's Composio project may not be provisioned yet. Start OpenBot again: every Start retries until it has a key. See [Install and test](#3-install-and-test). |
