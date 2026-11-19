@@ -67,7 +67,12 @@ export function updateRequiredSentence(error: unknown): string | null {
     : RECORDER_UPDATE_REQUIRED;
 }
 
-type OpenBotTarget = { openbotUrl: string; token?: string };
+type OpenBotTarget = {
+  openbotUrl: string;
+  token?: string;
+  /** The organization the connection was made in, as its grant named it. Absent: {@link DEFAULT_ORGANIZATION_ID}. */
+  organizationId?: string;
+};
 
 /**
  * Sends the request with the bearer when there is one, never with cookies, and never follows a redirect. Every request
@@ -127,8 +132,23 @@ function idempotencyKey(): string {
   );
 }
 
-/** The organization the Recorder works in: an install has one, and the API addresses it as `default`. */
-export const ORGANIZATION_ID = "default";
+/**
+ * The organization every install has, which the API addresses as `default`. A connection is made there (the code it
+ * exchanges names the organization it is for), and a connection whose grant named no organization works there too: that
+ * is every connection an OpenBot older than organizations made.
+ */
+export const DEFAULT_ORGANIZATION_ID = "default";
+
+/**
+ * The organization a connection's requests go to: the one its grant named (`RecorderConnectionGrant.organizationId`),
+ * else {@link DEFAULT_ORGANIZATION_ID}. A person can be in several organizations, and a Recorder connected in one records
+ * into that one only.
+ */
+export function organizationOf(connection: {
+  organizationId?: string | null;
+}): string {
+  return connection.organizationId || DEFAULT_ORGANIZATION_ID;
+}
 
 /** What a caller of a generated function (src/shared/generated) adds to the request it makes. */
 export type OpenBotRequestInit = RequestInit & {

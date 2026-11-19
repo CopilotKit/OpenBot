@@ -10,7 +10,7 @@
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import type { RecorderState } from "../protocol/messages";
 import { reportRecorderActivity } from "../shared/generated/recorder";
-import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
+import { OpenBotError, organizationOf } from "../shared/openbot-client";
 
 /** How often a running recording reports, well inside the 90 s after which OpenBot treats a report as stale. */
 export const ACTIVITY_REPORT_MS = 30_000;
@@ -24,6 +24,8 @@ export type ActivityTarget = {
   openbotUrl: string;
   token: string;
   userId: string;
+  /** The organization the connection was made in (`organizationOf`). */
+  organizationId?: string;
 };
 
 type Timers = {
@@ -70,10 +72,14 @@ export function createActivityReport(deps: ActivityDeps): ActivityReport {
     const target = await deps.target();
     if (!target) return;
     try {
-      await reportRecorderActivity(ORGANIZATION_ID, activityOf(deps.state()), {
-        target,
-        signal: AbortSignal.timeout(REPORT_WAIT_MS),
-      });
+      await reportRecorderActivity(
+        organizationOf(target),
+        activityOf(deps.state()),
+        {
+          target,
+          signal: AbortSignal.timeout(REPORT_WAIT_MS),
+        },
+      );
     } catch (error) {
       if (error instanceof OpenBotError && error.signedOut)
         await deps.signedOut(error.body?.reason ?? "revoked", target);

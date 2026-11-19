@@ -24,6 +24,11 @@ type Seen = {
   body: unknown;
 };
 const seen: Seen[] = [];
+/** Which organization each request named (the OpenBot-Organization header), by its method and path. */
+const organizationNamed: { request: string; organization: string | null }[] =
+  [];
+/** Which organization each read of the deployment was asked of. */
+const deploymentAsked: string[] = [];
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
 /** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
@@ -56,10 +61,19 @@ const server = Bun.serve({
     const url = new URL(request.url);
     const text = await request.text();
     named.push(request.headers.get("openbot-client"));
-    if (url.pathname === "/api/v2/organizations/default/deployment")
+    organizationNamed.push({
+      request: `${request.method} ${url.pathname}`,
+      organization: request.headers.get("openbot-organization"),
+    });
+    const deployment = /^\/api\/v2\/organizations\/([^/]+)\/deployment$/.exec(
+      url.pathname,
+    );
+    if (deployment) {
+      deploymentAsked.push(deployment[1] as string);
       return Response.json(deploymentAnswer.body, {
         status: deploymentAnswer.status,
       });
+    }
     if (url.pathname === `${ORG}/bots/insecure`)
       return Response.json(
         {
@@ -146,8 +160,13 @@ const server = Bun.serve({
           : { bots: [ada], nextCursor: "bmV4dA" },
       );
     }
-    if (route === `GET ${ORG}/bots/a%20b`)
+    if (
+      route === `GET ${ORG}/bots/a%20b` ||
+      route === "GET /api/v2/organizations/default/bots/a%20b"
+    )
       return Response.json({ bot: { ...ada, id: "a b" } });
+    if (route === "GET /api/v2/people/me/invitations")
+      return Response.json({ invitations: [], nextCursor: null });
     if (route === `POST ${ORG}/bots/ada/pause`)
       return Response.json({ botId: "ada", paused: true });
     if (route === `PUT ${ORG}/people/me/devices/phone-1`)
@@ -184,10 +203,20 @@ const server = Bun.serve({
 });
 const serverUrl = `http://127.0.0.1:${server.port}`;
 const COOKIE = "better-auth.session_token=signed-in";
+/** The session the app holds: null before anybody has signed in. */
+let cookie: string | null = COOKIE;
+/** What the phone keeps in its secure store (src/auth.ts `organizationStore`). */
+const secure = new Map<string, string>();
 
 mock.module("../src/auth", () => ({
   serverUrl,
-  authClient: { getCookie: () => COOKIE },
+  authClient: { getCookie: () => cookie },
+  organizationStore: {
+    read: async () => secure.get("organization") ?? null,
+    write: async (id: string) => {
+      secure.set("organization", id);
+    },
+  },
 }));
 mock.module("expo-crypto", () => ({
   randomUUID: () => crypto.randomUUID(),
@@ -207,7 +236,18 @@ const { deleteRoutine } = await import(
 const { replaceBotGrant } = await import(
   "../src/api/generated/bot-grants/bot-grants"
 );
-const { ApiError, everyBot, ME, ORGANIZATION_ID } = await import("../src/api");
+const {
+  ApiError,
+  chooseOrganization,
+  everyBot,
+  ME,
+  ORGANIZATION_ID,
+  organizationChoices,
+} = await import("../src/api");
+const { listInvitations } = await import(
+  "../src/api/generated/organizations/organizations"
+);
+const { NOT_IN_ORGANIZATION } = await import("../src/organization");
 
 const { checkVersion } = await import("../src/version-check");
 const { onUpdateRequired } = await import("../src/client-version");
@@ -215,6 +255,9 @@ const { onUpdateRequired } = await import("../src/client-version");
 beforeEach(() => {
   seen.length = 0;
   named.length = 0;
+  organizationNamed.length = 0;
+  deploymentAsked.length = 0;
+  cookie = COOKIE;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
 });
 afterAll(() => {
@@ -347,8 +390,13 @@ test("every request names the phone app and the OpenBot release it was built fro
 });
 
 test("before sign-in the app reads the deployment and decides: this release's OpenBot is fine, one that serves only newer phone apps says Update OpenBot", async () => {
+  cookie = null;
   expect(await checkVersion()).toEqual({ kind: "ok" });
   expect(named).toEqual([`mobile/${RELEASE}`]);
+  // Before sign-in nobody works anywhere: the deployment is asked of the organization every install has, and the
+  // request names no organization of its own.
+  expect(deploymentAsked).toEqual(["default"]);
+  expect(organizationNamed[0]?.organization).toBeNull();
 
   deploymentAnswer = { status: 200, body: fixture.deployments["v1.1.0"] };
   expect(await checkVersion()).toEqual({ kind: "ok" });
@@ -464,4 +512,70 @@ test("a refusal of this app as too old, on any request, reaches the root layout 
   } finally {
     stop();
   }
+});
+
+test("signed in, every request names the organization it is for, and the deployment is asked of the person's own", async () => {
+  await getBot(ORGANIZATION_ID, "a b");
+  await listInvitations({ limit: 100 });
+  await checkVersion();
+  // Under the organization they work in, an address that names none, and the deployment read: each names org_work.
+  // The list of their organizations names none, since it is how the one they work in is found.
+  expect(organizationNamed).toEqual(
+    expect.arrayContaining([
+      { request: `GET ${ORG}/bots/a%20b`, organization: "org_work" },
+      {
+        request: "GET /api/v2/people/me/invitations",
+        organization: "org_work",
+      },
+      { request: `GET ${ORG}/deployment`, organization: "org_work" },
+    ]),
+  );
+  for (const { request, organization } of organizationNamed)
+    if (request.startsWith(`GET ${MINE}`)) expect(organization).toBeNull();
+    else expect(organization).toBe("org_work");
+  // `default` is not one of the places a signed-in person's requests go.
+  expect(deploymentAsked).toEqual(["org_work"]);
+});
+
+// Last: the pick it makes is the phone's from here on.
+test("picking another organization sends every request after it there, and the phone keeps the pick for the next sign-in", async () => {
+  expect((await organizationChoices()).currentId).toBe("org_work");
+  const picked = await chooseOrganization("default");
+  expect(picked.currentId).toBe("default");
+  expect(picked.organizations.map((one) => one.id)).toEqual([
+    "default",
+    "org_work",
+  ]);
+  // Asked of the server first, so a pick is always one of the person's own.
+  expect(seen.map((request) => request.path)).toContain(MINE);
+
+  seen.length = 0;
+  organizationNamed.length = 0;
+  await getBot(ORGANIZATION_ID, "a b");
+  expect(seen.map((request) => request.path)).toEqual([
+    "/api/v2/organizations/default/bots/a%20b",
+  ]);
+  expect(organizationNamed).toEqual([
+    {
+      request: "GET /api/v2/organizations/default/bots/a%20b",
+      organization: "default",
+    },
+  ]);
+  expect([...secure.values()]).toEqual(["default"]);
+
+  // The app opened again, signed in afresh: the server still says org_work is active, and the pick kept on the phone
+  // wins while it is one of the person's.
+  cookie = "better-auth.session_token=signed-in-again";
+  seen.length = 0;
+  await getBot(ORGANIZATION_ID, "a b");
+  expect(seen.map((request) => request.path)).toEqual([
+    MINE,
+    "/api/v2/organizations/default/bots/a%20b",
+  ]);
+
+  // An organization the person is not in is refused, and nothing is addressed to it.
+  await expect(chooseOrganization("org_elsewhere")).rejects.toThrow(
+    NOT_IN_ORGANIZATION,
+  );
+  expect([...secure.values()]).toEqual(["default"]);
 });

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   createOrganizationAddress,
+  createOrganizationChoice,
   IN_NO_ORGANIZATION,
   ORGANIZATION,
 } from "../mobile/src/organization";
@@ -59,4 +60,28 @@ test("a read that fails is asked again, and somebody in no organization is told 
   await expect(addressed(`${ORGANIZATION}/routines`, "ada")).rejects.toThrow(
     IN_NO_ORGANIZATION,
   );
+});
+
+test("a pick kept on the phone is used while it is one of the person's, and set aside once it is not", async () => {
+  let kept: string | null = "org_gone";
+  const store = {
+    read: async () => kept,
+    write: async (id: string) => {
+      kept = id;
+    },
+  };
+  let list = [{ id: "org_a", active: true }, { id: "org_b" }];
+  const choice = createOrganizationChoice(async () => list, store);
+  // Left, deleted, or somebody else's: the server's active one.
+  expect(await choice.current("ada")).toBe("org_a");
+  await choice.choose("org_b", "ada");
+  expect(kept).toBe("org_b");
+  expect(await choice.address(`${ORGANIZATION}/bots`, "ada")).toBe(
+    "/api/v2/organizations/org_b/bots",
+  );
+  // The next sign-in reads the list again; the pick is still one of theirs.
+  expect(await choice.current("ada-again")).toBe("org_b");
+  // Gone from their list: not addressed again.
+  list = [{ id: "org_a", active: true }];
+  expect(await choice.current("ada-third")).toBe("org_a");
 });
