@@ -158,12 +158,22 @@
   --color-composer-disabled-ink: currentColor;
   --composer-disabled-shadow: var(--shadow-composer);
 
+  --spacing-search-lg: 2.75rem;
+  --spacing-search-lg-gap: 0.375rem;
+  --color-search-lg: color-mix(in oklab, var(--muted) 50%, transparent);
+  --search-lg-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --color-search-icon: var(--muted-foreground);
+  --search-focus-ring: 3px;
+  --color-search-focus-ring: color-mix(in oklab, var(--ring) 50%, transparent);
+  --color-search-focus-border: var(--ring);
+
   --spacing-badge-count: auto;
   --spacing-badge-count-x: 0.375rem;
   --text-badge-count: 11px;
   --badge-count-weight: 500;
 }
 :root[data-skin].dark {
+  --color-search-lg: color-mix(in oklab, var(--input) 40%, transparent);
   --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);
   --color-ghost-active: var(--color-ghost-hover);
   --color-outline: color-mix(in oklab, var(--input) 30%, transparent);

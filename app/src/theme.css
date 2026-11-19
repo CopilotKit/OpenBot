@@ -389,6 +389,19 @@ body {
   --text-table-head-size: 0.75rem;
   --table-head-weight: 400;
   /*
+   * Search ("Search"): a pill, 32px (S) or 48px (M), white with a 12% edge that darkens under the
+   * pointer, a 4px #d8dee9 band round it while focused, and its glyph gray until something is typed
+   * (search-field.tsx).
+   */
+  --spacing-search-lg: 3rem;
+  --spacing-search-lg-gap: 0.875rem;
+  --color-search-lg: var(--card);
+  --search-lg-shadow: 0 0 #0000;
+  --color-search-icon: var(--color-field-placeholder);
+  --search-focus-ring: 4px;
+  --color-search-focus-ring: var(--color-field-focus);
+  --color-search-focus-border: transparent;
+  /*
    * Badges ("Badges"): Icon+Text is a 32px pill in its colour at 20%, the icon in that colour and
    * the label in ink, 8px in beside the icon and 12px at the end. Numeric is a 24px ink circle with
    * the count in 12px. The kit's own greens and oranges, until it settles on one of each.

@@ -1,4 +1,4 @@
-import { IconLogout, IconPlus, IconSearch } from "@/components/icons";
+import { IconLogout, IconPlus } from "@/components/icons";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   Link,
@@ -17,11 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { SearchField } from "@/components/ui/search-field";
 import {
   Sidebar,
   SidebarContent,
@@ -518,21 +514,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarGroup className="gap-px">
             <SidebarMenuItem>
-              {/* Figma's search: a white pill with no outline. */}
-              <InputGroup className="bg-card text-sm rounded-full h-9 border-transparent shadow-none dark:bg-input/30">
-                <InputGroupInput
-                  aria-label="Search conversations"
-                  aria-describedby={
-                    searching ? "conversation-search-scope" : undefined
-                  }
-                  onChange={(event) => changeSearch(event.target.value)}
-                  placeholder="Search…"
-                  value={search}
-                />
-                <InputGroupAddon>
-                  <IconSearch />
-                </InputGroupAddon>
-              </InputGroup>
+              {/* The UI Kit's small search. */}
+              <SearchField
+                aria-label="Search conversations"
+                aria-describedby={
+                  searching ? "conversation-search-scope" : undefined
+                }
+                clearLabel="Clear the search"
+                onChange={(event) => changeSearch(event.target.value)}
+                onClear={() => changeSearch("")}
+                placeholder="Search…"
+                size="sm"
+                value={search}
+              />
             </SidebarMenuItem>
             {/*
              * What is searched, said while somebody types: names and the recent lines the rows

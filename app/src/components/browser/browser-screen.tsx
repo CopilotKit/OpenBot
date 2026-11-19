@@ -1,5 +1,4 @@
 import type { BrowserApiState } from "@openbot/shared/openbot-browser";
-import { IconSearch } from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import {
@@ -9,11 +8,7 @@ import {
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { SearchField } from "@/components/ui/search-field";
 import { addressFrom } from "@/lib/browser/address";
 import {
   browserTabsMutationOptions,
@@ -466,18 +461,17 @@ function StartPage({ onGo }: { onGo: (url: string) => void }) {
           onGo(url);
         }}
       >
-        <InputGroup className="h-11 rounded-full bg-muted/50 shadow-xs dark:bg-input/40">
-          <InputGroupInput
-            aria-label="Search or go to a site"
-            onChange={(event) => setTyped(event.target.value)}
-            placeholder="Search or type an address"
-            spellCheck={false}
-            value={typed}
-          />
-          <InputGroupAddon className="pl-4">
-            <IconSearch />
-          </InputGroupAddon>
-        </InputGroup>
+        {/* The UI Kit's large search. */}
+        <SearchField
+          aria-label="Search or go to a site"
+          clearLabel="Clear the address"
+          onChange={(event) => setTyped(event.target.value)}
+          onClear={() => setTyped("")}
+          placeholder="Search or type an address"
+          size="lg"
+          spellCheck={false}
+          value={typed}
+        />
       </form>
     </div>
   );

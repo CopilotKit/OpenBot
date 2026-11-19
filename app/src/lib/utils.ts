@@ -51,6 +51,8 @@ const twMerge = extendTailwindMerge({
         "menu-label-y",
         "row",
         "row-actions",
+        "search-lg",
+        "search-lg-gap",
         "select-pad",
         "tab-edge",
         "tab-gap",
