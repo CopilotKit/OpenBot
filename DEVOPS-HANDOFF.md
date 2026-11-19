@@ -58,7 +58,7 @@ docker compose --env-file backend-images.env --env-file .env --profile pe up -d 
 
 Do **not** `docker build -f Dockerfile` from this checkout for the OpenBot API. The deploy workflow [`.github/workflows/deploy-ecs.yml`](.github/workflows/deploy-ecs.yml):
 
-1. Waits for **CI** success on **`main`** (`workflow_run`)
+1. Runs on **push to `main`** (rely on required PR checks before merge)
 2. Pulls **`ghcr.io/copilotkit/openbot:v1.1.0`** (`linux/arm64`)
 3. Pushes that image to ECR
 4. Points the ECS task definition at the ECR **digest**

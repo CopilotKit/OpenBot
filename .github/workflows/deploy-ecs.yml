@@ -1,9 +1,9 @@
 name: Deploy to ECS
 
+# Push to main only (after required CI checks on the merge). Avoids workflow_run,
+# which zizmor flags as a dangerous trigger.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches:
       - main
 
@@ -17,12 +17,6 @@ concurrency:
 jobs:
   deploy:
     name: deploy
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -40,11 +34,10 @@ jobs:
       ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP }}
       # Published OpenBot 1.1 image. Do not float on `main`.
       OPENBOT_SOURCE_IMAGE: ghcr.io/copilotkit/openbot:v1.1.0
-      SOURCE_SHA: ${{ github.event_name == 'push' && github.sha || github.event.workflow_run.head_sha }}
+      SOURCE_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'push' && github.sha || github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
