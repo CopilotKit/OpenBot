@@ -337,13 +337,21 @@ run("management agent on a real cluster", () => {
       "-p",
       JSON.stringify({ data: { DATABASE_URL: encoded } }),
     );
+    // What a working backup needs: the full Service name, and a role that bypasses row-level
+    // security. OpenBot's tables FORCE it, so pg_dump as the owner refuses; the server's
+    // superuser does not.
+    const admin = json<{ data: Record<string, string> }>(
+      "-n",
+      PRODUCT,
+      "get",
+      "secret",
+      "openbot-postgresql",
+    ).data["postgres-password"];
+    const database = new URL(
+      Buffer.from(encoded ?? "", "base64").toString("utf8"),
+    ).pathname.slice(1);
     fullDatabaseUrl = Buffer.from(
-      Buffer.from(encoded ?? "", "base64")
-        .toString("utf8")
-        .replace(
-          "@openbot-postgresql:",
-          `@openbot-postgresql.${PRODUCT}.svc.cluster.local:`,
-        ),
+      `postgresql://postgres:${encodeURIComponent(Buffer.from(admin ?? "", "base64").toString("utf8"))}@openbot-postgresql.${PRODUCT}.svc.cluster.local:5432/${database}`,
     ).toString("base64");
 
     await desire(to);
