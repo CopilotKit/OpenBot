@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { BotDelegation } from "@/components/bot-profile/delegation";
+import { TASK_THREADS_OFFERED } from "@/lib/bot-agents/queries";
 
 export const Route = createFileRoute("/_authed/_app/bots/$agentId/agents")({
   component: AgentsPage,
@@ -15,7 +16,11 @@ function AgentsPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Choose whether this Bot does the work itself or hands it to agents."
+      description={
+        TASK_THREADS_OFFERED
+          ? "Choose whether this Bot does the work itself or hands it to agents."
+          : "Choose the agent this Bot runs on."
+      }
       title="Agents"
     >
       {(agent) => <BotDelegation agent={agent} />}
