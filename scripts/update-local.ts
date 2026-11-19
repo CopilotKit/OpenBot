@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { RELEASE_FROM_INSIDE } from "../shared/kubernetes-promotion";
 import {
   parseReleaseManifest,
   planUpgrade,
@@ -154,13 +155,11 @@ interface ComposeConfiguration {
 const ACCEPTED = ".openbot-release.json";
 const JOURNAL = ".openbot-update-journal.json";
 const LOCK = ".openbot-update.lock";
+
 /** Asks a server for its release from inside its own container. `/release` answers only a loopback
  * peer, and a published port or a Service reaches the server from somewhere else. */
-export const RELEASE_FROM_INSIDE = [
-  "bun",
-  "-e",
-  "const r=await fetch('http://127.0.0.1:'+(process.env.PORT||process.env.SERVER_PORT||3001)+'/release'); if(!r.ok)process.exit(1); console.log(JSON.stringify(await r.json()));",
-];
+export { RELEASE_FROM_INSIDE };
+
 const IMAGE_VARIABLES: Record<string, string> = {
   server: "SERVER_IMAGE",
   supervisor: "SUPERVISOR_IMAGE",

@@ -4,9 +4,9 @@ import { join } from "node:path";
 import conformance from "../fixtures/releases/conformance.json";
 import {
   classifySource,
+  type InstalledRelease,
   parseReleaseManifest,
   planUpgrade,
-  type InstalledRelease,
   type ReleaseManifest,
 } from "../release-manifest";
 

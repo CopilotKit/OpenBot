@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### OpenBot Desktop
+
+- **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
+  again when it is gone. On Windows, after Podman was removed, the window stayed on "Setting up this
+  computer" after sign-in, because Install took the old install as done.
+
 ## 1.1.1
 
 **Before upgrading.** Read these first: several change what a Helm values file, a Compose override

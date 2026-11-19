@@ -293,7 +293,7 @@ export const ALLOWED: Allowed[] = [
   },
   {
     file: "desktop/src-tauri/src/host_access.rs",
-    what: /^\/api\/host-access\/desktop\/(next|result|shown)$/,
+    what: /^\/api\/host-access\/desktop\/(next|result|shown|restore)$/,
     rule: "machine-credential",
     why: "Desktop's host access, with its host token",
   },
