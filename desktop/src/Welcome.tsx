@@ -57,9 +57,10 @@ const CLOUDS = [
  * From the installer's own checks: the engine needs 4 CPUs (`local_eval::MIN_ENGINE_CPUS`), and
  * OpenBot's own machine takes 6 to 8 GiB of memory while 4 GiB is kept for the computer itself
  * (`machine_size.rs`). Memory is said as 16 GB, room for that plus the person's own apps, as decided
- * with David on 13 Nov 2026. Disk is what the downloads hold to before anything starts: the back
- * end's 15 GB and OpenBot's images as they land on the disk (`early_downloads::needed_for`), said
- * as `installFreeGb` in `disk-needs.json`, which a Rust test keeps equal to it. Then what it uses
+ * with David on 13 Nov 2026. Disk is what the downloads hold to before anything starts: room for
+ * the installation, OpenBot's images included, and for its first update, so the update's own check
+ * lets it through (`early_downloads::needed_for`, `local_eval::setup_free_on_drive`). It is said
+ * as `installFreeGb` in `disk-needs.json`, which Rust tests keep equal to it. Then what it uses
  * once installed, `installedGb`, measured and checked against every release's images by
  * `scripts/disk-needs.ts`. Both on one line: the first screen has no room for another at the
  * window's default size (`setupLayout.browser.test.ts`).

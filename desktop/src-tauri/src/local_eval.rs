@@ -337,8 +337,8 @@ pub struct Shortfall {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub updating: bool,
     /// With disk short: what is needed free where `disk_gb` was measured, in whole GiB. For an
-    /// update, what the update writes (`update_room`); for a first setup, the CLI's 15 GiB, and
-    /// inside the engine the 5% of its disk k3s keeps free (`EngineCheck::short_for_setup`), or
+    /// update, what the update writes (`update_room`); for a first setup, room for the installation
+    /// and its first update (`EngineCheck::short_for_setup`), or
     /// what the CLI said it requires.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub needed_gb: Option<String>,
@@ -1089,8 +1089,8 @@ pub enum Terms {
         #[serde(skip_serializing_if = "Option::is_none")]
         disk_gb: Option<String>,
         /// With disk short: what a first setup needs free there, in whole GiB rounded up
-        /// (`EngineCheck::short_for_setup`): the CLI's 15 GiB, and inside the engine the 5% of its
-        /// disk k3s keeps free. The window says it beside `disk_gb`.
+        /// (`EngineCheck::short_for_setup`): room for the installation and its first update, on the
+        /// drive and inside the engine. The window says it beside `disk_gb`.
         #[serde(skip_serializing_if = "Option::is_none")]
         needed_gb: Option<String>,
         /// That figure is what is free on `drive` (`Shortfall::free_on_drive`).
@@ -1591,16 +1591,52 @@ free memory inside a container, so an engine below those totals can never pass i
 is left to the CLI at Start: OpenBot's own Podman machine is 4 CPUs and 6 GiB and passes there, so
 a stricter total here would stop every Podman install.
 
-Free disk is the CLI's own, measured as it measures it, inside a container: 15 GiB, and the 5% of
-the engine's disk that k3s keeps free (`engine_free_disk_needed`). On the drive under a machine's
-disk it is the 15 GiB alone: the 5% is k3s's line inside the machine. Measured on 2026-11-19 with
-v1.1.0: OpenBot and its back end take about 7.5 GiB installed, an update up to 4.5 GiB more beside
-them, logs up to 1.3 GiB. `desktop/src/disk-needs.json` holds the numbers the window says, and
-`scripts/disk-needs.ts` checks each release against them.
+The CLI's own free disk line, measured as it measures it, inside a container, is 15 GiB, and the 5%
+of the engine's disk that k3s keeps free (`engine_free_disk_needed`). OpenBot asks for more before a
+first setup: room for the installation and for its first update, which the update's preflight
+(`update_room`) asks for once it is installed (`setup_free_on_drive`, `setup_free_in_engine`).
+Measured on 2026-11-19 with v1.1.0: OpenBot and its back end take about 7.5 GiB installed, at most
+`INSTALLED_MOST_BYTES`, an update up to 4.5 GiB more beside them, logs up to 1.3 GiB.
+`desktop/src/disk-needs.json` holds the numbers the window says, and `scripts/disk-needs.ts` checks
+each release against them.
 */
 pub const MIN_ENGINE_CPUS: u64 = 4;
 pub const MIN_ENGINE_MEMORY_BYTES: u64 = 4 * GIB;
 pub const MIN_ENGINE_FREE_DISK_BYTES: u64 = 15 * GIB;
+
+/// The most an installation takes on disk: OpenBot's images with the largest Bot framework and both
+/// sign-in images, and the back end (`installedGb.to` in `desktop/src/disk-needs.json`, which
+/// `scripts/disk-needs.ts` checks against each release).
+pub const INSTALLED_MOST_BYTES: u64 = 10 * GIB;
+
+/**
+What a first setup needs free on the drive under the engine's disk once OpenBot's own images are in
+(`early_downloads::needed_for` adds them before they are): the rest of the installation, and then
+what the first update's preflight asks for there, twice what the update writes (`update_shortfall`).
+Never less than the CLI's 15 GiB. The update's database is counted as not measured, the most it
+counts. A setup let through at the CLI's 15 GiB was left 5 to 8 GiB, and its first update was
+refused for want of 19.
+*/
+pub fn setup_free_on_drive() -> u64 {
+    let rest = INSTALLED_MOST_BYTES.saturating_sub(crate::update_ready::on_disk(
+        crate::early_downloads::IMAGES_DOWNLOAD_BYTES,
+    ));
+    MIN_ENGINE_FREE_DISK_BYTES.max(rest + 2 * update_needs(None))
+}
+
+/**
+What a first setup needs free inside an engine whose disk is `size` bytes: the whole installation,
+then what the first update's preflight asks for there, what it writes and the 15% of the disk the
+kubelet keeps free (`update_shortfall`). Never less than the CLI's line (`engine_free_disk_needed`).
+Inside Docker Desktop's 64 GiB disk that is about 30 GiB, where the CLI asks for 18.2.
+*/
+pub fn setup_free_in_engine(size: u64) -> u64 {
+    engine_free_disk_needed(Some(size)).max(
+        INSTALLED_MOST_BYTES
+            + update_needs(None)
+            + size / 100 * crate::update_ready::KEEP_FREE_PERCENT,
+    )
+}
 
 /// What a first setup needs free inside an engine whose disk is `size` bytes: the CLI's 15 GiB and
 /// the 5% of that disk k3s keeps free (`kubernetes_keeps_free`). The 15 GiB alone when the size is
@@ -1863,21 +1899,18 @@ impl EngineCheck {
 
     /**
     The free disk a first setup is short of, and what it needs there: the drive under the engine's
-    disk against the CLI's 15 GiB first, since it runs out first and is what the person frees; then
-    the engine's own disk against the 15 GiB and the 5% of it k3s keeps free
-    (`engine_free_disk_needed`). The two are judged apart: a sparse machine disk shows room whatever
-    the drive has, and the drive says nothing of k3s's line inside the machine.
+    disk first (`setup_free_on_drive`), since it runs out first and is what the person frees; then
+    the engine's own disk (`setup_free_in_engine`). Both leave room for the installation and its
+    first update. The two are judged apart: a sparse machine disk shows room whatever the drive
+    has, and the drive says nothing of k3s's lines inside the machine.
     */
     fn short_for_setup(&self) -> Option<(u64, u64)> {
-        if let Some(drive) = self
-            .drive
-            .as_ref()
-            .filter(|drive| drive.free < MIN_ENGINE_FREE_DISK_BYTES)
-        {
-            return Some((drive.free, MIN_ENGINE_FREE_DISK_BYTES));
+        let on_drive = setup_free_on_drive();
+        if let Some(drive) = self.drive.as_ref().filter(|drive| drive.free < on_drive) {
+            return Some((drive.free, on_drive));
         }
         self.disk
-            .map(|disk| (disk.free, engine_free_disk_needed(Some(disk.size))))
+            .map(|disk| (disk.free, setup_free_in_engine(disk.size)))
             .filter(|(free, needed)| free < needed)
     }
 
@@ -1900,7 +1933,7 @@ impl EngineCheck {
     fn free_on_drive(&self) -> bool {
         self.drive
             .as_ref()
-            .is_some_and(|drive| drive.free < MIN_ENGINE_FREE_DISK_BYTES)
+            .is_some_and(|drive| drive.free < setup_free_on_drive())
     }
 
     /// Podman on Windows, whose machine runs in WSL.
@@ -2212,12 +2245,13 @@ pub fn drive_short() -> Option<Shortfall> {
 ROOM FOR AN UPDATE, checked before an update does anything: before the back end's `local update`
 (`checked_call`) and before OpenBot's own update stops, backs up or downloads (`upgrade::run`).
 
-The first setup's 15 GiB is what the back end needs free before it is installed. An installation
-already uses part of that, so an update is held to what the update itself writes, beside what is
-there, until it removes what it replaced:
+An installation is already on the disk, so an update is held to what the update itself writes,
+beside what is there, until it removes what it replaced. A first setup leaves room for this
+(`setup_free_on_drive`, `setup_free_in_engine`), so an installation set up at the least free disk
+the setup takes still has room for its first update:
 
 - New images: an update downloads at most `MOST_AN_UPDATE_DOWNLOADS` (every image of OpenBot's and
-  the back end's changed), and an image takes `update_ready::ON_DISK` times its download on disk.
+  the back end's changed), and an image takes `update_ready::on_disk` of its download on disk.
 - The database, twice: the backup `upgrade` writes before anything changes (`upgrade::DUMP`, a
   `pg_dump` of it), and the copy a failed update restores into before it swaps it in
   (`stack::restore_runtime_database`). Measured when OpenBot can (`installation_database`), and
@@ -2237,7 +2271,7 @@ pub const UNMEASURED_DATABASE: u64 = GIB;
 
 /// Bytes an update writes, with a database of `database` bytes (`update_room`).
 pub fn update_needs(database: Option<u64>) -> u64 {
-    MOST_AN_UPDATE_DOWNLOADS * crate::update_ready::ON_DISK
+    crate::update_ready::on_disk(MOST_AN_UPDATE_DOWNLOADS)
         + 2 * database.unwrap_or(UNMEASURED_DATABASE)
 }
 
@@ -5964,10 +5998,28 @@ mod tests {
             crate::early_downloads::IMAGES_DOWNLOAD_BYTES,
             disk_number("imagesDownloadMb") * 1_000_000
         );
+        assert_eq!(
+            INSTALLED_MOST_BYTES,
+            disk_needs()["installedGb"]["to"]
+                .as_u64()
+                .expect("installedGb.to")
+                * GIB
+        );
+        // 4.35 in the file, 435 hundredths here: what the release check measures with is what
+        // the checks count.
+        let on_disk = disk_needs()["onDisk"].as_f64().expect("onDisk");
+        assert_eq!(
+            crate::update_ready::ON_DISK_PERCENT as f64,
+            (on_disk * 100.0).round()
+        );
+        assert_eq!(
+            crate::update_ready::on_disk(1_000_000),
+            (on_disk * 1_000_000.0).round() as u64
+        );
     }
 
-    // "About 20 GB free to install": the back end's 15 GiB and OpenBot's own images
-    // as they land on the disk, what the downloads hold to before anything starts.
+    // "About 31 GB free to install": an installation and room for its first update, what the
+    // downloads hold to before anything starts.
     #[test]
     fn the_install_figure_the_window_says_is_what_the_downloads_hold_to() {
         let plan = crate::early_downloads::Plan {
@@ -5992,6 +6044,79 @@ mod tests {
             engine_free_disk_needed(Some(1024 * GIB)),
             15 * GIB + 1024 * GIB / 20
         );
+    }
+
+    /// The least free disk, to the byte, that `check_at(free)` lets a first setup through with.
+    fn least_a_setup_takes(check_at: impl Fn(u64) -> EngineCheck) -> u64 {
+        let (mut short, mut room) = (0, 4096 * GIB);
+        assert!(check_at(room).short_for_setup().is_none());
+        while room - short > 1 {
+            let middle = short + (room - short) / 2;
+            if check_at(middle).short_for_setup().is_some() {
+                short = middle;
+            } else {
+                room = middle;
+            }
+        }
+        room
+    }
+
+    /**
+    A fresh installation at the least free disk the window says and the setup lets through takes its
+    first update: what is left once it is installed is what the update's preflight asks for
+    (`update_room_of`), on the drive under the engine's disk and inside it. The update's database is
+    not measured, the most it counts. A setup that passed at 15 GiB free on the drive was left 9.4
+    GiB, and its first update asked for 19; inside Docker's 64 GiB disk a setup at the CLI's 18.2
+    GiB was left 8.2, and the update asked for 19.1.
+    */
+    #[test]
+    fn a_fresh_installation_at_the_least_the_setup_takes_has_room_for_its_first_update() {
+        let installed = disk_needs()["installedGb"]["to"]
+            .as_u64()
+            .expect("installedGb.to")
+            * GIB;
+        let images = crate::early_downloads::Plan {
+            offline_images: true,
+            ..Default::default()
+        };
+        let roomy_engine = Disk {
+            size: 1006 * GIB,
+            free: 900 * GIB,
+        };
+        let on_a_mac = |free: u64, disk: Disk| EngineCheck {
+            podman: false,
+            size: Some((10, 22011707392)),
+            disk: Some(disk),
+            drive: Some(crate::windows::MachineDrive {
+                drive: None,
+                free,
+                mac: true,
+            }),
+            pressure: None,
+        };
+        let less = |disk: Disk, by: u64| Disk {
+            size: disk.size,
+            free: disk.free - by,
+        };
+
+        // The drive: the downloads start at what they hold to, OpenBot's images land, the account
+        // step lets the setup through, and the installation takes the rest.
+        let before = crate::early_downloads::needed_for(&images).total();
+        assert!(before <= disk_number("installFreeGb") * GIB);
+        let landed = before - images.disk_bytes();
+        assert_eq!(on_a_mac(landed, roomy_engine).short_for_setup(), None);
+        assert!(least_a_setup_takes(|free| on_a_mac(free, roomy_engine)) <= landed);
+        let after = on_a_mac(before - installed, less(roomy_engine, installed));
+        assert_eq!(update_room_of(&after, None), None, "{after:?}");
+
+        // Inside Docker Desktop's 64 GiB disk, with room on the Mac.
+        let docker = |free: u64| Disk {
+            size: 64 * GIB,
+            free,
+        };
+        let least = least_a_setup_takes(|free| on_a_mac(500 * GIB, docker(free)));
+        let after = on_a_mac(500 * GIB - installed, docker(least - installed));
+        assert_eq!(update_room_of(&after, None), None, "{after:?}");
     }
 
     // Mirrors local.ts and local-manager.ts at Intelligence 3935afbf, with synthetic identifiers.
@@ -11935,7 +12060,7 @@ fn main() {
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
                 "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
-                "neededGb": "66", "wsl": true, "drive": "C:"
+                "neededGb": "172", "wsl": true, "drive": "C:"
             })
         );
         assert_eq!(
@@ -11946,8 +12071,8 @@ fn main() {
             ]
         );
 
-        // Docker Desktop with 15 GiB of a 64 GiB disk free: below the CLI's 15 GiB and the 5% of
-        // the disk k3s keeps free, 18.2 GiB together.
+        // Docker Desktop with 15 GiB of a 64 GiB disk free: below the 29.7 GiB a first setup needs
+        // inside it, the installation and its first update with the 15% the kubelet keeps free.
         lab.engine(
             crate::engine::Engine::Docker,
             DOCKER_INFO,
@@ -11959,15 +12084,16 @@ fn main() {
         assert_eq!(wire["reason"], json!("resources-short"));
         assert_eq!(
             wire["shortfall"],
-            json!({ "podman": false, "cpu": false, "memory": false, "disk": true, "diskGb": "15", "neededGb": "19" })
+            json!({ "podman": false, "cpu": false, "memory": false, "disk": true, "diskGb": "15", "neededGb": "30" })
         );
         assert_eq!(
             checks_logged().last().unwrap(),
-            "WARN [local check] after local start failed: 10 CPUs and 20.5 GiB of memory, 15 GiB free of 64 GiB in a container, no disk pressure; short of disk (OpenBot needs 19 GiB free)"
+            "WARN [local check] after local start failed: 10 CPUs and 20.5 GiB of memory, 15 GiB free of 64 GiB in a container, no disk pressure; short of disk (OpenBot needs 30 GiB free)"
         );
 
         // Docker on a 1.8 TiB disk with 160 GiB free, its node under DiskPressure: nearly full
-        // by k3s's own line, though above what a first setup needs.
+        // by k3s's own line, and below what a first setup needs there, the 15% the kubelet keeps
+        // free and room for the installation and its first update.
         lab.engine(
             crate::engine::Engine::Docker,
             DOCKER_INFO,
@@ -11981,7 +12107,7 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": false, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "160", "nearlyFull": true, "diskSizeGb": "1827.9"
+                "diskGb": "160", "nearlyFull": true, "diskSizeGb": "1827.9", "neededGb": "295"
             })
         );
         checks_logged();
@@ -12050,21 +12176,21 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "12", "neededGb": "15", "wsl": true, "drive": "C:", "freeOnDrive": true
+                "diskGb": "12", "neededGb": "26", "wsl": true, "drive": "C:", "freeOnDrive": true
             })
         );
         assert_eq!(
             checks_logged(),
             [
-                "WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 12 GiB free on C:; short of disk (OpenBot needs 15 GiB free)",
-                "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 12 GiB free on C:, no disk pressure; short of disk (OpenBot needs 15 GiB free)",
+                "WARN [local check] before local start: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 12 GiB free on C:; short of disk (OpenBot needs 26 GiB free)",
+                "WARN [local check] after local start failed: 4 CPUs and 5.8 GiB of memory, 941 GiB free of 1006.8 GiB in a container, 12 GiB free on C:, no disk pressure; short of disk (OpenBot needs 26 GiB free)",
             ]
         );
         assert_eq!(
             serde_json::to_value(engine_size_terms()).unwrap(),
             json!({
                 "status": "engine-too-small", "podman": true, "cpu": false, "memory": false,
-                "disk": true, "wsl": true, "drive": "C:", "diskGb": "12", "neededGb": "15", "freeOnDrive": true
+                "disk": true, "wsl": true, "drive": "C:", "diskGb": "12", "neededGb": "26", "freeOnDrive": true
             })
         );
     }
@@ -12104,7 +12230,7 @@ fn main() {
         assert_eq!(serde_json::to_value(engine_size_terms()).unwrap(), window);
         assert_eq!(
             checks_logged(),
-            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, free disk not measured, 13.2 GiB free on C:; short of disk (OpenBot needs 15 GiB free)"]
+            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, free disk not measured, 13.2 GiB free on C:; short of disk (OpenBot needs 26 GiB free)"]
         );
         // A machine whose own disk is what ran short, with room on C:, is never said as C:'s.
         lab.engine(
@@ -12135,7 +12261,7 @@ fn main() {
         windows_f(&lab, 132);
         assert!(engine_size_terms().is_some());
         assert!(crate::early_downloads::held_for_room());
-        // What the held downloads look at: the same free disk, below the same 15 GiB.
+        // What the held downloads look at: the same free disk, below the same figure.
         assert_eq!(engine_free_disk(), Some(132 * GIB / 10 + GIB / 100));
         windows_f(&lab, 970);
         assert_eq!(engine_size_terms(), None);
@@ -12215,13 +12341,13 @@ fn main() {
         let wire = serde_json::to_value(&report).unwrap();
         assert_eq!(wire["outcome"], json!("blocked"));
         assert_eq!(wire["reason"], json!("resources-short"));
-        // 4 x 2 GB of images and the 52 MiB database twice, 8.1 GB, at most half of what is free.
+        // 4.35 x 2 GB of images and the 52 MiB database twice, 8.8 GB, at most half of what is free.
         assert_eq!(
             wire["shortfall"],
             json!({
                 "podman": false, "cpu": false, "memory": false, "disk": true,
                 "diskGb": "7.5", "freeOnDrive": true, "mac": true,
-                "updating": true, "neededGb": "16"
+                "updating": true, "neededGb": "17"
             })
         );
         let logged = checks_logged();
@@ -12253,7 +12379,7 @@ fn main() {
             pressure: None,
         };
         assert_eq!(update_room_of(&check, Some(52 * 1024 * 1024)), None);
-        // C: on Windows at 12 GB free, under the 15 GB an update needs free there: refused, said
+        // C: on Windows at 12 GB free, under the 17 GB an update needs free there: refused, said
         // as C:'s.
         let windows_g = EngineCheck {
             drive: Some(crate::windows::MachineDrive {
@@ -12268,7 +12394,7 @@ fn main() {
             (short.drive.as_deref(), short.free_on_drive, short.mac),
             (Some("C:"), true, false)
         );
-        assert_eq!(short.needed_gb.as_deref(), Some("15"));
+        assert_eq!(short.needed_gb.as_deref(), Some("17"));
         // Docker Desktop's own disk limit, the Mac with room: what is short is inside Docker, and
         // the update needs its images and the database, and the 15% k3s keeps free, there.
         let small_docker = EngineCheck {
@@ -12315,15 +12441,15 @@ fn main() {
             serde_json::to_value(engine_size_terms()).unwrap(),
             json!({
                 "status": "engine-too-small", "podman": false, "cpu": false, "memory": false,
-                "disk": true, "drive": "C:", "diskGb": "13.9", "neededGb": "15", "freeOnDrive": true
+                "disk": true, "drive": "C:", "diskGb": "13.9", "neededGb": "26", "freeOnDrive": true
             })
         );
         assert_eq!(
             checks_logged(),
-            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, 938.3 GiB free of 1006.8 GiB in a container, 13.9 GiB free on C:; short of disk (OpenBot needs 15 GiB free)"]
+            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, 938.3 GiB free of 1006.8 GiB in a container, 13.9 GiB free on C:; short of disk (OpenBot needs 26 GiB free)"]
         );
         assert!(crate::early_downloads::held_for_room());
-        // What the held downloads look at is C:, below the same 15 GiB.
+        // What the held downloads look at is C:, below the same figure.
         assert_eq!(engine_free_disk(), Some(14_999_998_464));
         // "filler deleted at 04:46:16; C: free 97796845568 bytes (97.8 GB)"
         windows_g(&lab, 97_796_845_568);
@@ -12360,7 +12486,7 @@ fn main() {
                 "updateTo": null, "checksPassed": false,
                 "shortfall": {
                     "podman": false, "cpu": false, "memory": false, "disk": true,
-                    "diskGb": "13.9", "neededGb": "15", "drive": "C:", "freeOnDrive": true
+                    "diskGb": "13.9", "neededGb": "26", "drive": "C:", "freeOnDrive": true
                 }
             })
         );
@@ -12484,7 +12610,7 @@ fn main() {
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
                 "diskGb": "30.5", "nearlyFull": true, "diskSizeGb": "1006.8",
-                "neededGb": "66", "wsl": true, "drive": "C:"
+                "neededGb": "172", "wsl": true, "drive": "C:"
             })
         );
 

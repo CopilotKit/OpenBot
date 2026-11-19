@@ -23939,7 +23939,7 @@ fn main() {
                     "cpu_short": false, "memory_short": false, "disk_short": true,
                     "cpu_needed_millis": 4000, "cpu_available_millis": 9800,
                     "memory_needed_mib": 4096, "memory_available_mib": 19353,
-                    "disk_needed_mib": 15360, "disk_available_mib": 0
+                    "disk_needed_mib": 40960, "disk_available_mib": 0
                 }
             })
         );

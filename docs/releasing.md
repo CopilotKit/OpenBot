@@ -420,13 +420,13 @@ CI bundles the CLI only on a tree that has `desktop/src-tauri/tauri.bundled-cli.
 
 ## The disk space the app says
 
-OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: "About 20 GB
+OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: "About 31 GB
 free to install, 7 to 10 GB used". Its checks say the same numbers when a disk is short. They come
 from one file, `desktop/src/disk-needs.json`, in GB of 2^30 bytes:
 
 | Number | What it is |
 | --- | --- |
-| `installFreeGb` | Free disk to install: the back end's setup and OpenBot's images as they land on the disk. |
+| `installFreeGb` | Free disk to install: the largest installation, and the room its first update's own check asks for beside it, so a computer set up at the minimum can take that update. |
 | `installedGb` | What an installation takes, from the smallest Bot framework to the largest with both sign-in images. |
 | `backEndFreeGb` | What the back end's first setup needs free, before the 5% of the engine's disk k3s keeps free. The CLI checks the same number (`REQUIRED_DISK_GIB` in the Intelligence CLI's `local-resources.ts`). |
 | `imagesDownloadMb` | What OpenBot's own images download, for the first screen's free-space check. |
@@ -447,7 +447,9 @@ To measure `onDisk` again, run it with `--measure` on a computer running OpenBot
 compares what OpenBot's images and the back end take there with what they download.
 
 When a number changes, the Rust tests in `local_eval.rs` name the constant that must change with
-it (`MIN_ENGINE_FREE_DISK_BYTES`, `MOST_AN_UPDATE_DOWNLOADS`, `early_downloads::IMAGES_DOWNLOAD_BYTES`).
+it (`MIN_ENGINE_FREE_DISK_BYTES`, `INSTALLED_MOST_BYTES`, `MOST_AN_UPDATE_DOWNLOADS`,
+`early_downloads::IMAGES_DOWNLOAD_BYTES`, `update_ready::ON_DISK_PERCENT`), and one of them fails
+when `installFreeGb` no longer leaves a fresh installation room for its first update.
 A change to `backEndFreeGb` is also a change to the Intelligence CLI's own check. Release that CLI
 first, then point `desktop/intelligence-cli.json` at it, so the window never says a number the CLI
 refuses.

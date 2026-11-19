@@ -839,8 +839,23 @@ fn blocked_normally(reason: Option<local_eval::Reason>) -> bool {
 
 const MIB: u64 = 1024 * 1024;
 
-/// What local setup needs, as `local_eval`'s minimums say it.
-fn needed(cpu_short: bool, memory_short: bool, disk_short: bool) -> telemetry::Resources {
+/// A number a check said, as CPUs or GiB to one decimal, times `scale`.
+fn said_number(said: &Option<String>, scale: f64) -> Option<u64> {
+    said.as_deref()
+        .and_then(|said| said.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| (value * scale).floor() as u64)
+}
+
+/// What local setup needs, as `local_eval`'s minimums say it. Disk is what the check said it needs
+/// where it measured (`needed_gb`, whole GiB): the CLI's figure, the account step's, or an
+/// update's. When it said none, what a first setup needs on the drive.
+fn needed(
+    cpu_short: bool,
+    memory_short: bool,
+    disk_short: bool,
+    needed_gb: &Option<String>,
+) -> telemetry::Resources {
     telemetry::Resources {
         cpu_short,
         memory_short,
@@ -850,7 +865,8 @@ fn needed(cpu_short: bool, memory_short: bool, disk_short: bool) -> telemetry::R
         cpu_available_millis: None,
         memory_needed_mib: local_eval::MIN_ENGINE_MEMORY_BYTES / MIB,
         memory_available_mib: None,
-        disk_needed_mib: local_eval::MIN_ENGINE_FREE_DISK_BYTES / MIB,
+        disk_needed_mib: said_number(needed_gb, 1024.0)
+            .unwrap_or(local_eval::setup_free_on_drive() / MIB),
         disk_available_mib: None,
     }
 }
@@ -858,18 +874,17 @@ fn needed(cpu_short: bool, memory_short: bool, disk_short: bool) -> telemetry::R
 /// A shortfall the CLI or OpenBot's check after a failed call named, with the numbers it said: CPUs,
 /// and GiB to one decimal.
 pub fn resources_of_shortfall(shortfall: &local_eval::Shortfall) -> telemetry::Resources {
-    let number = |said: &Option<String>, scale: f64| {
-        said.as_deref()
-            .and_then(|said| said.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value >= 0.0)
-            .map(|value| (value * scale).floor() as u64)
-    };
     telemetry::Resources {
         disk_nearly_full: shortfall.nearly_full,
-        cpu_available_millis: number(&shortfall.cpus, 1000.0),
-        memory_available_mib: number(&shortfall.memory_gb, 1024.0),
-        disk_available_mib: number(&shortfall.disk_gb, 1024.0),
-        ..needed(shortfall.cpu, shortfall.memory, shortfall.disk)
+        cpu_available_millis: said_number(&shortfall.cpus, 1000.0),
+        memory_available_mib: said_number(&shortfall.memory_gb, 1024.0),
+        disk_available_mib: said_number(&shortfall.disk_gb, 1024.0),
+        ..needed(
+            shortfall.cpu,
+            shortfall.memory,
+            shortfall.disk,
+            &shortfall.needed_gb,
+        )
     }
 }
 
@@ -878,13 +893,14 @@ pub fn resources_of_measure(
     cpu: bool,
     memory: bool,
     disk: bool,
+    needed_gb: &Option<String>,
     measured: &local_eval::EngineMeasure,
 ) -> telemetry::Resources {
     telemetry::Resources {
         cpu_available_millis: Some(measured.cpus.saturating_mul(1000)),
         memory_available_mib: Some(measured.memory_bytes / MIB),
         disk_available_mib: measured.free_disk_bytes.map(|free| free / MIB),
-        ..needed(cpu, memory, disk)
+        ..needed(cpu, memory, disk, needed_gb)
     }
 }
 
@@ -967,10 +983,13 @@ pub fn terms_failure(
             cpu,
             memory,
             disk,
+            needed_gb,
             measured,
             ..
         }) => Some(SetupFailure {
-            resources: Some(resources_of_measure(*cpu, *memory, *disk, measured)),
+            resources: Some(resources_of_measure(
+                *cpu, *memory, *disk, needed_gb, measured,
+            )),
             ..SetupFailure::new(step, telemetry::SetupErrorClass::InsufficientResources)
         }),
         Ok(_) => None,
@@ -1989,7 +2008,7 @@ mod tests {
                 cpu_available_millis: Some(9800),
                 memory_needed_mib: 4096,
                 memory_available_mib: Some(19353),
-                disk_needed_mib: 15360,
+                disk_needed_mib: local_eval::setup_free_on_drive() / MIB,
                 disk_available_mib: Some(0),
             })
         );
@@ -2010,6 +2029,53 @@ mod tests {
                 cause: "docker_unavailable"
             })),
             None
+        );
+    }
+
+    /// A disk that is short sends what the check said it needs there, not a fixed 15 GiB: the CLI's
+    /// 66 GiB on a 1 TB Docker disk, and the account step's 26 GiB on a Mac's drive.
+    #[test]
+    fn a_short_disk_sends_what_its_check_said_it_needs() {
+        let cli = local_eval::Shortfall {
+            disk: true,
+            disk_gb: Some("60".into()),
+            needed_gb: Some("66".into()),
+            ..local_eval::Shortfall::default()
+        };
+        let sent = resources_of_shortfall(&cli);
+        assert_eq!(
+            (sent.disk_needed_mib, sent.disk_available_mib),
+            (66 * 1024, Some(60 * 1024))
+        );
+        let account = terms_failure(&Ok(local_eval::Terms::EngineTooSmall {
+            podman: false,
+            cpu: false,
+            memory: false,
+            disk: true,
+            wsl: false,
+            drive: None,
+            disk_gb: Some("20.1".into()),
+            needed_gb: Some("26".into()),
+            free_on_drive: true,
+            mac: true,
+            measured: local_eval::EngineMeasure {
+                cpus: 10,
+                memory_bytes: 16 * 1024 * 1024 * 1024,
+                free_disk_bytes: Some(20 * 1024 * 1024 * 1024),
+            },
+        }))
+        .unwrap()
+        .resources
+        .unwrap();
+        assert_eq!(account.disk_needed_mib, 26 * 1024);
+        // Nothing said: what a first setup needs on the drive.
+        let unsaid = resources_of_shortfall(&local_eval::Shortfall {
+            disk: true,
+            ..local_eval::Shortfall::default()
+        });
+        assert_eq!(
+            unsaid.disk_needed_mib,
+            local_eval::setup_free_on_drive() / MIB
         );
     }
 
@@ -2088,7 +2154,7 @@ mod tests {
                         cpu_available_millis: Some(4000),
                         memory_needed_mib: 4096,
                         memory_available_mib: Some(2048),
-                        disk_needed_mib: 15360,
+                        disk_needed_mib: local_eval::setup_free_on_drive() / MIB,
                         disk_available_mib: Some(102400),
                     }),
                 },

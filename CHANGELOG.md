@@ -230,13 +230,15 @@ or a script has to say.
 
 ### OpenBot Desktop
 
-- **It asks for about 20 GB free to install, where it asked for 40, and says what it uses.** The
-  first screen says "About 20 GB free to install, 7 to 10 GB used". Measured on v1.1.0: 7.5 GB
-  installed, and up to 4.5 GB more while an update downloads beside the running release. The back
-  end's setup needs 15 GB free, plus the 5% of Docker's or Podman's disk that k3s keeps free, and a
-  disk that is short says the figure for that disk ("OpenBot needs 66 GB" on a 1 TB disk). An
-  update now counts on downloading at most 2 GB, where it counted 1.7, which v1.1.1's images
-  already exceed.
+- **It asks for about 31 GB free to install, where it asked for 40, and says what it uses.** The
+  first screen says "About 31 GB free to install, 7 to 10 GB used": the installation, and room
+  for its first update, so a computer set up at the minimum is never refused that update.
+  Measured on v1.1.0: 7.5 GB installed, up to 4.5 GB more while an update downloads beside the
+  running release, and images taking 4.35 times their download on disk. Inside Docker's or
+  Podman's disk the setup also leaves the 15% k3s keeps free for images, and a disk that is short
+  says the figure for that disk ("OpenBot needs 30 GB" inside a 64 GB Docker disk). An update now
+  counts on downloading at most 2 GB, where it counted 1.7, which v1.1.1's images already exceed,
+  so an installation needs about 4 GB more free than before to update (17 GB where it was 13).
 - **Connected to another OpenBot on a Mac works again.** In 1.1.0 the window showed only "This
   relay is for the OpenBot window", because the Mac's web view dropped a cookie on a redirect.
 - **A server that refuses to start says why at once**, in its own words, where the window waited
