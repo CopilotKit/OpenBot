@@ -25,6 +25,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
   again when it is gone. On Windows, after Podman was removed, the window stayed on "Setting up this
   computer" after sign-in, because Install took the old install as done.
+- **On Windows, setup no longer waits for ever on "Checking what OpenBot needs to download".** A
+  command OpenBot runs in its engine's machine now stops after 60 seconds. If Windows refused the
+  machine's key because other accounts can open it, setup says so and names the file and the
+  account.
 
 ## 1.1.1
 
