@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 1.1.1
+
 **Before upgrading.** Read these first: several change what a Helm values file, a Compose override
 or a script has to say.
 
