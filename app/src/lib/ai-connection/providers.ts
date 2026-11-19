@@ -67,6 +67,14 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "unbiased",
   },
   {
+    id: "trustedrouter",
+    name: "TrustedRouter",
+    summary: "Use a TrustedRouter API key for models from many providers.",
+    keySummary: "Use a TrustedRouter API key for models from many providers.",
+    logins: ["endpoint"],
+    mark: "trustedrouter",
+  },
+  {
     id: "openai-compatible",
     name: "Any OpenAI-compatible endpoint",
     summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.",
@@ -103,6 +111,12 @@ export const ENDPOINT_PRESETS: Partial<
     model: "pareto",
     keyUrl: "https://platform.unbiased.ai/dashboard/keys",
     keyLink: "Get an Unbiased AI API key",
+  },
+  trustedrouter: {
+    baseUrl: "https://api.trustedrouter.com/v1",
+    model: "anthropic/claude-sonnet-5.5",
+    keyUrl: "https://trustedrouter.com/console/api-keys",
+    keyLink: "Get a TrustedRouter API key",
   },
 };
 

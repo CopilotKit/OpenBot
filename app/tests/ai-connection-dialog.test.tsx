@@ -431,6 +431,7 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
             "Google Gemini",
             "xAI",
             "Unbiased AI",
+            "TrustedRouter",
             "Any OpenAI-compatible endpoint",
           ]);
           expect(await measured(page)).toEqual(FINE);

@@ -25058,17 +25058,18 @@ components:
           description: Its name, as a model picker shows it.
     AiConnectionProvider:
       type: string
-      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
+      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
       enum:
         - openai
         - anthropic
         - google
         - xai
         - unbiased
+        - trustedrouter
         - openai-compatible
     AiConnectionLogin:
       type: string
-      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
       enum:
         - plan
         - api-key
@@ -25156,7 +25157,7 @@ components:
     AiConnectionInput:
       type: object
       additionalProperties: false
-      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.
+      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
       required:
         - provider
         - login

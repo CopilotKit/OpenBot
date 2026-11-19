@@ -105,6 +105,15 @@ const endpointPresets: Record<
     keyUrl: "https://platform.unbiased.ai/dashboard/keys",
     keyLink: "Get an Unbiased AI API key",
   },
+  // TrustedRouter's gateway speaks the OpenAI API and lists models from many providers under their
+  // vendor's prefix, so the model is named the way its /models lists it.
+  // https://trustedrouter.com/docs
+  trustedrouter: {
+    baseUrl: "https://api.trustedrouter.com/v1",
+    model: "anthropic/claude-sonnet-5.5",
+    keyUrl: "https://trustedrouter.com/console/api-keys",
+    keyLink: "Get a TrustedRouter API key",
+  },
 };
 
 /** What approving in the browser does, for each provider that signs in that way. */

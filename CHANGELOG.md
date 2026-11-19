@@ -22,6 +22,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **TrustedRouter is on the Connect your AI screen**, and in Settings where the AI connection is
+  changed. TrustedRouter is an OpenAI-compatible gateway in front of many providers. A TrustedRouter
+  API key is all the row asks for: OpenBot fills in `https://api.trustedrouter.com/v1` and the model
+  `anthropic/claude-sonnet-5.5`, which can be changed to any name the gateway lists. The model list
+  reads the gateway's `/models`, as it does for any other compatible endpoint.
 - **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
   again when it is gone. On Windows, after Podman was removed, the window stayed on "Setting up this
   computer" after sign-in, because Install took the old install as done.
