@@ -282,9 +282,10 @@ def _gateway_key(run, provider: str) -> dict:
     The address stays the configured one: the server sends a token only to a harness it runs, which
     reaches the model through its gateway.
     """
-    if not run.gateway_token or provider not in ("openai", "anthropic"):
+    token = getattr(run, "gateway_token", "")
+    if not isinstance(token, str) or not token or provider not in ("openai", "anthropic"):
         return {}
-    return {"api_key": run.gateway_token}
+    return {"api_key": token}
 
 
 async def _plan_model():
