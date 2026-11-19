@@ -243,12 +243,29 @@ describe("how a Bot that holds delegate is told to work", () => {
     expect(DELEGATING_GUIDANCE).toContain("never a task's");
   });
 
-  test("a reaction is the whole answer, with no words, not even the emoji", () => {
-    expect(DELEGATING_GUIDANCE).toContain("not even the emoji");
-    // The LangGraph Bot reacted 👀 to an ask it then handed to a task.
-    expect(DELEGATING_GUIDANCE).toContain("exactly one of these three things");
+  test("seen acknowledgements allow a reply or task in the same turn", () => {
+    expect(DELEGATING_GUIDANCE).toContain("👀 means only 'seen'");
     expect(DELEGATING_GUIDANCE).toContain(
-      "Never react to a message you answer or hand to a task",
+      "You may react and then answer or hand work to a task in the same turn",
+    );
+    expect(DELEGATING_GUIDANCE).toContain("a reaction does not end your turn");
+    expect(DELEGATING_GUIDANCE).not.toContain(
+      "the reaction is your whole answer",
+    );
+    expect(DELEGATING_GUIDANCE).not.toContain(
+      "Never react to a message you answer",
+    );
+  });
+
+  test("direct greetings get a reply while group messages may need only acknowledgement", () => {
+    expect(DELEGATING_GUIDANCE).toContain("'yo' or 'hello'");
+    expect(DELEGATING_GUIDANCE).toContain("needs a reply or action");
+    expect(DELEGATING_GUIDANCE).toContain("when it needs no response from you");
+    expect(DELEGATING_GUIDANCE).toContain(
+      "a message addressed to someone else",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Do not repeat the reaction emoji as a standalone reply",
     );
   });
 

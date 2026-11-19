@@ -624,7 +624,7 @@ const REACTION_ONLY = new RegExp(
 /**
  * One turn of a Bot that holds `delegate` and `react`, drawn the way it was meant to read.
  *
- * A REACTION IS THE WHOLE ANSWER. A Bot that reacts sometimes also writes the emoji as its reply, and
+ * AVOID A DUPLICATE EMOJI. A Bot that reacts sometimes also writes the emoji as its reply, and
  * the person saw 👍 under their message and 👍 again as a line of its own. In a turn that reacted, a
  * line that is nothing but reactions is that reaction again, and is not drawn.
  *

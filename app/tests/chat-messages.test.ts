@@ -18,7 +18,7 @@ describe("a Bot's turn that reacts or hands work on", () => {
     function: { name, arguments: args },
   });
 
-  test("a reaction is the whole answer: the emoji written as a reply too is not drawn again", () => {
+  test("the emoji written as a reply beside a reaction is not drawn again", () => {
     const items = toVisibleChatItems([
       thanks,
       {
@@ -35,6 +35,33 @@ describe("a Bot's turn that reacts or hands work on", () => {
       { id: "assistant-thumb", role: "assistant", content: "👍" },
     ]);
     expect(items.map((item) => item.id)).toEqual(["user-thanks", "call-react"]);
+  });
+
+  test("a seen reaction preserves the follow-up reply", () => {
+    const items = toVisibleChatItems([
+      { id: "user-yo", role: "user", content: "yo" },
+      {
+        id: "assistant-seen",
+        role: "assistant",
+        toolCalls: [call("call-seen", "react", '{"emoji":"👀"}')],
+      },
+      {
+        id: "tool-seen",
+        role: "tool",
+        toolCallId: "call-seen",
+        content: "Reacted 👀 to the person's message.",
+      },
+      {
+        id: "assistant-hello",
+        role: "assistant",
+        content: "Hey! How can I help?",
+      },
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      "user-yo",
+      "call-seen",
+      "assistant-hello",
+    ]);
   });
 
   test("words beside a reaction, and an emoji with no reaction, are still drawn", () => {
