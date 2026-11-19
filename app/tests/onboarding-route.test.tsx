@@ -841,9 +841,7 @@ test("the self-hosting step in the address waits for the answer, rather than fla
   const view = open("/onboarding?step=selfhost");
 
   expect(await heading(view, "OpenBot for Business")).toBeTruthy();
-  expect(
-    view.queryByRole("heading", { name: WELCOME }),
-  ).toBeNull();
+  expect(view.queryByRole("heading", { name: WELCOME })).toBeNull();
 });
 
 test("until the deployment answers, Welcome's Continue waits; a failure says so and offers Try again", async () => {
