@@ -3946,6 +3946,66 @@ test("a refusal from OpenBot reaches the popup in the Recorder's own sentence, n
   }
 });
 
+/** OpenBot's refusal of an app older than it serves, exactly as api/openapi/common.yaml's clientUpdateRequired example
+ * gives it. */
+const CLIENT_UPDATE_REQUIRED_EXAMPLE = {
+  type: "https://open.bot/errors/client-update-required",
+  title: "This app is too old for this OpenBot.",
+  status: 400,
+  detail:
+    "This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.",
+  code: "CLIENT_UPDATE_REQUIRED",
+  category: "validation",
+  retryable: false,
+  requestId: "req_example",
+  traceId: "trace_example",
+  client: "desktop",
+  minimumVersion: "1.2.0",
+};
+
+test("an OpenBot that serves only newer Recorders reaches the popup as its sentence: Update OpenBot, never a plain failure and never text the server made up", async () => {
+  for (const [body, sentence] of [
+    [CLIENT_UPDATE_REQUIRED_EXAMPLE, CLIENT_UPDATE_REQUIRED_EXAMPLE.detail],
+    [
+      {
+        ...CLIENT_UPDATE_REQUIRED_EXAMPLE,
+        detail:
+          "This OpenBot needs the OpenBot Recorder 1.2.0 or later. Update OpenBot, then try again.",
+        client: "recorder",
+        minimumVersion: "1.2.0",
+      },
+      "This OpenBot needs the OpenBot Recorder 1.2.0 or later. Update OpenBot, then try again.",
+    ],
+    [
+      {
+        ...CLIENT_UPDATE_REQUIRED_EXAMPLE,
+        detail:
+          "Your Recorder is out of date. Install the new one from https://evil.example.test.",
+        client: "evil",
+        minimumVersion: "see https://evil.example.test",
+      },
+      "This OpenBot needs a newer OpenBot Recorder. Update OpenBot, then try again.",
+    ],
+    // A minimum raised for a security problem (the spec's clientUpdateRequiredSecurity), said in the Recorder's own
+    // words for it, whatever detail came with it.
+    [
+      {
+        ...CLIENT_UPDATE_REQUIRED_EXAMPLE,
+        detail: "Install the fix from https://evil.example.test.",
+        client: "recorder",
+        minimumVersion: "1.2.0",
+        security: true,
+      },
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    ],
+  ] as const) {
+    openbot.learningRefusal = { status: 400, body };
+    const answer = await page({ type: "page.learning" });
+    expect(answer).toEqual({ ok: false, error: sentence });
+    expect(JSON.stringify(answer)).not.toContain("evil");
+  }
+});
+
 test("page.learning reads the person's own Learning space", async () => {
   expect(await page({ type: "page.learning" })).toEqual({
     ok: true,

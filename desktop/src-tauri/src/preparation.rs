@@ -144,19 +144,17 @@ wrote:
 
 - A Claude plan names the Claude Agent SDK as its Bot (`PICKED_HARNESS_IMAGE`): only a plan picks
   that Bot (`harness::for_credential`).
-- A ChatGPT plan names its model service's address. An installation from before the plan ran as a
-  service names only the plan's token store, until the Start after its update writes the address.
+- A plan recorded for the installation (`stack::plan_engine`) runs its own engine: the Claude Agent
+  SDK for a Claude plan, the Python LangGraph image for a ChatGPT plan. Every Start names both plan
+  engines' addresses whatever the plan, so the address says nothing. An installation from before the
+  plan ran as a service names only the plan's token store.
 
 Every other sign-in names neither, and an installation nobody has signed in to has no `.env`.
 */
 pub fn plan_images(root: &Path) -> Vec<&'static str> {
     let set = crate::env::already_set(
         &root.join(".env"),
-        &[
-            "PICKED_HARNESS_IMAGE",
-            "CHATGPT_PLAN_HARNESS_URL",
-            "CHATGPT_AUTH_FILE",
-        ],
+        &["PICKED_HARNESS_IMAGE", "CHATGPT_AUTH_FILE"],
     );
     let named = |key: &str| set.get(key).is_some_and(|value| !value.trim().is_empty());
     let mut images = Vec::new();
@@ -171,7 +169,11 @@ pub fn plan_images(root: &Path) -> Vec<&'static str> {
     }) {
         images.push(crate::plan::SIGN_IN_IMAGE);
     }
-    if named("CHATGPT_PLAN_HARNESS_URL") || named("CHATGPT_AUTH_FILE") {
+    let engine = crate::stack::plan_engine(root).map(|engine| engine.service);
+    if engine == Some("agent-claude-plan") && !images.contains(&crate::plan::SIGN_IN_IMAGE) {
+        images.push(crate::plan::SIGN_IN_IMAGE);
+    }
+    if named("CHATGPT_AUTH_FILE") || engine == Some(crate::plan::CHATGPT_PLAN_SERVICE) {
         images.push(crate::plan::CHATGPT_SIGN_IN_IMAGE);
     }
     images
@@ -304,12 +306,100 @@ pub fn image_present(address: &Address, image: &str) -> Result<bool, Problem> {
         .map_err(|e| required(format!("Could not check an installed image: {e}")))
 }
 
+/// How long Start waits for an engine that does not answer about an image, and how often it asks
+/// again in that time. Straight after Install the engine can be busy for a moment, as the back
+/// end's cluster comes up in the same Podman machine or after that machine's network was set up
+/// again, and a first Start that read that as the images being gone sent the person round Install
+/// for nothing.
+const ENGINE_ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(120);
+const ASK_AGAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// What an engine said about one image.
+enum Inspected {
+    There,
+    /// The engine answered that it does not have it.
+    Missing,
+    /// No answer about the image: the engine's own words, or why it could not be asked.
+    NoAnswer(String),
+}
+
+fn inspect(address: &Address, image: &str) -> Inspected {
+    let output = address
+        .command()
+        .args(["image", "inspect", image])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output();
+    match output {
+        Ok(output) if output.status.success() => Inspected::There,
+        Ok(output) => {
+            let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if says_missing(&said) {
+                Inspected::Missing
+            } else {
+                Inspected::NoAnswer(said)
+            }
+        }
+        Err(error) => Inspected::NoAnswer(error.to_string()),
+    }
+}
+
+/// An engine's answer that it has no such image: Docker's "No such image" (and "No such object"
+/// from older Dockers), Podman's "image not known". Anything else is not an answer about the image.
+fn says_missing(said: &str) -> bool {
+    let said = said.to_ascii_lowercase();
+    ["no such image", "no such object", "image not known"]
+        .iter()
+        .any(|words| said.contains(words))
+}
+
+/// Every image in `images` is on the engine at `address`. Only an engine that answers that it does
+/// not have one sends Start back to Install; one that does not answer is waited for
+/// (`ENGINE_ANSWERS_WITHIN`), and said as not answering if it never does, which Install would not
+/// change either.
 pub fn require_images(address: &Address, images: &[String]) -> Result<(), Problem> {
+    require_images_within(address, images, ENGINE_ANSWERS_WITHIN, ASK_AGAIN_EVERY)
+}
+
+pub(crate) fn require_images_within(
+    address: &Address,
+    images: &[String],
+    within: std::time::Duration,
+    every: std::time::Duration,
+) -> Result<(), Problem> {
+    let engine = address.engine.binary();
+    let deadline = std::time::Instant::now() + within;
     for image in images {
-        if !image_present(address, image)? {
-            return Err(required(format!(
-                "The selected container engine does not have {image}."
-            )));
+        let mut waited = false;
+        loop {
+            match inspect(address, image) {
+                Inspected::There => {
+                    if waited {
+                        log::info!("[engine] {engine} answered again: {image} is there");
+                    }
+                    break;
+                }
+                Inspected::Missing => {
+                    return Err(required(format!(
+                        "The selected container engine does not have {image}."
+                    )));
+                }
+                Inspected::NoAnswer(said) if std::time::Instant::now() >= deadline => {
+                    return Err(Problem::with(
+                        "The software OpenBot runs on is not answering. Try Start again in a minute.",
+                        format!("Asking {engine} for {image}: {said}"),
+                    ));
+                }
+                Inspected::NoAnswer(said) => {
+                    if !waited {
+                        log::warn!(
+                            "[engine] {engine} did not answer about {image}; waiting for it: {said}"
+                        );
+                    }
+                    waited = true;
+                    std::thread::sleep(every);
+                }
+            }
         }
     }
     Ok(())

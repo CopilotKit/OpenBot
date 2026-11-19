@@ -2,7 +2,9 @@
 A stand-in for an OpenBot that runs elsewhere, for this module's tests: a real HTTP server on a
 loopback port that answers the addresses the app uses as the real one does.
 
-- the public deployment answer and the authorization server metadata (RFC 8414), at the real paths;
+- the public deployment answer and the authorization server metadata (RFC 8414), at the real paths,
+  the deployment as one of the real answers in `shared/fixtures/client-version/cases.json` when
+  asked (`Shape::Answers`);
 - the authorization endpoint, which accepts only the public client, `response_type=code`, an S256
   challenge and a redirect of exactly `http://127.0.0.1:<port>/callback`, and sends the browser
   back with a code or with `error=access_denied`;
@@ -60,6 +62,10 @@ pub enum Shape {
     InfoAnswers(u16),
     /// Its revocation endpoint fails with a 500 whatever it is sent.
     RevokeBroken,
+    /// Signs in as `Current` does, and answers `deployment` with one of the real answers in
+    /// `shared/fixtures/client-version/cases.json`, by name: `current`, `v1.1.0`, `raised`,
+    /// `security` or `v3-only`.
+    Answers(&'static str),
 }
 
 const SCOPES: [&str; 4] = ["openid", "profile", "offline_access", "openbot"];
@@ -416,17 +422,23 @@ async fn answer(
         )
     };
     Ok(match (method.as_str(), path.as_str()) {
-        ("GET", "/api/v2/organizations/default/deployment") => json(
-            StatusCode::OK,
-            serde_json::json!({
-                "edition": if shape == Shape::Personal { "personal" } else { "team" },
-                "localEvaluation": shape == Shape::LocalEvaluation,
-                "generativeUi": true,
-                "authProviders": ["google"],
-                "ssoConfigured": false,
-                "ssoRequired": false,
-            }),
-        ),
+        ("GET", "/api/v2/organizations/default/deployment") => match &shape {
+            Shape::Answers(name) => json(
+                StatusCode::OK,
+                crate::client_version::fixture_deployment(name),
+            ),
+            _ => json(
+                StatusCode::OK,
+                serde_json::json!({
+                    "edition": if shape == Shape::Personal { "personal" } else { "team" },
+                    "localEvaluation": shape == Shape::LocalEvaluation,
+                    "generativeUi": true,
+                    "authProviders": ["google"],
+                    "ssoConfigured": false,
+                    "ssoRequired": false,
+                }),
+            ),
+        },
         ("GET", "/.well-known/oauth-authorization-server/api/auth") => {
             if matches!(
                 shape,

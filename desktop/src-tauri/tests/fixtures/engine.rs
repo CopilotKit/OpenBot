@@ -61,6 +61,36 @@ fn main() {
             .unwrap();
         writeln!(log, "{}\t{}", cwd.display(), joined).unwrap();
     }
+    // The `server` container's environment, as Compose gives it one. A container takes `.env` (the
+    // Compose file's `env_file`), and the host token and encryption key Compose was handed, when it
+    // is created, and keeps them until it is created again: `restart` changes none of it. `up`
+    // creates it when there is none, when `.env` changed since (a changed configuration), and always
+    // with `--force-recreate`. `server-env` in the installation holds what the running server has,
+    // the two credentials by their length only. Every other command succeeds and says nothing.
+    if SCENARIO == "server-env" {
+        if args.first().map(String::as_str) == Some("compose")
+            && args.iter().any(|arg| arg == "up")
+            && args.iter().any(|arg| arg == "server")
+        {
+            let env = std::fs::read_to_string(".env").unwrap_or_default();
+            let made_from = std::fs::read_to_string(".fixture-server-made-from").ok();
+            let recreate = args.iter().any(|arg| arg == "--force-recreate");
+            if recreate || made_from.as_deref() != Some(env.as_str()) {
+                let length = |name: &str| std::env::var(name).unwrap_or_default().len();
+                std::fs::write(".fixture-server-made-from", &env).unwrap();
+                std::fs::write(
+                    "server-env",
+                    format!(
+                        "{env}host-token-length={}\nencryption-key-length={}\n",
+                        length("OPENBOT_DESKTOP_HOST_TOKEN"),
+                        length("KEY_ENCRYPTION_KEY"),
+                    ),
+                )
+                .unwrap();
+            }
+        }
+        return;
+    }
     if SCENARIO == "compose-provider" {
         println!("Docker Compose version disposable-provider");
         return;
@@ -162,13 +192,19 @@ fn main() {
                 );
             }
         }
+        // `up`, with the profiles of whatever it names: the picked Bot's, a plan engine's.
         value
-            if value.starts_with("compose up -d --no-build --pull never ")
-                || value
-                    .starts_with("compose --profile harness up -d --no-build --pull never ")
-                // The same, with the overlay that remaps the Bot's host port.
-                || (SCENARIO == "harness"
-                    && value.starts_with("compose -f docker-compose.yml -f .openbot-harness-port.yml --profile harness up -d --no-build --pull never ")) =>
+            if {
+                let mut rest = value.strip_prefix("compose ").unwrap_or("");
+                // The overlay that remaps the Bot's host port, when one is named.
+                while let Some(after) = rest.strip_prefix("-f ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                while let Some(after) = rest.strip_prefix("--profile ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                rest.starts_with("up -d --no-build --pull never ")
+            } =>
         {
             if SCENARIO == "up-fails" {
                 eprintln!("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");

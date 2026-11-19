@@ -14,7 +14,16 @@
 //!
 //! And Settings' AI model row (`ai_connection`, `change_ai_connection`): which provider and sign-in
 //! OpenBot starts with, never a key, and Change, which stops OpenBot and opens the setup window at
-//! its AI screen.
+//! its AI screen. Kept for a page on an older server, which cannot change the connection itself.
+//!
+//! And the AI connection changed in the app with no stop (`ai_providers`, `begin_plan_sign_in`,
+//! `finish_plan_sign_in`, `cancel_plan_sign_in`, `begin_provider_sign_in`,
+//! `finish_provider_sign_in`, `cancel_provider_sign_in`, `prepare_ai_connection`,
+//! `settle_ai_connection`): the sign-ins that run here, which keep what they get here and never hand
+//! a token to the page (an Unbiased AI sign-in's key excepted, which the page sends straight to the
+//! server like a typed one), and the plan engines and the picked Bot, started, stopped or restarted
+//! one container at a time while everything else keeps running. A key or an address never passes
+//! through here: the page sends it to the server.
 //!
 //! And Settings' Share usage data row (`usage_data`, `set_usage_data`): the opt-out the
 //! environment variables give, as a switch kept for the next launch. Setup's last screen asks the
@@ -38,7 +47,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 25] = [
+pub const PERMISSIONS: [&str; 34] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -60,6 +69,15 @@ pub const PERMISSIONS: [&str; 25] = [
     "openbot-desktop:allow-notify",
     "openbot-desktop:allow-ai-connection",
     "openbot-desktop:allow-change-ai-connection",
+    "openbot-desktop:allow-ai-providers",
+    "openbot-desktop:allow-begin-plan-sign-in",
+    "openbot-desktop:allow-finish-plan-sign-in",
+    "openbot-desktop:allow-cancel-plan-sign-in",
+    "openbot-desktop:allow-begin-provider-sign-in",
+    "openbot-desktop:allow-finish-provider-sign-in",
+    "openbot-desktop:allow-cancel-provider-sign-in",
+    "openbot-desktop:allow-prepare-ai-connection",
+    "openbot-desktop:allow-settle-ai-connection",
     "openbot-desktop:allow-usage-data",
     "openbot-desktop:allow-set-usage-data",
     "openbot-desktop:allow-quit",
@@ -100,7 +118,13 @@ async fn status(
 #[tauri::command]
 pub async fn restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     crate::desktop_connected::nothing_here(&app)?;
-    crate::restart_openbot_from(app, crate::AskedFrom::Settings).await
+    // The page has always been given a sentence. What lay beneath it follows, as it did.
+    crate::restart_openbot_from(app, crate::AskedFrom::Settings)
+        .await
+        .map_err(|problem| match problem.detail {
+            Some(detail) => format!("{} {detail}", problem.said),
+            None => problem.said,
+        })
 }
 
 /// Stops everything, as the menu's Stop did. The page asking goes with it; the window shows setup.
@@ -216,11 +240,19 @@ async fn speech_available(language: String) -> speech::Availability {
         .unwrap_or(speech::Availability::Unavailable)
 }
 
-/// Start listening in `language`; what is heard arrives through `on_event`. Returns the session's
-/// number, for `speech_stop` and `speech_abort`. A session already listening ends.
+/// Start listening in `language`; what is heard arrives through `on_event`. `refused` are the
+/// languages the page asked about first and this computer turned down, for speech.log; a page from
+/// before the fallback sends none. Returns the session's number, for `speech_stop` and
+/// `speech_abort`. A session already listening ends.
 #[tauri::command]
-async fn speech_start(language: String, on_event: tauri::ipc::Channel<speech::Event>) -> u64 {
-    speech::start(&language, move |event| on_event.send(event).is_ok())
+async fn speech_start(
+    language: String,
+    refused: Option<Vec<String>>,
+    on_event: tauri::ipc::Channel<speech::Event>,
+) -> u64 {
+    speech::start(&language, &refused.unwrap_or_default(), move |event| {
+        on_event.send(event).is_ok()
+    })
 }
 
 /// Hand over the phrase in progress, then end.
@@ -280,6 +312,125 @@ async fn change_ai_connection(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The AI dialog's providers and their ways in, in the setup window's order.
+#[tauri::command]
+async fn ai_providers() -> Vec<openbot_desktop_lib::provider::Provider> {
+    openbot_desktop_lib::provider::catalogue()
+}
+
+/// The address a plan's sign-in sent the browser to.
+#[derive(serde::Serialize)]
+struct SignInAddress {
+    url: String,
+}
+
+/// Start a Claude or ChatGPT plan's sign-in in the browser, while OpenBot keeps running.
+#[tauri::command]
+async fn begin_plan_sign_in(
+    app: tauri::AppHandle,
+    plan: openbot_desktop_lib::ai_connection::Plan,
+) -> Result<SignInAddress, String> {
+    let url = crate::begin_plan_sign_in_now(app, plan).await?;
+    Ok(SignInAddress { url })
+}
+
+/// Finish it: the Claude plan with the code the browser showed, the ChatGPT plan by waiting for the
+/// browser to come back. The token is kept on this computer and never returned.
+#[tauri::command]
+async fn finish_plan_sign_in(
+    app: tauri::AppHandle,
+    plan: openbot_desktop_lib::ai_connection::Plan,
+    code: Option<String>,
+) -> Result<(), String> {
+    crate::finish_plan_sign_in_now(app, plan, code).await
+}
+
+#[tauri::command]
+async fn cancel_plan_sign_in(
+    app: tauri::AppHandle,
+    plan: openbot_desktop_lib::ai_connection::Plan,
+) -> Result<(), String> {
+    crate::cancel_plan_sign_in_now(app, plan).await
+}
+
+/// Start a Google, xAI or Unbiased AI sign-in in the browser.
+#[tauri::command]
+async fn begin_provider_sign_in(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<openbot_desktop_lib::provider_oauth::Authorization, String> {
+    crate::begin_provider_sign_in_now(app, provider).await
+}
+
+/// What a provider's sign-in gave the page: for Unbiased AI, the key it minted, which the page
+/// sends straight to the server as an address's key and keeps nowhere. Nothing for Google or xAI,
+/// whose sign-in stays in the file the server reads.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSignedIn {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_key: Option<String>,
+}
+
+#[tauri::command]
+async fn finish_provider_sign_in(
+    app: tauri::AppHandle,
+    attempt_id: String,
+) -> Result<ProviderSignedIn, String> {
+    crate::desktop_connected::nothing_here(&app)?;
+    let api_key = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::provider_oauth::finish(&attempt_id)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(ProviderSignedIn { api_key })
+}
+
+#[tauri::command]
+async fn cancel_provider_sign_in(attempt_id: String) {
+    openbot_desktop_lib::provider_oauth::cancel(&attempt_id);
+}
+
+/// What `prepare_ai_connection` answers once the connection's engine is ready.
+#[derive(serde::Serialize)]
+struct Prepared {
+    ready: bool,
+}
+
+/// Start the one plan engine the connection needs, alone, and wait until it answers. Nothing else
+/// is started, stopped or restarted. Ready at once for a connection with no engine of its own.
+#[tauri::command]
+async fn prepare_ai_connection(
+    app: tauri::AppHandle,
+    provider: String,
+    login: String,
+) -> Result<Prepared, String> {
+    crate::prepare_ai_connection_now(app, provider, login).await?;
+    Ok(Prepared { ready: true })
+}
+
+/// Settle on the connection the server now has: recorded for the next start, a plan engine no
+/// longer needed stopped, and the picked Bot moved to an engine that can use it, alone.
+#[tauri::command]
+async fn settle_ai_connection(
+    app: tauri::AppHandle,
+    provider: String,
+    login: String,
+    model: Option<String>,
+    endpoint_host: Option<String>,
+) -> Result<(), String> {
+    crate::settle_ai_connection_now(
+        app,
+        openbot_desktop_lib::ai_connection::Change {
+            provider,
+            login,
+            model,
+            endpoint_host,
+        },
+    )
+    .await
+}
+
 /// Settings' Share usage data: whether this installation shares, and whether the app's own
 /// environment turned it off.
 #[tauri::command]
@@ -332,6 +483,15 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             notify,
             ai_connection,
             change_ai_connection,
+            ai_providers,
+            begin_plan_sign_in,
+            finish_plan_sign_in,
+            cancel_plan_sign_in,
+            begin_provider_sign_in,
+            finish_provider_sign_in,
+            cancel_provider_sign_in,
+            prepare_ai_connection,
+            settle_ai_connection,
             usage_data,
             set_usage_data,
             quit,

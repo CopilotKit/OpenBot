@@ -5,6 +5,7 @@ import { parse } from "yaml";
 import {
   deprecations,
   firstServed,
+  heldReleases,
   lastRelease,
   minimumViolations,
   type Release,
@@ -30,6 +31,50 @@ describe("the last release a tree is held to", () => {
     // Candidates are never what apps were built from.
     expect(lastRelease(releases, "1.1.0-rc.3")?.tagName).toBe("v1.0.3");
     expect(lastRelease(releases, "0.0.0")).toBeUndefined();
+  });
+});
+
+describe("the releases a tree's spec is held to", () => {
+  const held = (version: string, now: Date, list = releases) =>
+    heldReleases(list, version, now).map((release) => release.tagName);
+
+  test("are every release in the window at or below the tree's version, newest first", () => {
+    const today = held("1.1.0", RELEASE_DAY);
+    expect(today[0]).toBe("v1.1.0");
+    expect(today).toContain("v1.0.3");
+    expect(today).toContain("v0.0.1");
+    expect(today).not.toContain("v1.1.0-rc.2");
+    // A fix on the 1.0 line is held to its own line, never to a release above it.
+    expect(held("1.0.4", RELEASE_DAY)[0]).toBe("v1.0.3");
+    expect(held("1.0.4", RELEASE_DAY)).not.toContain("v1.1.0");
+  });
+
+  test("hold a tree to an older release in the window, not only to the last one", () => {
+    // A year on, with a 1.2.0 published: a tree preparing 1.3.0 is held to 1.2.0 and to 1.1.0,
+    // whose apps the window still serves.
+    const later = [
+      ...releases,
+      {
+        tagName: "v1.2.0",
+        publishedAt: "2027-06-01T09:00:00Z",
+        isPrerelease: false,
+      },
+    ];
+    expect(held("1.3.0", new Date("2027-11-10T00:00:00Z"), later)).toEqual([
+      "v1.2.0",
+      "v1.1.0",
+      "v1.0.3",
+      "v1.0.2",
+      "v1.0.1",
+    ]);
+    // Once 1.1.0 has aged out, it is not.
+    expect(held("1.3.0", new Date("2027-11-18T00:00:00Z"), later)).toEqual([
+      "v1.2.0",
+    ]);
+  });
+
+  test("always include the last release, even when it has aged out", () => {
+    expect(held("1.1.0", new Date("2029-01-01T00:00:00Z"))).toEqual(["v1.1.0"]);
   });
 });
 

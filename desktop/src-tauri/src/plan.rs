@@ -469,9 +469,8 @@ impl SigningIn {
 /// The published name of the image whose `langchain-openai` runs the ChatGPT sign-in.
 ///
 /// The LangGraph harness, used as a tool rather than as a Bot for the same reason the Claude one is:
-/// it is the image that already carries the vendor's own login. A ChatGPT plan also runs it as its
-/// model service (`CHATGPT_PLAN_SERVICE`), and nothing else does, so it is pulled only for a ChatGPT
-/// plan (`crate::preparation::PLAN_IMAGES`).
+/// it is the image that already carries the vendor's own login. Every install pulls it, because a
+/// ChatGPT plan also runs it as its model service (`CHATGPT_PLAN_SERVICE`).
 ///
 /// A name, not a reference: see `SIGN_IN_IMAGE`.
 pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";
@@ -480,14 +479,15 @@ pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";
 ///
 /// The same image as the sign-in, run as a service beside the Bot. The Bot itself is the TypeScript
 /// LangGraph image, and LangChain's ChatGPT plan model exists only in Python, so the Bot sends its
-/// model calls here, and so do the server's own Bots on that plan. Started only on a ChatGPT plan
-/// (`crate::stack::selected_services`), so every other installation runs one Bot image, not two.
-pub const CHATGPT_PLAN_SERVICE: &str = "agent-langgraph-agui";
+/// model calls here, and so do the server's own Bots on that plan. A service of its own behind its
+/// own profile, started only on a ChatGPT plan, at Start or alone when the plan is chosen in the
+/// app (`crate::ai_connection::Plan`), so every other installation runs one Bot image, not two.
+pub const CHATGPT_PLAN_SERVICE: &str = "agent-chatgpt-plan";
 
 /// Where the Bot and the server reach that service: its name on the Compose network and the port
-/// its Dockerfile fixes. Written to `.env` as `CHATGPT_PLAN_HARNESS_URL` on a ChatGPT plan, and
-/// written empty on any other answer.
-pub const CHATGPT_PLAN_URL: &str = "http://agent-langgraph-agui:4206";
+/// its Dockerfile fixes. Written to `.env` as `CHATGPT_PLAN_HARNESS_URL` on every Start, so a plan
+/// chosen in the app reaches it with no restart.
+pub const CHATGPT_PLAN_URL: &str = "http://agent-chatgpt-plan:4206";
 
 /// Where the vendor's login persists what it gets.
 const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";
@@ -1642,8 +1642,14 @@ fn remove(here: &Path, name: &str) {
         return;
     }
     std::fs::write(here.join(format!("{name}.stop")), "").unwrap();
+    // Back once the container is gone, however long a busy computer takes, as Docker's is. Two
+    // minutes is not stopping at all, and fails loudly.
     let began = Instant::now();
-    while pid.exists() && began.elapsed() < Duration::from_secs(10) {
+    while pid.exists() {
+        if began.elapsed() > Duration::from_secs(120) {
+            eprintln!("Error response from daemon: could not kill container {name}: it is still running");
+            std::process::exit(1);
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -1696,7 +1702,8 @@ fn run(args: &[String], here: &Path) {
         if stop.as_ref().is_some_and(|stop| stop.exists()) {
             end(listeners, 137);
         }
-        if began.elapsed() > Duration::from_secs(20) {
+        // Only so a run nobody stops does not outlive its test.
+        if began.elapsed() > Duration::from_secs(120) {
             end(listeners, 1);
         }
         let accepted = listeners.iter().find_map(|listener| listener.accept().ok());

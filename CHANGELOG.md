@@ -8,26 +8,209 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Read these first: they change what a Helm values file has to say.
+**Before upgrading.** Read these first: several change what a Helm values file, a Compose override
+or a script has to say.
 
-- **The Helm charts refuse shared computers until you say you mean them.** Shared computers
-  (`computers.mode: shared`, still the default) run every person's Bots on one computer, where a
-  command one Bot runs can read another person's files, so they suit a proof of concept only.
-  Sandbox mode (`computers.mode: sandbox`) gives each person a computer of their own and is the way
-  to run OpenBot for people; it needs the agent-sandbox controller in the cluster. A plain install
-  now stops and names both. A release that runs shared computers today, including one that never
-  set `computers.mode`, has to set `computers.sharedModeAcknowledged: true` before upgrading
-  (`openbot.computers.sharedModeAcknowledged` in the `openbot-bundle` chart), or `helm upgrade`
-  stops with that message and changes nothing. Acknowledged, the install notes say it again, and
-  admins see it in Admin (below). **The same goes for `computers.mode: external`**: every person's
-  Bots share the one computer at `computers.url`, so a release on it sets the same value before
-  upgrading, and its refusal, install notes and Admin notice say the same.
+- **The Helm charts refuse shared and external computers until you say you mean them.** Shared
+  computers (`computers.mode: shared`, still the default) and external ones
+  (`computers.mode: external`, the one computer at `computers.url`) run every person's Bots on one
+  computer, where a command one Bot runs can read another person's files, so they suit a proof of
+  concept only. Sandbox mode (`computers.mode: sandbox`) gives each person a computer of their own
+  and is the way to run OpenBot for people; it needs the agent-sandbox controller in the cluster.
+  A release on shared or external computers, including one that never set `computers.mode`, has to
+  set `computers.sharedModeAcknowledged: true` before upgrading
+  (`openbot.computers.sharedModeAcknowledged` in the `openbot-bundle` chart), or `helm install` and
+  `helm upgrade` stop with a message naming both choices and change nothing. That includes an
+  upgrade with `--reuse-values`, and the single-user mode of either chart. Acknowledged, the
+  install notes say it again, and admins see it in Admin (below).
+- **The `openbot-bundle` chart keeps files in its own object store.** A bundle upgraded with your
+  own values file moves every file people and Bots attached out of PostgreSQL and into the bucket
+  `openbot-files` in the bundled Intelligence's local object storage, which a new Job makes on
+  every install and upgrade. That storage is one pod, with no replication or backup of its own. To
+  keep files in PostgreSQL, set `openbot.attachments.store: postgres` and
+  `openbot.objectStorage.enabled: false`. An upgrade with `--reuse-values` keeps the values it had,
+  so files stay in PostgreSQL. Don't turn off `intelligence.localObjectStorage` while files are in
+  it: the bundle refuses that. See Files (below).
+- **Migrations run at start: five, all additive.** The database moves from `0132_bot_task_runs` to
+  the migration `release-policy.json` names for this release. `0133_files_in_an_object_store` adds
+  the `file_deletions` table and lets an attachment's bytes live outside PostgreSQL,
+  `0134_attachments_storage_key_index` indexes where they live, `0135_files_gate_opened` records
+  when files may move, `0136_api_deprecated_use` counts use of deprecated API, and
+  `0137_ai_connections` keeps the AI connection an admin chose (below). A 1.1.0
+  server works against the new schema, so 1.1.0 upgrades to 1.1.1 with its servers rolling one by
+  one, with no downtime. `0133` needs OpenBot's login to hold the `openbot_system` role's
+  privileges, as 1.1.0 set up, and stops with the `GRANT` to run when it doesn't. It waits at most
+  five seconds for a lock on `attachments`, so a long transaction can fail the first start, which
+  then tries again. Upgrading from 1.0.x or 0.3.x runs 1.1.0's migrations as well: read 1.1.0's
+  Before upgrading first.
+- **Going back to 1.1.0 after files moved to an object store** needs them moved back first: set
+  `attachments.store: postgres` with the store still configured, and wait for the move to finish.
+  A 1.1.0 server cannot read a file that is in the store.
+- **New Bots run on the LangGraph (TypeScript) engine where a deployment runs it.** OpenBot
+  Desktop runs it, and an installation's Bot that ran on the Python LangGraph engine moves to the
+  TypeScript one at its next Install and Start, keeping its conversations. Docker Compose now
+  defines `agent-langgraph-ts` (port 4215, on this machine only), which a plain `docker compose up`
+  builds from the checkout unless `LANGGRAPH_TS_IMAGE` and `IMAGE_PULL_POLICY=missing` name the
+  published image. A server without `LANGGRAPH_TS_AG_UI_URL`, and both Helm charts, keep new Bots
+  on the server's built-in engine. `OPENBOT_DEFAULT_BOT_ENGINE=built-in` keeps every new Bot there.
+- **Compose: Claude and ChatGPT plans run in services of their own.** `agent-harness` is no longer
+  handed `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_AUTH_FILE` or the `./.langchain` folder. They go to
+  two new services, `agent-claude-plan` and `agent-chatgpt-plan`, behind the `claude-plan` and
+  `chatgpt-plan` profiles, which OpenBot Desktop starts when a plan needs them. A Compose override
+  of your own that ran a plan through `agent-harness` turns on the profile and sets
+  `CLAUDE_PLAN_HARNESS_URL` or `CHATGPT_PLAN_HARNESS_URL`.
+- **The model picker offers only models proven on the Bot's engine** (below). A conversation or a
+  Bot set to a model that isn't proven runs on the default, and says so.
+- **A model gateway serves `/responses` for gpt-5.4 and gpt-5.5.** Bots behind an OpenAI-compatible
+  address now call those models, and their mini, nano and dated versions, on the Responses API.
+- **A server that refuses to start exits with code 78**, where it exited with 1. The all-in-one
+  image now ends its container instead of trying again forever, and on Kubernetes the pod's
+  CrashLoopBackOff names the reason in `kubectl describe`. A crash still exits with 1. Monitoring
+  that watches the exit code may need to know the new one.
+- **Settings that now stop a server from starting when they are wrong:** `OPENBOT_MINIMUM_CLIENTS`,
+  `OPENBOT_DEFAULT_BOT_ENGINE`, `SHUTDOWN_KEEP_SERVING_SECONDS`, `SHUTDOWN_DRAIN_SECONDS`, and the
+  file store's (below). An `S3_BUCKET`, `GCS_BUCKET` or `AZURE_STORAGE_CONTAINER` already in the
+  server's environment, for example one it shares with Intelligence, turns the file store on, and
+  the server then checks that store at start.
+- **Kubernetes: a server pod takes up to 45 seconds to stop**, so it can finish what it is doing
+  (below). `server.shutdown` sets it.
+- **Deprecated:** nothing.
+
+### Files
+
+- **Files can live in an object store.** Amazon S3 or anything that speaks its API, Google Cloud
+  Storage or Azure Blob Storage, where they were always in PostgreSQL. With a store, a file can be
+  up to 100 MB. Without one nothing changes: files stay in PostgreSQL, with 8 MB for pictures and
+  PDFs and 1 MB for other files, and OpenBot Desktop stays on PostgreSQL. The `openbot` chart gains
+  `attachments.store` (`postgres` unless set) and `objectStorage`: `enabled`, `provider` (`s3`,
+  `gcs` or `azure`), `bucket`, `prefix` (`openbot/`), `region`, `endpoint`, `forcePathStyle`,
+  `azure.accountUrl`, `deleteAfterDays` (7), `assumeAllServersCurrent`, `existingSecret` with its
+  `secretKeys`, and `inCluster` for a store in the cluster. A server pod can sign in to the store
+  with workload identity through `serviceAccount.annotations`. On Docker Compose the same settings
+  are `FILES_STORE`, `FILES_PREFIX`, `FILES_DELETE_AFTER_DAYS`, `FILES_ASSUME_ALL_SERVERS_CURRENT`,
+  `S3_*`, `GCS_BUCKET` and `AZURE_STORAGE_*` in `.env`. The chart refuses a store asked for and
+  not set up, a Secret without its keys, and a store in the cluster behind a network policy with no
+  way to reach it, each by name.
+  - The server writes, reads and deletes a test file at start, and refuses to start when the store
+    doesn't answer. It never falls back to PostgreSQL.
+  - Files already in PostgreSQL move to the store in the background, and back again when
+    `attachments.store` is set to `postgres` with the store still configured. A server refuses to
+    start without the store's settings while any file is still in it.
+  - During a rolling upgrade new files stay in PostgreSQL until no 1.1.0 server is connected. A
+    connection pooler, such as PgBouncer or RDS Proxy, hides which servers are connected: set
+    `assumeAllServersCurrent: true` once every server runs 1.1.1.
+  - A deleted file leaves the store after `deleteAfterDays`, and a weekly sweep removes anything
+    left behind. Files are served from OpenBot's own addresses, as before.
+- **Word, Excel and PowerPoint files.** People can attach `.docx`, `.xlsx` and `.pptx` files, and
+  Bots can send them, recognised by what is inside rather than by the name. The Bot reads their
+  text: a workbook's sheets as tables, a document with its tables, a presentation's slides in
+  order, up to 120,000 characters. They count as documents, so the document limit applies. Old
+  `.doc`, `.xls` and `.ppt` files, password-protected ones, macro-enabled ones (`.docm`, `.xlsm`,
+  `.pptm`), templates, and a file whose contents don't match its name are refused with a sentence
+  saying why.
+- **Bots send files to people.** A Bot can hand you a file from its computer. It shows as a card in
+  the conversation, a task or a group, with Download, and is still there after a reload.
+- **The limits come from the server.** The message box refuses a file over this OpenBot's limit
+  before uploading it, and a picture over 8 MB shows as a file. A picture over the model's own limit
+  reaches the Bot as a note instead of failing the turn.
+
+### Apps and the OpenBot they talk to
+
+- **Every app says which version it is, and OpenBot can ask for a newer one.** The web app, OpenBot
+  Desktop, the phone app and the Recorder send `OpenBot-Client: <app>/<version>` on every request,
+  and the server's `deployment` answer names the API versions it serves and the oldest release of
+  each app it serves (`api`, `minimumClients`, `launcherApi`, `extensionApi`). An app older than
+  that reads "Update OpenBot" in place of the app, and a server too old for the app says "Ask
+  whoever runs your OpenBot to update it". A server refuses an older app's requests with 400
+  `CLIENT_UPDATE_REQUIRED`. Nothing is refused unless an admin sets `OPENBOT_MINIMUM_CLIENTS`
+  (for example `desktop=1.2.0,mobile=1.2.0`), because a release serves every app released in the
+  12 months before it. A request with no `OpenBot-Client` header, such as a script's, is never
+  refused.
+- **OpenBot Desktop 1.0.3 or older gets a page instead of a server that stops.** An older Desktop
+  that starts this release now shows "Update OpenBot" with Check for Updates…, where the server
+  used to exit for want of the install token those apps never wrote.
+- **OpenBot Desktop checks it can start a release before it starts it.** A release that needs a
+  newer app is not started; the window offers Update and restart instead.
+- **A signed security floor.** The apps, and OpenBot Cloud's servers, can be told the lowest safe
+  release of OpenBot Desktop, its back end, the phone app and the Recorder; an app below it shows
+  one notice, "This version of OpenBot has a security problem. Update to keep using it." It never
+  applies to a company's own OpenBot, and no floor is set
+  ([docs/releasing.md](docs/releasing.md#security-floor)).
+
+### API
+
+- **The API refuses NUL in text.** Every text field the spec holds to a pattern refuses a NUL
+  character anywhere in it, with 400 `VALIDATION_ERROR` and "That text has a character OpenBot
+  can't keep. Type it again." Before, one NUL could pass where the pattern asked for a character.
+- **The API says when something you call is deprecated.** An operation, a query or header
+  parameter, or a request-body field the spec marks deprecated answers with the standard
+  `Deprecation` and `Sunset` headers and a `Link` to this changelog, whose Deprecated list under
+  "Before upgrading" says what replaces it. It keeps working until at least its sunset, 12 months
+  or more after it was deprecated. Nothing is deprecated yet, so no answer carries them. See
+  [api/README.md](api/README.md#deprecating).
+- **Statuses, roles and scope kinds in API answers can gain values.** The spec declares them open
+  (`x-extensible-enum`): a task's or a run's status, a person's role, a network policy's scope,
+  what decided a person's permission, and the others listed in `api/accepted-breaking-changes.md`.
+  A script that reads one should treat a value it doesn't know as "other" rather than fail, as the
+  web and phone apps now do. The values sent today are unchanged.
+- **Edit a routine in place.** `PATCH` on a routine changes its name, what to do, its schedule and
+  its time zone, keeping its conversation and runs, and a routine's page has an Edit routine row.
+  Before, the only way to change one was to ask its Bot. A routine in an answer now always carries
+  its `cron`.
+- New optional fields: `computerMode` in the organization settings' `context`, `attachmentLimits`
+  on `deployment`, `files` and `declined` on a message, and `unverified` on a conversation's model
+  choice. A Bot's `framework` can be `langgraph-ts`.
+
+### Bots and models
+
+- **Change the AI connection with no restart.** An admin of a personal OpenBot changes the AI
+  connection from Settings > General > AI model: a key, an address, or, in OpenBot Desktop, a plan
+  or provider sign-in. OpenBot checks it with the provider before saving it, and the next run uses
+  it. A team's OpenBot shows it and keeps it as its deployment sets it.
+  `GET` and `PUT /api/v2/organizations/{organizationId}/ai-connection` do the same, and with
+  `MODEL_GATEWAY_TOKEN` set the Bots' engines reach models through OpenBot instead of holding a
+  provider key of their own.
+- **The model picker offers a model only when OpenBot has proven it on the Bot's engine.** A daily
+  check sends every listed model a request through each engine, and a model that doesn't answer
+  there is hidden, on OpenAI, Anthropic and Google. A conversation already set to one runs on the
+  default, and the composer says "X doesn't work with this Bot yet, so this conversation uses Y".
+  A provider never checked, such as xAI, and a gateway, list everything as before.
+- **New Bots on LangGraph (TypeScript).** See Before upgrading. A Bot's Setup > Connection says
+  what it runs on.
+- **Claude plan errors say what happened.** A usage limit, running out of credit, a dropped
+  connection, no answer, a client too old for the model and a refusal each get their own sentence,
+  and a task tries again after a dropped connection but not after a limit. A call to a tool the
+  step didn't offer goes back to the model as a tool error instead of ending the turn, and a reply
+  that came back cut off says "Ask it to carry on". The Claude harness bundles a newer Claude Code,
+  so plan Bots run Claude's newest models.
+- **Gemini sign-in says what Google said**, with when to try again. A free-tier daily limit reads as
+  a rate limit, never as out of credit, and the model list loads when OpenBot starts.
+- **A turn that failed after it did something isn't sent again.** On every engine, a message whose
+  Bot had already said something or called a tool stays sent when the turn fails.
+- **Bots reach other Bots, plan engines and MCP servers on a connection of their own**, so a second
+  message a few seconds after the first no longer fails with "Couldn't reach" the Bot. A built-in
+  Bot's tool calls are no longer lost under load.
+- The AG2 and Langroid harnesses call gpt-5.6 and newer, and the -pro models, on the Responses API.
+  The Agno harness no longer sends Claude a `top_p`, which Claude 4.5 and 4.6 refused. The
+  LangGraph harness keeps the kind of error Gemini and xAI name, and pins its model clients.
+
+### Conversations
+
+- **Group conversations name who sent each line**, by name or email, and "Someone who left" for
+  someone no longer there.
+- **A Bot's reply waiting to be shared says whose turn it is.** In a group, only the Bot's owner sees
+  Open on it; everyone else reads "Waiting for <owner> to allow sharing this reply." A reply the
+  owner declined to share reads "<owner> didn't share this reply. Nothing was sent." as a notice,
+  not an error.
+- **Dictation in OpenBot Desktop** on a Mac falls back to the next language and region the Mac has
+  when the page's isn't available, and says which to add. A browser says when it can't take
+  dictation in a language.
 
 ### Admin
 
-- **Admins see when everyone's Bots share one computer.** On an OpenBot whose Bots all run on one
-  computer, Admin's overview and its Computers page say so, say it suits a proof of concept only,
-  and say how to give each person a computer of their own. An OpenBot one person uses, OpenBot
+- **Admins see when everyone's Bots share one computer.** On a team's OpenBot whose Bots all run on
+  one computer, Admin's overview and its Computers page say so, say it suits a proof of concept
+  only, and say how to give each person a computer of their own. An OpenBot one person uses, OpenBot
   Desktop included, says nothing, because that computer is the person's own. Nobody but an admin
   sees anything new. The organization settings' read-only `context` gains `computerMode`
   (`per-person`, `shared` or `none`).
@@ -39,25 +222,60 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot on GitHub, right after something goes well: you copy a Bot's answer, one of your
   routines finishes a run, or a long task finishes. Never right after an error, never on a team's
   OpenBot, and never beside the notifications offer. Either answer is saved to your account, so it
-  is never asked again on any device. Settings → General keeps the link in a new OpenBot section.
+  is never asked again on any device. Settings > General keeps the link in a new OpenBot section.
   The preferences gain `dismissedNotices` (the notices you answered) and `noticesDue` (the ones
   OpenBot would show you now), and `POST /api/v2/organizations/{organizationId}/nudge-events`
   counts how many people were shown a nudge, followed it or dismissed it, with product telemetry
   on; see [TELEMETRY.md](docs/TELEMETRY.md).
-- **The API says when something you call is deprecated.** An operation, parameter or field the
-  API spec marks deprecated answers with the standard `Deprecation` and `Sunset` headers and a
-  `Link` to this changelog, whose Deprecated list under a release's "Before upgrading" says what
-  replaces it. It keeps working until at least its sunset, 12 months or more after it was
-  deprecated, and is removed only once nothing still uses it. A field in an answer is the
-  exception: the server can't tell whether anything reads it, so it may go once its sunset has
-  passed. Nothing is deprecated yet. See
-  [api/README.md](api/README.md#deprecating).
-- **Statuses, roles and scope kinds in API answers can gain values.** The spec declares them open
-  (`x-extensible-enum`): a task's or a run's status, a person's role, a network policy's scope,
-  what decided a person's permission, and the others listed in
-  `api/accepted-breaking-changes.md`. A script
-  that reads one should treat a value it doesn't know as "other" rather than fail. The values sent
-  today are unchanged.
+
+### OpenBot Desktop
+
+- **Connected to another OpenBot on a Mac works again.** In 1.1.0 the window showed only "This
+  relay is for the OpenBot window", because the Mac's web view dropped a cookie on a redirect.
+- **A server that refuses to start says why at once**, in its own words, where the window waited
+  three minutes and said it could not finish starting. Retry after fixing it starts clean, without
+  the old refusal.
+- **Stop and Quit let the server finish first.** The server stops before the Bots and computers it
+  is using, and a Bot's answer in progress ends as stopped, not as "Couldn't reach". Stop and Quit
+  no longer cut each other's stop of the back end short, so Quit after Stop on Windows no longer
+  leaves it running. Stopping can take a few seconds longer.
+- **An update checks this computer has room first**, before it stops or downloads anything, and
+  says "OpenBot needs more free space to update" with the figures and Retry. A full disk reads as
+  one plain line.
+- **Status window:** Restart applies changes made to `.env`, it offers Start after Stop, and it
+  shows Updating with no buttons during an update.
+- **Launching OpenBot while it quits** opens it again once it has quit, where it stayed on Shutting
+  down.
+- **The first Start after Install** waits up to two minutes for the container engine, instead of
+  sending you back to Install.
+- On Windows, checking your saved setup no longer freezes the window while Windows finishes an
+  update, and says so after five seconds.
+- An update stopped after it updated your data says it didn't finish and that the next Start
+  finishes it. An update to the release OpenBot already runs is not a failure.
+- The first screen offers OpenBot (Self-Contained), and one OpenBot for Business card, Cloud or
+  Self-Hosted, that books a call; connecting to an OpenBot at work is "Already have OpenBot at
+  work? Connect to it." The update screen says the same.
+- The step before a Composio sign-in shows inside the Desktop window.
+- Get Troubleshooting Logs adds the speech log and the model provider's own error words, with
+  secrets taken out.
+
+### Running OpenBot
+
+- **A server asked to stop finishes what it is doing.** It finishes requests and Bot answers in
+  flight, closes live connections with 1001, and keeps an answer still running at the limit as
+  stopped. `SHUTDOWN_KEEP_SERVING_SECONDS` (0 unless set) and `SHUTDOWN_DRAIN_SECONDS` (6) set how
+  long; the chart's `server.shutdown` uses 5 and 25, and a pod's `terminationGracePeriodSeconds`
+  becomes their sum plus 15. A second signal stops it at once.
+- **A browser or database switched off in the OpenBot image stays off**
+  (`EMBEDDED_COMPUTER=off`, `EMBEDDED_POSTGRES=off`, as every chart server pod sets), where it was
+  restarted about once a second. A computer that exits no longer leaves its virtual display
+  running.
+
+### Smaller changes
+
+- An admin's review list shows a person as soon as their own space is made, and a denied folder
+  action lands in Activity after the attempt it denied.
+- Mastra's mark is its current one.
 
 ## 1.1.0
 

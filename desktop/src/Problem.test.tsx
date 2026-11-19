@@ -4,12 +4,14 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
 let invokeFailure: string | null = null;
+/** What the shell answers a command, where a test needs more than nothing. */
+let answers: Record<string, unknown> = {};
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
     invokeCalls.push({ command, args });
     if (invokeFailure) return Promise.reject(invokeFailure);
-    return Promise.resolve(null);
+    return Promise.resolve(answers[command] ?? null);
   },
 }));
 
@@ -27,12 +29,113 @@ beforeAll(() =>
 afterEach(() => {
   invokeCalls = [];
   invokeFailure = null;
+  answers = {};
   if (previousSupportUrl === undefined)
     delete process.env.VITE_OPENBOT_SUPPORT_URL;
   else process.env.VITE_OPENBOT_SUPPORT_URL = previousSupportUrl;
   cleanup();
 });
 afterAll(() => GlobalRegistrator.unregister());
+
+/** What the shell says when the OpenBot on this computer needs a newer app (`client_version.rs`). */
+const LOCAL_APP_TOO_OLD = {
+  said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+  detail:
+    "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+  kind: "app-too-old",
+};
+
+/*
+ * An OpenBot that needs a newer version of this app is not a failure. Wherever setup shows a
+ * problem, it says "Update OpenBot" with the shell's sentence, and Update and restart reads the
+ * update feed and installs what it finds: no failure heading, no technical details, no logs.
+ */
+test("an OpenBot that needs a newer app says Update OpenBot and Update and restart installs the update", async () => {
+  answers = {
+    app_update_offer: {
+      version: null,
+      current: "1.1.0",
+      installing: null,
+      updatesItself: true,
+    },
+    check_app_update: {
+      found: "available",
+      version: "1.2.0",
+      current: "1.1.0",
+    },
+    // On success the app restarts into the new version, and never answers.
+    install_app_update: new Promise(() => {}),
+  };
+  const view = render(<Failure problem={LOCAL_APP_TOO_OLD} />);
+  const card = view.getByRole("alert");
+  expect(view.getByRole("heading", { name: "Update OpenBot" })).toBeTruthy();
+  expect(card.textContent).toContain(LOCAL_APP_TOO_OLD.said);
+  expect(view.queryByText("That didn’t finish")).toBeNull();
+  expect(view.queryByText("Technical details")).toBeNull();
+  expect(view.queryByRole("button", { name: "Copy logs" })).toBeNull();
+  // Drawn as a notice, not as the failure card.
+  expect(card.classList.contains("blocker")).toBe(false);
+  const update = view.getByRole("button", { name: "Update and restart" });
+  await waitFor(() => expect(update).toHaveProperty("disabled", false));
+  fireEvent.click(update);
+  await waitFor(() =>
+    expect(invokeCalls.map((call) => call.command)).toEqual([
+      "app_update_offer",
+      "check_app_update",
+      "install_app_update",
+    ]),
+  );
+  await waitFor(() => expect(update.textContent).toBe("Downloading…"));
+});
+
+/** The same, for a minimum the OpenBot on this computer raised because of a security problem. */
+const LOCAL_APP_TOO_OLD_SECURITY = {
+  said: "This version of OpenBot has a security problem. Update to keep using it.",
+  detail:
+    "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+  kind: "app-too-old-security",
+};
+
+// For a security problem, the security sentence is the heading, in place of Update OpenBot, with the
+// same update and nothing repeating it below.
+test("an OpenBot that raised this app's minimum for a security problem says so in place of Update OpenBot, with the same update", async () => {
+  answers = {
+    app_update_offer: {
+      version: null,
+      current: "1.1.0",
+      installing: null,
+      updatesItself: true,
+    },
+  };
+  const view = render(<Failure problem={LOCAL_APP_TOO_OLD_SECURITY} />);
+  expect(
+    view.getByRole("heading", { name: LOCAL_APP_TOO_OLD_SECURITY.said }),
+  ).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "Update OpenBot" })).toBeNull();
+  expect(view.getAllByText(LOCAL_APP_TOO_OLD_SECURITY.said)).toHaveLength(1);
+  expect(view.queryByText("That didn’t finish")).toBeNull();
+  const update = view.getByRole("button", { name: "Update and restart" });
+  await waitFor(() => expect(update).toHaveProperty("disabled", false));
+});
+
+// A build that never updates itself has nothing to press: it says how to get one that does.
+test("an OpenBot that needs a newer app, on a build that doesn't update itself, says how to get one", async () => {
+  answers = {
+    app_update_offer: {
+      version: null,
+      current: "1.1.0-internal.12.gabc",
+      installing: null,
+      updatesItself: false,
+    },
+  };
+  const view = render(<Failure problem={LOCAL_APP_TOO_OLD} />);
+  await waitFor(() =>
+    expect(view.getByRole("alert").textContent).toContain(
+      "This version of OpenBot doesn't update itself. Install a released version of OpenBot to get updates.",
+    ),
+  );
+  expect(view.queryByRole("button", { name: "Update and restart" })).toBeNull();
+});
 
 /*
  * The card a Mac showed when its disk filled mid-update: containerd's input/output errors and

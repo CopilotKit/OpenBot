@@ -57,6 +57,22 @@ info:
     SIGN_IN_UNAVAILABLE.
 
 
+    OpenBot's own apps name themselves on every request in the header
+    `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop,
+    mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header
+    may name more than one, separated by spaces: OpenBot Desktop adds its
+    own to the one its window's page sent. getDeployment says which API
+    versions this OpenBot serves and the oldest release of each app it
+    serves (minimumClients). Every other operation under /api/v2 refuses
+    an app older than that with 400 and the code CLIENT_UPDATE_REQUIRED, whose problem
+    names the app (client) and its minimum (minimumVersion) and whose
+    detail tells the person to update OpenBot. When that minimum was raised
+    because of a security problem in older releases, the problem also says
+    security: true, and getDeployment lists it under securityMinimumClients.
+    A program of your own need not send the header; without it nothing is
+    refused for a version.
+
+
     This file is the single source of truth: the clients, the server's types,
     the docs and the contract tests are all generated from it or checked
     against it. A change that breaks an existing client fails the pull request.
@@ -187,6 +203,7 @@ paths:
   /api/v2/organizations/{organizationId}/model-key: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-key' }
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
+  /api/v2/organizations/{organizationId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection' }
   /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
   /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
   /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
@@ -568,6 +585,8 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            ai-connection:read: Read how OpenBot reaches its AI provider, never a key, when the signed-in person is an administrator.
+            ai-connection:write: Change how OpenBot reaches its AI provider, when the signed-in person is an administrator.
             apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.
@@ -993,6 +1012,21 @@ components:
             reason: each entry names the item and says what is wrong with it.
           items:
             type: object
+        client:
+          type: string
+          x-extensible-enum: [web, desktop, mobile, recorder]
+          description: >-
+            On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named
+            that is older than this OpenBot serves. A later OpenBot may name
+            another app; read one you don't know as other.
+        minimumVersion:
+          type: string
+          description: On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves.
+        security:
+          type: boolean
+          description: >-
+            On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below
+            was raised because of a security problem in older releases.
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
@@ -1310,6 +1344,33 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+            clientUpdateRequired:
+              value:
+                type: https://open.bot/errors/client-update-required
+                title: This app is too old for this OpenBot.
+                status: 400
+                detail: This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.
+                code: CLIENT_UPDATE_REQUIRED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                client: desktop
+                minimumVersion: 1.2.0
+            clientUpdateRequiredSecurity:
+              value:
+                type: https://open.bot/errors/client-update-required
+                title: This app is too old for this OpenBot.
+                status: 400
+                detail: This version of OpenBot has a security problem. Update to keep using it.
+                code: CLIENT_UPDATE_REQUIRED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                client: desktop
+                minimumVersion: 1.2.0
+                security: true
     ConversationNotFound:
       description: >-
         The conversation does not exist, was removed, or the caller is not in

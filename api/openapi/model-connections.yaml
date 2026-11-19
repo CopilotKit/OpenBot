@@ -357,6 +357,144 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connection:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Models]
+      operationId: getAiConnection
+      summary: Read how OpenBot reaches its AI provider
+      description: >-
+        Return the AI provider OpenBot's Bots run on, the way OpenBot signs in
+        to it, the model or address host where one was named, and whether a
+        run can use it now. Never a key. Also which other connections still
+        have a key kept, so they can be used again without pasting it. Where
+        whoever runs OpenBot sets the provider, editable is false and the
+        connection can't be changed here. Only an administrator of the
+        organization may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: How OpenBot reaches its AI provider. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnection'
+              examples:
+                apiKey:
+                  $ref: '#/components/examples/AiConnectionExample'
+                endpoint:
+                  $ref: '#/components/examples/AiConnectionEndpointExample'
+                fixed:
+                  $ref: '#/components/examples/AiConnectionFixedExample'
+                none:
+                  $ref: '#/components/examples/AiConnectionNoneExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    put:
+      tags: [Models]
+      operationId: replaceAiConnection
+      summary: Change how OpenBot reaches its AI provider
+      description: >-
+        Switch the AI provider OpenBot's Bots run on, with no restart. OpenBot
+        checks the connection with the provider first: a key, an address or a
+        sign-in it can't use is refused, nothing is saved, and the connection
+        in use keeps running. Once saved, the next run uses it, and runs
+        already going finish on the one they started with. A key goes into
+        the organization's vault and is never sent back; the key of the
+        connection it replaces stays kept, so it can be used again (saved).
+        Recorded on the audit trail, never with a key. Only an administrator
+        of the organization may change it, and not where whoever runs OpenBot
+        sets the provider.
+      security:
+        - webSession: []
+        - appOAuth: [ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiConnectionInput'
+            examples:
+              apiKey:
+                value:
+                  provider: anthropic
+                  login: api-key
+                  apiKey: sk-ant-example
+              savedKey:
+                value:
+                  provider: openai
+                  login: api-key
+                  useSavedKey: true
+              endpoint:
+                value:
+                  provider: google
+                  login: endpoint
+                  apiKey: example-gemini-key
+                  baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
+                  model: gemini-3-pro
+              signIn:
+                value:
+                  provider: xai
+                  login: oauth
+                  model: grok-5
+              plan:
+                value:
+                  provider: anthropic
+                  login: plan
+      responses:
+        '200':
+          description: The connection, as saved and in use. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnection'
+              examples:
+                apiKey:
+                  $ref: '#/components/examples/AiConnectionExample'
+                endpoint:
+                  $ref: '#/components/examples/AiConnectionEndpointExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     CredentialId:
@@ -623,6 +761,147 @@ components:
           description: >-
             An effort the model takes, or null for its own. Trimmed, and read
             in lower case.
+    AiConnectionProvider:
+      type: string
+      description: >-
+        The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
+        Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
+        openai-compatible: any server that speaks OpenAI's API, at an address
+        given.
+      enum: [openai, anthropic, google, xai, unbiased, openai-compatible]
+    AiConnectionLogin:
+      type: string
+      description: >-
+        How OpenBot signs in to the provider. plan: the person's Claude or
+        ChatGPT plan (openai, anthropic). api-key: a key from the provider
+        (openai, anthropic). endpoint: an address and, where it asks for one,
+        a key (google, xai, unbiased, openai-compatible). oauth: the person's
+        Google or xAI sign-in (google, xai).
+      enum: [plan, api-key, endpoint, oauth]
+    AiConnectionSaved:
+      type: object
+      description: >-
+        A connection with a key still kept in the vault, which can be used
+        again without pasting the key (useSavedKey). Never the key.
+      required: [provider, login, endpointHost]
+      properties:
+        provider:
+          $ref: '#/components/schemas/AiConnectionProvider'
+        login:
+          $ref: '#/components/schemas/AiConnectionLogin'
+        endpointHost:
+          type: [string, 'null']
+          description: The host of its address, for an endpoint. Null for an API key.
+    AiConnection:
+      type: object
+      description: >-
+        How OpenBot reaches its AI provider: who, how it signs in, and
+        whether a run can use it now. Never a key.
+      required:
+        - provider
+        - login
+        - model
+        - endpointHost
+        - keySet
+        - ready
+        - source
+        - editable
+        - saved
+        - changedAt
+      properties:
+        provider:
+          description: The provider. Null while none is chosen yet.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionProvider'
+            - type: 'null'
+        login:
+          description: How OpenBot signs in to it. Null while none is chosen yet.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionLogin'
+            - type: 'null'
+        model:
+          type: [string, 'null']
+          description: >-
+            The model named for an endpoint or a sign-in. Null for an API key
+            or a plan, where the model catalogue offers the provider's models.
+        endpointHost:
+          type: [string, 'null']
+          description: >-
+            The host of the endpoint's address, never its path, query or
+            anything that signs in. Null unless the login is endpoint.
+        keySet:
+          type: boolean
+          description: Whether a live key for this connection is kept in the vault.
+        ready:
+          type: boolean
+          description: >-
+            Whether a run can use it now: its key is kept, its sign-in can be
+            read, or its plan's engine answers.
+        source:
+          type: string
+          enum: [stored, environment, none]
+          description: >-
+            stored: set here, or carried over from how OpenBot was set up.
+            environment: set by whoever runs OpenBot, in its configuration.
+            none: nothing set yet.
+        editable:
+          type: boolean
+          description: >-
+            Whether an administrator can change it here. False where whoever
+            runs OpenBot sets the provider: its key is changed in the vault.
+        saved:
+          type: array
+          description: >-
+            The connections with a key still kept in the vault, so a switch
+            to one of them needs no key pasted.
+          items:
+            $ref: '#/components/schemas/AiConnectionSaved'
+        changedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When it was last changed. Null if never.
+    AiConnectionInput:
+      type: object
+      additionalProperties: false
+      description: >-
+        The connection to switch to. openai and anthropic take plan or
+        api-key; google and xai take endpoint or oauth; unbiased and
+        openai-compatible take endpoint. Any other pair is refused.
+      required: [provider, login]
+      properties:
+        provider:
+          $ref: '#/components/schemas/AiConnectionProvider'
+        login:
+          $ref: '#/components/schemas/AiConnectionLogin'
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          writeOnly: true
+          description: >-
+            The provider's key. Required for api-key unless useSavedKey;
+            optional for an endpoint that asks for none. Encrypted into the
+            vault before anything else, and never sent back: no answer
+            includes it, now or later.
+        useSavedKey:
+          type: boolean
+          description: >-
+            Use the key already kept for this provider (and, for an endpoint,
+            this address) instead of sending one.
+        baseUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: ^https?://[^@/?#]+([/?#].*)?$
+          description: >-
+            The endpoint's address, http or https, with nothing in it that
+            signs in. Required for endpoint.
+        model:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: The model to run on. Required for endpoint and oauth. Trimmed.
   responses:
     InvalidCredential:
       description: >-
@@ -764,7 +1043,211 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidAiConnection:
+      description: >-
+        The body is malformed, the provider doesn't take that login, the
+        address isn't http or https or has something in it that signs in, or
+        a key, an address or a model the login needs is missing.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            pair:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Google Gemini doesn't take a plan. Pick an API key or a sign-in.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            keyMissing:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Paste a key, or use the saved key.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            credentialsInAddress:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Take the user name and password out of the address, and paste the key in its own field.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiConnectionFixed:
+      description: >-
+        Whoever runs this OpenBot sets its AI provider (editable is false), so
+        it can't be changed here. Or the Idempotency-Key was already used for
+        a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            fixed:
+              value:
+                type: https://open.bot/errors/ai-connection-fixed
+                title: The AI provider is set by whoever runs OpenBot.
+                status: 409
+                detail: This OpenBot's AI provider is set by whoever runs it. Change its key in the vault.
+                code: AI_CONNECTION_FIXED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiConnectionRefused:
+      description: >-
+        OpenBot checked the connection and can't use it, so nothing was saved
+        and the connection in use keeps running. code says why:
+        AI_CONNECTION_KEY_REFUSED, the provider didn't accept the key;
+        AI_CONNECTION_UNREACHABLE, the address didn't answer;
+        AI_CONNECTION_MODEL_UNAVAILABLE, the key can't use that model;
+        AI_CONNECTION_SIGN_IN_MISSING, there's no sign-in to read;
+        AI_CONNECTION_ENGINE_NOT_READY, the plan's engine isn't answering
+        yet. detail is OpenBot's own sentence, naming the provider or the
+        host, never what the provider said.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            keyRefused:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: Anthropic didn't accept that key. Check it and paste it again.
+                code: AI_CONNECTION_KEY_REFUSED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            unreachable:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: OpenBot couldn't reach api.example.com. Check the address.
+                code: AI_CONNECTION_UNREACHABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            modelUnavailable:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: That key can't use gemini-3-pro. Pick another model.
+                code: AI_CONNECTION_MODEL_UNAVAILABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            signInMissing:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: Sign in to Google first, then try again.
+                code: AI_CONNECTION_SIGN_IN_MISSING
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            engineNotReady:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: Claude hasn't started yet. Try again in a moment.
+                code: AI_CONNECTION_ENGINE_NOT_READY
+                category: validation
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
   examples:
+    AiConnectionExample:
+      summary: An Anthropic key, kept, with an OpenAI key still kept from before.
+      value:
+        provider: anthropic
+        login: api-key
+        model: null
+        endpointHost: null
+        keySet: true
+        ready: true
+        source: stored
+        editable: true
+        saved:
+          - provider: openai
+            login: api-key
+            endpointHost: null
+        changedAt: '2026-11-17T09:00:00.000Z'
+    AiConnectionEndpointExample:
+      summary: Google Gemini at its OpenAI-compatible address.
+      value:
+        provider: google
+        login: endpoint
+        model: gemini-3-pro
+        endpointHost: generativelanguage.googleapis.com
+        keySet: true
+        ready: true
+        source: stored
+        editable: true
+        saved:
+          - provider: google
+            login: endpoint
+            endpointHost: generativelanguage.googleapis.com
+        changedAt: '2026-11-17T09:00:00.000Z'
+    AiConnectionFixedExample:
+      summary: A team's OpenBot, where whoever runs it sets the provider.
+      value:
+        provider: openai
+        login: api-key
+        model: null
+        endpointHost: null
+        keySet: true
+        ready: true
+        source: environment
+        editable: false
+        saved: []
+        changedAt: null
+    AiConnectionNoneExample:
+      summary: Nothing chosen yet.
+      value:
+        provider: null
+        login: null
+        model: null
+        endpointHost: null
+        keySet: false
+        ready: false
+        source: none
+        editable: true
+        saved: []
+        changedAt: null
     CredentialExample:
       summary: The Bots' model key.
       value:
