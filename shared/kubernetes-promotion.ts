@@ -316,13 +316,18 @@ export async function runningIdentity(
     ),
   );
 }
+/**
+ * Whether the running server is the candidate release, by what it says on /release. The commit is
+ * not compared: a server reports the commit its image was built from, and a release's manifest
+ * names the later commit that released it (v1.1.0's server says 9a11f982a, its manifest
+ * e373655cc). Which bytes run is already held by the image digest the Deployment is pinned to.
+ */
 export function identityMatches(
   identity: ReleaseIdentity,
   candidate: ReleaseManifest,
 ) {
   return (
     identity.version === candidate.version &&
-    identity.commit === candidate.source.commit &&
     identity.distributionId === candidate.distribution.id &&
     identity.repository === candidate.distribution.repository &&
     identity.channel === candidate.distribution.channel
