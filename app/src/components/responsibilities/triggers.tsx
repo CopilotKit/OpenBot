@@ -8,7 +8,7 @@ import {
   IconPlus,
   IconWebhook,
 } from "@tabler/icons-react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   createTriggerMutationOptions,
   type ResponsibilityRecord,
@@ -482,6 +483,13 @@ function NewTriggerDialog({
   }) => void;
 }) {
   const id = useId();
+  // The personal edition has no Slack pairing, so a Slack trigger there could never fire. The New
+  // routine page leaves Slack out there for the same reason (`new-routine-page.tsx`).
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const offeredKinds = (Object.keys(KIND_LABEL) as TriggerKind[]).filter(
+    (value) => !(personal && value === "slack"),
+  );
   const [kind, setKind] = useState<TriggerKind>("webhook");
   const [eventTypes, setEventTypes] = useState("");
   const [fieldPath, setFieldPath] = useState("");
@@ -575,7 +583,7 @@ function NewTriggerDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(KIND_LABEL) as TriggerKind[]).map((value) => (
+                    {offeredKinds.map((value) => (
                       <SelectItem key={value} value={value}>
                         {KIND_LABEL[value]}
                       </SelectItem>
