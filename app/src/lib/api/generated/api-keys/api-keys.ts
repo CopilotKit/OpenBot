@@ -313,7 +313,7 @@ export const getCreateApiKeyUrl = (
 };
 
 /**
- * Make an API key that acts as the person on the API: in this organization only when organizationOnly is true, otherwise in every organization they are a member of. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
+ * Make an API key that acts as the person on the API, in this organization only: the one it was made in. In any other organization it is refused as if the organization did not exist. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
  * @summary Make an API key
  */
 export const createApiKey = async (

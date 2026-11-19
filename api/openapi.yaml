@@ -10,7 +10,7 @@ info:
 
     An OpenBot install holds one or more organizations, and a person may be a member of several. Where an install allows more than one, everybody has an organization of their own, made for them when they first sign in, and joins others by invitation. Otherwise, and on an install for one person with no sign-in, everybody works in the organization `default`. organizationId is an organization's id or its slug, and the caller must be a member of it: an organization the caller is not in answers exactly as one that does not exist, `default` included.
 
-    A program of your own signs its requests in one of two ways. An API key acts as the person who made it, in every organization they are a member of, like a personal access token: the address names the organization each request is for. Keys start `obk_` and are sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 and on the socket a join token is spent on (createConversationJoinToken). To get a first key, sign in to OpenBot's web app, open Settings, then API keys, and create one. The key is shown once. Only a person signed in to the web app can make or delete keys: a key or an app's sign-in cannot. An app that signs people in uses OAuth 2.1 instead, described under the appOAuth security scheme: its client ids, redirect addresses, endpoints, how long tokens last and the four addresses outside /api/v2 a token also works at.
+    A program of your own signs its requests in one of two ways. An API key acts as the person who made it, in the organization it was made in, like a personal access token: the address names the organization each request is for. Keys start `obk_` and are sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 and on the socket a join token is spent on (createConversationJoinToken). To get a first key, sign in to OpenBot's web app, open Settings, then API keys, and create one. The key is shown once. Only a person signed in to the web app can make or delete keys: a key or an app's sign-in cannot. An app that signs people in uses OAuth 2.1 instead, described under the appOAuth security scheme: its client ids, redirect addresses, endpoints, how long tokens last and the four addresses outside /api/v2 a token also works at.
 
     An install for one person on one computer has no sign-in. It signs nobody in, so it has neither OAuth nor API keys, and the operations that manage keys and sessions answer 503 with the code SIGN_IN_UNAVAILABLE.
 
@@ -36,7 +36,7 @@ tags:
   - name: Identity providers
     description: The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them.
   - name: API keys
-    description: The keys a person makes for automation. A key acts as them, in every organization they are a member of, on the API, and only a person signed in to OpenBot can make or manage one.
+    description: The keys a person makes for automation. A key acts as them, in the organization it was made in, on the API, and only a person signed in to OpenBot can make or manage one.
   - name: Sessions
     description: Where a person is signed in to OpenBot, so they can see each browser and device and sign one out.
   - name: Organization settings
@@ -1207,7 +1207,7 @@ paths:
         - API keys
       operationId: createApiKey
       summary: Make an API key
-      description: 'Make an API key that acts as the person on the API: in this organization only when organizationOnly is true, otherwise in every organization they are a member of. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app''s sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.'
+      description: 'Make an API key that acts as the person on the API, in this organization only: the one it was made in. In any other organization it is refused as if the organization did not exist. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app''s sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.'
       security:
         - webSession: []
       parameters:
@@ -1223,7 +1223,6 @@ paths:
                 value:
                   name: Nightly report
                   expiresInDays: 90
-                  organizationOnly: true
       responses:
         '201':
           description: The key, shown this once.
@@ -10473,7 +10472,7 @@ paths:
         - Organizations
       operationId: deleteOrganization
       summary: Delete an organization
-      description: 'Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, an API key made for it alone stops working, and it leaves every member''s list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person''s own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.'
+      description: 'Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, the API keys made in it stop working, and it leaves every member''s list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person''s own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -20351,7 +20350,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: OpenBot API key
-      description: 'Automation. An API key acts as the person who created it, like a personal access token: in every organization they are a member of, or in one organization only when it was made for that one (organizationOnly). The address of each request names the organization, and one the key does not work in answers not found. A key starts `obk_` and is sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 (the relayed realtime socket at `/api/v2/organizations/{organizationId}/realtime/websocket` included) and on the relayed realtime socket at `/api/intelligence/client/websocket`, where a join token the key made is spent (createConversationJoinToken). A person makes one in the web app, signed in, under Settings, then API keys (createApiKey).'
+      description: 'Automation. An API key acts as the person who created it, like a personal access token, in the one organization it was made in. The address of each request names the organization, and any other answers not found. A key starts `obk_` and is sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 (the relayed realtime socket at `/api/v2/organizations/{organizationId}/realtime/websocket` included) and on the relayed realtime socket at `/api/intelligence/client/websocket`, where a join token the key made is spent (createConversationJoinToken). A person makes one in the web app, signed in, under Settings, then API keys (createApiKey).'
     recorderConnection:
       type: http
       scheme: bearer
@@ -22012,7 +22011,7 @@ components:
           type:
             - string
             - 'null'
-          description: The organization the key works in, when it was made for that one only (organizationOnly). Null when it works in every organization the person is a member of. Absent from a server that makes every key for every organization.
+          description: 'The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.'
     ApiKeyPage:
       type: object
       required:
@@ -22048,9 +22047,6 @@ components:
           minimum: 1
           maximum: 365
           description: Days until the key stops working. Absent, it never expires.
-        organizationOnly:
-          type: boolean
-          description: Whether the key works only in this organization, the one the address names. In any other organization it is refused as if the organization did not exist. Absent or false, the key works in every organization the person is a member of.
     CreatedApiKey:
       type: object
       required:

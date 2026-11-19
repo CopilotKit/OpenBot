@@ -37,9 +37,9 @@ info:
 
 
     A program of your own signs its requests in one of two ways. An API key
-    acts as the person who made it, in every organization they are a member
-    of, like a personal access token: the address names the organization
-    each request is for. Keys start `obk_` and are sent as
+    acts as the person who made it, in the organization it was made in, like
+    a personal access token: the address names the organization each
+    request is for. Keys start `obk_` and are sent as
     `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
     and on the socket a join token is spent on (createConversationJoinToken).
     To get a first key, sign in to OpenBot's web app, open Settings, then API
@@ -87,7 +87,7 @@ tags:
   - { name: People, description: "The people in the organization: who they are, what they may do, and what is theirs alone (their standing instructions, preferences and first-run onboarding). An administrator sees everybody; anybody else sees themselves, as me." }
   - { name: Linked accounts, description: "A person's accounts at other services, such as Slack and GitHub, that OpenBot knows are theirs, so a Bot answering there knows who it is talking to." }
   - { name: Identity providers, description: "The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them." }
-  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, in every organization they are a member of, on the API, and only a person signed in to OpenBot can make or manage one." }
+  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, in the organization it was made in, on the API, and only a person signed in to OpenBot can make or manage one." }
   - { name: Sessions, description: "Where a person is signed in to OpenBot, so they can see each browser and device and sign one out." }
   - { name: Organization settings, description: "What an administrator sets for everybody, and what this OpenBot offers: sign-in, recording, idle computers, allowlists, the setup checklist, and which models Bots ran on." }
   - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
@@ -644,10 +644,9 @@ components:
       bearerFormat: OpenBot API key
       description: >-
         Automation. An API key acts as the person who created it, like a
-        personal access token: in every organization they are a member of,
-        or in one organization only when it was made for that one
-        (organizationOnly). The address of each request names the
-        organization, and one the key does not work in answers not found. A
+        personal access token, in the one organization it was made in. The
+        address of each request names the organization, and any other
+        answers not found. A
         key starts `obk_` and is sent as
         `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
         (the relayed realtime socket at

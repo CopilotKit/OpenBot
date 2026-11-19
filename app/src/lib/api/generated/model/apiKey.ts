@@ -30,7 +30,7 @@ export interface ApiKey {
    */
   lastUsedAt: string | null;
   /**
-   * The organization the key works in, when it was made for that one only (organizationOnly). Null when it works in every organization the person is a member of. Absent from a server that makes every key for every organization.
+   * The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.
    * @nullable
    */
   organizationId?: string | null;
