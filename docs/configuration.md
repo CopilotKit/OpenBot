@@ -314,6 +314,32 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 
 The built-in Bots call a gateway's Chat Completions API (`/chat/completions`), which every OpenAI-compatible endpoint serves, unless their model takes tools only through the Responses API: `gpt-5.6` and later, the `-pro` models and `gpt-5.3-codex`, under a gateway's `openai/` name too. For those they call `/responses`, which a gateway or a proxy in front of OpenAI also serves. `COPILOTKIT_OPENAI_API=responses` or `chat` picks one API for every model instead. When OpenBot picks `/responses` itself, the server logs `openai-api` once at start-up, naming the model; a value you set is never changed, `chat` included, and any other value is an error when a built-in Bot runs.
 
+### OpenDesign Go
+
+[OpenDesign Go](https://go.open-design.ai/) can use this existing OpenAI-compatible route.
+Subscribe to a Go plan, create an API key in a workspace that has access to it, and choose a
+tool-capable model available to that key ([API setup](https://open-design.ai/help/cloud-api/)).
+In your deployment's private environment, set:
+
+```sh
+BOT_PROVIDER=openai
+OPENAI_BASE_URL=https://amr-link.open-design.ai/v1
+OPENAI_API_KEY=YOUR_WORKSPACE_API_KEY
+BOT_MODEL=YOUR_MODEL_ID
+COPILOTKIT_OPENAI_API=chat
+```
+
+Replace the two placeholders; do not commit the key. Keep the model ID exactly as the endpoint
+lists it. For a tenant package, use `provider: openai`, its stored key's `credential_secret_ref`,
+and the same bare ID as `default_model`; do not add an `openai/` prefix unless it is part of the
+upstream ID. Remove or update a conflicting `OPENAI_CONTAINER_BASE_URL` so containers reach
+the same service. Restart the affected processes after changing their environment.
+
+For a single-user installation, the model picker uses the credential's live model list; in a
+team deployment an administrator must allow the model first. Send a short request and verify
+a tool call before assigning computer tasks. Availability and limits follow the workspace's
+plan. This setup adds no OpenDesign account sign-in or subscription-usage display.
+
 ## The model list
 
 The model picker in a Bot's composer offers the models the deployment's credential can use, and how hard each one can think, per conversation and turn by turn: a change applies to the next message. It applies to built-in Bots and to the harness picked in setup when it is OpenBot's own LangGraph or Claude Agent SDK harness; a Bot on any other framework picks its own model.
