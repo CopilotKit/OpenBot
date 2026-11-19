@@ -28,16 +28,18 @@ export type Release = {
 };
 
 const STABLE = /^v(\d+)\.(\d+)\.(\d+)$/;
+const TAG = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 
+/**
+ * Release order of two version tags, by semver's precedence (Bun's own `Bun.semver.order`): a
+ * candidate such as `v1.1.1-rc.1`, which a release branch's tree carries, orders after `v1.1.0` and
+ * before `v1.1.1`.
+ */
 export function compareTags(a: string, b: string): number {
-  const left = STABLE.exec(a);
-  const right = STABLE.exec(b);
+  const left = TAG.exec(a);
+  const right = TAG.exec(b);
   if (!left || !right) throw new Error(`Not a release tag: ${!left ? a : b}`);
-  for (const index of [1, 2, 3]) {
-    const difference = Number(left[index]) - Number(right[index]);
-    if (difference !== 0) return Math.sign(difference);
-  }
-  return 0;
+  return Bun.semver.order(left[1], right[1]);
 }
 
 function stable(releases: readonly Release[]): Release[] {

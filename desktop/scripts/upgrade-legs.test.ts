@@ -78,6 +78,26 @@ test("a pull request upgrades from the newest release at or below this tree", ()
   expect(previousRelease(releases, "1.0.4")).toBe("v1.0.3");
 });
 
+// A release branch carries its candidate's version in package.json, such as 1.1.1-rc.1 on
+// release/1.1, and every pull request into it runs these. A candidate orders before its own release
+// and after the one before it, as semver says.
+test("a candidate's tree upgrades from the release before it", () => {
+  expect(previousRelease(releases, "1.1.1-rc.1")).toBe("v1.1.0");
+  expect(previousRelease(releases, "1.1.0-rc.2")).toBe("v1.0.3");
+  const final = {
+    tagName: "v1.1.1",
+    publishedAt: day.toISOString(),
+    isPrerelease: false,
+  };
+  expect(previousRelease([final, ...releases], "1.1.1-rc.2")).toBe("v1.1.0");
+});
+
+test("a candidate's nightly run takes the same legs as its release", () => {
+  expect(windowLegs(releases, day, "1.1.1-rc.1", "v1.1.0", policy)).toEqual(
+    windowLegs(releases, day, "1.1.1", "v1.1.0", policy),
+  );
+});
+
 test("the nightly run upgrades from the one-API releases and every one the policy upgrades from", () => {
   expect(windowLegs(releases, day, "1.1.0", "v1.1.0", policy)).toEqual([
     "v1.1.0",
