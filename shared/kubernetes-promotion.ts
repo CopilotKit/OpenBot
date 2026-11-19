@@ -339,6 +339,9 @@ export interface PromotionSteps {
   save: (journal: PromotionJournal) => void | Promise<void>;
   /** The server Deployment as it was before anything changed. */
   before: Deployment;
+  /** Whether to stop writes and take a fresh backup first; `needsMaintenance(candidate)` when left
+   * out. The agent also asks for it whenever the database changes at all. */
+  maintenance?: boolean;
   /** A registry mirror the customer chose; the digest stays pinned either way. */
   mirror?: string;
   /** Records what the promotion starts from, before the first phase is written. */
@@ -358,7 +361,7 @@ export async function runPromotion(
 ): Promise<PromotionJournal> {
   const { target, run, candidate, journal } = steps;
   const timeout = `${target.timeoutSeconds}s`;
-  const downtime = needsMaintenance(candidate);
+  const downtime = steps.maintenance ?? needsMaintenance(candidate);
   let scaledDown = false;
   let verified = false;
   const phase = async (value: PromotionPhase) => {

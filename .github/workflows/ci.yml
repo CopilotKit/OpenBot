@@ -604,11 +604,13 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       # A Dockerfile the release does not publish is one a machine would build from source, so the
       # list and the tree have to agree. Checked here rather than trusted, because the failure is
-      # silent: the release succeeds and a laptop somewhere builds the image.
+      # silent: the release succeeds and a laptop somewhere builds the image. The management agent
+      # is not a harness: its image is published with OpenBot's server images.
       - name: Every buildable service is published
         run: |
           set -euo pipefail
           found="$(find . -mindepth 2 -maxdepth 2 -name Dockerfile -not -path './node_modules/*' \
+            -not -path './management-agent/*' \
             | sed -e 's|^\./||' -e 's|/Dockerfile$||' | sort)"
           published="$(jq -r '.[]' .github/published-images.json | sort)"
           if [ "$found" != "$published" ]; then
