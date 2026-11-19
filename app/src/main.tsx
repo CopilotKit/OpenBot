@@ -14,7 +14,7 @@ installAppErrorReporting();
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
-  throw new Error("OpenBot could not find the application root element.");
+  throw new Error("AgentForce could not find the application root element.");
 }
 
 createRoot(rootElement).render(

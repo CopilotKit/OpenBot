@@ -17,6 +17,7 @@ import {
   type CommandOption,
   Composer,
   type ComposerDraft,
+  type DocumentOption,
   type DroppedAttachments,
   type QueueAction,
   type QueuedMessage,
@@ -44,6 +45,7 @@ export function ConversationView({
   notice,
   attached,
   agents = [],
+  documents = [],
   commands,
   channelId,
   holdsFilesUntilSent = false,
@@ -68,7 +70,6 @@ export function ConversationView({
   messages: readonly Message[];
   threadId?: string;
   busy?: boolean;
-  /** Shown above the composer. An error, or why this conversation is read-only. */
   notice?: ReactNode;
   /**
    * A drawer on the composer's top edge, for what the next message answers: a little narrower than
@@ -76,9 +77,7 @@ export function ConversationView({
    */
   attached?: ReactNode;
   agents?: readonly AgentOption[];
-  /**
-   * The `/` menu for this Bot's granted skills, supplied by the route that owns grant loading.
-   */
+  documents?: readonly DocumentOption[];
   commands?: readonly CommandOption[];
   /**
    * The channel this conversation belongs to, forwarded to the composer so it can upload
@@ -106,9 +105,7 @@ export function ConversationView({
    * drains on this falling.
    */
   pending?: boolean;
-  /** Focus the composer the moment it can take a caret; forwarded to the composer. */
   autoFocus?: boolean;
-  /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
   /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
   working?: ReactNode;
@@ -117,21 +114,7 @@ export function ConversationView({
    * to draw a Stop button from. Defaults to `pending` for a caller with no gap between the two.
    */
   stoppable?: boolean;
-  /**
-   * Let somebody type at a Bot that is already working, and run what they typed when it finishes.
-   *
-   * Off by default, and asked for rather than assumed, because it is only true of a conversation
-   * that will still be here when the turn ends. The compose screen creates the channel on send and
-   * navigates away; a message parked there would go down with the unmount, and a message that
-   * silently disappears is a worse answer than a send button that will not go.
-   *
-   * The other place somebody talks to a Bot, the direct `/bot` chat, does not get this either, and
-   * not by a decision made here: that screen draws CopilotKit's own chat rather than this composer,
-   * so there is nothing on it for this flag to reach. Giving it the same affordance means either
-   * moving it onto this composer or asking for it upstream, and neither is a queue.
-   */
   queueWhileBusy?: boolean;
-  /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
   /**
    * The top of the conversation, drawn above the first message and scrolled away with it. Only
@@ -144,7 +127,6 @@ export function ConversationView({
    */
   starterSuggestions?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
-  /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
   voiceCall?: { active: boolean; supported: boolean; onStart(): void };
   /** The composer's model picker. See `Composer`. */
@@ -579,6 +561,7 @@ export function ConversationView({
           modelPicker={modelPicker}
           {...(routine ? { routine } : {})}
           agents={agents}
+          documents={documents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
           holdsFilesUntilSent={holdsFilesUntilSent}

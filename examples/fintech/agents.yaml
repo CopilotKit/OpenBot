@@ -84,24 +84,35 @@ agents:
   # so the address belongs to the deployment. Replace it with your own service and nothing changes.
   - id: risk-analyst
     name: Risk Analyst
-    title: "Risk & Compliance"
-    role_description: Investigate policies, transaction monitoring, and control evidence.
+    title: Risk & Compliance
+    role_description: Investigate policies, controls, and compliance questions.
     avatar_seed: risk-analyst
     type: remote-ag-ui
     endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
+  - id: developer
+    name: Developer Agent
+    title: GitHub and engineering
+    role_description: Read repositories, issues, and pull requests to help engineering prioritize work.
+    avatar_seed: developer
+    type: built-in
+    system_prompt: >-
+      You are Descasio's Developer Agent. Use granted GitHub tools for repository facts, issue
+      status, assignees, and pull requests. When the person asks to implement a Linear ticket,
+      start a Product Engineer run rather than claiming you edited the repo yourself. Never imply
+      you can merge a pull request. Cite ticket ids and pull request URLs the tools return.
+    skills:
+      - linear-tickets
+      - implement-a-ticket
 
-  # The Bot somebody picked in setup.
+  # The Bot somebody picked in setup, kept exactly as the template ships it.
   #
   # ONE ROW, AND IT EXISTS ONLY ONCE SOMETHING IS PICKED. A Bot whose endpoint interpolates to
-  # nothing is dropped by the loader, so this row removes itself until the shell writes an address.
-  # That is what makes registration need no API: the choice becomes a setting, and seeding does the
-  # rest.
+  # nothing is dropped by the loader, so this row removes itself until the shell writes an address —
+  # which is why it is invisible in the AgentForce demo and still safe to keep. Removing it instead
+  # takes the deployment's only remote-Bot registration path with it.
   #
-  # The KIND is interpolated too, and that is not a flourish. Written as a literal `remote-mastra`
-  # row it made this whole package fail to load on any server that predates that kind — the loader
-  # refuses an unknown `agent.type`, and refusing one Bot means refusing the file, so the deployment
-  # would not start at all. Interpolated, an older server sees `remote-ag-ui` and loads normally
-  # unless somebody actually picks Mastra.
+  # The KIND is interpolated too: written as a literal kind, a server that predates that kind
+  # refuses the row, and refusing one Bot means refusing the file, so the deployment would not start.
   - id: picked-harness
     name: ${PICKED_HARNESS_NAME:-Your Bot}
     title: Powered by ${PICKED_HARNESS_NAME:-Your Bot}

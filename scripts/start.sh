@@ -232,7 +232,7 @@ identifies_as_openbot() {
     # The app is static HTML with nothing to interrogate, so its title is the identity available.
     app)
       curl -fsS --max-time 3 "http://localhost:$port/" 2>/dev/null \
-        | grep -qi '<title>[^<]*OpenBot'
+        | grep -Eqi '<title>[^<]*(OpenBot|PlugiQ AgentForce)'
       ;;
     # Compose services on dedicated loopback ports, answering a route named for this stack.
     *)
@@ -295,8 +295,8 @@ stop_server_processes_for_restart() {
 }
 
 echo
-echo "OpenBot"
-echo "======="
+echo "PlugiQ AgentForce"
+echo "================="
 
 # Provision the installation's Composio project with the existing CLI sign-in, independently of
 # Learning. The helper preserves supplied keys and Arcade. The server is started with the resulting

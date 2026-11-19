@@ -41,8 +41,9 @@ type UploadedAttachment = {
 /**
  * The SDK's `onUpload`, scoped to one channel.
  *
- * `fetch` directly rather than `client()` from `@/lib/client`: `client()` JSON-stringifies its
- * body and sets a JSON content type, neither of which can carry a multipart upload.
+ * `apiFetch` rather than `client()` from `@/lib/client`: `client()` JSON-stringifies its
+ * body and sets a JSON content type, neither of which can carry a multipart upload. `apiFetch`
+ * is still the one door that attaches the browser identity.
  *
  * Supplying this is what keeps the bytes out of browser state: with `onUpload` set, the SDK never
  * calls its own `readFileAsBase64` and never retains the `File` it was handed, so no copy of the

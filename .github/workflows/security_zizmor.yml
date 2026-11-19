@@ -12,7 +12,7 @@ name: security / zizmor
 
 on:
   push:
-    branches: [main]
+    branches: [none]
     paths:
       - ".github/workflows/**"
       - ".github/actions/**"

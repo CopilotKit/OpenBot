@@ -65,6 +65,8 @@ export type QueuedMessage = {
    * eventually runs rather than being silently dropped on the way through the queue.
    */
   commandIds: string[];
+  /** Company knowledge documents attached via `#`. */
+  documentIds: string[];
   /**
    * Whatever was staged on the draft when it got parked, so a file somebody attached before the
    * Bot was ready still applies when the message eventually runs.
@@ -218,6 +220,7 @@ export function reduceQueue(
               id: action.id,
               text: action.draft.text,
               commandIds: [...action.draft.commandIds],
+              documentIds: [...action.draft.documentIds],
               attachments: [...action.draft.attachments],
             },
           ],
@@ -281,6 +284,7 @@ export function reduceQueue(
             id: action.id,
             text: action.draft.text,
             commandIds: [...action.draft.commandIds],
+            documentIds: [...action.draft.documentIds],
             attachments: [...action.draft.attachments],
           },
         ],
@@ -474,6 +478,9 @@ function joinQueued(
       // The same skill queued twice is still one instruction. Sending it twice would put the
       // same paragraph in front of the Bot two times and say nothing new by doing it.
       commandIds: [...new Set(queue.flatMap((message) => message.commandIds))],
+      documentIds: [
+        ...new Set(queue.flatMap((message) => message.documentIds)),
+      ],
       isEmpty: text.length === 0,
       attachments,
     },

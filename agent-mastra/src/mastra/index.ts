@@ -99,14 +99,8 @@ function agUiContextEntries(
   requestContext?: OpenBotInstructionArgs["requestContext"],
 ) {
   const agUi = requestContext?.get("ag-ui");
-  if (
-    typeof agUi !== "object" ||
-    agUi === null ||
-    !("context" in agUi) ||
-    !Array.isArray(agUi.context)
-  ) {
-    return [];
-  }
+  if (typeof agUi !== "object" || agUi === null) return [];
+  if (!("context" in agUi) || !Array.isArray(agUi.context)) return [];
   return agUi.context;
 }
 

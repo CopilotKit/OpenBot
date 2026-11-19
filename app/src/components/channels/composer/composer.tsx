@@ -1252,8 +1252,8 @@ export function Composer({
 
   const isBusy = pending || isSubmitting;
   const triggers = useMemo(
-    () => buildTriggers({ agents, commands }),
-    [agents, commands],
+    () => buildTriggers({ agents, commands, documents }),
+    [agents, commands, documents],
   );
   const draft = useMemo(() => toDraft(value, staged), [staged, value]);
 

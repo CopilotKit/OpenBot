@@ -8,6 +8,8 @@ node_modules
 !.env.example
 dist
 **/dist
+!product-engineer-loop/dist
+!product-engineer-loop/dist/**
 app/dist
 .nx
 *.log

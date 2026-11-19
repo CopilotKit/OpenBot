@@ -247,6 +247,9 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // @ag-ui/proto needs @bufbuild/protobuf v2 (./wire). server/ hoists v1 for @cursor/sdk;
+    // dedupe keeps Vite on the v2 copy declared in app/package.json.
+    dedupe: ["@bufbuild/protobuf"],
   },
   /*
    * The release this build is made for, which an error report from the app carries

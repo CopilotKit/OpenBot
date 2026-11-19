@@ -506,7 +506,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarGroup className="gap-px">
             <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
+              <InputGroup className="h-9 rounded-lg border-sidebar-border bg-sidebar-accent text-sm text-sidebar-foreground">
                 <InputGroupInput
                   aria-label="Search conversations"
                   aria-describedby={

@@ -12,21 +12,21 @@ import { MCPMock } from "@copilotkit/aimock/mcp";
 
 const PORT = Number.parseInt(process.env.MOCK_KNOWLEDGE_PORT ?? "4300", 10);
 
-const NOTES = [
+export const NOTES = [
   {
-    title: "Expense policy",
-    url: "https://notion.example/expense-policy",
-    body: "Meals under $75 need no receipt. Anything above needs one, and anything above $500 needs your manager before you spend it.",
+    title: "Employee Handbook — Annual Leave",
+    url: "https://demo.agentforce.local/knowledge/employee-handbook",
+    body: "For this synthetic AgentForce demo, full-time employees receive 20 working days of annual leave each calendar year. Leave should be requested at least five working days in advance and approved by the employee's manager. Up to five unused days may be carried into the next calendar year and must be used by March 31.",
   },
   {
-    title: "Onboarding checklist",
-    url: "https://notion.example/onboarding",
-    body: "Day one: laptop, SSO, and the team channel. Week one: shadow two customer calls. Month one: ship something small to production.",
+    title: "Engineering Guidelines",
+    url: "https://demo.agentforce.local/knowledge/engineering-guidelines",
+    body: "For this synthetic AgentForce demo, all production changes require one peer review. Pull requests must explain the customer impact, include test evidence, and link the relevant issue. Security-sensitive changes require a second reviewer from the platform team.",
   },
   {
-    title: "Incident review: checkout outage",
-    url: "https://notion.example/incident-checkout",
-    body: "Checkout was down for 41 minutes. Cause was an expired certificate nobody owned. Action: certificates get an owner and an alert at 30 days.",
+    title: "Product Overview — Plug 2.0",
+    url: "https://demo.agentforce.local/knowledge/product-overview",
+    body: "For this synthetic AgentForce demo, Plug 2.0 is Descasio's workflow automation platform for digitizing approvals, requisitions, and operational processes. Current priorities are the Process Builder experience, reusable workflow templates, and clearer audit history.",
   },
 ];
 
@@ -35,7 +35,7 @@ const mock = new MCPMock({ port: PORT } as never);
 mock.addTool({
   name: "search_notes",
   description:
-    "Search the company's notes and return the matching ones with a link to each. Use this for any question about company policy, process or history.",
+    "Search Descasio's synthetic demo knowledge and return matching documents with a citation link. Use this for questions about company policy, engineering practice, or Plug 2.0.",
   inputSchema: {
     type: "object",
     properties: {

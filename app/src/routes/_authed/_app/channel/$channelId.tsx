@@ -166,7 +166,7 @@ function RouteComponent() {
           data-slot="conversation-header"
         >
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <SidebarToggle />
             <motion.div
               animate={{ opacity: 1 }}
@@ -201,6 +201,13 @@ function RouteComponent() {
               {/* Nothing while it loads, unless the list names it; one that could not load is still a conversation. */}
               {named?.name ?? (channel.error ? "Conversation" : null)}
             </motion.span>
+            {channel.data ? (
+              <ChannelMembers
+                channel={channel.data}
+                focusedId={agentId}
+                onFocus={setFocusedId}
+              />
+            ) : null}
           </div>
           <div className="flex flex-row gap-1.5">
             {task ? (

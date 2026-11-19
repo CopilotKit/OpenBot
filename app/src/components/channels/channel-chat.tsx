@@ -797,7 +797,7 @@ export function ChannelChat({
       try {
         const stored = await readThreadMessages(
           channel.threadId,
-          runtimeAgentId,
+          activeAgentId,
         );
         const isCurrent = current && version === historyReadVersion.current;
         if (isCurrent) {
@@ -828,10 +828,13 @@ export function ChannelChat({
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
-        // never coming.
-        if (current) setRestoring(false);
-        // Release even on join/restore failure; the gate orders messages, not withholds them.
-        openJoinGate.current();
+        // never coming. A superseded join — the room moved to another member — must not open the
+        // gate that join now owns, or the next turn would run before that member's thread is joined.
+        if (current) {
+          setRestoring(false);
+          setBoundAgentId(activeAgentId);
+          openJoinGate.current();
+        }
       }
       if (askAgain && current) pullHistoryRef.current?.();
     })();
@@ -939,7 +942,7 @@ export function ChannelChat({
           if (!isCurrent()) return;
           const stored = await readThreadMessages(
             channel.threadId,
-            runtimeAgentId,
+            activeAgentId,
           );
           if (!isCurrent()) return;
           // A turn of this tab's began while the read was out: it is read again once that ends.
@@ -1727,7 +1730,7 @@ export function ChannelChat({
       },
     });
     return () => subscription?.unsubscribe();
-  }, [agent, runtimeAgentId]);
+  }, [agent, activeAgentId]);
 
   /** Stable reference for effects and component callbacks. */
   /*
@@ -1823,6 +1826,35 @@ export function ChannelChat({
     copilotkit.stopAgent({ agent });
   };
 
+  const pendingDelivery = useRef<{
+    text: string;
+    skillInstructions: string[];
+    attachments: Attachment[];
+    documentIds: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!channel.agentIds.includes(activeAgentId)) {
+      const next = channel.agentIds[0];
+      if (next) setActiveAgentId(next);
+    }
+  }, [activeAgentId, channel.agentIds]);
+
+  useEffect(() => {
+    const pending = pendingDelivery.current;
+    if (!pending || boundAgentId !== activeAgentId) return;
+    pendingDelivery.current = null;
+    setAwaitingAgent(false);
+    void sayRef
+      .current(
+        pending.text,
+        pending.skillInstructions,
+        pending.attachments,
+        pending.documentIds,
+      )
+      .catch(() => undefined);
+  }, [activeAgentId, boundAgentId]);
+
   /**
    * Component buttons speak as user turns without forcing every transcript card to re-render.
    *
@@ -1855,7 +1887,7 @@ export function ChannelChat({
       .catch(() => undefined);
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
-  }, []);
+  }, [seedDocumentIds]);
 
   return (
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's

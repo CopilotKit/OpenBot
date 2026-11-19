@@ -204,10 +204,74 @@ container under gVisor, which Chromium is sensitive to; test a navigation before
 `gcloud run compose up` will also deploy the whole compose file if you want a throwaway database
 alongside.
 
-**AWS.** ECS Express Mode provisions the cluster, load balancer, HTTPS and autoscaling from an image
-in ECR, and is what AWS points App Runner users at now that App Runner takes no new customers.
-Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
-No shared-memory configuration is needed or possible.
+**AWS ECS on Fargate.** This repository's [Deploy to ECS workflow](../.github/workflows/deploy-ecs.yml)
+deploys after the `CI` workflow succeeds for a push to `main`. It checks out and builds the exact
+commit CI checked, pushes the app and LangGraph Bot images to ECR, runs the database migration as a
+one-off Fargate task, then updates the LangGraph Bot service followed by the app service and waits for
+each to become stable. If the LangGraph Bot service does not stabilize, the workflow reports ECS
+service events and task/container failure details to help diagnose the deployment. The deploy builds
+are separate from CI's test image. It uses GitHub OIDC
+rather than long-lived AWS access keys. The workflow assumes you have provisioned the AWS resources
+below; it does not create them.
+
+Before enabling it:
+
+- Create an ECR repository and an ECS cluster, Fargate service, task definition, and task execution
+  role. The task definition must use `awsvpc` and `ARM64` to match the image built by this workflow,
+  include the application container, and
+  reference the RDS connection and application secrets from Secrets Manager. Give its task role and
+  execution role the permissions they need. The GitHub OIDC role needs ECR image-push permissions
+  for both repositories, ECS describe/register/run/update permissions for both services, and
+  `iam:PassRole` for both task definitions' task and execution roles; scope its trust policy to this
+  repository's `main` branch.
+- Configure the ECS service's ALB target group to forward to port `3001` and use `/health` for its
+  health check. Permit inbound traffic to the task only from the load balancer. The task needs
+  outbound access to ECR, Secrets Manager, and RDS.
+- Use RDS PostgreSQL with the `vector` extension enabled. Set `EMBEDDED_POSTGRES=off` and provide
+  `DATABASE_URL` in the task definition. The workflow runs
+  `bun scripts/migrate.ts` with the image's entrypoint replaced, before updating the service; do not
+  run migrations independently at task startup when using multiple tasks. The task definition is a
+  template: the workflow clears any configured container `entryPoint` and `command` for the service
+  so the image's `/init` entrypoint starts the API, then adds the shell/migration command only to the
+  one-off migration task.
+- Create the `agent-langgraph` ECR repository and a separate ARM64 Fargate task definition and ECS
+  service for the Bot. The Bot container listens on port `4201` and serves `/health` and `/ag-ui`.
+  Make it privately discoverable from the app task (for example with ECS Service Connect or AWS
+  Cloud Map), allow inbound port `4201` only from the app task's security group, and configure its
+  model-provider secret and `MANAGED_AGENT_TOKEN`. Configure the app task with the same
+  `MANAGED_AGENT_TOKEN`, `MANAGED_AGENT_AG_UI_URL` pointing to the private `/ag-ui` URL, and
+  `AGENT_ENDPOINT_ALLOWED_HOSTS` containing the private hostname and port. The workflow deploys the
+  Bot service before the app service; it does not create service discovery or networking resources.
+- Configure these GitHub repository settings. `AWS_ROLE_ARN` is a secret; the rest are variables.
+  Subnet and security group IDs are comma-separated lists without spaces.
+
+  | Name | Value |
+  | --- | --- |
+  | `AWS_ROLE_ARN` | ARN of the GitHub OIDC role |
+  | `AWS_REGION` | AWS region containing the resources |
+  | `ECR_REPOSITORY` | Existing ECR repository name |
+  | `ECS_CLUSTER` | ECS cluster name |
+  | `ECS_SERVICE` | ECS service name |
+  | `ECS_TASK_FAMILY` | Task definition family to use as the deployment template |
+  | `ECS_CONTAINER_NAME` | Application container name in that task definition |
+  | `LANGGRAPH_ECR_REPOSITORY` | LangGraph Bot ECR repository; defaults to `agent-langgraph` |
+  | `LANGGRAPH_ECS_SERVICE` | LangGraph Bot ECS service name, in `ECS_CLUSTER` |
+  | `LANGGRAPH_ECS_TASK_FAMILY` | LangGraph Bot task definition family |
+  | `LANGGRAPH_ECS_CONTAINER_NAME` | LangGraph Bot container name in that task definition |
+  | `ECS_SUBNET_IDS` | Subnets used to launch the migration task |
+  | `ECS_SECURITY_GROUP_IDS` | Security groups used by the migration task |
+  | `ECS_ASSIGN_PUBLIC_IP` | `ENABLED` or `DISABLED` |
+
+The task should start with at least **1 vCPU and 2 GB memory**; **2 vCPU and 4 GB** is recommended.
+Fargate does not support configuring shared memory, and this image already uses Chromium's
+`--disable-dev-shm-usage` mode. Its writable `/workspace` and `/profiles` directories are task-local
+unless you configure persistent storage. Replacing a task without persistent storage loses browser
+profiles and workspace files; multiple tasks also have separate browsers. Decide on the desired
+persistence and scaling behavior before increasing the service's task count.
+
+The image does not run the routines or staged-attachment sweeps on a schedule. If you rely on either,
+configure a separate scheduled ECS task for the corresponding script as described above. ECS Express
+Mode is another AWS option, but this workflow targets a standard Fargate service behind an ALB.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
 and it is the only one that gives each person (or an Isolated Bot) a computer of its own and scales

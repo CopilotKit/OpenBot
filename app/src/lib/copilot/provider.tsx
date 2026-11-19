@@ -34,6 +34,10 @@ import { SkillTools } from "./skill-tools";
  * session cookie, and the runtime endpoint sits behind the same guard as every other API route, so
  * without it every run is rejected as anonymous while the rest of the app looks signed in.
  *
+ * `headers` carries the browser id used in no-sign-in mode, so a CopilotKit run belongs to the
+ * same person as `/api/channels`. Without it, chats would be created as one browser and spoken
+ * in as another.
+ *
  * The URL is relative, like every other call in the app, so the Vite dev proxy and a single-origin
  * deployment both work without a build-time base URL to get wrong.
  *
