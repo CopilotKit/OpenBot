@@ -42,6 +42,7 @@ import type { Agent } from "./config";
 import { Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
 import { CommandFailed, type Kube, run } from "./kube";
+import { internalStatusPins } from "./pins";
 import {
   type AcceptedRelease,
   type AgentState,
@@ -361,22 +362,11 @@ export class ManagementAgent {
     };
     return {
       ...promotionValues(manifest, image),
-      // The server's internal status port, open to the agent's namespace only, so the agent reads
-      // /release without pods/exec. A chart without it ignores the value.
+      // The server's internal status port, open to the agent's namespace as well as the customer's
+      // own peers, so the agent reads /release without pods/exec (pins.ts).
       server: {
         ...promotionValues(manifest, image).server,
-        internalStatus: {
-          enabled: true,
-          allowFrom: [
-            {
-              namespaceSelector: {
-                matchLabels: {
-                  "kubernetes.io/metadata.name": this.config.agentNamespace,
-                },
-              },
-            },
-          ],
-        },
+        internalStatus: internalStatusPins(this.config.agentNamespace),
       },
     };
   }
