@@ -8,6 +8,11 @@ import {
   readExpanded,
   useExpandedBots,
 } from "@/lib/bots/panel";
+import {
+  deleteChannelMutationOptions,
+  markChannelReadMutationOptions,
+  renameChannelMutationOptions,
+} from "@/lib/channels/mutations";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { applyToBotLists } from "@/lib/channels/use-channel-events";
 import { settleReactWork } from "./settle-react-work";
@@ -189,4 +194,72 @@ test("a live event patches the open Bot lists that hold its conversation, and re
   expect(client.getQueryState(channelKeys.byBot("a"))?.isInvalidated).toBe(
     true,
   );
+});
+
+test("a live message for a conversation past a Bot's first page rereads that Bot's list, so it can go to the top", () => {
+  const client = new QueryClient();
+  const firstPage = [1, 2, 3, 4, 5].map((n) =>
+    conversation(`p${n}`, ["a"], `2026-11-0${n}T10:00:00.000Z`),
+  );
+  client.setQueryData(channelKeys.list(), {
+    pages: [{ channels: [], nextCursor: null }],
+    pageParams: [""],
+  });
+  client.setQueryData(channelKeys.byBot("a"), {
+    pages: [
+      { channels: firstPage, nextCursor: "next" },
+      {
+        channels: [conversation("late", ["a"], "2026-10-01T10:00:00.000Z")],
+        nextCursor: null,
+      },
+    ],
+    pageParams: ["", "next"],
+  });
+  applyToBotLists(client, {
+    channelId: "late",
+    lastMessage: "Back to life",
+    lastMessageAt: "2026-11-09T10:00:00.000Z",
+    lastMessageAgentId: "a",
+  });
+  expect(client.getQueryState(channelKeys.byBot("a"))?.isInvalidated).toBe(
+    true,
+  );
+});
+
+test("reading a conversation marks it read under its Bots as well, and a rename or delete rereads their lists", async () => {
+  const client = new QueryClient();
+  client.setQueryData(channelKeys.byBot("a"), {
+    pages: [
+      {
+        channels: [
+          {
+            ...conversation("c1", ["a"], "2026-11-01T10:00:00.000Z"),
+            lastMessageAgentId: "a",
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+    pageParams: [""],
+  });
+  const read = markChannelReadMutationOptions(client);
+  await read.onMutate?.("c1", undefined as never);
+  const row = client.getQueryData<{
+    pages: { channels: ChannelSummary[] }[];
+  }>(channelKeys.byBot("a"))?.pages[0]?.channels[0];
+  expect(row?.lastReadAt).not.toBeNull();
+
+  for (const made of [
+    renameChannelMutationOptions(client),
+    deleteChannelMutationOptions(client),
+  ]) {
+    client.setQueryData(channelKeys.byBot("b"), {
+      pages: [{ channels: [], nextCursor: null }],
+      pageParams: [""],
+    });
+    await (made.onSuccess as unknown as (() => unknown) | undefined)?.();
+    expect(client.getQueryState(channelKeys.byBot("b"))?.isInvalidated).toBe(
+      true,
+    );
+  }
 });

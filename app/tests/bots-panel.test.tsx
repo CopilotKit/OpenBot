@@ -346,3 +346,70 @@ test("New Bot is in the panel's header", async () => {
   const add = await view.findByRole("button", { name: "New Bot" });
   expect(add.getAttribute("href")).toBe("/bots?new=true");
 });
+
+test("opening a conversation from under its Bot keeps the Bots panel there", async () => {
+  served.invoice = () =>
+    Response.json(
+      conversationPage([conversation("i1", ["invoice"], "Open Acme invoices")]),
+    );
+  const { view, user, router } = renderPanel();
+  await user.click(await view.findByText("Open Acme invoices"));
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/channel/i1"),
+  );
+  expect(view.getByRole("heading", { level: 2, name: "Bots" })).toBeTruthy();
+});
+
+test("a Bot's pinned conversations stay first under it, whatever moved since", async () => {
+  // As a live message leaves the cache: a newer unpinned one ahead of the pinned one.
+  served.invoice = () =>
+    Response.json(
+      conversationPage([
+        conversation(
+          "new",
+          ["invoice"],
+          "Just now",
+          "2026-11-09T10:00:00.000Z",
+        ),
+        {
+          ...conversation("pin", ["invoice"], "Pinned one"),
+          pinned: true,
+        },
+      ]),
+    );
+  const { view } = renderPanel();
+  await view.findByText("Just now");
+  const titles = [
+    ...view.container.querySelectorAll<HTMLElement>("a[href^='/channel/']"),
+  ].map((link) => link.textContent);
+  expect(titles[0]).toContain("Pinned one");
+  expect(titles[1]).toContain("Just now");
+});
+
+test("after switching to Conversations, a conversation opened there keeps Conversations", async () => {
+  served.invoice = () =>
+    Response.json(
+      conversationPage([conversation("i1", ["invoice"], "Open Acme invoices")]),
+    );
+  served["(all)"] = () =>
+    Response.json(
+      conversationPage([conversation("c9", ["finance"], "From the list")]),
+    );
+  const { view, user, router } = renderPanel();
+  await user.click(await view.findByText("Open Acme invoices"));
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/channel/i1"),
+  );
+  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await view.findByRole("heading", { level: 2, name: "Conversations" });
+  await router.navigate({
+    to: "/channel/$channelId",
+    params: { channelId: "c9" },
+  });
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/channel/c9"),
+  );
+  expect(
+    view.getByRole("heading", { level: 2, name: "Conversations" }),
+  ).toBeTruthy();
+});

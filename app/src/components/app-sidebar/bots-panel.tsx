@@ -28,7 +28,7 @@ import { relativeTimeShort } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { cn } from "@/lib/utils";
 import { Channel } from "./channel";
-import { isUnread } from "./conversations-panel";
+import { isUnread, pinnedFirst } from "./conversations-panel";
 
 /**
  * One Bot's latest conversations, under its row: {@link BOT_CONVERSATIONS_PAGE} at a time, read from
@@ -79,7 +79,8 @@ function BotConversations({ botId }: { botId: string }) {
     );
   return (
     <>
-      {conversations.data.map((channel) => (
+      {/* Pinned first, as the Conversations panel draws them: a live patch reorders by time alone. */}
+      {pinnedFirst(conversations.data).map((channel) => (
         <Channel
           busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
           canRename={channel.canRename ?? false}

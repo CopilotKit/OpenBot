@@ -4,6 +4,7 @@ import {
   type ReactNode,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -85,7 +86,20 @@ export function SectionProvider({ children }: { children: ReactNode }) {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
-  const routed = sectionForPath(pathname, routes);
+  // What was open before this page, read while working out where a conversation belongs.
+  const lastRef = useRef<SectionId>(CONVERSATIONS);
+  /*
+   * A conversation is Conversations', except one opened from under its Bot in the Bots panel: that
+   * panel stays, so the Bot's list the person was working through is still there. A group
+   * conversation's address is a conversation too.
+   */
+  const onConversation =
+    pathname !== "/channel/new" && /^\/(channel|group)\//.test(pathname);
+  const routed = onConversation
+    ? lastRef.current === "bots"
+      ? "bots"
+      : CONVERSATIONS
+    : sectionForPath(pathname, routes);
   // What `show` picked, and the page it was picked on: a new page hands the choice back to the route.
   const [shown, setShown] = useState<{
     id: SectionId;
@@ -94,9 +108,10 @@ export function SectionProvider({ children }: { children: ReactNode }) {
   // The last section a page belonged to, for pages that belong to none.
   const [last, setLast] = useState<SectionId>(routed ?? CONVERSATIONS);
   if (routed !== null && routed !== last) setLast(routed);
-
   const section =
     shown && shown.pathname === pathname ? shown.id : (routed ?? last);
+  // What is on screen now, opened by the page or by `show`, is what the next conversation keeps.
+  lastRef.current = section;
   const value = useMemo<OpenSection>(
     () => ({
       section,

@@ -82,7 +82,7 @@ test("pinning PATCHes the flag to the conversation and invalidates the roster", 
   expect(invalidated).toEqual([{ queryKey: ["channels"] }]);
 });
 
-test("deleting sends DELETE to the conversation and invalidates the roster and its searches", async () => {
+test("deleting sends DELETE to the conversation and invalidates the roster, its searches and the Bots panel's lists", async () => {
   const seen = capturingFetch(204, undefined);
   const { queryClient, invalidated } = invalidationRecorder();
   const options = deleteChannelMutationOptions(queryClient);
@@ -99,10 +99,11 @@ test("deleting sends DELETE to the conversation and invalidates the roster and i
   expect(seen[0]?.url).toBe(conversationPath("channel-1"));
   expect(seen[0]?.init?.method).toBe("DELETE");
   expect(idempotencyKeyOf(seen[0])).toBeTruthy();
-  // A search that found it must not offer it again either.
+  // A search that found it must not offer it again either, nor the Bots panel under its Bot.
   expect(invalidated).toEqual([
     { queryKey: ["channels", "list"] },
     { queryKey: ["channels", "search"] },
+    { queryKey: ["channels", "bot"] },
   ]);
 });
 

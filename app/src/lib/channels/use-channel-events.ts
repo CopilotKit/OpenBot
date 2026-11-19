@@ -490,7 +490,20 @@ export function applyToBotLists(
     if (typeof botId !== "string" || !data) continue;
     const patched = applyChannelEvent(data, activity);
     if (patched !== "unknown") {
-      if (patched !== data) queryClient.setQueryData(query.queryKey, patched);
+      /*
+       * A patch reorders only the page that holds the row. Past a Bot's first page (after Show
+       * more), a conversation with news could not reach the top that way, so the list is read again.
+       */
+      const holding = patched.pages.findIndex((page) =>
+        page.channels.some((channel) => channel.id === activity.channelId),
+      );
+      if (holding > 0)
+        void queryClient.invalidateQueries({
+          queryKey: query.queryKey,
+          exact: true,
+        });
+      else if (patched !== data)
+        queryClient.setQueryData(query.queryKey, patched);
       continue;
     }
     if (inIt === undefined || inIt.includes(botId))
