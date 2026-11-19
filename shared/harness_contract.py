@@ -107,11 +107,13 @@ def anthropic_environment(base: str, model: str = "claude-sonnet-5-5") -> dict[s
 
 
 @contextmanager
-def fake_provider() -> Iterator[tuple[str, list[dict]]]:
+def fake_provider(keys: list[str] | None = None) -> Iterator[tuple[str, list[dict]]]:
     """An OpenAI- and Anthropic-compatible model on localhost that answers "ok" and records bodies.
 
     Yields `(base_url, bodies)`: every request body in arrival order. Serves Chat Completions,
     Responses and Messages, streamed and not, since which one a framework uses is its own choice.
+    Given `keys`, also writes down the key each request presented, as OpenAI's SDK sends it
+    (`Authorization: Bearer`) or Anthropic's (`x-api-key`).
     """
     import uvicorn
     from fastapi import FastAPI, Request
@@ -119,6 +121,18 @@ def fake_provider() -> Iterator[tuple[str, list[dict]]]:
 
     bodies: list[dict] = []
     app = FastAPI()
+
+    if keys is not None:
+
+        @app.middleware("http")
+        async def presented(request: Request, call_next):
+            bearer = request.headers.get("authorization", "")
+            keys.append(
+                bearer[len("Bearer ") :]
+                if bearer.startswith("Bearer ")
+                else request.headers.get("x-api-key", "")
+            )
+            return await call_next(request)
 
     def sse(lines):
         async def stream():

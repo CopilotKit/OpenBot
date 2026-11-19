@@ -72,6 +72,8 @@ export type RunModel = {
   route?: ModelRoute;
   /** The run's thread, which a Claude plan's query is kept under. */
   threadId?: string;
+  /** The run's organization, when the server names one, which joins that query's name. */
+  organization?: string;
   /** The run's own stop, which cancels a Claude plan's query. */
   signal?: AbortSignal;
 };
@@ -399,7 +401,13 @@ function routedModel(run: RunModel, env: Env): BaseChatModel | undefined {
       model: run.model,
       effort: run.effort,
       botId: run.botId,
-      ...(claude ? { threadId: run.threadId ?? "", signal: run.signal } : {}),
+      ...(claude
+        ? {
+            threadId: run.threadId ?? "",
+            ...(run.organization ? { organization: run.organization } : {}),
+            signal: run.signal,
+          }
+        : {}),
     });
   }
   if (!route.token)

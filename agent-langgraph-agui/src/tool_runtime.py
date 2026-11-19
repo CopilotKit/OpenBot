@@ -44,6 +44,9 @@ class RunTools:
     # The server retries this run itself (`openbotSendOnce`): the model is asked once per step and
     # a failure is handed back, where the model's own client would have retried it twice first.
     send_once: bool = False
+    # The model gateway's token for this run, in its organization (`openbotModelRoute.token`);
+    # empty when the server sent none, and the deployment's own key applies.
+    gateway_token: str = field(default="", repr=False)
 
 
 # The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
@@ -56,11 +59,29 @@ OPENBOT_PROPS = {
     "openbotDeploymentTools",
     "openbotModel",
     "openbotSendOnce",
+    "openbotModelRoute",
+    "openbotOrganization",
     "openbot_run",
     "openbot_deployment_tools",
     "openbot_model",
     "openbot_send_once",
+    "openbot_model_route",
+    "openbot_organization",
 }
+
+
+def run_gateway_token(props) -> str:
+    """The model gateway's token the server minted for this run, or an empty string.
+
+    One engine serves every organization of an OpenBot, and the gateway answers a call on the AI
+    connection of the organization its token names. The server sends a run's own token as
+    `openbotModelRoute: {"via": "openai" | "anthropic", "token": ...}`; a plan's route carries none.
+    """
+    route = props.get("openbotModelRoute")
+    if not isinstance(route, dict) or route.get("via") not in ("openai", "anthropic"):
+        return ""
+    token = route.get("token")
+    return token.strip() if isinstance(token, str) else ""
 
 
 def run_model(props) -> tuple[str, str]:
@@ -376,6 +397,7 @@ class ToolAwareAgent(WholeThreadAgent):
             model=model,
             effort=effort,
             send_once=props.get("openbotSendOnce") is True,
+            gateway_token=run_gateway_token(props),
         )
         # The maintained endpoint clones this subclass per request. ContextVar
         # also isolates graph tasks across concurrent requests and resets on
