@@ -12,7 +12,8 @@
  *  4. a signed rollback is refused because the release's policy says restore-backup;
  *  5. a release whose image does not exist: backup, Flux fails the upgrade, recovery-required;
  *     then, as a person recovers (journal.json removed, the desired version set back to the
- *     accepted release), the agent pins Flux back to the accepted chart and verifies it.
+ *     accepted release), the agent pins Flux back to the accepted chart, restarts every workload
+ *     of the release so none keeps the old database server's address, and verifies it.
  *
  * Opt-in, because it needs a cluster it may write to and the release builds. On a kind cluster
  * with a plain-HTTP registry on the kind network:
@@ -674,6 +675,7 @@ run("management agent on a real cluster", () => {
     // The person recovers as the journal says. The failed release's image never ran, so the
     // database is the one the accepted release left and restoring the backup changes nothing here.
     // The desired version goes back to the accepted release, then journal.json is removed.
+    const recoveredAt = Date.now();
     await desire(to);
     kubectl(
       "-n",
@@ -720,6 +722,37 @@ run("management agent on a real cluster", () => {
     const accepted = JSON.parse(state()["state.json"] ?? "{}");
     expect(accepted.accepted.version).toBe(to.version);
     expect(accepted.accepted.digest).toBe(to.digest);
+
+    // Every workload of the release was restarted after the recovery. A restore repoints the
+    // release at a new database server; the upgrade rewrites the connection Secrets, but a
+    // workload whose pod template does not change (Intelligence's) would keep the old server's
+    // address it read at start and go on writing there.
+    const workloads = json<{
+      items: {
+        kind: string;
+        metadata: { name: string };
+        spec: {
+          template: { metadata: { annotations?: Record<string, string> } };
+        };
+      }[];
+    }>(
+      "-n",
+      PRODUCT,
+      "get",
+      "deployment,statefulset",
+      "-l",
+      "app.kubernetes.io/instance=openbot",
+    ).items;
+    expect(workloads.length).toBeGreaterThan(1);
+    // One minute of slack for the cluster's clock against this machine's.
+    const restarted = (annotations?: Record<string, string>) =>
+      Date.parse(annotations?.["kubectl.kubernetes.io/restartedAt"] ?? "") >=
+      recoveredAt - 60_000;
+    expect(
+      workloads
+        .filter((w) => !restarted(w.spec.template.metadata.annotations))
+        .map((w) => `${w.kind}/${w.metadata.name}`),
+    ).toEqual([]);
 
     // The server runs the accepted release's image again, with its replicas back.
     const image = JSON.parse(to.manifest).artifacts.images.openbot.reference;

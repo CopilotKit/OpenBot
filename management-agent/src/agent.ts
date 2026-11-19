@@ -320,7 +320,8 @@ export class ManagementAgent {
    * those zero replicas as the ones to put back.
    *
    * Pods of a StatefulSet that the failed release left stuck are deleted while it goes back on
-   * (`forcedRollback`), as Kubernetes asks.
+   * (`forcedRollback`), as Kubernetes asks. Then every workload of the release is restarted, so
+   * none keeps the address of the database the person restored away from.
    */
   private async converge(accepted: AcceptedRelease, manifest: ReleaseManifest) {
     const pinned = await this.flux.pinnedDigest();
@@ -366,6 +367,12 @@ export class ManagementAgent {
               done.abort();
               await unstuck;
             }
+            // A recovery restores the database to a new server and repoints the release at it.
+            // The upgrade rewrites the connection Secrets, but a workload whose pod template did
+            // not change (Intelligence's, say) keeps the old server's address it read at start and
+            // goes on writing there. Restart every workload of the release so each one reads the
+            // database the release now names.
+            await this.restart(undefined);
           },
           declaredSuspension: async () => new Set(),
         });
