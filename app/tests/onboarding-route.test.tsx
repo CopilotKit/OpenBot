@@ -301,7 +301,7 @@ const footerButtons = (view: ReturnType<typeof render>) =>
   );
 /** How many scenes the intro's reel plays, read from its dots. */
 const reelScenes = (view: ReturnType<typeof render>) =>
-  view.container.querySelectorAll("[data-intro-reel] > [aria-hidden] > span")
+  view.container.querySelectorAll('[data-demo="intro"] [data-slide-dot]')
     .length;
 /** Book a demo's booking calendar. */
 const calendar = (view: ReturnType<typeof render>) => {
@@ -451,7 +451,7 @@ test("Welcome asks when Bots should ask, with Extra vigilant beside the words, n
   expect(ask.closest("[data-onboarding-demo]")).toBeNull();
   expect(ask.closest("[inert]")).toBeNull();
   expect(
-    view.container.querySelector("[data-onboarding-demo] [data-intro-reel]"),
+    view.container.querySelector('[data-onboarding-demo] [data-demo="intro"]'),
   ).not.toBeNull();
 });
 
@@ -530,7 +530,9 @@ test("without a Bot computer, the intro leaves the computer scene out", async ()
   await heading(view, "Welcome to OpenBot");
 
   await waitFor(() => expect(reelScenes(view)).toBe(2));
-  expect(view.container.querySelector('[data-scene="computer"]')).toBeNull();
+  expect(
+    view.container.querySelector('[data-slide-dot="computer"]'),
+  ).toBeNull();
 });
 
 test("Continue and Back start the new step's picture at the top of its pane", async () => {
@@ -655,7 +657,7 @@ test("after a reload, Back still returns through history, not a second entry", a
 });
 
 // Saving the name makes it known: the name step stays until onboarding ends, never Welcome again.
-test("Get started on the name step saves the name, finishes, plays the orb's finish, then opens the app", async () => {
+test("Get started on the name step saves the name, finishes, says All set, then opens the app", async () => {
   const view = open("/onboarding?step=name");
   await heading(view, "What should we call you?");
   // The frame's primary is the name form's Get started, not a Continue.
@@ -668,20 +670,19 @@ test("Get started on the name step saves the name, finishes, plays the orb's fin
   await userEvent.setup({ document }).type(view.getByLabelText("Name"), "Maya");
   fireEvent.click(view.getByRole("button", { name: "Get started" }));
 
+  // OpenBot's own look draws the step's picture as the designers' video, the orb in it; the
+  // alternate skins keep the drawn orb and its finish (onboarding-name-step.test.tsx).
+  expect(
+    view.container.querySelector('[data-onboarding-demo] [data-demo="name"]'),
+  ).not.toBeNull();
   await waitFor(() =>
     expect(
-      view.container.querySelector(
-        '[data-onboarding-finish] [data-state="done"]',
-      ),
-    ).not.toBeNull(),
+      view.getByRole("button", { name: "All set" }).hasAttribute("data-done"),
+    ).toBe(true),
   );
   expect(named).toBe("Maya");
   expect(completed).toBe(true);
   expect(view.queryByText("Home")).toBeNull();
-  // While the orb finishes, the button says what has happened.
-  expect(
-    view.getByRole("button", { name: "All set" }).hasAttribute("data-done"),
-  ).toBe(true);
   await waitFor(() => expect(view.getByText("Home")).toBeTruthy(), {
     timeout: 3000,
   });

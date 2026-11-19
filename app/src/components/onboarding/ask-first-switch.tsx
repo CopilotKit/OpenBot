@@ -39,7 +39,12 @@ export function AskFirstSwitch() {
     : (inbox.data?.enabled ?? false);
   return (
     <div className="flex w-full flex-col gap-2 text-left">
-      <Item size="sm" variant="outline">
+      {/* The UI Kit's Action Card in OpenBot's own look: a white card on the gray pane, no edge. */}
+      <Item
+        className="own:lg:border-transparent own:lg:bg-card"
+        size="sm"
+        variant="outline"
+      >
         <ItemMedia variant="icon">
           <IconHandStop />
         </ItemMedia>

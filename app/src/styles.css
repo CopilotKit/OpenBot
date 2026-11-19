@@ -10,6 +10,12 @@
 @import "./skins/skins.css";
 
 /*
+ * OpenBot's own look only, never an alternate skin's: for a screen redrawn from the November 2026
+ * Figma whose old drawing the skins keep (onboarding). The opposite of theme.css's `skin:`.
+ */
+@custom-variant own (&:is(:root:not([data-skin]) *));
+
+/*
  * Streamdown draws a Bot's prose, and Tailwind only ships classes it can see used. Its markup lives
  * in a dependency, so without this the transcript renders unstyled markdown — correct HTML with none
  * of the spacing that makes it readable. The path is relative to this file.
@@ -261,6 +267,106 @@
       calc(100% + 40px) calc(100% + 220px) / 640px 560px no-repeat,
       radial-gradient(closest-side, var(--backdrop-shape), transparent) 22%
       calc(100% + 260px) / 940px 920px no-repeat;
+  }
+}
+
+/*
+ * Onboarding's frame (Figma "Onboarding"): the app's window again, 12px inside the dithered field,
+ * with the step's words on a gray pane at the left and its picture on the page at the right, and the
+ * same notches where the two meet. From `lg`, where a step has two panes; one column below, as on a
+ * phone. The words' pane is drawn by an empty element behind the step's header, words and buttons
+ * (`data-onboarding-pane`), which are three rows of the frame's grid rather than one box.
+ */
+@media (min-width: 1024px) {
+  :root:not([data-skin]) [data-onboarding-frame] {
+    position: relative;
+    isolation: isolate;
+    padding: --spacing(3);
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-onboarding-frame]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--frame-dither);
+    background-size: 340px 340px;
+    opacity: var(--frame-dither-opacity);
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane] {
+    position: relative;
+    border-radius: 18px 0 0 18px;
+    background-color: var(--sidebar);
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::before,
+  :root:not([data-skin]) [data-onboarding-pane]::after,
+  :root:not([data-skin]) [data-onboarding-notch] {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    width: 30px;
+    height: 16px;
+    pointer-events: none;
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::before,
+  :root:not([data-skin]) [data-onboarding-pane]::after {
+    right: -0.5px;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::before {
+    top: 0;
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::after {
+    bottom: 0;
+    transform: scaleY(-1);
+  }
+
+  :root:not([data-skin]) [data-onboarding-notch] {
+    left: calc(100% + 0.5px);
+  }
+
+  :root:not([data-skin]) [data-onboarding-notch="top"] {
+    top: 0;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 1 30 0)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-onboarding-notch="bottom"] {
+    bottom: 0;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 -1 30 16)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  /* The picture's pane: the page, with its soft shapes, as the app's page has them. */
+  :root:not([data-skin]) [data-onboarding-demo] {
+    border-left: 1px solid var(--sidebar-border);
+    border-radius: 0 18px 18px 0;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(closest-side, var(--backdrop-shape), transparent),
+      radial-gradient(closest-side, var(--backdrop-shape), transparent),
+      radial-gradient(closest-side, var(--backdrop-shape), transparent);
+    background-position:
+      calc(100% + 120px) 8%,
+      calc(100% + 40px) calc(100% + 220px),
+      22% calc(100% + 260px);
+    background-size:
+      860px 820px,
+      640px 560px,
+      940px 920px;
+    background-repeat: no-repeat;
   }
 }
 

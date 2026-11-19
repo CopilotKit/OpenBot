@@ -140,7 +140,6 @@
     "shadow": 4
   },
   "components/onboarding/onboarding-frame.tsx": {
-    "palette": 4,
     "shadow": 1
   },
   "components/onboarding/organization-flow.tsx": {

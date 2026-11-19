@@ -12,9 +12,16 @@ import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-first-copy";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
-import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
+import {
+  FRAMEWORKS,
+  SelfHostDemo,
+} from "@/components/onboarding/demos/self-host-demo";
 import { FINISH_MS, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
+import {
+  type OnboardingScene,
+  OnboardingSlides,
+} from "@/components/onboarding/onboarding-slides";
 import {
   type OnboardingStep,
   OnboardingWizard,
@@ -30,6 +37,13 @@ import {
 import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
+import { useSkinId } from "@/skins/store";
+import businessVideo from "@/assets/onboarding/business.mp4";
+import businessPoster from "@/assets/onboarding/business-poster.png";
+import nameVideo from "@/assets/onboarding/name.mp4";
+import namePoster from "@/assets/onboarding/name-poster.png";
+import welcomeVideo from "@/assets/onboarding/welcome.mp4";
+import welcomePoster from "@/assets/onboarding/welcome-poster.png";
 
 const PRODUCT = appConfig.brand.productName;
 
@@ -92,6 +106,65 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * first task has started (`NotifyPrompt`), when what they are for is plain.
  */
 
+/*
+ * The pictures in OpenBot's own look (Figma "Onboarding"): one video a step, filling the pane, which
+ * the alternate skins draw as their animated demos instead. Each video plays its scenes one after
+ * another and ends on the start of its first, so it loops without a jump; `from` is where each scene
+ * starts, in seconds, read off the designers' cut.
+ */
+const ASK = {
+  id: "welcome",
+  caption:
+    "Ask in plain words. A Bot does the work and tells you when it's done.",
+  label: "A message box under the OpenBot orb, where you ask a Bot for work",
+};
+const WELCOME_SCENES: OnboardingScene[] = [
+  { ...ASK, from: 0 },
+  {
+    id: "computer",
+    caption: "Bots use a browser and files of their own, apart from yours.",
+    label: "A Bot reading a page in its own browser, beside its own files",
+    from: 7.25,
+  },
+  {
+    id: "team",
+    caption: "Pick a Bot for the job, or make your own.",
+    label: "Your Bots at work, each with what it is doing, and New Bot",
+    from: 12.25,
+  },
+  { ...ASK, from: 18.25 },
+];
+const LOCAL = {
+  id: "local",
+  caption: "On your computer",
+  label: `${PRODUCT} on a laptop`,
+};
+const BUSINESS_SCENES: OnboardingScene[] = [
+  { ...LOCAL, from: 0 },
+  {
+    id: "agents",
+    caption: "With the agents you already have",
+    label: `Frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}`,
+    from: 3.25,
+  },
+  {
+    id: "organization",
+    caption: "For your organization",
+    label:
+      "Your organization signing in with Google, Microsoft or Okta, with your rules, team Bots and an audit trail",
+    from: 7,
+  },
+  { ...LOCAL, from: 11.25 },
+];
+const NAME_SCENES: OnboardingScene[] = [
+  {
+    id: "name",
+    caption: "",
+    label: "The OpenBot orb over the question Home opens on",
+    from: 0,
+  },
+];
+
 /**
  * The welcome step: one animation of what OpenBot does, and beside it the one choice worth making
  * before the first task, whether a Bot asks before it changes anything.
@@ -106,7 +179,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
  * The animation is a picture and the switch is real, so they never share a pane: the switch sits
  * with the words, and the picture stays a picture.
  */
-function welcomeStep(computer: boolean): OnboardingStep {
+function welcomeStep(computer: boolean, own: boolean): OnboardingStep {
   return {
     id: "welcome",
     title: `Welcome to ${PRODUCT}`,
@@ -117,19 +190,19 @@ function welcomeStep(computer: boolean): OnboardingStep {
             aria-labelledby="onboarding-permissions"
             className="flex flex-col gap-3 text-left"
           >
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 own:lg:gap-1.5">
               <h2
-                className="text-lg font-semibold text-pretty"
+                className="text-lg font-semibold text-pretty own:lg:text-base own:lg:leading-heading own:lg:tracking-heading"
                 id="onboarding-permissions"
               >
                 Choose when Bots ask
               </h2>
-              <p className="text-pretty text-muted-foreground">
+              <p className="text-pretty text-muted-foreground own:lg:text-sm own:lg:font-light">
                 {ALWAYS_ASKS_SHORT}
               </p>
             </div>
             <AskFirstSwitch />
-            <p className="text-sm text-pretty text-muted-foreground">
+            <p className="text-sm text-pretty text-muted-foreground own:lg:text-xs">
               You can change this anytime in Settings.
             </p>
           </section>
@@ -138,7 +211,19 @@ function welcomeStep(computer: boolean): OnboardingStep {
         <p>Give work to Bots in plain words. They tell you when it's done.</p>
       </StepIntro>
     ),
-    demo: () => <IntroReel computer={computer} />,
+    demo: () =>
+      own ? (
+        <OnboardingSlides
+          kind="intro"
+          poster={welcomePoster}
+          scenes={WELCOME_SCENES}
+          // An OpenBot without a Bot computer is never shown one.
+          skip={computer ? [] : ["computer"]}
+          video={welcomeVideo}
+        />
+      ) : (
+        <IntroReel computer={computer} />
+      ),
   };
 }
 
@@ -160,7 +245,7 @@ function welcomeStep(computer: boolean): OnboardingStep {
  * A calendar that can't load (offline, blocked, silent) puts the picture back, with Book a call, which
  * opens the OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
  */
-function useBookDemoStep(): OnboardingStep {
+function useBookDemoStep(own: boolean): OnboardingStep {
   const [calendar, setCalendar] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [booked, setBooked] = React.useState(false);
@@ -179,7 +264,17 @@ function useBookDemoStep(): OnboardingStep {
         </p>
       </StepIntro>
     ),
-    demo: () => <SelfHostDemo />,
+    demo: () =>
+      own ? (
+        <OnboardingSlides
+          kind="self-host"
+          poster={businessPoster}
+          scenes={BUSINESS_SCENES}
+          video={businessVideo}
+        />
+      ) : (
+        <SelfHostDemo />
+      ),
     primaryLabel: "Book a demo",
     onPrimary: () => setCalendar(true),
     secondary: { label: "Not now" },
@@ -212,6 +307,7 @@ function useBookDemoStep(): OnboardingStep {
       </StepIntro>
     ),
     demo: () => <BookingCalendar onBooked={book} onFailed={fail} />,
+    wideDemo: true,
     primaryLabel: undefined,
     onPrimary: undefined,
     primaryHidden: !booked,
@@ -350,8 +446,23 @@ function RouteComponent() {
     return () => clearTimeout(timer);
   }, [leaving, navigate, reduced]);
 
-  const name = useNameStep({ finish, finished });
-  const selfhost = useBookDemoStep();
+  // OpenBot's own look draws the November 2026 onboarding; an alternate skin keeps its own.
+  const own = useSkinId() === "openbot";
+  const nameStep = useNameStep({ finish, finished });
+  const name: OnboardingStep = own
+    ? {
+        ...nameStep,
+        demo: () => (
+          <OnboardingSlides
+            kind="name"
+            poster={namePoster}
+            scenes={NAME_SCENES}
+            video={nameVideo}
+          />
+        ),
+      }
+    : nameStep;
+  const selfhost = useBookDemoStep(own);
   /*
    * The checklist says whether there is a Bot computer, and the intro shows one only where there
    * is. Until it answers, the usual case: a computer that is there.
@@ -391,7 +502,7 @@ function RouteComponent() {
 
   const byId: Record<StepId, OnboardingStep> = {
     welcome: {
-      ...welcomeStep(!computerMissing),
+      ...welcomeStep(!computerMissing, own),
       primaryDisabled: !capabilities,
       notice: capabilitiesFailed,
     },
