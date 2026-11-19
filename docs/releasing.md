@@ -420,16 +420,14 @@ CI bundles the CLI only on a tree that has `desktop/src-tauri/tauri.bundled-cli.
 
 ## The disk space the app says
 
-OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: about 20 GB
-free to install, 7 to 10 GB once installed, and about 20 GB free so it can update. Its checks say
-the same numbers when a disk is short. They come from one file, `desktop/src/disk-needs.json`, in
-GB of 2^30 bytes:
+OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: "About 20 GB
+free to install, 7 to 10 GB used". Its checks say the same numbers when a disk is short. They come
+from one file, `desktop/src/disk-needs.json`, in GB of 2^30 bytes:
 
 | Number | What it is |
 | --- | --- |
 | `installFreeGb` | Free disk to install: the back end's setup and OpenBot's images as they land on the disk. |
 | `installedGb` | What an installation takes, from the smallest Bot framework to the largest with both sign-in images. |
-| `updateFreeGb` | Free disk an update asks of the drive (`local_eval::update_needs`, twice, with the database unmeasured). |
 | `backEndFreeGb` | What the back end's first setup needs free, before the 5% of the engine's disk k3s keeps free. The CLI checks the same number (`REQUIRED_DISK_GIB` in the Intelligence CLI's `local-resources.ts`). |
 | `imagesDownloadMb` | What OpenBot's own images download, for the first screen's free-space check. |
 | `mostAnUpdateDownloadsMb` | The most an update downloads, every image changed. |

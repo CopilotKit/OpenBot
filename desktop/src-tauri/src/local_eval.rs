@@ -5966,18 +5966,7 @@ mod tests {
         );
     }
 
-    // "Keep about 20 GB free so it can update": the room the update check asks of the drive with
-    // the database unmeasured, its largest, is within that.
-    #[test]
-    fn the_update_figure_the_window_says_covers_what_the_update_check_asks() {
-        let on_drive = update_needs(None) * 2;
-        assert!(
-            on_drive <= disk_number("updateFreeGb") * GIB,
-            "the update check asks {on_drive} bytes of the drive"
-        );
-    }
-
-    // "About 20 GB of free disk space to install": the back end's 15 GiB and OpenBot's own images
+    // "About 20 GB free to install": the back end's 15 GiB and OpenBot's own images
     // as they land on the disk, what the downloads hold to before anything starts.
     #[test]
     fn the_install_figure_the_window_says_is_what_the_downloads_hold_to() {

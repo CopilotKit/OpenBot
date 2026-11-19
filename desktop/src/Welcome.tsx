@@ -6,8 +6,8 @@ import {
 } from "@tabler/icons-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { BusinessBooker } from "./BusinessBooker";
-import diskNeeds from "./disk-needs.json";
 import { ConnectToOpenBot, useConnectToOpenBot } from "./ConnectToOpenBot";
+import diskNeeds from "./disk-needs.json";
 import {
   EarlyDownloadsLine,
   earlyDownloadsMeasured,
@@ -59,21 +59,17 @@ const CLOUDS = [
  * (`machine_size.rs`). Memory is said as 16 GB, room for that plus the person's own apps, as decided
  * with David on 13 Nov 2026. Disk is what the downloads hold to before anything starts: the back
  * end's 15 GB and OpenBot's images as they land on the disk (`early_downloads::needed_for`), said
- * as `installFreeGb` in `disk-needs.json`, which a Rust test keeps equal to it.
+ * as `installFreeGb` in `disk-needs.json`, which a Rust test keeps equal to it. Then what it uses
+ * once installed, `installedGb`, measured and checked against every release's images by
+ * `scripts/disk-needs.ts`. Both on one line: the first screen has no room for another at the
+ * window's default size (`setupLayout.browser.test.ts`).
  */
 export const SELF_CONTAINED_NEEDS = [
   "A Mac or a 64-bit Windows PC",
   "16 GB of memory or more",
   "4 CPU cores or more",
-  `About ${diskNeeds.installFreeGb} GB of free disk space to install`,
+  `About ${diskNeeds.installFreeGb} GB free to install, ${diskNeeds.installedGb.from} to ${diskNeeds.installedGb.to} GB used`,
 ] as const;
-
-/**
- * What OpenBot takes once it is installed, and what an update asks for, in rough numbers: measured,
- * and checked against every release's images by `scripts/disk-needs.ts`. The update figure covers
- * what the update check asks of the drive (`local_eval::update_needs`).
- */
-export const SELF_CONTAINED_DISK_USE = `Once it's installed, OpenBot uses ${diskNeeds.installedGb.from} to ${diskNeeds.installedGb.to} GB. Keep about ${diskNeeds.updateFreeGb} GB free so it can update.`;
 
 /** Where OpenBot runs: on this computer, or at an address this app connects to. */
 export type Hosting = "this-computer" | "connect";
@@ -304,7 +300,6 @@ function SelfContained({
             <li key={need}>{need}</li>
           ))}
         </ul>
-        <p className="needs-note">{SELF_CONTAINED_DISK_USE}</p>
       </section>
       {resumes ? (
         <div className="row">

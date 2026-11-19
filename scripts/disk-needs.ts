@@ -39,7 +39,6 @@ const MB = 1_000_000;
 export type DiskNeeds = {
   installFreeGb: number;
   installedGb: { from: number; to: number };
-  updateFreeGb: number;
   backEndFreeGb: number;
   imagesDownloadMb: number;
   mostAnUpdateDownloadsMb: number;

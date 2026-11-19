@@ -21,7 +21,6 @@ const MB = 1_000_000;
 const needs: DiskNeeds = {
   installFreeGb: 20,
   installedGb: { from: 7, to: 10 },
-  updateFreeGb: 20,
   backEndFreeGb: 15,
   imagesDownloadMb: 1200,
   mostAnUpdateDownloadsMb: 2000,

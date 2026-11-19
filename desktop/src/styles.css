@@ -1157,24 +1157,17 @@ a.button-link:hover {
   margin-bottom: 0;
 }
 
+/* The first column as wide as its longer need, so the disk need, the longest, keeps to one line.
+   The gap holds the second column's bullets clear of the first column's words. */
 .needs-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: 2px 16px;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 24px;
   margin: 0 0 4px;
   padding-left: 20px;
   color: var(--text-primary);
   font-size: var(--text-sm);
   line-height: 22px;
-}
-
-/* What OpenBot takes once it is installed, and what an update asks, under the needs. */
-.needs-note {
-  margin: 4px 0 0;
-  max-width: 34rem;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  line-height: 20px;
 }
 
 /* A disclosure: options almost nobody should open. */

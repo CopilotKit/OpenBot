@@ -231,8 +231,7 @@ or a script has to say.
 ### OpenBot Desktop
 
 - **It asks for about 20 GB free to install, where it asked for 40, and says what it uses.** The
-  first screen says "About 20 GB of free disk space to install", and under it "Once it's installed,
-  OpenBot uses 7 to 10 GB. Keep about 20 GB free so it can update." Measured on v1.1.0: 7.5 GB
+  first screen says "About 20 GB free to install, 7 to 10 GB used". Measured on v1.1.0: 7.5 GB
   installed, and up to 4.5 GB more while an update downloads beside the running release. The back
   end's setup needs 15 GB free, plus the 5% of Docker's or Podman's disk that k3s keeps free, and a
   disk that is short says the figure for that disk ("OpenBot needs 66 GB" on a 1 TB disk). An

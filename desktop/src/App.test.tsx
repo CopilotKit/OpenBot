@@ -718,12 +718,9 @@ test("the first screen offers OpenBot (Self-Contained), then OpenBot for Busines
     "A Mac or a 64-bit Windows PC",
     "16 GB of memory or more",
     "4 CPU cores or more",
-    "About 20 GB of free disk space to install",
+    // Free disk to install, and what it uses once installed, in rough numbers (`disk-needs.json`).
+    "About 20 GB free to install, 7 to 10 GB used",
   ]);
-  // What it takes once installed, and what an update asks, in rough numbers (`disk-needs.json`).
-  expect(view.container.querySelector(".needs-note")?.textContent).toBe(
-    "Once it's installed, OpenBot uses 7 to 10 GB. Keep about 20 GB free so it can update.",
-  );
   // Connecting to a company's own OpenBot is a link under the rows, not one of them. No booking
   // link of its own: OpenBot for Business is the booking.
   const connect = view.getByRole("button", { name: "Connect to it" });
