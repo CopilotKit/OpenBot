@@ -653,6 +653,7 @@ fn machine_on(drive: &str, free: u64) -> crate::windows::MachineDrive {
 fn an_existing_machine_is_measured_on_its_own_drive() {
     assert_eq!(
         disk_place(
+            true,
             Some(machine_on("C:", 15_000_000_000)),
             Some(PathBuf::from(r"F:\openbot\engine")),
             Some(PathBuf::from(r"C:\Users\person")),
@@ -666,6 +667,7 @@ fn an_existing_machine_is_measured_on_its_own_drive() {
 fn a_new_machine_is_measured_in_the_install_folders_engine_folder() {
     assert_eq!(
         disk_place(
+            true,
             None,
             Some(PathBuf::from(r"F:\openbot\engine")),
             Some(PathBuf::from(r"C:\Users\person")),
@@ -674,12 +676,32 @@ fn a_new_machine_is_measured_in_the_install_folders_engine_folder() {
     );
 }
 
+/// Install uses Docker Desktop, which keeps its disk under the user profile, not in the install
+/// folder: the profile's drive is measured, though the install folder is on F: with a machine home.
+#[test]
+fn an_install_on_docker_is_measured_on_the_user_profiles_drive() {
+    assert_eq!(
+        disk_place(
+            false,
+            None,
+            Some(PathBuf::from(r"F:\openbot\engine")),
+            Some(PathBuf::from(r"C:\Users\person")),
+        ),
+        Some(DiskPlace::Folder(PathBuf::from(r"C:\Users\person")))
+    );
+    assert!(!uses_podman(crate::install::Choice::UseDocker));
+    assert!(!uses_podman(crate::install::Choice::OpenDockerDesktop));
+    assert!(!uses_podman(crate::install::Choice::DockerNotRunning));
+    assert!(uses_podman(crate::install::Choice::UsePodman));
+    assert!(uses_podman(crate::install::Choice::InstallPodman));
+}
+
 /// With no machine and no machine home, Podman puts the disk in the user profile, so the space
 /// check looks there.
 #[test]
 fn with_no_machine_home_the_user_profile_is_measured() {
     assert_eq!(
-        disk_place(None, None, Some(PathBuf::from(r"C:\Users\person"))),
+        disk_place(true, None, None, Some(PathBuf::from(r"C:\Users\person"))),
         Some(DiskPlace::Folder(PathBuf::from(r"C:\Users\person")))
     );
 }

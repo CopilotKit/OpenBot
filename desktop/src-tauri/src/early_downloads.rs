@@ -1034,11 +1034,15 @@ pub fn start(root: PathBuf, hooks: Hooks) {
         let said = |summary| (hooks.said)(summary);
         // `wsl --help` runs at most once, and only when the rest of the offer already holds.
         let can_move = std::cell::OnceCell::new();
+        let podman = uses_podman(facts.choice);
         run(
             jobs,
             needed,
-            engine_disk_free,
-            |need| engine_move_offer(need, || *can_move.get_or_init(crate::windows::wsl_can_move)),
+            || engine_disk_free(podman),
+            |need| {
+                engine_move_offer(need, || *can_move.get_or_init(crate::windows::wsl_can_move))
+                    .filter(|_| podman)
+            },
             &said,
             DISK_RECHECK,
         );
@@ -1058,18 +1062,34 @@ enum DiskPlace {
     Folder(PathBuf),
 }
 
-/// Where the engine's disk is: the drive of the `machine` that exists, else the machine `home` that
-/// a new machine goes into, else the user `profile`, where Podman puts the disk with no home. None
-/// when none of them is known.
+/// Where the engine's disk is, for an Install that uses Podman (`podman`): the drive of the
+/// `machine` that exists, else the machine `home` that a new machine goes into, else the user
+/// `profile`, where Podman puts the disk with no home. None when none of them is known.
+///
+/// An Install that uses Docker has no Podman machine: Docker Desktop keeps its disk in its own
+/// place, `%LOCALAPPDATA%\Docker` unless its settings move it, so the user profile is measured, as
+/// before there was a machine home.
 fn disk_place(
+    podman: bool,
     machine: Option<crate::windows::MachineDrive>,
     home: Option<PathBuf>,
     profile: Option<PathBuf>,
 ) -> Option<DiskPlace> {
+    if !podman {
+        return profile.map(DiskPlace::Folder);
+    }
     match machine {
         Some(machine) => Some(DiskPlace::Machine(machine)),
         None => home.or(profile).map(DiskPlace::Folder),
     }
+}
+
+/// Install uses Podman with this `choice` (`install::choose`).
+fn uses_podman(choice: crate::install::Choice) -> bool {
+    matches!(
+        choice,
+        crate::install::Choice::UsePodman | crate::install::Choice::InstallPodman
+    )
 }
 
 /// The user profile: where Podman puts the machine's disk when there is no machine home.
@@ -1079,10 +1099,11 @@ fn profile() -> Option<PathBuf> {
         .or_else(dirs::home_dir)
 }
 
-/// The bytes free on the drive of the engine's disk on this computer now. None when it cannot be
-/// read, which is not judged.
-fn engine_disk_free() -> Option<u64> {
+/// The bytes free on the drive of the engine's disk on this computer now, for an Install that uses
+/// Podman (`podman`) or Docker. None when it cannot be read, which is not judged.
+fn engine_disk_free(podman: bool) -> Option<u64> {
     let place = disk_place(
+        podman,
         crate::windows::podman_machine_drive(crate::acquire::MACHINE),
         crate::engine::machine_home(),
         profile(),

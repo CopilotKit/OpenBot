@@ -200,11 +200,19 @@ fill a gap. Three rules hold that boundary:
 - **On Windows, the engine's disk follows the install folder.** OpenBot's Podman machine is a WSL
   disk of about 40 GB. By default, Podman puts that disk in the user profile, usually on C:, for
   every install folder.
-  - **`XDG_DATA_HOME`:** on Windows, Podman reads it for its data folder. No flag or
-    `containers.conf` key sets this location. OpenBot sets it to `<install>\engine` (the machine
-    home) on every Podman command it runs (`engine::machine_home`, `use_machine_home` in `main.rs`). The machine's
-    config stays in `%USERPROFILE%\.config` with absolute paths. As a result, a `podman` command
-    without the variable still finds the machine.
+  - **`XDG_DATA_HOME`, on `podman machine init` only:** on Windows, Podman reads it for its data
+    folder, and init puts a new machine's disk there. No flag or `containers.conf` key sets this
+    location. OpenBot sets it to `<install>\engine` (the machine home) for init alone
+    (`engine::podman_command`, `use_machine_home` in `main.rs`). Every later command finds the disk
+    through WSL and the absolute paths in the machine's config, which stays in
+    `%USERPROFILE%\.config`.
+  - **Every other Podman command keeps Podman's default data folder.** Podman keeps state there
+    that the person's own Podman and the uninstaller share: the API proxy's record
+    (`win-sshproxy.tid`, which stop reads to end the proxy on `\\.\pipe\podman-openbot`), and the
+    user-mode networking distribution `podman-net-usermode` with its count of machines and its lock.
+    For the same reason, init runs without `--user-mode-networking`, and `podman machine set
+    --user-mode-networking` turns it on right after, so `podman-net-usermode` is made in the default
+    folder, not in the install folder.
   - **A drive that cannot hold a WSL disk** (a network share, a removable drive, exFAT, FAT32)
     keeps the disk in the user profile (`windows::holds_wsl_disk`). Install does not stop, and the
     `create-machine` row says where the disk is. An installation saved on Docker Desktop has no
