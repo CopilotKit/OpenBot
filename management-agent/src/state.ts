@@ -54,11 +54,20 @@ export function journalBlocks(journal: PromotionJournal | null) {
 }
 
 export class StateStore {
+  /** Both saves read the whole ConfigMap before writing it back. Never let two do that at once. */
+  private writeLock: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly kube: Kube,
     private readonly namespace: string,
     private readonly name: string,
   ) {}
+
+  private serialized<T>(save: () => Promise<T>): Promise<T> {
+    const next = this.writeLock.then(save);
+    this.writeLock = next.catch(() => undefined);
+    return next;
+  }
 
   private async data() {
     const map = await this.kube.get<{ data?: Record<string, string> }>(
@@ -97,19 +106,23 @@ export class StateStore {
     });
   }
 
-  async saveState(state: AgentState) {
-    const data = await this.data();
-    await this.write({
-      ...data,
-      "state.json": `${JSON.stringify(State.parse(state), null, 2)}\n`,
+  saveState(state: AgentState) {
+    return this.serialized(async () => {
+      const data = await this.data();
+      await this.write({
+        ...data,
+        "state.json": `${JSON.stringify(State.parse(state), null, 2)}\n`,
+      });
     });
   }
 
-  async saveJournal(journal: PromotionJournal) {
-    const data = await this.data();
-    await this.write({
-      ...data,
-      "journal.json": `${JSON.stringify(journal, null, 2)}\n`,
+  saveJournal(journal: PromotionJournal) {
+    return this.serialized(async () => {
+      const data = await this.data();
+      await this.write({
+        ...data,
+        "journal.json": `${JSON.stringify(journal, null, 2)}\n`,
+      });
     });
   }
 }
