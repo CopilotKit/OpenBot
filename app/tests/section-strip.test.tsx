@@ -193,11 +193,11 @@ test("⌘B on a page with no panel opens Conversations' panel", async () => {
 });
 
 test("a page no section owns keeps the section that was open", async () => {
-  const { view, router } = renderApp("/bots");
-  await view.findByRole("link", { name: "Bots" });
+  const { view, router } = renderApp("/routines");
+  await view.findByRole("link", { name: "Routines" });
   await act(() => router.navigate({ to: "/teams" }));
   expect(
-    view.getByRole("link", { name: "Bots" }).getAttribute("aria-current"),
+    view.getByRole("link", { name: "Routines" }).getAttribute("aria-current"),
   ).toBe("page");
 });
 
@@ -222,4 +222,17 @@ test("clicking the open Conversations icon hides its panel, and clicking it agai
   expect(sidebarState(view)).toBe("collapsed");
   await user.click(conversations);
   expect(sidebarState(view)).toBe("expanded");
+});
+
+test("Bots on the strip shows the Bots panel and stays on the page", async () => {
+  const { view, router, user } = renderApp("/");
+  await user.click(await view.findByRole("button", { name: "Bots" }));
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  expect(router.state.location.pathname).toBe("/");
+  expect(
+    view.getByRole("button", { name: "Bots" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  // Pressed again with its panel showing, it folds the panel away, as Conversations does.
+  await user.click(view.getByRole("button", { name: "Bots" }));
+  expect(sidebarState(view)).toBe("collapsed");
 });

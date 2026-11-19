@@ -1,6 +1,6 @@
-import { IconLogout, IconMessages } from "@tabler/icons-react";
+import { type Icon, IconLogout, IconMessages } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { BrandName } from "@/components/edition/brand-name";
 import { Strip, StripItem } from "@/components/layout/strip";
 import { openNewOrganization } from "@/components/organizations/new-organization-dialog";
@@ -24,7 +24,12 @@ import {
   useOrganizationChoices,
   useWaitingInvitationCount,
 } from "@/lib/organizations/queries";
-import { CONVERSATIONS, useOpenSection } from "@/lib/sections";
+import {
+  CONVERSATIONS,
+  type SectionId,
+  sectionHasPanel,
+  useOpenSection,
+} from "@/lib/sections";
 import { BotsNavBadge } from "../bot-profile/attention";
 import { RecordingDot, useLiveRecording } from "../browser/browser-nav-item";
 import { navigationRender } from "../edition/team-features-dialog";
@@ -64,20 +69,31 @@ function HomeOrb() {
 }
 
 /**
- * Conversations' icon. It opens the section's panel without leaving the page; on the section that
- * is already open with its panel showing, it hides the panel, and shows it again.
+ * A section with a panel (Conversations, Bots): its icon opens the panel without leaving the page; on
+ * the section that is already open with its panel showing, it hides the panel, and shows it again.
  */
-function ConversationsItem() {
+function PanelItem({
+  id,
+  label,
+  icon,
+  end,
+}: {
+  id: SectionId;
+  label: string;
+  icon: Icon;
+  end?: ReactNode;
+}) {
   const { section, show } = useOpenSection();
   const { open, setOpen, isMobile } = useSidebar();
-  const current = section === CONVERSATIONS;
+  const current = section === id;
   return (
     <StripItem
       active={current}
-      icon={IconMessages}
-      label="Conversations"
+      end={end}
+      icon={icon}
+      label={label}
       onClick={() => {
-        show(CONVERSATIONS);
+        show(id);
         // A narrow window's sheet shows the strip and the panel together: nothing to fold.
         if (isMobile) return;
         setOpen(current ? !open : true);
@@ -86,7 +102,7 @@ function ConversationsItem() {
   );
 }
 
-/** One of the main menu's destinations, as a section whose pages it opens. */
+/** One of the main menu's destinations with no panel, as a section whose pages it opens. */
 function PageItem({ item }: { item: NavigationLink }) {
   const { section } = useOpenSection();
   const recording = useLiveRecording();
@@ -95,14 +111,7 @@ function PageItem({ item }: { item: NavigationLink }) {
   return (
     <StripItem
       active={section === item.id}
-      end={
-        item.id === "bots" ? (
-          // What waits on you across every Bot; Bots lists them first.
-          <BotsNavBadge onIcon />
-        ) : recordingHere ? (
-          <RecordingDot {...recordingHere} />
-        ) : null
-      }
+      end={recordingHere ? <RecordingDot {...recordingHere} /> : null}
       icon={item.icon}
       label={item.label}
       render={<Link to={item.to} />}
@@ -182,19 +191,31 @@ function StripAccount() {
 
 /**
  * The app's strip: the orb, Conversations, the main menu's destinations in the shared list's order
- * (`lib/navigation.ts`), and the account at the foot.
+ * (`lib/navigation.ts`), and the account at the foot. A section with a panel switches the panel and
+ * leaves the page alone; any other opens its page.
  */
 export function SectionStrip() {
   const navigation = useNavigationItems();
   return (
     <Strip footer={<StripAccount />} header={<HomeOrb />}>
-      <ConversationsItem />
+      <PanelItem icon={IconMessages} id={CONVERSATIONS} label="Conversations" />
       {navigation
         .filter(isNavigationLink)
         .filter((item) => item.section === "primary")
-        .map((item) => (
-          <PageItem item={item} key={item.id} />
-        ))}
+        .map((item) =>
+          sectionHasPanel(item.id) ? (
+            <PanelItem
+              // What waits on you across every Bot; the Bots panel puts a dot on each.
+              end={item.id === "bots" ? <BotsNavBadge onIcon /> : undefined}
+              icon={item.icon}
+              id={item.id}
+              key={item.id}
+              label={item.label}
+            />
+          ) : (
+            <PageItem item={item} key={item.id} />
+          ),
+        )}
     </Strip>
   );
 }

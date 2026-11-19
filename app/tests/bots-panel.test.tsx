@@ -413,3 +413,15 @@ test("after switching to Conversations, a conversation opened there keeps Conver
     view.getByRole("heading", { level: 2, name: "Conversations" }),
   ).toBeTruthy();
 });
+
+test("a Bot's row is filled only on hover, not for being its page", async () => {
+  const { view, router } = renderPanel();
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  await router.navigate({
+    to: "/bots/$agentId",
+    params: { agentId: "invoice" },
+  });
+  const link = await view.findByRole("link", { name: /^Invoice Review/ });
+  await waitFor(() => expect(link.getAttribute("data-status")).toBe("active"));
+  expect(link.className.split(/\s+/)).not.toContain("bg-foreground/5");
+});

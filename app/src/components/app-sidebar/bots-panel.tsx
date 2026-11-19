@@ -141,8 +141,6 @@ function BotRow({
        */}
       <div className="flex items-center gap-1" data-slot="bot-row">
         <Link
-          activeOptions={{ exact: false }}
-          activeProps={{ className: "bg-foreground/5" }}
           className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2"
           params={{ agentId: bot.id }}
           to="/bots/$agentId"

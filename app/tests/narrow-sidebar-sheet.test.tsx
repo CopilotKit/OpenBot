@@ -27,6 +27,7 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { organizationKeys } from "@/lib/organizations/queries";
+import { SectionProvider } from "@/lib/sections";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
 
@@ -184,13 +185,15 @@ function renderNarrowApp(
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <SidebarProvider>
-          <AppSidebar />
-          {/* The page's own Show sidebar button, which is how a narrow window opens the sheet. */}
-          <SidebarToggle />
-          <TeamFeaturesDialog />
-          <NewOrganizationDialog />
-        </SidebarProvider>
+        <SectionProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            {/* The page's own Show sidebar button, which is how a narrow window opens the sheet. */}
+            <SidebarToggle />
+            <TeamFeaturesDialog />
+            <NewOrganizationDialog />
+          </SidebarProvider>
+        </SectionProvider>
       ),
     }),
     history: createMemoryHistory({ initialEntries: [start] }),
@@ -232,7 +235,6 @@ test.each([
     /AI Model and Agent Framework/,
     "/channel/models",
   ],
-  ["Bots", "link", /^Bots/, "/bots"],
   ["Connections", "link", /^Connections/, "/connections"],
   // A link drawn as a button: it still goes somewhere.
   ["New conversation", "button", /^New conversation$/, "/channel/new"],
@@ -246,6 +248,17 @@ test.each([
     expect(app.router.state.location.pathname).toBe(path);
   },
 );
+
+test("picking Bots in the narrow sheet shows the Bots panel there and leaves the sheet open", async () => {
+  const app = renderNarrowApp();
+  const sheet = await app.openSheet();
+  await app.user.click(within(sheet).getByRole("button", { name: /^Bots/ }));
+  expect(
+    await within(sheet).findByRole("heading", { level: 2, name: "Bots" }),
+  ).toBeTruthy();
+  expect(app.view.getByRole("dialog", { name: "Sidebar" })).toBeTruthy();
+  expect(app.router.state.location.pathname).toBe("/channel/models");
+});
 
 test("Settings in the account menu closes the sheet and opens Settings", async () => {
   const app = renderNarrowApp();

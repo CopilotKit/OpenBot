@@ -825,10 +825,10 @@ describe("the account menu", () => {
     const marked = () =>
       [
         ...app.view.container.querySelectorAll(
-          "[data-slot=strip] [aria-current=page]",
+          "[data-slot=strip] [aria-current=page], [data-slot=strip] [aria-pressed=true]",
         ),
-      ].map((link) => link.getAttribute("href"));
-    await waitFor(() => expect(marked()).toEqual(["/bots"]));
+      ].map((item) => item.querySelector(".sr-only")?.textContent);
+    await waitFor(() => expect(marked()).toEqual(["Bots"]));
     const menu = await app.openAccountMenu();
     await app.person.click(
       await within(menu).findByRole("menuitem", { name: /Invitations/ }),
@@ -836,9 +836,9 @@ describe("the account menu", () => {
     await waitFor(() =>
       expect(app.router.state.location.pathname).toBe("/invitations"),
     );
-    expect(marked()).toEqual(["/bots"]);
+    expect(marked()).toEqual(["Bots"]);
     // Nor is any row drawn as if it were, by focus or by the pointer the menu left over it.
-    const bots = app.view.getByRole("link", { name: /^Bots/ });
+    const bots = app.view.getByRole("button", { name: /^Bots/ });
     expect(document.activeElement).not.toBe(bots);
   });
 

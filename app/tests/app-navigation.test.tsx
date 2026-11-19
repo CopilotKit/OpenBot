@@ -194,15 +194,16 @@ test.each(["user", "admin"] as const)(
   async (role) => {
     const { view, user } = renderSidebar(role);
     const footer = await view.findByRole("navigation", { name: "Sections" });
-    expect(
-      links(footer).map(({ label, to }) => ({
-        label: label.replace(/\d+$/, ""),
-        to,
-      })),
-    ).toEqual(expected(role, "primary"));
-    // What a person makes and comes back to, beside Bots, in the order of the eight.
+    // Every destination in the shared list's order, after Conversations: a section with a panel
+    // (Bots) as a button that switches the panel, any other as a link to its page.
+    const names = [
+      ...footer.querySelectorAll<HTMLElement>("a[href], button"),
+    ].map((item) => item.querySelector(".sr-only")?.textContent);
+    expect(names).toEqual([
+      "Conversations",
+      ...expected(role, "primary").map((item) => item.label),
+    ]);
     expect(links(footer).map(({ to }) => to)).toEqual([
-      "/bots",
       "/routines",
       "/memory",
       "/skills",
@@ -212,7 +213,7 @@ test.each(["user", "admin"] as const)(
     const badge = within(footer).getByRole("img", {
       name: "1 thing needs you",
     });
-    expect(badge.closest("a")?.getAttribute("href")).toBe("/bots");
+    expect(badge.closest("button")?.textContent).toContain("Bots");
 
     await user.click(view.getByRole("button", { name: /Maya Chen/ }));
     const menu = await view.findByRole("menu");
