@@ -78,6 +78,8 @@ export interface Task {
    * @nullable
    */
   workingSince?: string | null;
+  /** True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false. */
+  answeringYou?: boolean;
   /**
    * When the task's turn will next be tried, while it waits to try again after a failure that passes (a rate limit, a service that did not answer). Null or absent when it is not waiting to try again.
    * @nullable

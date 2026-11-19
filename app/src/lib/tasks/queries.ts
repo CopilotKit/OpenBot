@@ -71,6 +71,12 @@ export type BotTask = {
   /** When the work it is doing now began, for how long it has been working. Null unless working. */
   workingSince?: string | null;
   /**
+   * Working only because its Bot is answering a message the person sent in its conversation: no
+   * work of the task's own runs. What runs on its own (For you's Working on) leaves it out. Absent
+   * from a server that does not say, which reads as false.
+   */
+  answeringYou?: boolean;
+  /**
    * When its turn will next be tried, while it waits to try again after a failure that passes (a
    * rate limit, a service that did not answer). Null or absent when it is not waiting.
    */
@@ -236,9 +242,10 @@ export const reactionsQueryOptions = (threadId: string) =>
   });
 
 /**
- * Where a task stands right now. A reply the person typed in the task's conversation runs in their
- * browser, which the server cannot see; the conversation's working dot can, so it counts as Working
- * too. Waiting on the person still comes first.
+ * Where a task stands right now. A reply the person typed in the task's conversation makes the
+ * server read it Working once that run reaches the server; the conversation's working dot says so
+ * first, so it counts as Working here too, before the task list is read again. Waiting on the
+ * person still comes first.
  */
 export function liveStatus(status: TaskStatus, busy: boolean): TaskStatus {
   return busy && status !== "needs_input" ? "working" : status;

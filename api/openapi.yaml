@@ -3811,7 +3811,7 @@ paths:
         - Tasks
       operationId: resolveTask
       summary: Mark a task done
-      description: Mark the task done. It stays in the list for 7 days, and a new turn in its conversation opens it again.
+      description: Mark the task done. What its Bot still asks the person in its conversation stops waiting on them, both its questions and the cards it asked with, so nothing is left to answer. It stays in the list for 7 days, and a new turn in its conversation opens it again.
       security:
         - webSession: []
         - appOAuth:
@@ -24916,6 +24916,9 @@ components:
             - 'null'
           format: date-time
           description: When the work it is doing now began. Null or absent unless it is working.
+        answeringYou:
+          type: boolean
+          description: True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.
         tryingAgainAt:
           type:
             - string

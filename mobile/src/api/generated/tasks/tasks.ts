@@ -108,7 +108,7 @@ export const getResolveTaskUrl = (organizationId: string, taskId: string) => {
 };
 
 /**
- * Mark the task done. It stays in the list for 7 days, and a new turn in its conversation opens it again.
+ * Mark the task done. What its Bot still asks the person in its conversation stops waiting on them, both its questions and the cards it asked with, so nothing is left to answer. It stays in the list for 7 days, and a new turn in its conversation opens it again.
  * @summary Mark a task done
  */
 export const resolveTask = async (

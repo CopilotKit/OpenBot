@@ -130,6 +130,12 @@ export const ListTasksResponse = zod.object({
           .describe(
             "When the work it is doing now began. Null or absent unless it is working.",
           ),
+        answeringYou: zod
+          .boolean()
+          .optional()
+          .describe(
+            "True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.",
+          ),
         tryingAgainAt: zod.iso
           .datetime({ offset: true })
           .nullish()
@@ -297,6 +303,12 @@ export const GetTaskResponse = zod.object({
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
         ),
+      answeringYou: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.",
+        ),
       tryingAgainAt: zod.iso
         .datetime({ offset: true })
         .nullish()
@@ -454,7 +466,7 @@ export const ListTaskTurnsResponse = zod.object({
 });
 
 /**
- * Mark the task done. It stays in the list for 7 days, and a new turn in its conversation opens it again.
+ * Mark the task done. What its Bot still asks the person in its conversation stops waiting on them, both its questions and the cards it asked with, so nothing is left to answer. It stays in the list for 7 days, and a new turn in its conversation opens it again.
  * @summary Mark a task done
  */
 
@@ -571,6 +583,12 @@ export const ResolveTaskResponse = zod.object({
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      answeringYou: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.",
         ),
       tryingAgainAt: zod.iso
         .datetime({ offset: true })
@@ -742,6 +760,12 @@ export const ReopenTaskResponse = zod.object({
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
         ),
+      answeringYou: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.",
+        ),
       tryingAgainAt: zod.iso
         .datetime({ offset: true })
         .nullish()
@@ -912,6 +936,12 @@ export const RetryTaskResponse = zod.object({
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
         ),
+      answeringYou: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.",
+        ),
       tryingAgainAt: zod.iso
         .datetime({ offset: true })
         .nullish()
@@ -1081,6 +1111,12 @@ export const StopTaskResponse = zod.object({
         .nullish()
         .describe(
           "When the work it is doing now began. Null or absent unless it is working.",
+        ),
+      answeringYou: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True while the task is working only because its Bot is answering a message the person sent in its conversation, with no work of the task's own running. A list of work running on its own leaves such a task out. Absent from a server that does not say, which reads as false.",
         ),
       tryingAgainAt: zod.iso
         .datetime({ offset: true })
