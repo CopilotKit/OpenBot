@@ -1582,6 +1582,14 @@ components:
         assignedToMe:
           type: boolean
           description: Whether an administrator assigned this Bot to the caller.
+        lastConversationAt:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            When a conversation of the caller's with this Bot last had a
+            message, the Bot's or anybody's, or was started if it has none yet;
+            null when the caller has none. Counts the conversations
+            listConversations lists. Set on listBots.
         builtIn:
           type: boolean
           description: >-

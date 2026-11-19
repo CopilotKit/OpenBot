@@ -53,6 +53,11 @@ export interface Bot {
   withheld?: boolean;
   /** Whether an administrator assigned this Bot to the caller. */
   assignedToMe: boolean;
+  /**
+   * When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.
+   * @nullable
+   */
+  lastConversationAt?: string | null;
   /** Whether it runs at the deployment's own managed address, so it needs no callback credential of its own. */
   builtIn: boolean;
   /** Whether it runs on OpenBot's model, so a person can pick the model per conversation. */
