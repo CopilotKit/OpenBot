@@ -16,6 +16,4 @@ export interface CreateApiKeyRequest {
    * @maximum 365
    */
   expiresInDays?: number;
-  /** Whether the key works only in this organization, the one the address names. In any other organization it is refused as if the organization did not exist. Absent or false, the key works in every organization the person is a member of. */
-  organizationOnly?: boolean;
 }

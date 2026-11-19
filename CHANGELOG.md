@@ -21,9 +21,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **Delete an organization.** `DELETE /api/v2/organizations/{organizationId}/profile`
   (`deleteOrganization`) deletes an organization and what is in it, for an owner of it. A person's
   own organization and `default` stay, refused with 409 `CONFLICT`.
-- **API keys for one organization.** `organizationOnly` on a new API key makes it work only in the
-  organization the address names; without it a key works in every organization its person is in,
-  as before. A key in an answer carries `organizationId`, null for a key that works everywhere.
+- **An API key acts in the organization it was made in.** A key made in one organization is refused
+  in any other, as if that organization did not exist. A key in an answer carries `organizationId`.
+  A key made before this release acts in `default`.
 - **The realtime socket at an address that names the organization.**
   `/api/v2/organizations/{organizationId}/realtime/websocket` relays the same socket as
   `/api/intelligence/client/websocket`, for a caller who is a member of that organization.
