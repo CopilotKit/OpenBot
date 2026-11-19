@@ -42,10 +42,14 @@ pub fn command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
 /**
 `Command::output`, to the command's end or `limit`, whichever comes first.
 
-A command still running at `limit` is killed through its own handle and answers
-`ErrorKind::TimedOut`, so the caller can tell "it did not say in time" apart from "it said no" or
-"it could not start". Both streams are kept, as `output` keeps them, because a probe's diagnostic
-is often on the one its answer is not.
+A command still running at `limit` is stopped (see `stop`: on Windows with everything it started,
+elsewhere through its own handle) and answers `ErrorKind::TimedOut`, so the caller can tell "it did
+not say in time" apart from "it said no" or "it could not start". Both streams are kept, as
+`output` keeps them, because a probe's diagnostic is often on the one its answer is not.
+
+A command that exited while something it started kept its output open also answers
+`ErrorKind::TimedOut`, because its answer is incomplete, but carries `StayedOpen`: `stayed_open`
+tells a caller that needs to know that it did exit, and was not stopped at `limit`.
 
 `local_images::run_within` is the same wait for engine commands, but it drops stderr and caps
 stdout, which is right for `kubectl` output and wrong for a probe whose failure has to be shown.
@@ -109,9 +113,30 @@ pub fn output_watching(
         }),
         _ => Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            format!("exited with {status} but its output stayed open"),
+            StayedOpen(status),
         )),
     }
+}
+
+/// `output_watching`'s error for a command that exited with its output still held open by
+/// something it started. Its kind stays `TimedOut`, which every other caller relies on; only the
+/// type says the command did exit.
+#[derive(Debug)]
+pub struct StayedOpen(pub std::process::ExitStatus);
+
+impl std::fmt::Display for StayedOpen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "exited with {} but its output stayed open", self.0)
+    }
+}
+
+impl std::error::Error for StayedOpen {}
+
+/// Whether `error` is `StayedOpen`: the command exited, and was not stopped at its limit.
+pub fn stayed_open(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<StayedOpen>())
 }
 
 /// Stop `child` and reap it. On Windows, also stop what it started: `podman machine ssh` runs

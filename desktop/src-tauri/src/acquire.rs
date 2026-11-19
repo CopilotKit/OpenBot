@@ -240,21 +240,26 @@ pub(crate) fn podman(args: &[&str]) -> Result<String, String> {
 /// A `podman` command as it is. Only `podman_default` runs these: everything else goes through
 /// `podman`.
 pub(crate) fn podman_as_is(args: &[&str]) -> Result<String, String> {
+    podman_as_is_with(
+        args,
+        |limit| crate::quiet::output_within(crate::engine::tool(Engine::Podman).args(args), limit),
+        || crate::engine::tool(Engine::Podman).args(args).output(),
+        key_shared,
+    )
+}
+
+/// `podman_as_is` with how it runs podman passed in: `within` for a `machine ssh`, which gets
+/// `MACHINE_SSH_LIMIT`, and `unlimited` for everything else.
+fn podman_as_is_with(
+    args: &[&str],
+    within: impl FnOnce(Duration) -> std::io::Result<std::process::Output>,
+    unlimited: impl FnOnce() -> std::io::Result<std::process::Output>,
+    shared: impl FnOnce(&str) -> Option<String>,
+) -> Result<String, String> {
     if let ["machine", "ssh", machine, ..] = args {
-        return machine_ssh_with(
-            args,
-            || {
-                crate::quiet::output_within(
-                    crate::engine::tool(Engine::Podman).args(args),
-                    MACHINE_SSH_LIMIT,
-                )
-            },
-            || key_shared(machine),
-        );
+        return machine_ssh_with(args, || within(MACHINE_SSH_LIMIT), || shared(machine));
     }
-    podman_with(args, || {
-        crate::engine::tool(Engine::Podman).args(args).output()
-    })
+    podman_with(args, unlimited)
 }
 
 /// How long one `podman machine ssh` may run. Every script OpenBot runs in its machine answers in
@@ -279,7 +284,12 @@ fn machine_ssh_with(
     shared: impl FnOnce() -> Option<String>,
 ) -> Result<String, String> {
     match run() {
-        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+        // An ssh that exited answered, even if something it started held its output open: the
+        // key is not why.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::TimedOut
+                && !crate::quiet::stayed_open(&error) =>
+        {
             let timed_out = format!(
                 "podman {} did not answer within {}s",
                 args.join(" "),
@@ -1926,6 +1936,67 @@ mod tests {
             problem.detail.unwrap_or_default().contains(why),
             "{failure}"
         );
+    }
+
+    /// Only a `machine ssh` runs under `MACHINE_SSH_LIMIT`, and gets the key check when it runs
+    /// out. Every other podman command, image pulls included, runs as it always did.
+    #[test]
+    fn only_a_machine_ssh_runs_under_the_limit() {
+        let failure = podman_as_is_with(
+            &HOST_GATEWAY_LOOKUP,
+            |limit| {
+                assert_eq!(limit, MACHINE_SSH_LIMIT);
+                timed_out()
+            },
+            || panic!("a machine ssh ran without a limit"),
+            |machine| Some(format!("{machine} key can be read by PC\\Sandbox")),
+        )
+        .expect_err("a machine ssh past its limit must fail");
+        assert!(failure.contains(KEY_SHARED), "{failure}");
+        assert!(failure.contains("openbot key"), "{failure}");
+
+        for args in [
+            &["machine", "inspect", "openbot"][..],
+            &["machine", "start", "openbot"][..],
+            &["pull", "docker.io/library/alpine"][..],
+        ] {
+            let failure = podman_as_is_with(
+                args,
+                |_| panic!("podman {} ran under the machine ssh limit", args.join(" ")),
+                || {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "ran unlimited",
+                    ))
+                },
+                |_| panic!("the key was checked for podman {}", args.join(" ")),
+            )
+            .expect_err("the stand-in podman fails");
+            assert_eq!(failure, "could not run podman: ran unlimited");
+        }
+    }
+
+    /// An ssh that exited answered, even when something it started held its output open past
+    /// `quiet`'s wait for it. That is not the key, so the key is not checked.
+    #[test]
+    fn a_machine_ssh_that_exited_with_its_output_held_open_does_not_check_the_key() {
+        let cli = crate::test_support::probe_cli("machine-ssh-held-open");
+        let failure = machine_ssh_with(
+            &HOST_GATEWAY_LOOKUP,
+            || {
+                crate::quiet::output_within(
+                    crate::quiet::command(&cli).arg("linger"),
+                    Duration::from_secs(30),
+                )
+            },
+            || panic!("the key was checked after ssh exited"),
+        )
+        .expect_err("an answer held open is no answer");
+        assert!(failure.contains("output stayed open"), "{failure}");
+        assert!(!failure.contains("did not answer within"), "{failure}");
+        // The child holding the output open ends three seconds later.
+        std::thread::sleep(Duration::from_secs(4));
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
     }
 
     /// The key is asked about only when ssh did not answer: an answer pays nothing.
