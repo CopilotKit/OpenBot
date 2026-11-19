@@ -54,6 +54,7 @@ import type { RouterContext } from "@/router-context";
 import { Route as RootRoute } from "@/routes/__root";
 import { Route as AuthedRoute } from "@/routes/_authed";
 import { Route as SignRoute } from "@/routes/sign";
+import { version as TREE_VERSION } from "../../package.json";
 import cases from "../../shared/fixtures/client-version/cases.json";
 import { nativeFetch, pageFetch } from "./page-fetch";
 import { settleReactWork } from "./settle-react-work";
@@ -235,7 +236,9 @@ function expected(
 }
 
 test("an OpenBot of today: the sign-in screen, and no update screen", async () => {
-  expect(RELEASE).toBe("1.1.0");
+  // This tree's own release, whatever package.json says: 1.1.0 on main, a candidate such as
+  // 1.1.1-rc.1 on its release branch.
+  expect(RELEASE).toBe(TREE_VERSION);
   expect(expected("current", THIS_WEB)).toBe("ok");
   const view = openApp();
   expect(
