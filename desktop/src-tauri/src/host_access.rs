@@ -23,6 +23,8 @@ use crate::quiet::said as command_said;
 #[cfg(test)]
 const DEFAULT_IMAGE: &str = "openbot-agent-computer:s10-chromium-arm64";
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// How long the folders are held for a server that stopped answering. See `broker_loop`.
+const DEFAULT_SERVER_AWAY_GRACE: Duration = Duration::from_secs(120);
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_OUTPUT_LIMIT: usize = 64 * 1024;
 const DEFAULT_MEMORY: &str = "512m";
@@ -41,6 +43,8 @@ pub struct HostAccessConfig {
     pub image: String,
     pub forbidden_paths: Vec<PathBuf>,
     pub poll_interval: Duration,
+    /// How long the folders are held for a server that stopped answering. See `broker_loop`.
+    pub server_away_grace: Duration,
     pub operation_timeout: Duration,
     pub output_limit: usize,
     pub memory: String,
@@ -63,6 +67,7 @@ impl HostAccessConfig {
             image: image.into(),
             forbidden_paths,
             poll_interval: DEFAULT_POLL_INTERVAL,
+            server_away_grace: DEFAULT_SERVER_AWAY_GRACE,
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
             output_limit: DEFAULT_OUTPUT_LIMIT,
             memory: DEFAULT_MEMORY.into(),
@@ -610,6 +615,41 @@ impl Drop for HostAccess {
     }
 }
 
+/// Why asking the server failed: it gave no answer at all, or it answered with something else.
+#[derive(Debug)]
+enum ServerFailure {
+    /// Nothing answered: the server is not running, is starting, or did not answer in time.
+    NoAnswer(String),
+    /// It answered, and not as it should: another token, an older server, an unreadable body.
+    Answered(String),
+}
+
+impl std::fmt::Display for ServerFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoAnswer(said) | Self::Answered(said) => f.write_str(said),
+        }
+    }
+}
+
+/**
+Asks the server for the next operation, once a poll interval, until Stop.
+
+FOUND ON A MAC: every restart of the server dropped every folder the person had approved. The Status
+window's Restart makes the server's container again and leaves this broker running, but the server
+keeps grants only in its memory, and this loop revoked every grant here on the first poll nobody
+answered. Settings → Computer then read "No folders approved", and the Bot was told its folder access
+had ended. A restart is not a Stop.
+
+So a server that stops answering has the folders held for it, for `server_away_grace`: work in
+flight is ended (the server that asked for it is gone), and the grants are kept. Once it answers
+again they are handed back to it (`restore_grants`) before anything else is asked of it. A server
+that does not come back within the grace, one that answers with anything but the hand-back (another
+token, a server older than the route), and Stop and Quit, which stop this broker, all still end
+them. A restart the container engine makes alone is held the same way: nothing here can tell it
+from one the Status window asked for, and the host token, which survives both, is what proves the
+server that comes back is this computer's own.
+*/
 fn broker_loop(inner: Arc<Inner>) {
     let client = match Client::builder()
         .timeout(Duration::from_secs(15))
@@ -622,10 +662,58 @@ fn broker_loop(inner: Arc<Inner>) {
             return;
         }
     };
+    // Since when the folders have been held for a server that stopped answering.
+    let mut holding_since: Option<Instant> = None;
     while !inner.is_stopped() {
+        if let Some(since) = holding_since {
+            match inner.restore_grants(&client) {
+                Ok(restored) => {
+                    log::info!(
+                        "[host access] the server answers again; {restored} folder grant(s) handed back"
+                    );
+                    holding_since = None;
+                }
+                Err(ServerFailure::NoAnswer(error)) => {
+                    if since.elapsed() >= inner.config.server_away_grace {
+                        log::warn!(
+                            "[host access] the server did not come back within {} s, so the folders it held ended: {error}",
+                            inner.config.server_away_grace.as_secs()
+                        );
+                        if let Err(cleanup) = inner.revoke_all_and_stop() {
+                            log::error!(
+                                "[host access] cleanup after a failed poll failed: {cleanup}"
+                            );
+                        }
+                        holding_since = None;
+                    }
+                    thread::sleep(inner.config.poll_interval);
+                    continue;
+                }
+                Err(ServerFailure::Answered(error)) => {
+                    log::warn!(
+                        "[host access] the server came back but did not take the folders back, so they ended: {error}"
+                    );
+                    if let Err(cleanup) = inner.revoke_all_and_stop() {
+                        log::error!("[host access] cleanup after a failed poll failed: {cleanup}");
+                    }
+                    holding_since = None;
+                }
+            }
+        }
         match inner.next_operation(&client) {
             Ok(Some(operation)) => inner.spawn_operation(client.clone(), operation),
             Ok(None) => thread::sleep(inner.config.poll_interval),
+            Err(ServerFailure::NoAnswer(error)) if inner.holds_live_grants() => {
+                log::warn!(
+                    "[host access] the server is not answering; holding this computer's folders for up to {} s while it comes back: {error}",
+                    inner.config.server_away_grace.as_secs()
+                );
+                if let Err(cleanup) = inner.end_work_in_flight() {
+                    log::error!("[host access] cleanup after a failed poll failed: {cleanup}");
+                }
+                holding_since = Some(Instant::now());
+                thread::sleep(inner.config.poll_interval);
+            }
             Err(error) => {
                 log::warn!("[host access] poll failed and revoked local leases: {error}");
                 if let Err(cleanup) = inner.revoke_all_and_stop() {
@@ -643,11 +731,103 @@ impl Inner {
     }
 
     fn revoke_all_and_stop(&self) -> HostAccessResult<()> {
+        self.end_work(true)
+    }
+
+    /// The server that asked for the work in flight is gone: no operation in progress may run, and
+    /// every container is removed. The grants are kept. See `broker_loop`.
+    fn end_work_in_flight(&self) -> HostAccessResult<()> {
+        self.end_work(false)
+    }
+
+    fn holds_live_grants(&self) -> bool {
+        self.state
+            .lock()
+            .expect("host state poisoned")
+            .grants
+            .values()
+            .any(|grant| !grant.revoked)
+    }
+
+    /**
+    Hands the grants still held here back to a server that answers again, and ends here the ones it
+    did not take back (the person ended them there, or a Stop for them is on its way). Answers how
+    many it took. A grant is only ever ended here by this, never made live again. See `broker_loop`.
+    */
+    fn restore_grants(&self, client: &Client) -> Result<usize, ServerFailure> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Held {
+            grant_id: String,
+            bot_id: String,
+            actor_id: String,
+            display_name: String,
+        }
+        #[derive(Deserialize)]
+        struct Restored {
+            restored: Vec<String>,
+        }
+        let held = self
+            .state
+            .lock()
+            .expect("host state poisoned")
+            .grants
+            .values()
+            .filter(|grant| !grant.revoked)
+            .map(|grant| Held {
+                grant_id: grant.id.clone(),
+                bot_id: grant.bot_id.clone(),
+                actor_id: grant.actor_id.clone(),
+                display_name: display_name_for(&grant.root),
+            })
+            .collect::<Vec<_>>();
+        if held.is_empty() {
+            return Ok(0);
+        }
+        let url = endpoint(&self.config.base_url, "/api/host-access/desktop/restore");
+        let response = client
+            .post(url)
+            .bearer_auth(&self.config.token)
+            .json(&serde_json::json!({ "grants": held }))
+            .send()
+            .map_err(|error| {
+                ServerFailure::NoAnswer(format!("Could not hand the folders back: {error}"))
+            })?;
+        if !response.status().is_success() {
+            return Err(ServerFailure::Answered(format!(
+                "Handing the folders back failed with HTTP {}",
+                response.status()
+            )));
+        }
+        let restored = response.json::<Restored>().map_err(|error| {
+            ServerFailure::Answered(format!(
+                "Handing the folders back returned invalid JSON: {error}"
+            ))
+        })?;
+        let taken = restored.restored.into_iter().collect::<HashSet<_>>();
+        let mut state = self.state.lock().expect("host state poisoned");
+        for grant in state.grants.values_mut() {
+            if !taken.contains(&grant.id) {
+                grant.revoked = true;
+            }
+        }
+        Ok(state.grants.values().filter(|grant| !grant.revoked).count())
+    }
+
+    fn end_work(&self, revoke_grants: bool) -> HostAccessResult<()> {
         let _effect = self.effect_lock.lock().expect("host effect lock poisoned");
         let running = {
             let mut state = self.state.lock().expect("host state poisoned");
-            for grant in state.grants.values_mut() {
-                grant.revoked = true;
+            if revoke_grants {
+                for grant in state.grants.values_mut() {
+                    grant.revoked = true;
+                }
+            } else {
+                let in_flight = state.active_by_operation.clone();
+                state.canceled_operations.extend(in_flight.iter().cloned());
+                state
+                    .active_by_bot
+                    .retain(|_, operation_id| !in_flight.contains(operation_id));
             }
             state.running.values().cloned().collect::<Vec<_>>()
         };
@@ -671,23 +851,23 @@ impl Inner {
         }
     }
 
-    fn next_operation(&self, client: &Client) -> HostAccessResult<Option<DesktopOperation>> {
+    fn next_operation(&self, client: &Client) -> Result<Option<DesktopOperation>, ServerFailure> {
         let url = endpoint(&self.config.base_url, "/api/host-access/desktop/next");
         let response = client
             .get(url)
             .bearer_auth(&self.config.token)
             .send()
             .map_err(|error| {
-                HostAccessError::Http(format!("Could not poll host operation: {error}"))
+                ServerFailure::NoAnswer(format!("Could not poll host operation: {error}"))
             })?;
         if !response.status().is_success() {
-            return Err(HostAccessError::Http(format!(
+            return Err(ServerFailure::Answered(format!(
                 "Host operation poll failed with HTTP {}",
                 response.status()
             )));
         }
         let poll = response.json::<DesktopPollResponse>().map_err(|error| {
-            HostAccessError::Http(format!(
+            ServerFailure::Answered(format!(
                 "Host operation poll returned invalid JSON: {error}"
             ))
         })?;
@@ -3734,6 +3914,295 @@ mod tests {
             received_at_ms: now_millis(),
         };
         assert!(inner.require_grant(&operation).is_err());
+    }
+
+    /// A server the broker polls that can be taken down and brought back on the same address, as a
+    /// restart does: while down it drops every connection unanswered. Records what it answered.
+    struct RestartingServer {
+        base_url: String,
+        up: Arc<std::sync::atomic::AtomicBool>,
+        /// What it answers a hand-back with.
+        restore_status: Arc<Mutex<u16>>,
+        seen: Arc<Mutex<Vec<(String, String)>>>,
+        dropped: Arc<AtomicUsize>,
+        done: Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl RestartingServer {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let up = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let restore_status = Arc::new(Mutex::new(200_u16));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let dropped = Arc::new(AtomicUsize::new(0));
+            let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (worker_up, worker_status, worker_seen, worker_dropped, worker_done) = (
+                up.clone(),
+                restore_status.clone(),
+                seen.clone(),
+                dropped.clone(),
+                done.clone(),
+            );
+            let thread = thread::spawn(move || loop {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if worker_done.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(_) => return,
+                };
+                if !worker_up.load(Ordering::SeqCst) {
+                    worker_dropped.fetch_add(1, Ordering::SeqCst);
+                    drop(stream);
+                    continue;
+                }
+                // Winsock accept inherits the listener's nonblocking mode.
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() {
+                    continue;
+                }
+                let path = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                let mut content_length = 0_usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_err() {
+                        break;
+                    }
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = trimmed.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0_u8; content_length];
+                if reader.read_exact(&mut body).is_err() {
+                    continue;
+                }
+                let body = String::from_utf8(body).unwrap();
+                let (status, answer) = if path.ends_with("/desktop/next") {
+                    (200, r#"{"operations":[],"leaseMs":15000}"#.to_string())
+                } else if path.ends_with("/desktop/restore") {
+                    let status = *worker_status.lock().unwrap();
+                    let presented: serde_json::Value = serde_json::from_str(&body).unwrap();
+                    let restored = presented["grants"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|grant| grant["grantId"].clone())
+                        .collect::<Vec<_>>();
+                    (
+                        status,
+                        serde_json::json!({ "restored": restored }).to_string(),
+                    )
+                } else {
+                    (404, "{}".to_string())
+                };
+                worker_seen.lock().unwrap().push((path, body));
+                let response = format!(
+                    "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+            Self {
+                base_url,
+                up,
+                restore_status,
+                seen,
+                dropped,
+                done,
+                thread: Some(thread),
+            }
+        }
+
+        fn set_up(&self, up: bool) {
+            self.up.store(up, Ordering::SeqCst);
+        }
+
+        fn asked(&self, path: &str) -> usize {
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(seen, _)| seen.ends_with(path))
+                .count()
+        }
+
+        fn handed_back(&self) -> Vec<serde_json::Value> {
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(path, _)| path.ends_with("/desktop/restore"))
+                .map(|(_, body)| serde_json::from_str(body).unwrap())
+                .collect()
+        }
+    }
+
+    impl Drop for RestartingServer {
+        fn drop(&mut self) {
+            self.done.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// Waits for `check`, failing the test after twenty seconds rather than holding it.
+    fn wait_until(what: &str, check: impl Fn() -> bool) {
+        let patience = Instant::now() + Duration::from_secs(20);
+        while !check() {
+            assert!(Instant::now() < patience, "never happened: {what}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// A broker polling `server`, holding one live grant for `bot-a`, the folders held for
+    /// `grace` when the server stops answering.
+    fn polling_broker(server: &RestartingServer, grace: Duration) -> (HostAccess, PathBuf) {
+        let mut config = HostAccessConfig::new(
+            &server.base_url,
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        config.poll_interval = Duration::from_millis(20);
+        config.server_away_grace = grace;
+        let host = HostAccess::start_with_approval(config, Arc::new(DenyAllApprovalUi)).unwrap();
+        let root = temp_root("host-access-restart");
+        host.inner.state.lock().unwrap().grants.insert(
+            "grant".into(),
+            LocalGrant {
+                id: "grant".into(),
+                bot_id: "bot-a".into(),
+                actor_id: "actor".into(),
+                bot_name: Some("Research Bot".into()),
+                root: root.clone(),
+                revoked: false,
+            },
+        );
+        (host, root)
+    }
+
+    fn grant_is_live(host: &HostAccess) -> bool {
+        host.inner
+            .state
+            .lock()
+            .unwrap()
+            .grants
+            .get("grant")
+            .is_some_and(|grant| !grant.revoked)
+    }
+
+    /// The server going away for a while, as a restart takes it: several polls nobody answers.
+    fn restart(server: &RestartingServer) {
+        server.set_up(false);
+        let dropped = server.dropped.load(Ordering::SeqCst);
+        wait_until("polls went unanswered", || {
+            server.dropped.load(Ordering::SeqCst) >= dropped + 3
+        });
+        server.set_up(true);
+    }
+
+    /*
+     * FOUND ON A MAC: every restart of the server, the Status window's Restart among them, dropped
+     * every folder the person had approved. The first poll nobody answered revoked every grant here,
+     * and the restarted server knew none, so Settings → Computer read "No folders approved" and the
+     * Bot was told its folder access had ended. The grants are now held while the server is away and
+     * handed back once it answers.
+     */
+    #[test]
+    fn a_folder_approved_before_the_server_restarted_is_held_and_handed_back_to_it() {
+        let server = RestartingServer::start();
+        let (host, root) = polling_broker(&server, Duration::from_secs(60));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 2);
+
+        restart(&server);
+        wait_until("the folders were handed back", || {
+            server.asked("/desktop/restore") >= 1
+        });
+        let polls_after = server.asked("/desktop/next");
+        wait_until("the broker polled again", || {
+            server.asked("/desktop/next") > polls_after
+        });
+
+        assert!(grant_is_live(&host), "the grant ended with the restart");
+        assert_eq!(
+            server.handed_back()[0],
+            serde_json::json!({
+                "grants": [{
+                    "grantId": "grant",
+                    "botId": "bot-a",
+                    "actorId": "actor",
+                    "displayName": display_name_for(&root),
+                }]
+            })
+        );
+        host.stop_with_machine_stopped();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_server_that_stays_away_or_will_not_take_the_folders_back_ends_them_and_so_does_stop() {
+        // Gone for longer than the grace: the folders end, as they always did.
+        let server = RestartingServer::start();
+        let (host, root) = polling_broker(&server, Duration::from_millis(150));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 1);
+        server.set_up(false);
+        wait_until("the grant ended", || !grant_is_live(&host));
+        assert_eq!(server.asked("/desktop/restore"), 0);
+        host.stop_with_machine_stopped();
+        let _ = fs::remove_dir_all(root);
+
+        // Back, but refusing the hand-back (another token, or a server without the route).
+        let server = RestartingServer::start();
+        *server.restore_status.lock().unwrap() = 401;
+        let (host, root) = polling_broker(&server, Duration::from_secs(60));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 1);
+        restart(&server);
+        wait_until("the folders were offered back", || {
+            server.asked("/desktop/restore") >= 1
+        });
+        wait_until("the grant ended", || !grant_is_live(&host));
+        host.stop_with_machine_stopped();
+        let _ = fs::remove_dir_all(root);
+
+        // Stop while the server is away: the folders end, and nothing is handed back after it.
+        let server = RestartingServer::start();
+        let (host, root) = polling_broker(&server, Duration::from_secs(60));
+        wait_until("the broker polled", || server.asked("/desktop/next") >= 1);
+        server.set_up(false);
+        let dropped = server.dropped.load(Ordering::SeqCst);
+        wait_until("polls went unanswered", || {
+            server.dropped.load(Ordering::SeqCst) >= dropped + 2
+        });
+        host.stop_with_machine_stopped();
+        server.set_up(true);
+        thread::sleep(Duration::from_millis(200));
+        assert!(!grant_is_live(&host));
+        assert_eq!(server.asked("/desktop/restore"), 0);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
