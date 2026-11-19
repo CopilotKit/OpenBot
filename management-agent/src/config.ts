@@ -14,7 +14,8 @@ const name = z
   .max(63);
 
 export const AgentConfig = z.strictObject({
-  managementUrl: z.url({ protocol: /^https?$/ }),
+  /** The agent authenticates with a client certificate; over http:// none is presented. */
+  managementUrl: z.url({ protocol: /^https$/ }),
   installId: z.uuid(),
   cloud: z.enum(CLOUDS),
   /** Base64 of the raw 32-byte Ed25519 key the management service signs commands with. */

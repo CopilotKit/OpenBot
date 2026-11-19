@@ -276,6 +276,9 @@ or a script has to say.
 - An admin's review list shows a person as soon as their own space is made, and a denied folder
   action lands in Activity after the attempt it denied.
 - Mastra's mark is its current one.
+- The management agent refuses an HTTP management URL at start-up instead of silently sending its
+  heartbeats without a client certificate, and stops reading an answer from the management service
+  once it grows past the size a real reply can have.
 
 ## 1.1.0
 
