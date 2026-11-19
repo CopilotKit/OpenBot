@@ -244,7 +244,7 @@ export class ManagementAgent {
     }
     if (state.rolledBackFrom === desired.version) return;
     if (state.accepted?.digest === candidate.digest) {
-      this.message = null;
+      await this.converge(state.accepted, candidate.manifest);
       return;
     }
     const release: AcceptedRelease = {
@@ -284,27 +284,96 @@ export class ManagementAgent {
       this.message = `waiting for the maintenance window to upgrade to ${desired.version}`;
       return;
     }
-    const failure = this.lastFailure;
-    if (
-      failure?.digest === candidate.digest &&
-      this.clock().getTime() - failure.at < RETRY_AFTER_FAILURE_MS
-    ) {
-      this.message = `upgrade to ${desired.version} was undone and is retried ${new Date(failure.at + RETRY_AFTER_FAILURE_MS).toISOString()}: ${failure.error}`;
+    if (this.retryLater(release)) return;
+    this.start(desired.version, () =>
+      this.remembering(release, () =>
+        this.upgrade(current, release, candidate.manifest),
+      ),
+    );
+  }
+
+  /**
+   * The desired release is the accepted one, so Flux should be pinned to it. When it is not, a
+   * promotion stopped on another chart (journal `recovery-required`), and a person has since
+   * recovered as the journal says (restored a backup, removed journal.json) and set the desired
+   * version back to the last accepted release. Flux is still pinned to the release that failed, so
+   * the agent puts the accepted one back: inside the window, journaled like any promotion.
+   *
+   * No quiescing and no backup. The database is the one the accepted release was accepted with
+   * (or the backup the person restored for it), so returning to that release changes nothing in
+   * it, and the failed promotion already left the server stopped. Quiescing would also record
+   * those zero replicas as the ones to put back.
+   */
+  private async converge(accepted: AcceptedRelease, manifest: ReleaseManifest) {
+    const pinned = await this.flux.pinnedDigest();
+    if (pinned === accepted.digest) {
+      this.message = null;
       return;
     }
-    this.start(desired.version, async () => {
-      try {
-        await this.upgrade(current, release, candidate.manifest);
-        this.lastFailure = null;
-      } catch (error) {
-        this.lastFailure = {
-          digest: candidate.digest,
-          at: this.clock().getTime(),
-          error: error instanceof Error ? error.message : String(error),
+    if (!this.insideWindow()) {
+      this.waitingWindow = true;
+      this.operationTarget = accepted.version;
+      this.message = `waiting for the maintenance window to return to ${accepted.version}`;
+      return;
+    }
+    if (this.retryLater(accepted)) return;
+    this.start(accepted.version, () =>
+      this.remembering(accepted, async () => {
+        const target = {
+          ...productTarget(this.config),
+          timeoutSeconds: PROMOTION_TIMEOUT_SECONDS,
         };
-        throw error;
-      }
-    });
+        const journal = this.newJournal(
+          pinned ? `chart ${pinned}` : "none",
+          accepted.version,
+        );
+        // The failed promotion scaled the server to zero. The chart puts its replicas back; when
+        // an autoscaler owns them, one replica lets the autoscaler take over again.
+        journal.previousReplicas = 1;
+        await runPromotion({
+          target,
+          run,
+          candidate: manifest,
+          journal,
+          save: (entry) => this.saveJournal(entry),
+          before: await serverDeployment(target, run),
+          maintenance: false,
+          backup: async () => {},
+          apply: () => this.applyRelease(accepted, manifest),
+          declaredSuspension: async () => new Set(),
+        });
+      }),
+    );
+  }
+
+  /** After an attempt at `release` was undone, says so and waits before the next one. */
+  private retryLater(release: AcceptedRelease) {
+    const failure = this.lastFailure;
+    if (
+      failure?.digest !== release.digest ||
+      this.clock().getTime() - failure.at >= RETRY_AFTER_FAILURE_MS
+    )
+      return false;
+    this.message = `the move to ${release.version} was undone and is retried ${new Date(failure.at + RETRY_AFTER_FAILURE_MS).toISOString()}: ${failure.error}`;
+    return true;
+  }
+
+  /** Runs `work` towards `release`, remembering a failure so it is not retried at once. */
+  private async remembering(
+    release: AcceptedRelease,
+    work: () => Promise<void>,
+  ) {
+    try {
+      await work();
+      this.lastFailure = null;
+    } catch (error) {
+      this.lastFailure = {
+        digest: release.digest,
+        at: this.clock().getTime(),
+        error: error instanceof Error ? error.message : String(error),
+      };
+      throw error;
+    }
   }
 
   /** No release accepted yet: install on an empty namespace, or adopt the running release when it
@@ -378,8 +447,12 @@ export class ManagementAgent {
     await this.flux.writePins(
       this.pinsFor(manifest) as unknown as Record<string, unknown>,
     );
-    await this.flux.pin(release.digest);
-    await this.flux.waitForRelease(release.digest, PROMOTION_TIMEOUT_SECONDS);
+    const token = await this.flux.pin(release.digest);
+    await this.flux.waitForRelease(
+      release.digest,
+      PROMOTION_TIMEOUT_SECONDS,
+      token,
+    );
   }
 
   private newJournal(

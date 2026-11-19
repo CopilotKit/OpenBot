@@ -25,6 +25,8 @@ export interface HelmRelease {
     conditions?: Condition[];
     lastAttemptedRevision?: string;
     lastAttemptedRevisionDigest?: string;
+    /** The last `reconcile.fluxcd.io/requestedAt` value helm-controller acted on. */
+    lastHandledReconcileAt?: string;
     history?: {
       chartName?: string;
       chartVersion?: string;
@@ -107,7 +109,18 @@ export class Flux {
     });
   }
 
-  /** Moves Flux to exactly `digest` and lets it install, then asks both controllers to act now. */
+  /**
+   * Moves Flux to exactly `digest` and lets it install, then asks both controllers to act now.
+   * Returns the request's token, which helm-controller reports back as `lastHandledReconcileAt`
+   * once it has acted on it.
+   *
+   * The HelmRelease is also asked to reset its failure counts (`resetAt`, with the same token as
+   * `requestedAt`, as `flux reconcile helmrelease --reset` does). Remediation retries are 0, so
+   * after a failed install or upgrade Flux tries the same chart and values again only on a reset:
+   * without it, putting back a digest that already failed (a failed first install, once a person
+   * has fixed its cause) would leave the release failed.
+   * https://fluxcd.io/flux/components/helm/helmreleases/#resetting-remediation-retries
+   */
   async pin(digest: string) {
     await this.kube.patch(
       this.namespace,
@@ -116,27 +129,32 @@ export class Flux {
       { spec: { ref: { digest }, suspend: false } },
     );
     await this.setHelmReleaseSuspended(false);
-    const now = new Date().toISOString();
-    for (const resource of [
-      "ocirepositories.source.toolkit.fluxcd.io/" +
-        this.config.product.ociRepository,
-      `helmreleases.helm.toolkit.fluxcd.io/${this.config.product.helmRelease}`,
-    ]) {
-      const [kind = "", name = ""] = resource.split("/");
-      await this.kube.annotate(
-        this.namespace,
-        kind,
-        name,
-        `reconcile.fluxcd.io/requestedAt=${now}`,
-      );
-    }
+    const token = new Date().toISOString();
+    await this.kube.annotate(
+      this.namespace,
+      "ocirepositories.source.toolkit.fluxcd.io",
+      this.config.product.ociRepository,
+      `reconcile.fluxcd.io/requestedAt=${token}`,
+    );
+    // Both in one change, so helm-controller never sees the request without the reset.
+    await this.kube.annotate(
+      this.namespace,
+      "helmreleases.helm.toolkit.fluxcd.io",
+      this.config.product.helmRelease,
+      `reconcile.fluxcd.io/requestedAt=${token}`,
+      `reconcile.fluxcd.io/resetAt=${token}`,
+    );
+    return token;
   }
 
   /**
    * Waits until the HelmRelease has attempted `digest` and says whether that worked. Flux's
    * remediation is off, so a failed install or upgrade stays failed for a person to look at.
+   *
+   * With the token `pin` returned, only a status written after helm-controller acted on that
+   * request counts: a digest put back after it failed shows the old failure until then.
    */
-  async waitForRelease(digest: string, timeoutSeconds: number) {
+  async waitForRelease(digest: string, timeoutSeconds: number, token?: string) {
     const deadline = Date.now() + timeoutSeconds * 1000;
     let last = "";
     while (Date.now() < deadline) {
@@ -146,7 +164,9 @@ export class Flux {
         release?.status?.lastAttemptedRevisionDigest === digest ||
         release?.status?.lastAttemptedRevision?.endsWith(digest);
       const current =
-        release?.status?.observedGeneration === release?.metadata.generation;
+        release?.status?.observedGeneration === release?.metadata.generation &&
+        (token === undefined ||
+          release?.status?.lastHandledReconcileAt === token);
       last = condition
         ? `${condition.reason ?? ""}: ${condition.message ?? ""}`
         : "no Ready condition yet";
