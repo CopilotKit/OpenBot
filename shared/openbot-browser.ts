@@ -52,6 +52,8 @@ export type LauncherConnection = {
   token: string;
   connectionId: string;
   user: { id: string; name: string; email: string };
+  /** The organization OpenBot made the connection in. Absent: `default`, as from an OpenBot older than organizations. */
+  organizationId?: string;
 };
 
 export type LauncherState = {

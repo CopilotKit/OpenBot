@@ -38,10 +38,13 @@ export type {
 } from "./generated/model";
 export {
   ApiError,
+  chooseOrganization,
   DEPLOYMENT_ORGANIZATION_ID,
+  deploymentOrganization,
   ME,
   ORGANIZATION_ID,
   organizationAddress,
+  organizationChoices,
 } from "./request";
 
 /** One page of a list the API pages (`limit`, `cursor`, `nextCursor`). */
