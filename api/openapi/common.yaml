@@ -527,7 +527,9 @@ components:
         under it (conversations:write); a file's download at
         `GET /api/attachments/{attachmentId}`, the address a sent message
         keeps (conversations:read); and the relayed realtime socket at
-        `/api/intelligence/client/websocket` (conversations:read). They work
+        `/api/intelligence/client/websocket` (conversations:read), which is
+        also on /api/v2 at
+        `/api/v2/organizations/{organizationId}/realtime/websocket`. They work
         nowhere else.
 
 
@@ -641,11 +643,15 @@ components:
       scheme: bearer
       bearerFormat: OpenBot API key
       description: >-
-        Automation. An API key acts as the person who created it, in every
-        organization they are a member of, like a personal access token: the
-        address of each request names the organization, and one the person
-        is not in answers not found. A key starts `obk_` and is sent as
+        Automation. An API key acts as the person who created it, like a
+        personal access token: in every organization they are a member of,
+        or in one organization only when it was made for that one
+        (organizationOnly). The address of each request names the
+        organization, and one the key does not work in answers not found. A
+        key starts `obk_` and is sent as
         `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
+        (the relayed realtime socket at
+        `/api/v2/organizations/{organizationId}/realtime/websocket` included)
         and on the relayed realtime socket at
         `/api/intelligence/client/websocket`, where a join token the key made
         is spent (createConversationJoinToken). A person makes one in the web

@@ -8,6 +8,29 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.**
+
+- **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
+  removed no earlier than its sunset, and only once nothing uses it.
+  - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.
+    Change a member's role with `PATCH /api/v2/organizations/{organizationId}/members/{personId}`
+    (`updateOrganizationMember`) instead.
+
+### API
+
+- **Delete an organization.** `DELETE /api/v2/organizations/{organizationId}/profile`
+  (`deleteOrganization`) deletes an organization and what is in it, for an owner of it. A person's
+  own organization and `default` stay, refused with 409 `CONFLICT`.
+- **API keys for one organization.** `organizationOnly` on a new API key makes it work only in the
+  organization the address names; without it a key works in every organization its person is in,
+  as before. A key in an answer carries `organizationId`, null for a key that works everywhere.
+- **The realtime socket at an address that names the organization.**
+  `/api/v2/organizations/{organizationId}/realtime/websocket` relays the same socket as
+  `/api/intelligence/client/websocket`, for a caller who is a member of that organization.
+- **Push notifications per organization.** A phone registered under an organization's address gets
+  push notifications from the person's Bots in that organization only.
+- New optional fields: `organizationId` on a conversation event and on a Recorder connection.
+
 ### Bots and models
 
 - **A Bot asks for the app a request needs instead of searching around it.** Asked about what is

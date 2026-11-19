@@ -80,6 +80,12 @@ export const ListApiKeysResponse = zod.object({
             .datetime({ offset: true })
             .nullable()
             .describe("When it last signed a request. Null if never."),
+          organizationId: zod
+            .string()
+            .nullish()
+            .describe(
+              "The organization the key works in, when it was made for that one only (organizationOnly). Null when it works in every organization the person is a member of. Absent from a server that makes every key for every organization.",
+            ),
         })
         .describe("An API key a person made. Never the key itself."),
     )
@@ -95,7 +101,7 @@ export const ListApiKeysResponse = zod.object({
 });
 
 /**
- * Make an API key that acts as the person, in every organization they are a member of, on the API. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
+ * Make an API key that acts as the person on the API: in this organization only when organizationOnly is true, otherwise in every organization they are a member of. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app's sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.
  * @summary Make an API key
  */
 
@@ -150,6 +156,12 @@ export const CreateApiKeyBody = zod.object({
     .max(createApiKeyBodyExpiresInDaysMax)
     .optional()
     .describe("Days until the key stops working. Absent, it never expires."),
+  organizationOnly: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Whether the key works only in this organization, the one the address names. In any other organization it is refused as if the organization did not exist. Absent or false, the key works in every organization the person is a member of.",
+    ),
 });
 
 export const CreateApiKeyResponse = zod.object({
@@ -170,6 +182,12 @@ export const CreateApiKeyResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe("When it last signed a request. Null if never."),
+      organizationId: zod
+        .string()
+        .nullish()
+        .describe(
+          "The organization the key works in, when it was made for that one only (organizationOnly). Null when it works in every organization the person is a member of. Absent from a server that makes every key for every organization.",
+        ),
     })
     .describe("An API key a person made. Never the key itself."),
   key: zod
