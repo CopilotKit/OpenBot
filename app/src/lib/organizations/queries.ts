@@ -65,10 +65,11 @@ export const organizationKeys = {
 };
 
 /**
- * The one organization of an OpenBot that keeps one. The API addresses it as `default`
- * (api/openapi.yaml, `OrganizationId`).
+ * The one organization of an OpenBot that keeps one, which every install has. The API addresses it
+ * as `default` (api/openapi.yaml, `OrganizationId`), and an API key made before keys were bound to
+ * an organization acts in it.
  */
-const ONLY_ORGANIZATION = "default";
+export const ONLY_ORGANIZATION = "default";
 const ONLY: OwnOrganizations = {
   organizations: [],
   canCreate: false,

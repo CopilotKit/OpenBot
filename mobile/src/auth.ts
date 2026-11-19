@@ -2,6 +2,7 @@ import { expoClient } from "@better-auth/expo/client";
 import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
 import * as SecureStore from "expo-secure-store";
+import type { OrganizationStore } from "./organization";
 import { clientHeaders } from "./release";
 
 const configured = process.env.EXPO_PUBLIC_SERVER_URL;
@@ -51,3 +52,13 @@ export async function signInEnterprise(email: string) {
       result.error.message ?? "Could not sign in to your organization.",
     );
 }
+
+/**
+ * Where the person's pick of organization is kept on this phone (../organization.ts): beside the session, one place for
+ * each OpenBot, as sign-in keeps its own.
+ */
+const PICKED_ORGANIZATION = `openbot-${endpoint.host.replace(/[^a-zA-Z0-9_-]/g, "-")}-organization`;
+export const organizationStore: OrganizationStore = {
+  read: () => SecureStore.getItemAsync(PICKED_ORGANIZATION),
+  write: (id) => SecureStore.setItemAsync(PICKED_ORGANIZATION, id),
+};
