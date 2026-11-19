@@ -7,11 +7,19 @@
  *   journal.json  the last promotion, in the promotion tool's journal format
  *
  * A journal in any phase other than `accepted` or `failed` means a promotion stopped after it may
- * have changed the database. Nothing more is upgraded until a person has recovered and removed
- * journal.json:
+ * have changed the database. Nothing more is upgraded until a person has recovered:
+ *
+ *   1. restore the backup (your cloud's runbook);
+ *   2. point your product values at the restored database, if it moved;
+ *   3. set the desired version in the management service to the release that ran on that data
+ *      (the accepted one);
+ *   4. remove journal.json:
  *
  *   kubectl -n openbot-system patch configmap openbot-agent-state --type=json \
  *     -p '[{"op":"remove","path":"/data/journal.json"}]'
+ *
+ * The agent then puts that release back inside the maintenance window: it pins Flux to its chart
+ * and writes its pins again (the failed promotion left them on its own), with no backup.
  */
 import { z } from "zod";
 import type { PromotionJournal } from "../../shared/kubernetes-promotion";

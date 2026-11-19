@@ -41,7 +41,7 @@ import type { ManagementClient } from "./client";
 import type { Agent } from "./config";
 import { Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
-import { CommandFailed, type Kube, run } from "./kube";
+import { CommandFailed, type Kube } from "./kube";
 import { internalStatusPins } from "./pins";
 import {
   type AcceptedRelease,
@@ -244,7 +244,7 @@ export class ManagementAgent {
     }
     if (state.rolledBackFrom === desired.version) return;
     if (state.accepted?.digest === candidate.digest) {
-      this.message = null;
+      await this.putBackAccepted(state.accepted);
       return;
     }
     const release: AcceptedRelease = {
@@ -314,14 +314,16 @@ export class ManagementAgent {
     manifest: ReleaseManifest,
   ) {
     const target = productTarget(this.config);
-    const server = await serverDeployment(target, run).catch(() => null);
+    const server = await serverDeployment(target, this.kube.run).catch(
+      () => null,
+    );
     if (!server && (await this.flux.pinnedDigest()) === null) {
       this.start(release.version, () =>
         this.install(release, manifest, "install"),
       );
       return;
     }
-    const identity = await readIdentity(this.config);
+    const identity = await readIdentity(this.config, this.kube.run);
     if (!identity || !identityMatches(identity, manifest)) {
       this.message = `the running release (${identity?.version ?? "unknown"}) is not ${release.version}, and the agent has no record of it to plan an upgrade from; set the desired version to the running one first`;
       return;
@@ -333,6 +335,30 @@ export class ManagementAgent {
       return;
     }
     this.start(release.version, () => this.install(release, manifest, "adopt"));
+  }
+
+  /**
+   * The desired release is the accepted one, but Flux is not on it: a promotion stopped in
+   * `recovery-required` and left Flux pinned to the failed chart and the pins on its image, and a
+   * person has since restored the backup and removed journal.json. The accepted release goes back
+   * on inside the window, without a backup (the database was restored to its data).
+   */
+  private async putBackAccepted(accepted: AcceptedRelease) {
+    if (await this.flux.on(accepted.digest)) {
+      this.message = null;
+      return;
+    }
+    if (!this.insideWindow()) {
+      this.waitingWindow = true;
+      this.operationTarget = accepted.version;
+      this.message = `waiting for the maintenance window to put ${accepted.version} back`;
+      return;
+    }
+    const from = (await this.flux.pinnedDigest()) ?? "none";
+    const manifest = parseReleaseManifest(JSON.parse(accepted.manifest));
+    this.start(accepted.version, () =>
+      this.install(accepted, manifest, "restore", from),
+    );
   }
 
   private start(target: string, work: () => Promise<void>) {
@@ -397,7 +423,7 @@ export class ManagementAgent {
       backupReference,
       databaseMayHaveChanged: false,
       recovery:
-        "No automatic Helm or database rollback. Inspect the HelmRelease, the migration and the rollout. Restore a matching backup, or restart the previous release only if its policy says restart-previous. Then remove journal.json from the agent's state ConfigMap.",
+        "No automatic Helm or database rollback. Inspect the HelmRelease, the migration and the rollout. To recover: restore the backup (your cloud's runbook), point your product values at the restored database if it moved, set the desired version in the management service to the release that ran on that data (the accepted one), then remove journal.json from the agent's state ConfigMap. The agent puts that release back inside the maintenance window. Restart the previous release instead only if its policy says restart-previous.",
     };
   }
 
@@ -411,16 +437,15 @@ export class ManagementAgent {
     });
   }
 
-  /** First install, or taking over a running release that already is the desired one. */
+  /** First install, taking over a running release that already is the desired one, or putting
+   * the accepted release back after a person recovered (`from` is what Flux was pinned to). */
   private async install(
     release: AcceptedRelease,
     manifest: ReleaseManifest,
-    mode: "install" | "adopt",
+    mode: "install" | "adopt" | "restore",
+    from = mode === "install" ? "none" : release.version,
   ) {
-    const journal = this.newJournal(
-      mode === "adopt" ? release.version : "none",
-      release.version,
-    );
+    const journal = this.newJournal(from, release.version);
     try {
       journal.databaseMayHaveChanged = true;
       journal.phase = "promoting";
@@ -429,11 +454,12 @@ export class ManagementAgent {
       journal.phase = "verifying";
       await this.saveJournal(journal);
       await this.verify(manifest);
-      await this.updateState((state) => {
-        state.accepted = release;
-        state.previous = null;
-        state.rolledBackFrom = null;
-      });
+      if (mode !== "restore")
+        await this.updateState((state) => {
+          state.accepted = release;
+          state.previous = null;
+          state.rolledBackFrom = null;
+        });
       journal.phase = "accepted";
       await this.saveJournal(journal);
     } catch (error) {
@@ -446,7 +472,7 @@ export class ManagementAgent {
 
   private async verify(manifest: ReleaseManifest) {
     const target = productTarget(this.config);
-    await run(
+    await this.kube.run(
       [
         "kubectl",
         "--namespace",
@@ -460,8 +486,15 @@ export class ManagementAgent {
       ],
       { cwd: target.cwd },
     );
-    verifyDeployment(await serverDeployment(target, run), manifest, true);
-    const identity: ReleaseIdentity | null = await readIdentity(this.config);
+    verifyDeployment(
+      await serverDeployment(target, this.kube.run),
+      manifest,
+      true,
+    );
+    const identity: ReleaseIdentity | null = await readIdentity(
+      this.config,
+      this.kube.run,
+    );
     if (!identity || !identityMatches(identity, manifest))
       throw new Error(
         "Running server release identity does not match the candidate",
@@ -478,7 +511,7 @@ export class ManagementAgent {
       ...productTarget(this.config),
       timeoutSeconds: PROMOTION_TIMEOUT_SECONDS,
     };
-    const before = await serverDeployment(target, run);
+    const before = await serverDeployment(target, this.kube.run);
     verifyDeployment(before, current, false);
     const operation = operationId(this.clock());
     const maintenance =
@@ -486,7 +519,7 @@ export class ManagementAgent {
       current.compatibility.database.to !== candidate.compatibility.database.to;
     await runPromotion({
       target,
-      run,
+      run: this.kube.run,
       candidate,
       journal: this.newJournal(
         current.version,
@@ -689,11 +722,11 @@ export class ManagementAgent {
         };
         await runPromotion({
           target,
-          run,
+          run: this.kube.run,
           candidate: manifest,
           journal: this.newJournal(from.version, previous.version),
           save: (entry) => this.saveJournal(entry),
-          before: await serverDeployment(target, run),
+          before: await serverDeployment(target, this.kube.run),
           maintenance: false,
           backup: async () => {},
           apply: () => this.applyRelease(previous, manifest),

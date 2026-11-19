@@ -4,6 +4,7 @@
  * or anything a person wrote.
  */
 import {
+  type KubeRunner,
   lastMigrationName,
   type ReleaseIdentity,
   runningIdentity,
@@ -12,7 +13,7 @@ import {
 import type { Heartbeat, UpgradeState } from "../../shared/management-contract";
 import type { AgentConfig } from "./config";
 import { type Flux, ready } from "./flux";
-import { type Kube, run } from "./kube";
+import type { Kube } from "./kube";
 
 export const AGENT_VERSION = process.env.OPENBOT_AGENT_VERSION ?? "0.1.0";
 
@@ -50,6 +51,7 @@ export function internalReleaseUrl(config: AgentConfig) {
  * internal status Service first, and from inside the server's container where a release has none. */
 export async function readIdentity(
   config: AgentConfig,
+  run: KubeRunner,
 ): Promise<ReleaseIdentity | null> {
   try {
     const response = await fetch(internalReleaseUrl(config), {
@@ -92,7 +94,7 @@ export async function collectHeartbeat(options: {
       kube.list<Workload>(namespace, "statefulsets").catch(() => []),
       kube.list<Pod>(namespace, "pods").catch(() => []),
       flux.helmRelease().catch(() => null),
-      readIdentity(config),
+      readIdentity(config, kube.run),
     ]);
   const imageDigests: Record<string, string> = {};
   for (const pod of pods) {

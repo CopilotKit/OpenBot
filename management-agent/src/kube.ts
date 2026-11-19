@@ -48,11 +48,11 @@ export async function execute(
   }
 }
 
-/** The shared promotion steps' runner. */
-export const run: KubeRunner = (command, options) => execute(command, options);
-
 export class Kube {
   constructor(private readonly exec = execute) {}
+
+  /** The shared promotion steps' runner, through the same kubectl as every other call. */
+  readonly run: KubeRunner = (command, options) => this.exec(command, options);
 
   kubectl(
     args: string[],

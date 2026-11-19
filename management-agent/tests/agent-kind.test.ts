@@ -9,7 +9,10 @@
  *  3. inside the window: quiesce, a backup Job (backup.kind=command, pg_dump of the bundle's real
  *     PostgreSQL, verified with pg_restore) that finishes before Flux is pinned to the new chart
  *     digest, then verification through /release;
- *  4. a signed rollback is refused because the release's policy says restore-backup.
+ *  4. a signed rollback is refused because the release's policy says restore-backup;
+ *  5. a release whose image does not exist ends in recovery-required, with Flux left on its chart;
+ *     a person sets the desired version back to the accepted release and removes journal.json, and
+ *     the agent puts the accepted release back.
  *
  * Opt-in, because it needs a cluster it may write to and the release builds. On a kind cluster
  * with a plain-HTTP registry on the kind network:
@@ -33,8 +36,15 @@ import {
   test,
 } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { RELEASE_FROM_INSIDE } from "../../shared/kubernetes-promotion";
 import { releaseManifestDigest } from "../../shared/management-contract";
 import {
   FakeManagementService,
@@ -101,18 +111,22 @@ interface Build {
   manifest: string;
   digest: string;
 }
-function push(version: string): Build {
+function bundleChart(version: string) {
   const directory = join(env.OPENBOT_AGENT_E2E_RELEASES ?? "", version);
   const chart = readdirSync(directory).find(
     (file) => file.startsWith("openbot-bundle-") && file.endsWith(".tgz"),
   );
   if (!chart) throw new Error(`no bundle chart in ${directory}`);
+  return join(directory, chart);
+}
+/** Pushes a chart archive to the test registry and returns its digest. */
+function pushChart(archive: string) {
   // helm push names the digest on stderr.
   const pushed = spawnSync(
     "helm",
     [
       "push",
-      join(directory, chart),
+      archive,
       `oci://${env.OPENBOT_AGENT_E2E_PUSH}/charts`,
       "--plain-http",
     ],
@@ -123,13 +137,16 @@ function push(version: string): Build {
   const output = `${pushed.stdout}${pushed.stderr}`;
   const digest = output.match(/Digest:\s*(sha256:[0-9a-f]{64})/)?.[1];
   if (!digest) throw new Error(`helm push printed no digest: ${output}`);
+  return digest;
+}
+function push(version: string): Build {
   return {
     version,
     manifest: readFileSync(
       join(env.OPENBOT_AGENT_E2E_RELEASES ?? "", `${version}.json`),
       "utf8",
     ),
-    digest,
+    digest: pushChart(bundleChart(version)),
   };
 }
 
@@ -552,5 +569,184 @@ run("management agent on a real cluster", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("policy: restore-backup needs a person");
     expect(pinned()).toBe(to.digest);
+  });
+
+  test("after a release fails, the accepted release is put back once a person has recovered", async () => {
+    service.window = { weekday: 0, startUtc: "00:00", hours: 168 };
+    const state = () =>
+      json<{ data: Record<string, string> }>(
+        "-n",
+        SYSTEM,
+        "get",
+        "configmap",
+        "openbot-agent-state",
+      ).data;
+    const journal = () => JSON.parse(state()["journal.json"] ?? "{}");
+    const pins = () =>
+      json<{ data: Record<string, string> }>(
+        "-n",
+        SYSTEM,
+        "get",
+        "configmap",
+        "openbot-agent-pins",
+      ).data["values.yaml"] ?? "";
+    const backups = () =>
+      kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")
+        .split("\n")
+        .filter((name) => name.includes("openbot-backup-"));
+
+    // The accepted release's chart, packaged again under another version so its digest differs,
+    // with a manifest whose image does not exist: Helm starts, the server never does.
+    const directory = join(pki.directory, "broken");
+    rmSync(directory, { recursive: true, force: true });
+    mkdirSync(directory, { recursive: true });
+    sh("tar", ["-xzf", bundleChart(to.version), "-C", directory]);
+    sh("helm", [
+      "package",
+      join(directory, "openbot-bundle"),
+      "--version",
+      "0.0.0-broken.1",
+      "--destination",
+      directory,
+    ]);
+    const archive = readdirSync(directory).find((file) =>
+      file.endsWith(".tgz"),
+    );
+    const accepted = JSON.parse(to.manifest);
+    const missingDigest = `sha256:${"de".repeat(32)}`;
+    const missing = {
+      reference: `ghcr.io/copilotkit/openbot@${missingDigest}`,
+    };
+    const version = `${to.version}-broken`;
+    const broken: Build = {
+      version,
+      manifest: JSON.stringify({
+        ...accepted,
+        version,
+        artifacts: {
+          ...accepted.artifacts,
+          images: {
+            ...accepted.artifacts.images,
+            openbot: missing,
+            server: missing,
+          },
+        },
+        compatibility: {
+          ...accepted.compatibility,
+          database: {
+            ...accepted.compatibility.database,
+            from: [accepted.compatibility.database.to],
+          },
+        },
+        upgrade: { ...accepted.upgrade, fromVersions: [to.version] },
+      }),
+      digest: pushChart(join(directory, archive ?? "")),
+    };
+    expect(broken.digest).not.toBe(to.digest);
+
+    await desire(broken);
+    const stopped = await until(
+      `${version} stopped in recovery-required`,
+      () => {
+        const entry = journal();
+        return (
+          entry.toVersion === version &&
+          entry.phase === "recovery-required" &&
+          entry
+        );
+      },
+      45,
+    );
+    expect(stopped.databaseMayHaveChanged).toBe(true);
+    await until(
+      "recovery-required reported",
+      () => latest()?.upgrade.state === "recovery-required",
+      5,
+    );
+    // Where the failed promotion leaves things: Flux on its chart, the pins on its image, and the
+    // accepted release still the one before it.
+    expect(pinned()).toBe(broken.digest);
+    expect(pins()).toContain(missingDigest);
+    expect(JSON.parse(state()["state.json"] ?? "{}").accepted.version).toBe(
+      to.version,
+    );
+
+    // A person recovers. The server never started, so OpenBot migrated nothing and the database
+    // still holds the accepted release's data: restoring the backup has nothing to undo here. They
+    // set the desired version back to the release that ran on that data, then remove journal.json.
+    const backupsBefore = new Set(backups());
+    await desire(to);
+    kubectl(
+      "-n",
+      SYSTEM,
+      "patch",
+      "configmap",
+      "openbot-agent-state",
+      "--type=json",
+      "-p",
+      JSON.stringify([{ op: "remove", path: "/data/journal.json" }]),
+    );
+
+    const restored = await until(
+      `${to.version} put back`,
+      () => {
+        const entry = journal();
+        return (
+          entry.toVersion === to.version &&
+          entry.phase === "accepted" &&
+          pinned() === to.digest &&
+          latest()?.upgrade.state === "idle" &&
+          entry
+        );
+      },
+      45,
+    );
+    expect(restored.fromVersion).toBe(broken.digest);
+    // No backup: the database was already restored to this release's data.
+    expect(restored.backupReference).toBe("none");
+    expect(backups().filter((name) => !backupsBefore.has(name))).toEqual([]);
+    expect(pins()).not.toContain(missingDigest);
+
+    // The product serves the accepted release again: its image by digest, and its own /release.
+    const image = accepted.artifacts.images.openbot.reference.split("@")[1];
+    expect(pins()).toContain(image);
+    const server = json<{
+      items: {
+        metadata: { name: string };
+        spec: {
+          template: { spec: { containers: { name: string; image: string }[] } };
+        };
+      }[];
+    }>(
+      "-n",
+      PRODUCT,
+      "get",
+      "deployment",
+      "-l",
+      "app.kubernetes.io/instance=openbot,app.kubernetes.io/component=server",
+    ).items[0];
+    expect(
+      server?.spec.template.spec.containers.find((c) => c.name === "server")
+        ?.image,
+    ).toEndWith(`@${image}`);
+    const release = await until(
+      "/release from the running server",
+      () =>
+        JSON.parse(
+          kubectl(
+            "-n",
+            PRODUCT,
+            "exec",
+            `deployment/${server?.metadata.name}`,
+            "--container",
+            "server",
+            "--",
+            ...RELEASE_FROM_INSIDE,
+          ),
+        ) as { version?: string },
+      5,
+    );
+    expect(release.version).toBe(to.version);
+    expect(latest()?.openbot.version).toBe(to.version);
   });
 });

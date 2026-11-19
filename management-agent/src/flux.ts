@@ -49,6 +49,14 @@ export function ready(object: { status?: { conditions?: Condition[] } }) {
   );
 }
 
+/** Whether the HelmRelease's last attempt was the chart at `digest`. */
+export function attempted(release: HelmRelease | null, digest: string) {
+  return (
+    release?.status?.lastAttemptedRevisionDigest === digest ||
+    release?.status?.lastAttemptedRevision?.endsWith(digest) === true
+  );
+}
+
 export class Flux {
   constructor(
     private readonly kube: Kube,
@@ -79,6 +87,16 @@ export class Flux {
     const repository = await this.ociRepository();
     const digest = repository?.spec.ref?.digest;
     return digest && digest !== PLACEHOLDER_DIGEST ? digest : null;
+  }
+
+  /** Whether Flux is pinned to `digest` and, once Helm has tried a chart, last tried that one. */
+  async on(digest: string) {
+    if ((await this.pinnedDigest()) !== digest) return false;
+    const release = await this.helmRelease();
+    const status = release?.status;
+    if (!status?.lastAttemptedRevisionDigest && !status?.lastAttemptedRevision)
+      return true;
+    return attempted(release, digest);
   }
 
   setHelmReleaseSuspended(suspend: boolean) {
@@ -142,17 +160,15 @@ export class Flux {
     while (Date.now() < deadline) {
       const release = await this.helmRelease();
       const condition = release ? ready(release) : undefined;
-      const attempted =
-        release?.status?.lastAttemptedRevisionDigest === digest ||
-        release?.status?.lastAttemptedRevision?.endsWith(digest);
+      const tried = attempted(release, digest);
       const current =
         release?.status?.observedGeneration === release?.metadata.generation;
       last = condition
         ? `${condition.reason ?? ""}: ${condition.message ?? ""}`
         : "no Ready condition yet";
-      if (attempted && current && condition?.status === "True") return;
+      if (tried && current && condition?.status === "True") return;
       if (
-        attempted &&
+        tried &&
         current &&
         condition?.status === "False" &&
         /Failed|Stalled/.test(condition.reason ?? "")
