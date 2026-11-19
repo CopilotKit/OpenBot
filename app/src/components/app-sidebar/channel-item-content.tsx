@@ -22,6 +22,7 @@ export function ChannelItemContent({
   pinned = false,
   revealing = false,
   view = "detailed",
+  avatar = true,
 }: {
   participantIds: string[];
   name: string;
@@ -34,6 +35,8 @@ export function ChannelItemContent({
   pinned?: boolean;
   revealing?: boolean;
   view?: ConversationView;
+  /** False where the row sits under its Bot already (the Bots panel), so the orb is not said twice. */
+  avatar?: boolean;
 }) {
   const unreadDot = unread ? (
     <span
@@ -68,13 +71,15 @@ export function ChannelItemContent({
   if (view === "compact") {
     return (
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="shrink-0">
-          <ChannelAvatar
-            participantIds={participantIds}
-            size={20}
-            typing={busy}
-          />
-        </div>
+        {avatar ? (
+          <div className="shrink-0">
+            <ChannelAvatar
+              participantIds={participantIds}
+              size={20}
+              typing={busy}
+            />
+          </div>
+        ) : null}
         <span
           className={`min-w-0 flex-1 truncate text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-normal"}`}
           title={title}

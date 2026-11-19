@@ -98,6 +98,7 @@ function BotConversations({ botId }: { botId: string }) {
           unread={isUnread(channel, openChannelId)}
           untitled={untitledLine(channel)}
           view="compact"
+          avatar={false}
         />
       ))}
       {conversations.hasNextPage ? (

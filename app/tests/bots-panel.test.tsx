@@ -240,6 +240,16 @@ test("the top three open with their conversations, read from the server by Bot",
   expect(caret("Old Helper").getAttribute("aria-expanded")).toBe("false");
 });
 
+test("a Bot's conversations under it are titles and times, without the Bot's orb again", async () => {
+  served.invoice = () =>
+    Response.json(
+      conversationPage([conversation("i1", ["invoice"], "Open Acme invoices")]),
+    );
+  const { view } = renderPanel();
+  const row = (await view.findByText("Open Acme invoices")).closest("a");
+  expect(row?.querySelector("[role=img]")).toBeNull();
+});
+
 test("the caret opens and closes a Bot, and the Bot's name opens its page", async () => {
   served.old = () =>
     Response.json(conversationPage([conversation("o1", ["old"], "Last year")]));

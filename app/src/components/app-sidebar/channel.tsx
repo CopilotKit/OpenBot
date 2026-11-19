@@ -43,6 +43,7 @@ export const Channel = memo(function Channel({
   busy,
   emphasis,
   view = "detailed",
+  avatar = true,
 }: {
   channelId: string;
   participantIds: string[];
@@ -60,6 +61,8 @@ export const Channel = memo(function Channel({
   emphasis: MessageListEmphasis;
   /** One line or two: see `ChannelItemContent`. */
   view?: ConversationView;
+  /** False under its Bot in the Bots panel: see `ChannelItemContent`. */
+  avatar?: boolean;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -121,6 +124,7 @@ export const Channel = memo(function Channel({
               pinned={pinned}
               revealing={revealed.typing}
               view={view}
+              avatar={avatar}
             />
           </Link>
         </ContextMenuTrigger>
