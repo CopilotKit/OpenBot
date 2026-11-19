@@ -77,6 +77,7 @@ export const getExchangeRecorderConnectCodeResponseMock =
       name: "Sam Ortiz",
       email: "sam@example.com",
     },
+    organizationId: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
   });
 
 export const getGetRecorderIdentityResponseMock = (): RecorderIdentity => ({

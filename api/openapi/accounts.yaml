@@ -110,6 +110,8 @@ paths:
         not their own away from administrator, and not the role of somebody
         the deployment's configuration names as an administrator. Asking for
         the role a person already has changes nothing and records nothing.
+        role is deprecated: change a member's role with
+        updateOrganizationMember instead.
       security:
         - webSession: []
         - appOAuth: [people:write]
@@ -609,8 +611,9 @@ paths:
       operationId: createApiKey
       summary: Make an API key
       description: >-
-        Make an API key that acts as the person, in every organization they
-        are a member of, on the API. The key itself is in this answer and never again:
+        Make an API key that acts as the person on the API: in this
+        organization only when organizationOnly is true, otherwise in every
+        organization they are a member of. The key itself is in this answer and never again:
         OpenBot keeps only a hash of it. Only the person themselves may make
         one, signed in to OpenBot: a key can never make another key, and
         neither can an app's sign-in. A key ends when it expires, when it is
@@ -630,6 +633,7 @@ paths:
                 value:
                   name: Nightly report
                   expiresInDays: 90
+                  organizationOnly: true
       responses:
         '201':
           description: The key, shown this once.
@@ -1306,6 +1310,13 @@ components:
             Only the person themselves may change it.
         role:
           $ref: '#/components/schemas/AssignableRole'
+          deprecated: true
+          x-deprecation-date: 2026-11-19
+          x-sunset: 2028-05-19
+          description: >-
+            Deprecated. Change a member's role with updateOrganizationMember
+            (PATCH /api/v2/organizations/{organizationId}/members/{personId})
+            instead.
     AdvanceOnboardingRequest:
       type: object
       additionalProperties: false
@@ -1456,6 +1467,13 @@ components:
           type: [string, 'null']
           format: date-time
           description: When it last signed a request. Null if never.
+        organizationId:
+          type: [string, 'null']
+          description: >-
+            The organization the key works in, when it was made for that one
+            only (organizationOnly). Null when it works in every organization
+            the person is a member of. Absent from a server that makes every
+            key for every organization.
     ApiKeyPage:
       type: object
       required: [apiKeys, nextCursor]
@@ -1488,6 +1506,13 @@ components:
           minimum: 1
           maximum: 365
           description: Days until the key stops working. Absent, it never expires.
+        organizationOnly:
+          type: boolean
+          description: >-
+            Whether the key works only in this organization, the one the
+            address names. In any other organization it is refused as if the
+            organization did not exist. Absent or false, the key works in
+            every organization the person is a member of.
     CreatedApiKey:
       type: object
       required: [apiKey, key]
@@ -2155,6 +2180,7 @@ components:
             createdAt: '2026-11-14T09:00:00.000Z'
             expiresAt: '2027-02-12T09:00:00.000Z'
             lastUsedAt: '2026-11-14T09:05:12.000Z'
+            organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         nextCursor: null
     CreatedApiKeyExample:
       summary: A key, made.
@@ -2166,6 +2192,7 @@ components:
           createdAt: '2026-11-14T09:00:00.000Z'
           expiresAt: '2027-02-12T09:00:00.000Z'
           lastUsedAt: null
+          organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         key: obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg
     SessionPageLast:
       summary: Signed in on a laptop and a phone.

@@ -181,6 +181,24 @@ export const updateOrganization = async (
   );
 };
 
+export const getDeleteOrganizationUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/profile`;
+};
+
+/**
+ * Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, an API key made for it alone stops working, and it leaves every member's list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person's own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Delete an organization
+ */
+export const deleteOrganization = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  return apiRequest<void>(getDeleteOrganizationUrl(organizationId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
 export const getUpdateOrganizationMemberUrl = (
   organizationId: string,
   personId: string,
