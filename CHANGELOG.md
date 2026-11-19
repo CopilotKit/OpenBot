@@ -276,6 +276,8 @@ or a script has to say.
 - An admin's review list shows a person as soon as their own space is made, and a denied folder
   action lands in Activity after the attempt it denied.
 - Mastra's mark is its current one.
+- Long tool results and approval text now offer "Show all". The measurement used to be taken once,
+  while the text was still hidden, so the button never appeared and the result stayed clipped.
 
 ## 1.1.0
 
