@@ -39,6 +39,14 @@ So: no hand-drawn containers, no new widths, no new spacing scale, no second way
 the screen genuinely does not fit — a table, a canvas, an editor beside a live preview — that is a
 deviation worth stating out loud and worth a comment saying why.
 
+The same holds for colours, corners and shadows. They come from the UI Kit (Figma "OpenBot
+(MASTER)", page UI Kit): the primitives in `components/ui` and the tokens in `theme.css`. A screen
+does not write Tailwind's palette (`text-emerald-600`), a colour of its own (`bg-[#f1f2f7]`), a
+corner of its own (`rounded-[20px]`) or a shadow of its own (`shadow-[…]`), and its icons come from
+`components/icons`. `app/tests/ui-kit-guard.test.ts` fails on a new one. Screens drawn before the
+kit are counted in `app/tests/ui-kit-guard.baseline.json`; cleaning one up lowers its count, and
+the test says how to write the new counts.
+
 ## The Shape
 
 Four components make the frame. They compose in this order and nest no other way.
@@ -246,6 +254,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
+| `text-emerald-600`, `bg-[#…]`, `rounded-[20px]` or `shadow-[…]` in a screen | A look the UI Kit does not have, which no token change reaches; `ui-kit-guard.test.ts` fails | A token (`text-success`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a `components/ui` primitive such as `Badge` |
 
 ## Error Handling
 
