@@ -62,6 +62,9 @@ const PHASE_STATE: Record<PromotionJournal["phase"], UpgradeState> = {
   "recovery-required": "recovery-required",
 };
 const PROMOTION_TIMEOUT_SECONDS = 900;
+/** After a promotion that was undone (a failed backup, say), how long before the same release is
+ * tried again, so the product is not quiesced every minute. */
+export const RETRY_AFTER_FAILURE_MS = 30 * 60_000;
 const WORKLOAD = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
 
 export type Log = (message: string, fields?: Record<string, unknown>) => void;
@@ -78,6 +81,9 @@ export class ManagementAgent {
   private servicePaused = false;
   private message: string | null = null;
   private stateLock: Promise<unknown> = Promise.resolve();
+  /** The release whose last attempt was undone, and when. */
+  private lastFailure: { digest: string; at: number; error: string } | null =
+    null;
 
   constructor(
     private readonly agent: Agent,
@@ -277,9 +283,27 @@ export class ManagementAgent {
       this.message = `waiting for the maintenance window to upgrade to ${desired.version}`;
       return;
     }
-    this.start(desired.version, () =>
-      this.upgrade(current, release, candidate.manifest),
-    );
+    const failure = this.lastFailure;
+    if (
+      failure?.digest === candidate.digest &&
+      this.clock().getTime() - failure.at < RETRY_AFTER_FAILURE_MS
+    ) {
+      this.message = `upgrade to ${desired.version} was undone and is retried ${new Date(failure.at + RETRY_AFTER_FAILURE_MS).toISOString()}: ${failure.error}`;
+      return;
+    }
+    this.start(desired.version, async () => {
+      try {
+        await this.upgrade(current, release, candidate.manifest);
+        this.lastFailure = null;
+      } catch (error) {
+        this.lastFailure = {
+          digest: candidate.digest,
+          at: this.clock().getTime(),
+          error: error instanceof Error ? error.message : String(error),
+        };
+        throw error;
+      }
+    });
   }
 
   /** No release accepted yet: install on an empty namespace, or adopt the running release when it

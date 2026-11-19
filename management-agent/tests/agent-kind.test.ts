@@ -138,6 +138,7 @@ let pki: TestPki;
 let service: FakeManagementService;
 let from: Build;
 let to: Build;
+let fullDatabaseUrl = "";
 
 async function desire(build: Build) {
   const charts = {
@@ -320,10 +321,12 @@ run("management agent on a real cluster", () => {
       "-l",
       "app.kubernetes.io/component=openbot-database",
     ).items;
-    const url = secrets
+    const encoded = secrets
       .map((item) => item.data?.["database-url"])
       .find(Boolean);
-    expect(url).toBeTruthy();
+    expect(encoded).toBeTruthy();
+    // As the bundle writes it: the short Service name, which the backup Job in the agent's
+    // namespace cannot resolve. The first backup fails on it, on purpose.
     kubectl(
       "-n",
       SYSTEM,
@@ -332,8 +335,16 @@ run("management agent on a real cluster", () => {
       "openbot-backup-db",
       "--type=merge",
       "-p",
-      JSON.stringify({ data: { DATABASE_URL: url } }),
+      JSON.stringify({ data: { DATABASE_URL: encoded } }),
     );
+    fullDatabaseUrl = Buffer.from(
+      Buffer.from(encoded ?? "", "base64")
+        .toString("utf8")
+        .replace(
+          "@openbot-postgresql:",
+          `@openbot-postgresql.${PRODUCT}.svc.cluster.local:`,
+        ),
+    ).toString("base64");
 
     await desire(to);
     await until(
@@ -351,6 +362,86 @@ run("management agent on a real cluster", () => {
     expect(kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")).not.toContain(
       "openbot-backup-",
     );
+  });
+
+  test("a failed backup puts the release back as it was and is not retried at once", async () => {
+    service.window = { weekday: 0, startUtc: "00:00", hours: 168 };
+    const journal = () =>
+      JSON.parse(
+        json<{ data: Record<string, string> }>(
+          "-n",
+          SYSTEM,
+          "get",
+          "configmap",
+          "openbot-agent-state",
+        ).data["journal.json"] ?? "{}",
+      );
+    const failed = await until(
+      "the promotion undone after the backup failed",
+      () => {
+        const entry = journal();
+        return (
+          entry.toVersion === to.version && entry.phase === "failed" && entry
+        );
+      },
+      10,
+    );
+    expect(failed.error).toContain("failed");
+    expect(failed.databaseMayHaveChanged).toBe(false);
+    // Writes are back: the server at its replicas, the CronJobs it suspended running again.
+    await until(
+      "the server back at its replicas",
+      () => {
+        const server = json<{
+          items: {
+            spec: { replicas?: number };
+            status: { readyReplicas?: number };
+          }[];
+        }>(
+          "-n",
+          PRODUCT,
+          "get",
+          "deployment",
+          "-l",
+          "app.kubernetes.io/instance=openbot,app.kubernetes.io/component=server",
+        ).items[0];
+        return (
+          server?.spec.replicas === failed.previousReplicas &&
+          server.status.readyReplicas === failed.previousReplicas
+        );
+      },
+      10,
+    );
+    const cronJobs = json<{
+      items: { metadata: { name: string }; spec: { suspend?: boolean } }[];
+    }>("-n", PRODUCT, "get", "cronjob").items;
+    for (const job of failed.pausedCronJobs ?? [])
+      if (!job.wasSuspended)
+        expect(
+          cronJobs.find((entry) => entry.metadata.name === job.name)?.spec
+            .suspend ?? false,
+        ).toBe(false);
+    expect(pinned()).toBe(from.digest);
+    // Three more heartbeats, and still one backup attempt: the product is not quiesced every minute.
+    await Bun.sleep(200_000);
+    const backups = kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")
+      .split("\n")
+      .filter((name) => name.includes("openbot-backup-"));
+    expect(backups).toHaveLength(1);
+    expect(latest()?.upgrade.journal ?? "").toContain("retried");
+
+    // A person fixes the backup's database address; a restarted agent tries again straight away.
+    kubectl(
+      "-n",
+      SYSTEM,
+      "patch",
+      "secret",
+      "openbot-backup-db",
+      "--type=merge",
+      "-p",
+      JSON.stringify({ data: { DATABASE_URL: fullDatabaseUrl } }),
+    );
+    kubectl("-n", SYSTEM, "rollout", "restart", "deployment/openbot-agent");
   });
 
   test("inside the window: backs up first, then upgrades and verifies", async () => {
