@@ -10,6 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { SetupChecklist, summaryOf } from "@/components/setup/setup-checklist";
+import { appConfig } from "@/lib/generated/application-config";
 import type {
   SetupChecklist as Checklist,
   SetupRow,
@@ -325,7 +326,7 @@ test("a key nobody has checked reads Not checked, never Ready", async () => {
   expect(view.getByText("1 thing isn't checked yet.")).not.toBeNull();
 });
 
-test("optional gaps alone say OpenBot is ready, and that each says how to add it", async () => {
+test("optional gaps alone say the product is ready, and that each says how to add it", async () => {
   serving({
     audience: "admin",
     rows: ADMIN.rows.map((row) =>
@@ -336,7 +337,7 @@ test("optional gaps alone say OpenBot is ready, and that each says how to add it
 
   expect(
     await view.findByText(
-      "OpenBot is ready to use. 2 optional features aren't set up yet. Each says how to add it.",
+      `${appConfig.brand.productName} is ready to use. 2 optional features aren't set up yet. Each says how to add it.`,
     ),
   ).not.toBeNull();
 });
@@ -345,7 +346,7 @@ test("the summary counts in the singular and the plural", () => {
   const gap = (id: SetupRow["id"], required = false) =>
     ROW({ id, required, ready: false, status: "needs_setup" });
   expect(summaryOf([gap("chat")])).toBe(
-    "OpenBot is ready to use. 1 optional feature isn't set up yet. Each says how to add it.",
+    `${appConfig.brand.productName} is ready to use. 1 optional feature isn't set up yet. Each says how to add it.`,
   );
   expect(summaryOf([gap("model", true), gap("intelligence", true)])).toBe(
     "2 things need setup, and 2 are required. Set up the required ones first.",

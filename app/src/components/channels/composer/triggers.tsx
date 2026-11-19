@@ -18,12 +18,6 @@ export type AgentOption = {
   avatarSeed: string;
 };
 
-export type DocumentOption = {
-  id: string;
-  name: string;
-  description?: string;
-};
-
 /**
  * Narrows the agent roster to mention options, scoped to a channel's permitted agents when
  * `permittedIds` is given.
@@ -54,19 +48,6 @@ export function toAgentOptions(
       // A group's roster carries no seed, and draws each Bot from its id; this matches it.
       avatarSeed: profile.avatarSeed ?? profile.id,
     }));
-}
-
-export function toDocumentOptions(
-  documents:
-    | readonly { id: string; title: string; category?: string }[]
-    | undefined,
-): DocumentOption[] {
-  if (!documents) return [];
-  return documents.map((document) => ({
-    id: document.id,
-    name: document.title,
-    description: document.category,
-  }));
 }
 
 function matches(query: string, ...fields: (string | undefined)[]): boolean {
@@ -111,31 +92,6 @@ export function agentTrigger(agents: readonly AgentOption[]): TriggerConfig {
 }
 
 /**
- * `#` attaches a company knowledge document to this message.
- */
-export function documentTrigger(
-  documents: readonly DocumentOption[],
-): TriggerConfig {
-  return mentionTrigger({
-    char: DOCUMENT_TRIGGER,
-    accessibilityLabel: "document",
-    reopenOnChipClick: true,
-    emptyMessage: "No documents yet",
-    onSearch: (query): TriggerSuggestion[] =>
-      documents
-        .filter((document) =>
-          matches(query, document.name, document.description),
-        )
-        .map((document) => ({
-          value: document.id,
-          label: document.name,
-          description: document.description,
-        })),
-    onSelect: (suggestion) => suggestion.label,
-  });
-}
-
-/**
  * `/` is restricted to the start of a line, so a URL or a date in the middle of a sentence never
  * opens the dropdown. Selection resolves to a chip; `applyCommandChips` then rewrites the ones that
  * are really prompts or client actions.
@@ -169,15 +125,9 @@ export function slashCommandTrigger(
 export function buildTriggers({
   agents,
   commands,
-  documents = [],
 }: {
   agents: readonly AgentOption[];
   commands: readonly CommandOption[];
-  documents?: readonly DocumentOption[];
 }): TriggerConfig[] {
-  return [
-    agentTrigger(agents),
-    slashCommandTrigger(commands),
-    documentTrigger(documents),
-  ];
+  return [agentTrigger(agents), slashCommandTrigger(commands)];
 }

@@ -39,10 +39,11 @@ permissions:
   contents: read
 
 # The identity this build updates from, compiled into the app (`updates.rs`). The same expressions
-# desktop.yml uses; a called workflow does not inherit its caller's `env`.
+# desktop.yml uses; a called workflow does not inherit its caller's `env`. Unit tests hardcode
+# CopilotKit/OpenBot URLs, so forks default there unless they set the repo variables.
 env:
-  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
-  OPENBOT_RELEASE_REPOSITORY: ${{ github.repository }}
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || 'CopilotKit/OpenBot' }}
+  OPENBOT_RELEASE_REPOSITORY: ${{ vars.OPENBOT_RELEASE_REPOSITORY || 'CopilotKit/OpenBot' }}
   OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
 
 jobs:

@@ -51,46 +51,6 @@ export function createChannelMutationOptions(queryClient: QueryClient) {
   });
 }
 
-function rememberChannel(queryClient: QueryClient, channel: AgentChannel) {
-  queryClient.setQueryData(channelKeys.detail(channel.id), channel);
-  void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
-}
-
-/** Add a coworker to a channel this person is already in. */
-export function addChannelAgentMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (variables: { channelId: string; agentId: string }) => {
-      const response = await client(
-        `/api/channels/${variables.channelId}/agents`,
-        {
-          method: "POST",
-          body: { agentId: variables.agentId },
-          fallback: "Could not add this coworker",
-        },
-      );
-      return ((await response.json()) as { channel: AgentChannel }).channel;
-    },
-    onSuccess: (channel) => rememberChannel(queryClient, channel),
-  });
-}
-
-/** Remove a coworker. The server refuses to remove the last one. */
-export function removeChannelAgentMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (variables: { channelId: string; agentId: string }) => {
-      const response = await client(
-        `/api/channels/${variables.channelId}/agents/${encodeURIComponent(variables.agentId)}`,
-        {
-          method: "DELETE",
-          fallback: "Could not remove this coworker",
-        },
-      );
-      return ((await response.json()) as { channel: AgentChannel }).channel;
-    },
-    onSuccess: (channel) => rememberChannel(queryClient, channel),
-  });
-}
-
 /**
  * Report the last thing said in a channel.
  *

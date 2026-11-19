@@ -797,7 +797,7 @@ export function ChannelChat({
       try {
         const stored = await readThreadMessages(
           channel.threadId,
-          activeAgentId,
+          runtimeAgentId,
         );
         const isCurrent = current && version === historyReadVersion.current;
         if (isCurrent) {
@@ -828,13 +828,10 @@ export function ChannelChat({
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
-        // never coming. A superseded join — the room moved to another member — must not open the
-        // gate that join now owns, or the next turn would run before that member's thread is joined.
-        if (current) {
-          setRestoring(false);
-          setBoundAgentId(activeAgentId);
-          openJoinGate.current();
-        }
+        // never coming.
+        if (current) setRestoring(false);
+        // Release even on join/restore failure; the gate orders messages, not withholds them.
+        openJoinGate.current();
       }
       if (askAgain && current) pullHistoryRef.current?.();
     })();
@@ -942,7 +939,7 @@ export function ChannelChat({
           if (!isCurrent()) return;
           const stored = await readThreadMessages(
             channel.threadId,
-            activeAgentId,
+            runtimeAgentId,
           );
           if (!isCurrent()) return;
           // A turn of this tab's began while the read was out: it is read again once that ends.
@@ -1016,7 +1013,13 @@ export function ChannelChat({
       offSaidOffTheList();
       pullHistoryRef.current = null;
     };
-  }, [channel.id, channel.threadId, joinGatePromise, joinedPromise]);
+  }, [
+    channel.id,
+    channel.threadId,
+    joinGatePromise,
+    joinedPromise,
+    runtimeAgentId,
+  ]);
 
   /*
    * A RUN OF A TURN GOING ON IN A CHAT THAT CLOSED, JOINED HERE AS IT STARTS. The join above carries a run only if one
@@ -1819,37 +1822,6 @@ export function ChannelChat({
     stopEpoch.current++;
     copilotkit.stopAgent({ agent });
   };
-
-  const pendingDelivery = useRef<{
-    text: string;
-    skillInstructions: string[];
-    attachments: Attachment[];
-    documentIds: string[];
-  } | null>(null);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: must re-check when the active Bot changes, not only when the roster does.
-  useEffect(() => {
-    if (!channel.agentIds.includes(activeAgentId)) {
-      const next = channel.agentIds[0];
-      if (next) setActiveAgentId(next);
-    }
-  }, [activeAgentId, channel.agentIds]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fires when the bound agent catches up so a queued delivery can send.
-  useEffect(() => {
-    const pending = pendingDelivery.current;
-    if (!pending || boundAgentId !== activeAgentId) return;
-    pendingDelivery.current = null;
-    setAwaitingAgent(false);
-    void sayRef
-      .current(
-        pending.text,
-        pending.skillInstructions,
-        pending.attachments,
-        pending.documentIds,
-      )
-      .catch(() => undefined);
-  }, [activeAgentId, boundAgentId]);
 
   /**
    * Component buttons speak as user turns without forcing every transcript card to re-render.

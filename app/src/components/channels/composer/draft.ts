@@ -14,7 +14,6 @@ import {
 
 export const AGENT_TRIGGER = "@";
 export const COMMAND_TRIGGER = "/";
-export const DOCUMENT_TRIGGER = "#";
 
 export type ComposerDraft = {
   /**
@@ -34,8 +33,6 @@ export type ComposerDraft = {
   agentId: string | null;
   /** Commands that survive into the sent message, in the order they were typed. */
   commandIds: string[];
-  /** Company knowledge documents attached via `#`, in chip order. */
-  documentIds: string[];
   isEmpty: boolean;
   attachments: Attachment[];
 };
@@ -46,7 +43,6 @@ export function toDraft(
 ): ComposerDraft {
   const agentChips = getChipsByTrigger(segments, AGENT_TRIGGER);
   const commandChips = getChipsByTrigger(segments, COMMAND_TRIGGER);
-  const documentChips = getChipsByTrigger(segments, DOCUMENT_TRIGGER);
 
   return {
     text: segmentsToPlainText(
@@ -58,7 +54,6 @@ export function toDraft(
     ).trim(),
     agentId: agentChips.at(-1)?.value ?? null,
     commandIds: commandChips.map((chip) => chip.value),
-    documentIds: documentChips.map((chip) => chip.value),
     isEmpty: isSegmentsEmpty(segments),
     attachments,
   };
@@ -77,11 +72,7 @@ export function canSendDraft(draft: ComposerDraft): boolean {
     return false;
   }
 
-  return (
-    draft.attachments.length > 0 ||
-    draft.documentIds.length > 0 ||
-    !draft.isEmpty
-  );
+  return draft.attachments.length > 0 || !draft.isEmpty;
 }
 
 /** Collapse multiple agent mentions to the most recent one while preserving identity on no-op. */

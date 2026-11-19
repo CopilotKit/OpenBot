@@ -1251,10 +1251,9 @@ export function Composer({
   );
 
   const isBusy = pending || isSubmitting;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `#` document options must refresh when the document list changes.
   const triggers = useMemo(
-    () => buildTriggers({ agents, commands, documents }),
-    [agents, commands, documents],
+    () => buildTriggers({ agents, commands }),
+    [agents, commands],
   );
   const draft = useMemo(() => toDraft(value, staged), [staged, value]);
 

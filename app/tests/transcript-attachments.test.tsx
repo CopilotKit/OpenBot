@@ -153,7 +153,7 @@ function staged(id: string, filename: string): Attachment {
 
 /** A message typed while the Bot had the turn, with whatever was staged on the draft beside it. */
 function parked(text: string, attachments: Attachment[]): QueuedMessage {
-  return { id: "queued-1", text, commandIds: [], documentIds: [], attachments };
+  return { id: "queued-1", text, commandIds: [], attachments };
 }
 
 /**
