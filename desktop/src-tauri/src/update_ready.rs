@@ -45,9 +45,10 @@ app's own release is got ready the same way for an installation behind it (`behi
 its engine answers, whether OpenBot runs or not: during sign-in, the back end's setup, or the wait
 for an engine with room. It pulls OpenBot's images only; the back end's setup pulls its own.
 
-Its download never takes the engine below the 15 GiB free the back end's setup checks for
-(`local_eval::MIN_ENGINE_FREE_DISK_BYTES`, `Ahead::keep_free`), counted with `ON_DISK` and against
-the computer's drive as well, so a setup that would pass its check without the download still does.
+Its download never takes the engine below the free disk the back end's setup checks for, counted
+with `ON_DISK`: 15 GiB on the computer's drive (`local_eval::MIN_ENGINE_FREE_DISK_BYTES`,
+`Ahead::keep_free`), and that and the 5% k3s keeps free on the engine's disk, so a setup that would
+pass its check without the download still does.
 While the engine has less than that, nothing downloads, and the update pulls the images as before.
 
 KEPT FOR THE UPDATE. A container engine never removes an image by itself. The back end's kubelet
@@ -210,9 +211,11 @@ pub fn room(download: u64, engine: Disk, computer_free: Option<u64>) -> Result<(
 }
 
 /**
-Whether a download of `download` bytes leaves `keep_free` bytes free: `ON_DISK` times it, taken from
-the engine's disk and from the computer's drive under it when that is measured. Nothing to keep
-always fits. Why not, for the log.
+Whether a download of `download` bytes leaves what the back end's setup checks for free, judged as
+it judges them (`local_eval::short_for_setup`): `ON_DISK` times it, taken from the computer's drive
+under the engine when that is measured, which keeps `keep_free`, and from the engine's disk, which
+keeps `keep_free` and the 5% of it k3s keeps free (`local_eval::kubernetes_keeps_free`). Nothing to
+keep always fits. Why not, for the log.
 */
 pub fn keeps_free(
     download: u64,
@@ -224,18 +227,19 @@ pub fn keeps_free(
         return Ok(());
     }
     let needed = download.saturating_mul(ON_DISK);
-    let free = computer_free.map_or(engine.free, |drive| drive.min(engine.free));
-    if free
-        .checked_sub(needed)
-        .is_some_and(|left| left >= keep_free)
-    {
-        return Ok(());
-    }
+    let short = |free: u64, keep: u64| free.checked_sub(needed).is_none_or(|left| left < keep);
+    let engine_keeps =
+        keep_free.saturating_add(crate::local_eval::kubernetes_keeps_free(engine.size));
+    let (free, keep) = match computer_free {
+        Some(drive) if short(drive, keep_free) => (drive, keep_free),
+        _ if short(engine.free, engine_keeps) => (engine.free, engine_keeps),
+        _ => return Ok(()),
+    };
     Err(format!(
         "it takes about {} on disk, and with {} free that leaves less than the {} the backend's setup needs",
         gb(needed),
         gb(free),
-        gb(keep_free)
+        gb(keep)
     ))
 }
 
@@ -302,6 +306,7 @@ pub struct Ahead<'a> {
     pub limits: Limits,
     /// Bytes the download must leave free (`keeps_free`): the back end's 15 GiB for an
     /// installation behind the app, whose back end may be setting up meanwhile, and 0 otherwise.
+    /// The engine's disk keeps the 5% of it k3s keeps free as well.
     pub keep_free: u64,
 }
 
@@ -624,6 +629,35 @@ mod tests {
         assert!(keeps_free(download, raised, Some(41 * GIB), 40 * GIB).is_err());
         // A release got ready while OpenBot runs keeps nothing back, as before.
         assert_eq!(keeps_free(download, at_the_line, None, 0), Ok(()));
+    }
+
+    /// What the back end's setup checks for, judged as it judges it (`local_eval::short_for_setup`):
+    /// the engine's disk keeps the 5% of it k3s keeps free beside the 15 GiB, and the computer's
+    /// drive the 15 GiB alone.
+    #[test]
+    fn the_download_for_an_installation_behind_leaves_what_the_setup_checks_for() {
+        const GIB: u64 = 1 << 30;
+        let keep = crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES;
+        // 1.2 GB, about what OpenBot's images download: 4.5 GiB on disk.
+        let download = 1_200_000_000;
+        // 21 GiB free of 100, and 16.5 after the download: above the kubelet's 15% line and the
+        // 15 GiB, and under the 20 the setup checks for with k3s's 5%.
+        let engine = Disk {
+            size: 100 * GIB,
+            free: 21 * GIB,
+        };
+        assert_eq!(room(download, engine, None), Ok(()));
+        let short = keeps_free(download, engine, None, keep).unwrap_err();
+        assert!(short.contains("less than the 21.5 GB"), "{short}");
+        // The drive under a roomy machine disk keeps the 15 GiB alone: 16.5 after is enough, and
+        // 14.5 is not.
+        let roomy = Disk {
+            size: 100 * GIB,
+            free: 60 * GIB,
+        };
+        assert_eq!(keeps_free(download, roomy, Some(21 * GIB), keep), Ok(()));
+        let short = keeps_free(download, roomy, Some(19 * GIB), keep).unwrap_err();
+        assert!(short.contains("less than the 16.1 GB"), "{short}");
     }
 
     /// An installation laid out at `version`, as Install leaves one.

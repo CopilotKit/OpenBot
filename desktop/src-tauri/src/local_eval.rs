@@ -1603,10 +1603,16 @@ pub const MIN_ENGINE_MEMORY_BYTES: u64 = 4 * GIB;
 pub const MIN_ENGINE_FREE_DISK_BYTES: u64 = 15 * GIB;
 
 /// What a first setup needs free inside an engine whose disk is `size` bytes: the CLI's 15 GiB and
-/// the 5% of that disk k3s keeps free (`evictionHard`: `nodefs.available<5%`). The 15 GiB alone
-/// when the size is not known.
+/// the 5% of that disk k3s keeps free (`kubernetes_keeps_free`). The 15 GiB alone when the size is
+/// not known.
 pub fn engine_free_disk_needed(size: Option<u64>) -> u64 {
-    MIN_ENGINE_FREE_DISK_BYTES + size.map_or(0, |size| size / 20)
+    MIN_ENGINE_FREE_DISK_BYTES + size.map_or(0, kubernetes_keeps_free)
+}
+
+/// What k3s keeps free of an engine's disk of `size` bytes, evicting the back end below it
+/// (`evictionHard`: `nodefs.available<5%`).
+pub fn kubernetes_keeps_free(size: u64) -> u64 {
+    size / 20
 }
 
 /// What an engine of this size is short of for local setup. Free disk that could not be measured

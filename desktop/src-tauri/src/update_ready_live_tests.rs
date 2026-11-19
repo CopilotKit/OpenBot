@@ -441,9 +441,10 @@ fn a_disk_short_of_room_downloads_nothing() {
 /**
 An installation behind the app, which the next Start moves to the app's release (`behind`), with
 OpenBot not running, as during sign-in or the back end's setup. Its release's OpenBot images arrive
-only while the engine keeps the back end's 15 GiB free beside them, and then the update's own pull of
-them (`pull_metrics::pull_image`, as `upgrade` makes it) downloads nothing. On 2026-11-10 a Mac
-moving from v1.0.0 to v1.0.1 pulled them in the update, after 4.5 minutes of the back end's setup.
+only while the engine keeps what the back end's setup checks for free beside them, and then the
+update's own pull of them (`pull_metrics::pull_image`, as `upgrade` makes it) downloads nothing. On
+2026-11-10 a Mac moving from v1.0.0 to v1.0.1 pulled them in the update, after 4.5 minutes of the
+back end's setup.
 */
 #[test]
 #[ignore = "runs a privileged k3s node, a registry and a proxy on Docker"]
@@ -470,11 +471,12 @@ fn an_installation_behind_gets_its_release_ready_before_the_update() {
     let from = installation.lab.requests().len();
 
     // Room for the back end's setup, not for the download beside it: nothing downloads. Well
-    // above the kubelet's 15% line, so it is the back end's 15 GiB that stops it.
+    // above the kubelet's 15% line, so it is what the back end's setup checks for that stops it:
+    // its 15 GiB, and the 5% of the disk k3s keeps free.
     let outcome = behind(&|| {
         Some(Disk {
-            size: 100 * GIB,
-            free: crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES + 1_000_000,
+            size: 64 * GIB,
+            free: crate::local_eval::engine_free_disk_needed(Some(64 * GIB)) + 1_000_000,
         })
     });
     let Outcome::Skipped(why) = outcome else {

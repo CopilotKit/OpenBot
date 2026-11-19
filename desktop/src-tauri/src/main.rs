@@ -2733,9 +2733,9 @@ fn own_release_paused<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
 One try at getting this app's own release ready for the installation in the selected folder when it
 is behind the app (`update_ready::behind`): OpenBot's images for it, into the engine the
 installation was set up on, once that engine answers, so the Start that moves it finds them there.
-Never started by itself: an engine that does not answer is left alone. The download keeps the back
-end's 15 GiB free (`update_ready::keeps_free`). Said in the log once per change of outcome. When the
-release is due and not ready yet, how soon the next try comes.
+Never started by itself: an engine that does not answer is left alone. The download keeps what the
+back end's setup checks for free (`update_ready::keeps_free`). Said in the log once per change of
+outcome. When the release is due and not ready yet, how soon the next try comes.
 */
 fn try_getting_own_release_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
