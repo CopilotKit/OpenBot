@@ -658,6 +658,14 @@ run("management agent on a real cluster", () => {
       () => latest()?.upgrade.state === "recovery-required",
       5,
     );
+    // Flux attempted the failed chart once. A failure-count reset sent with the new digest made
+    // helm-controller upgrade to it a second time straight after the first attempt failed.
+    const attempts = (
+      JSON.parse(
+        sh("helm", ["history", "openbot", "-n", PRODUCT, "-o", "json"]),
+      ) as { chart: string }[]
+    ).filter((revision) => revision.chart.includes("-broken"));
+    expect(attempts).toHaveLength(1);
     // Left as it failed: Flux on the failed chart, the pins naming the missing image.
     expect(pinned()).toBe(broken.digest);
     expect(
