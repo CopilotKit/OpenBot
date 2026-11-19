@@ -135,39 +135,43 @@ function BotRow({
 }) {
   return (
     <li className="flex flex-col">
-      <div
-        className="group/bot-row flex items-center gap-1 rounded-lg hover:bg-foreground/5"
-        data-slot="bot-row"
-      >
+      {/*
+       * Two buttons side by side, each with its own hover, as in Guido's sketch: the Bot, which opens
+       * its page, and a square caret, transparent until hovered, which opens its conversations.
+       */}
+      <div className="flex items-center gap-1" data-slot="bot-row">
         <Link
           activeOptions={{ exact: false }}
-          activeProps={{ className: "font-semibold" }}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-1.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring focus-visible:ring-2"
+          activeProps={{ className: "bg-foreground/5" }}
+          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2"
           params={{ agentId: bot.id }}
           to="/bots/$agentId"
         >
           <BotOrb name={bot.name} seed={bot.avatarSeed} size={24} />
           <span className="min-w-0 flex-1 truncate">{bot.name}</span>
+          {waiting ? (
+            <span
+              aria-label={waiting}
+              className="size-2 shrink-0 rounded-full bg-primary"
+              role="img"
+            />
+          ) : null}
         </Link>
-        {waiting ? (
-          <span
-            aria-label={waiting}
-            className="size-2 shrink-0 rounded-full bg-primary"
-            role="img"
-          />
-        ) : null}
-        <Button
+        <button
           aria-expanded={expanded}
           aria-label={`${expanded ? "Hide" : "Show"} ${bot.name}'s conversations`}
-          className="size-7 shrink-0 text-muted-foreground hover:bg-foreground/5"
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-transparent text-muted-foreground outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2"
           onClick={onToggle}
-          size="icon"
-          variant="ghost"
+          type="button"
         >
           <IconChevronDown
-            className={cn("transition-transform", !expanded && "-rotate-90")}
+            aria-hidden="true"
+            className={cn(
+              "size-4 transition-transform",
+              !expanded && "-rotate-90",
+            )}
           />
-        </Button>
+        </button>
       </div>
       {expanded ? (
         <div className="ml-[21px] border-sidebar-border border-l pl-1.5">
