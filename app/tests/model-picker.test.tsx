@@ -469,6 +469,36 @@ test("a conversation with no pick shows the default", async () => {
   );
 });
 
+test("a Bot default is inherited until a conversation has its own pick", async () => {
+  const botDefault = {
+    model: "gpt-6.1-terra",
+    effort: "high",
+    source: "openai",
+  };
+  const { result } = renderHook(
+    () => useConversationModel("conversation-a", catalogue, botDefault),
+    { wrapper },
+  );
+  await waitFor(() =>
+    expect(result.current.value).toEqual({
+      model: "gpt-6.1-terra",
+      effort: "high",
+    }),
+  );
+  await act(async () => {
+    result.current.choose({ model: catalogue.default, effort: null });
+    await result.current.beforeSend();
+  });
+  expect(saved["conversation-a"]).toEqual({
+    model: catalogue.default,
+    effort: null,
+  });
+  expect(result.current.value).toEqual({
+    model: catalogue.default,
+    effort: null,
+  });
+});
+
 test("picking saves to the server, and picking the default saves null", async () => {
   const { result } = renderHook(
     () => useConversationModel("conversation-a", catalogue),

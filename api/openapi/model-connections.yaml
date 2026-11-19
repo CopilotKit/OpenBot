@@ -761,6 +761,11 @@ components:
           description: >-
             An effort the model takes, or null for its own. Trimmed, and read
             in lower case.
+        pinModel:
+          type: boolean
+          description: >-
+            Keep an explicitly named model as an override even when it is the
+            deployment's default. Omit to use the default as a reset.
     AiConnectionProvider:
       type: string
       description: >-

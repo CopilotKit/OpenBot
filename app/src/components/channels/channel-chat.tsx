@@ -1076,6 +1076,7 @@ export function ChannelChat({
   const runModel = useConversationModel(
     channel.id,
     picksModel ? models.data : undefined,
+    botProfile?.defaultModel,
   );
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
@@ -1943,6 +1944,7 @@ export function ChannelChat({
             modelPicker={
               <ModelPicker
                 catalogue={picksModel ? models.data : undefined}
+                defaultModel={runModel.defaultModel}
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}

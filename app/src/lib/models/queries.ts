@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import type { ModelChoiceInput } from "@/lib/api/generated/model";
 import {
   getModelCatalogue,
   getModelChoice,
@@ -87,6 +88,8 @@ export type ConversationModel = {
    */
   unverified?: { model: string; label: string };
 };
+
+export type ConversationModelInput = ModelChoiceInput;
 
 export const modelKeys = {
   all: ["models"] as const,

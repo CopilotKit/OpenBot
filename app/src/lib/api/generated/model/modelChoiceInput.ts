@@ -19,4 +19,6 @@ export interface ModelChoiceInput {
    * @pattern \S
    */
   effort: string | null;
+  /** Keep an explicitly named model as an override even when it is the deployment's default. Omit to use the default as a reset. */
+  pinModel?: boolean;
 }

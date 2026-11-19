@@ -219,6 +219,12 @@ export const ReplaceModelChoiceBody = zod.object({
     .describe(
       "An effort the model takes, or null for its own. Trimmed, and read in lower case.",
     ),
+  pinModel: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Keep an explicitly named model as an override even when it is the deployment's default. Omit to use the default as a reset.",
+    ),
 });
 
 export const ReplaceModelChoiceResponse = zod
