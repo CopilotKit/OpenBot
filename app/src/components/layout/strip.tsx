@@ -46,7 +46,7 @@ export function Strip({
       ) : null}
       <nav
         aria-label="Sections"
-        className="no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-1"
+        className="no-scrollbar flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1"
       >
         {children}
       </nav>
@@ -67,7 +67,7 @@ export const stripItemClassName = cn(
   "relative flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
   "hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 [&_svg]:size-5 [&_svg]:shrink-0",
   "data-active:bg-foreground/[0.07] data-active:text-sidebar-foreground",
-  "data-active:before:absolute data-active:before:top-1/2 data-active:before:-left-[7px] data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
+  "data-active:before:absolute data-active:before:top-1/2 data-active:before:-left-[6px] data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
 );
 
 /**
