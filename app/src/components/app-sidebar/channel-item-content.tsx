@@ -1,8 +1,16 @@
 import { IconPinFilled } from "@tabler/icons-react";
 import { ChannelAvatar } from "@/components/channels/avatar";
+import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 
-/** Shared by live conversations and the appearance preference previews. */
+/**
+ * Shared by live conversations and the appearance preference previews.
+ *
+ * `view` picks the row's shape. Detailed (the default here) is two lines: the Bot's name, its time
+ * and marks, then the title. Compact is one line, as Claude's sidebar lists chats: a small avatar
+ * and the title, with the unread dot and the pin at the right. It names no Bot and shows no time,
+ * and says nothing in words while a Bot works: the avatar moves.
+ */
 export function ChannelItemContent({
   participantIds,
   name,
@@ -14,6 +22,7 @@ export function ChannelItemContent({
   unread = false,
   pinned = false,
   revealing = false,
+  view = "detailed",
 }: {
   participantIds: string[];
   name: string;
@@ -25,7 +34,47 @@ export function ChannelItemContent({
   unread?: boolean;
   pinned?: boolean;
   revealing?: boolean;
+  view?: ConversationView;
 }) {
+  const unreadDot = unread ? (
+    <span
+      className="size-2 shrink-0 rounded-full bg-primary"
+      data-slot="unread-dot"
+    />
+  ) : null;
+  const pin = pinned ? (
+    <IconPinFilled
+      className="size-3 shrink-0 text-muted-foreground/70"
+      data-slot="pinned"
+    />
+  ) : null;
+  const caret = revealing ? (
+    <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
+  ) : null;
+
+  if (view === "compact") {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="shrink-0">
+          <ChannelAvatar
+            participantIds={participantIds}
+            size={20}
+            typing={busy}
+          />
+        </div>
+        <span
+          className={`min-w-0 flex-1 truncate text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-normal"}`}
+          title={title}
+        >
+          {displayedTitle}
+          {caret}
+        </span>
+        {unreadDot}
+        {pin}
+      </div>
+    );
+  }
+
   const primaryText = `text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-medium"}`;
   const secondaryText = "text-[12px] leading-4 text-muted-foreground";
 
@@ -59,21 +108,15 @@ export function ChannelItemContent({
               {lastMessageAt}
             </span>
           )}
-          {unread ? (
-            <span className="size-2 shrink-0 rounded-full bg-primary" />
-          ) : null}
-          {pinned ? (
-            <IconPinFilled className="size-3 shrink-0 text-muted-foreground/70" />
-          ) : null}
+          {unreadDot}
+          {pin}
         </div>
         <div
           className={`mt-px truncate ${emphasis === "thread" ? primaryText : secondaryText}`}
           title={title}
         >
           {displayedTitle}
-          {revealing ? (
-            <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
-          ) : null}
+          {caret}
         </div>
       </div>
     </div>
