@@ -276,6 +276,9 @@ or a script has to say.
 - An admin's review list shows a person as soon as their own space is made, and a denied folder
   action lands in Activity after the attempt it denied.
 - Mastra's mark is its current one.
+- With a Chinese, Japanese or Korean input method, pressing Enter to confirm the character being
+  typed no longer sends the chat message; it commits the character, and the next Enter sends
+  (`prompt-area` 0.7.1 in the web app, Desktop and the Recorder).
 
 ## 1.1.0
 
