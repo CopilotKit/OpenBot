@@ -51,7 +51,7 @@ export function resolveCliSource(cli: string): CliSource {
   return { kind: "npm", spec: `copilotkit@${value}` };
 }
 
-export type Platform = "darwin" | "win32";
+export type Platform = "darwin" | "linux" | "win32";
 export type Arch = "arm64" | "x64";
 
 /**
@@ -89,7 +89,7 @@ export function nodeAsset(
     const file = `win-${arch}/node.exe`;
     return { url: base + file, file, inArchive: "", key };
   }
-  const folder = `node-v${node}-darwin-${arch}`;
+  const folder = `node-v${node}-${platform}-${arch}`;
   const file = `${folder}.tar.gz`;
   return { url: base + file, file, inArchive: `${folder}/bin/node`, key };
 }
@@ -188,6 +188,19 @@ function runChecked(run: Runner, cmd: string[], cwd: string): string {
   }
   return result.stdout;
 }
+
+/**
+ * What a Linux bundle leaves out of the CLI's dependencies, relative to `cli/`.
+ *
+ * `@azure/msal-node-runtime`, Microsoft's native sign-in broker under the CLI's optional
+ * `@microsoft/teams.cli`, ships Linux libraries linked against libwebkit2gtk-4.0, which current
+ * distributions no longer ship, so they cannot load where OpenBot runs. The AppImage bundler
+ * (linuxdeploy) deploys the dependencies of every shared library in the app and fails on that one.
+ * Without them, the broker is unavailable, as it already is on a system without that library.
+ */
+export const LINUX_LEFT_OUT = [
+  "node_modules/@azure/msal-node-runtime/dist/linux",
+];
 
 /** What the build records about the CLI it bundled. */
 export type CliRecord = {
@@ -358,6 +371,11 @@ export async function bundleCli(
       platform,
       arch,
     });
+    if (platform === "linux") {
+      for (const path of LINUX_LEFT_OUT) {
+        rmSync(join(target, "cli", path), { recursive: true, force: true });
+      }
+    }
     return { cli, node };
   } finally {
     rmSync(workDir, { recursive: true, force: true });
@@ -392,8 +410,10 @@ export const realRun: Runner = (cmd, cwd) => {
 };
 
 async function main(platform?: string, arch?: string) {
-  if (platform !== "darwin" && platform !== "win32") {
-    throw new Error(`Platform must be darwin or win32, got "${platform}".`);
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
+    throw new Error(
+      `Platform must be darwin, linux or win32, got "${platform}".`,
+    );
   }
   if (arch !== "arm64" && arch !== "x64") {
     throw new Error(`Architecture must be arm64 or x64, got "${arch}".`);

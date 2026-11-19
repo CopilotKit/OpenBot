@@ -17,6 +17,7 @@ import {
   downloadNode,
   type Fetcher,
   type NodeChoice,
+  LINUX_LEFT_OUT,
   nodeAsset,
   packCli,
   type Runner,
@@ -101,6 +102,15 @@ test("points a macOS build at the tarball and the node binary inside it", () => 
   expect(asset.inArchive).toBe("node-v26.13.0-darwin-arm64/bin/node");
 });
 
+test("points a Linux build at the tarball and the node binary inside it", () => {
+  const asset = nodeAsset("linux", "x64", "26.13.0");
+  expect(asset.url.endsWith("/v26.13.0/node-v26.13.0-linux-x64.tar.gz")).toBe(
+    true,
+  );
+  expect(asset.inArchive).toBe("node-v26.13.0-linux-x64/bin/node");
+  expect(asset.key).toBe("linux-x64");
+});
+
 test("refuses a Node version that is not exact", () => {
   expect(() => nodeAsset("darwin", "arm64", "26")).toThrow();
   expect(() => nodeAsset("darwin", "arm64", "v26.13.0")).toThrow();
@@ -117,6 +127,8 @@ const realSums = `a9d7e34eaeeadd4ecbd9f0795f49f9d2c2625e63fc4e2f77709f039497f570
 d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6  node-v26.13.0-darwin-arm64.tar.gz
 6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e  node-v26.13.0-darwin-arm64.tar.xz
 525c9b29bb0263d687de60a4cec0e2a6db876a8eb032369e5795eca71e7c358e  node-v26.13.0-darwin-x64.tar.gz
+439e9c438acdf6a6ffe47418da709153d66c4bed812e30a473faacb107dd2791  node-v26.13.0-linux-arm64.tar.gz
+5848553868b402d3fabb5b09270649977780a390f832155721025a08b5104455  node-v26.13.0-linux-x64.tar.gz
 4c9baa047c4ae555050179f25a63153f1c962af32e2aad97735fb550750c5e7a  win-arm64/node.exe
 14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5  win-x64/node.exe
 caad0090dc3add94c06abd01e395e8ec0f1586c10071bda1f99480445d695f6f  win-x64/node.lib
@@ -139,11 +151,12 @@ test("intelligence-cli.json pins the hashes nodejs.org lists", () => {
     readFileSync(join(import.meta.dir, "..", "intelligence-cli.json"), "utf8"),
   );
   expect(choice.node.version).toBe("26.13.0");
-  // Every installer that bundles the CLI: desktop-build.yml's Apple silicon and Windows ones, and
-  // the signed Intel Mac one Desktop macOS signing builds.
+  // Every installer that bundles the CLI: desktop-build.yml's Apple silicon, Windows and Linux
+  // ones, and the signed Intel Mac one Desktop macOS signing builds.
   for (const [platform, arch] of [
     ["darwin", "arm64"],
     ["darwin", "x64"],
+    ["linux", "x64"],
     ["win32", "x64"],
   ] as const) {
     const asset = nodeAsset(platform, arch, choice.node.version);
@@ -507,6 +520,7 @@ test("installs the CLI's dependencies for the installer's platform, not the runn
   for (const [platform, arch] of [
     ["darwin", "x64"],
     ["darwin", "arm64"],
+    ["linux", "x64"],
     ["win32", "x64"],
   ] as const) {
     const asset = nodeAsset(platform, arch, "26.13.0");
@@ -552,6 +566,46 @@ test("installs the CLI's dependencies for the installer's platform, not the runn
   }
 });
 
+// linuxdeploy fails on msal-node-runtime's Linux libraries, which need libwebkit2gtk-4.0.
+test("a Linux bundle leaves out what cannot load on Linux, and only a Linux bundle", async () => {
+  for (const platform of ["linux", "darwin"] as const) {
+    const asset = nodeAsset(platform, "x64", "26.13.0");
+    const bytes = new TextEncoder().encode(`fake node ${platform}`);
+    const target = join(tempDir("bundle-"), "out");
+    const { run } = fakePackRun({
+      name: "copilotkit",
+      version: "4.34.0",
+      bin: "index.js",
+    });
+    await bundleCli(target, platform, "x64", {
+      fetch: fakeFetch({
+        [sumsUrl]: `${sha(bytes)}  ${asset.file}\n`,
+        [asset.url]: bytes,
+      }),
+      run: (cmd, cwd) => {
+        if (cmd[0] === "tar" && cmd.includes(asset.inArchive)) {
+          const dest = join(cwd, asset.inArchive);
+          mkdirSync(dirname(dest), { recursive: true });
+          writeFileSync(dest, bytes);
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        const result = run(cmd, cwd);
+        if (cmd[0] === "npm" && cmd[1] === "install") {
+          for (const path of LINUX_LEFT_OUT) {
+            mkdirSync(join(cwd, path), { recursive: true });
+          }
+        }
+        return result;
+      },
+      choice: { cli: "latest", node: pin(asset.key, sha(bytes)) },
+    });
+    for (const path of LINUX_LEFT_OUT) {
+      expect(existsSync(join(target, "cli", path))).toBe(platform !== "linux");
+    }
+    expect(existsSync(join(target, "cli", "node_modules", "a"))).toBe(true);
+  }
+});
+
 function runCommandLine(...args: string[]) {
   return Bun.spawnSync(
     ["bun", join(import.meta.dir, "cli-bundle.ts"), ...args],
@@ -563,9 +617,9 @@ function runCommandLine(...args: string[]) {
 }
 
 test("the command line exits 1 on an unknown platform", () => {
-  const result = runCommandLine("linux", "x64");
+  const result = runCommandLine("freebsd", "x64");
   expect(result.exitCode).toBe(1);
-  expect(result.stderr.toString()).toContain("linux");
+  expect(result.stderr.toString()).toContain("freebsd");
 });
 
 test("the command line exits 1 on an unknown architecture", () => {

@@ -2838,13 +2838,26 @@ fn bundled_cli() -> Option<Result<PinnedCli, Failure>> {
     ))
 }
 
-/// Where the bundled CLI is: `Contents/Resources/cli-bundle` in a Mac app, beside the program
-/// elsewhere.
+/// Where the bundled CLI is: wherever Tauri puts the app's resources.
 fn bundled_cli_root() -> Option<PathBuf> {
-    let program = std::env::current_exe().ok()?;
+    bundled_cli_root_of(&std::env::current_exe().ok()?)
+}
+
+/// `Contents/Resources/cli-bundle` in a Mac app. On Linux, `lib/OpenBot/cli-bundle` beside the
+/// program's `bin` folder: `/usr/lib/OpenBot` for a .deb or .rpm, `usr/lib/OpenBot` in the
+/// AppImage, named for `productName`, which a test holds to "OpenBot". Beside the program on Windows.
+fn bundled_cli_root_of(program: &std::path::Path) -> Option<PathBuf> {
     let directory = program.parent()?;
     if cfg!(target_os = "macos") {
         Some(directory.parent()?.join("Resources").join("cli-bundle"))
+    } else if cfg!(target_os = "linux") {
+        Some(
+            directory
+                .parent()?
+                .join("lib")
+                .join("OpenBot")
+                .join("cli-bundle"),
+        )
     } else {
         Some(directory.join("cli-bundle"))
     }
@@ -11290,6 +11303,25 @@ overlay 164506208 20481024 135620148 14% /
         assert!(option_env!("OPENBOT_BUNDLED_CLI_PROGRAM_SHA256").is_none());
         assert!(bundled_cli().is_none());
         assert!(bundled_cli_root().is_some());
+    }
+
+    /// The folder Tauri bundles `cli-bundle/` into on each platform (`tauri.bundled-cli.conf.json`).
+    #[test]
+    fn the_bundled_cli_is_in_the_app_s_resources() {
+        let (program, root) = if cfg!(target_os = "macos") {
+            (
+                "/Applications/OpenBot.app/Contents/MacOS/openbot-desktop",
+                "/Applications/OpenBot.app/Contents/Resources/cli-bundle",
+            )
+        } else if cfg!(target_os = "linux") {
+            ("/usr/bin/openbot-desktop", "/usr/lib/OpenBot/cli-bundle")
+        } else {
+            (r"C:\OpenBot\openbot-desktop.exe", r"C:\OpenBot\cli-bundle")
+        };
+        assert_eq!(
+            bundled_cli_root_of(std::path::Path::new(program)),
+            Some(PathBuf::from(root))
+        );
     }
 
     /**
