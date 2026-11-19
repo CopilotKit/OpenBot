@@ -472,7 +472,9 @@ impl Telemetry {
                     .lock()
                     .map_err(|_| TelemetryError::Poisoned)? = None;
             }
-            EventData::SetupAbandoned { .. } => {
+            // Both end the setup session at its step: neither this launch's quit nor the next
+            // launch says it again.
+            EventData::SetupAbandoned { .. } | EventData::SetupRestartRequired { .. } => {
                 if state.activated {
                     return Ok(());
                 }
@@ -563,17 +565,33 @@ impl Telemetry {
         }
     }
 
+    /// The setup step this launch is on, while setup has not yet activated.
+    fn setup_step(&self) -> Result<Option<Step>> {
+        let guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
+        Ok(guard
+            .as_ref()
+            .and_then(|state| (!state.activated).then_some(state.last_step).flatten()))
+    }
+
     pub fn shutdown(&self) -> Result<()> {
-        let step = {
-            let guard = self.state.lock().map_err(|_| TelemetryError::Poisoned)?;
-            guard
-                .as_ref()
-                .and_then(|state| (!state.activated).then_some(state.last_step).flatten())
-        };
-        if let Some(step) = step {
+        if let Some(step) = self.setup_step()? {
             self.record(EventData::SetupAbandoned { step })?;
         }
         self.flush_with_lock_wait(FLUSH_BUDGET)
+    }
+
+    /**
+    Windows is restarting for the fix setup asked for (Windows Subsystem for Linux), during setup:
+    `setup_restart_required` at the step it is on, saved before Windows ends the app. Setup goes on
+    after the restart under the same installation, so the exit is not an abandonment: neither this
+    launch nor the next one says `setup_abandoned` for it. Nothing once setup has activated, or
+    when this setup session already ended.
+    */
+    pub fn restart_required(&self) -> Result<()> {
+        if let Some(step) = self.setup_step()? {
+            self.record(EventData::SetupRestartRequired { step })?;
+        }
+        Ok(())
     }
 
     pub fn snapshot(&self) -> Result<PersistedState> {
@@ -1097,6 +1115,13 @@ pub enum EventData {
     WindowsStage {
         outcome: WindowsStageOutcome,
     },
+    /// One of the Windows readiness check's probes ran long or ran out of time (`windows::Heard`),
+    /// and how long it took. A probe that answered in good time says nothing.
+    WindowsProbe {
+        probe: WindowsProbeKind,
+        outcome: WindowsProbeOutcome,
+        duration_ms: u64,
+    },
     ImagePull {
         outcome: Outcome,
         duration_ms: u64,
@@ -1120,6 +1145,11 @@ pub enum EventData {
     },
     Activated,
     SetupAbandoned {
+        step: Step,
+    },
+    /// Setup ended its session for the Windows restart a fix needs (`Telemetry::restart_required`),
+    /// at the last screen the window showed. Setup goes on after it, under the same installation.
+    SetupRestartRequired {
         step: Step,
     },
     /// The Account step's CopilotKit sign-in: started, and how it ended, with how long the person
@@ -1192,10 +1222,12 @@ impl EventData {
             Self::EngineDetected { .. } => "oss.desktop.engine_detected",
             Self::EngineInstalled { .. } => "oss.desktop.engine_installed",
             Self::WindowsStage { .. } => "oss.desktop.windows_stage",
+            Self::WindowsProbe { .. } => "oss.desktop.windows_probe",
             Self::ImagePull { .. } => "oss.desktop.image_pull",
             Self::SetupFailed { .. } => "oss.desktop.setup_failed",
             Self::Activated => "oss.desktop.activated",
             Self::SetupAbandoned { .. } => "oss.desktop.setup_abandoned",
+            Self::SetupRestartRequired { .. } => "oss.desktop.setup_restart_required",
             Self::SignIn { .. } => "oss.desktop.sign_in",
             Self::SetupStalled { .. } => "oss.desktop.setup_stalled",
             Self::UiStalled { .. } => "oss.desktop.ui_stalled",
@@ -1387,6 +1419,7 @@ pub enum Harness {
     Llamaindex,
     Agno,
     Langgraph,
+    LanggraphTs,
     GoogleAdk,
     PydanticAi,
     MicrosoftAgentFramework,
@@ -1455,6 +1488,67 @@ pub enum WindowsStageOutcome {
     NestedVirtualizationUnavailable,
     NotAdministrator,
     CheckFailed,
+}
+
+/// Which of the Windows readiness check's probes, by what it asks. Never the command itself.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsProbeKind {
+    /// Whether a hypervisor runs or firmware virtualization is on (CIM).
+    Virtualization,
+    /// Whether this account can approve an administrator prompt.
+    Administrator,
+    /// The WSL optional feature's state (CIM, through Windows servicing).
+    WslFeature,
+    /// Whether the modern WSL service is installed (CIM).
+    WslService,
+    /// The Virtual Machine Platform optional feature's state (CIM, through Windows servicing).
+    VirtualMachinePlatformFeature,
+    /// The default WSL version, from the registry.
+    DefaultWslVersion,
+    /// `wsl.exe --version`.
+    WslVersion,
+    /// `wsl.exe --system`, which starts WSL's own VM.
+    WslSystemStart,
+    /// Whether Docker answers.
+    Docker,
+}
+
+impl WindowsProbeKind {
+    pub const ALL: [Self; 9] = [
+        Self::Virtualization,
+        Self::Administrator,
+        Self::WslFeature,
+        Self::WslService,
+        Self::VirtualMachinePlatformFeature,
+        Self::DefaultWslVersion,
+        Self::WslVersion,
+        Self::WslSystemStart,
+        Self::Docker,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Virtualization => "virtualization",
+            Self::Administrator => "administrator",
+            Self::WslFeature => "wsl_feature",
+            Self::WslService => "wsl_service",
+            Self::VirtualMachinePlatformFeature => "virtual_machine_platform_feature",
+            Self::DefaultWslVersion => "default_wsl_version",
+            Self::WslVersion => "wsl_version",
+            Self::WslSystemStart => "wsl_system_start",
+            Self::Docker => "docker",
+        }
+    }
+}
+
+/// How a Windows probe that said something went: it answered, but late, or it was stopped at its
+/// limit.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsProbeOutcome {
+    Slow,
+    TimedOut,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1595,6 +1689,7 @@ pub enum CliFailure {
     InvalidAcceptance,
     RootlessPodman,
     DownloadStalled,
+    BelowSecurityFloor,
 }
 
 /**
@@ -1706,6 +1801,7 @@ const CLI_FAILURES: &[&str] = &[
     "invalid_acceptance",
     "rootless_podman",
     "download_stalled",
+    "below_security_floor",
 ];
 
 /// A numeric version, and for the app's own version a closed pre-release label (`AppVersion`):
@@ -1739,11 +1835,16 @@ pub fn schema_json() -> serde_json::Value {
         },
         "events": {
             "step_viewed": { "step": steps },
-            "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
+            "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "langgraph_ts", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
             "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
+            "windows_probe": {
+                "probe": WindowsProbeKind::ALL.map(WindowsProbeKind::as_str),
+                "outcome": ["slow", "timed_out"],
+                "duration_ms": "u64"
+            },
             "image_pull": { "outcome": ["success", "failure"], "duration_ms": "u64", "bytes": "option_u64" },
             "setup_failed": {
                 "step": steps,
@@ -1760,6 +1861,7 @@ pub fn schema_json() -> serde_json::Value {
             },
             "activated": {},
             "setup_abandoned": { "step": steps },
+            "setup_restart_required": { "step": steps },
             "sign_in": {
                 "outcome": ["started", "completed", "failed", "cancelled", "restored"],
                 "duration_ms": "option_u64",
@@ -2125,6 +2227,27 @@ mod tests {
         assert!(NumericVersion::parse("123456789012345678901234567890123").is_err());
     }
 
+    /// The default Bot is the TypeScript LangGraph engine, and the window records choosing it.
+    /// Refused here, the first screen's Install would record no Bot at all.
+    #[test]
+    fn the_default_bot_can_be_recorded_as_chosen() {
+        let chosen = serde_json::from_value::<EventData>(serde_json::json!({
+            "kind": "harness_chosen",
+            "harness": "langgraph_ts"
+        }))
+        .expect("the default Bot's choice is refused");
+        assert_eq!(
+            chosen,
+            EventData::HarnessChosen {
+                harness: Harness::LanggraphTs
+            }
+        );
+        assert!(schema_json()["events"]["harness_chosen"]["harness"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("langgraph_ts")));
+    }
+
     #[test]
     fn event_schema_is_tagged_closed_and_exposes_centralized_name() {
         let event = Event::new(
@@ -2326,6 +2449,16 @@ mod tests {
             EventData::WindowsStage {
                 outcome: WindowsStageOutcome::WslNoKernel,
             },
+            EventData::WindowsProbe {
+                probe: WindowsProbeKind::WslFeature,
+                outcome: WindowsProbeOutcome::TimedOut,
+                duration_ms: 30_012,
+            },
+            EventData::WindowsProbe {
+                probe: WindowsProbeKind::VirtualMachinePlatformFeature,
+                outcome: WindowsProbeOutcome::Slow,
+                duration_ms: 7_250,
+            },
             EventData::ImagePull {
                 outcome: Outcome::Success,
                 duration_ms: 12,
@@ -2360,6 +2493,9 @@ mod tests {
             },
             EventData::Activated,
             EventData::SetupAbandoned { step: Step::Ask },
+            EventData::SetupRestartRequired {
+                step: Step::Install,
+            },
             EventData::SignIn {
                 outcome: SignInOutcome::Cancelled,
                 duration_ms: Some(12),
@@ -2416,7 +2552,7 @@ mod tests {
                 .is_some_and(|steps| steps.iter().any(|step| step == "connect_openbot")),
             "{listed}"
         );
-        for kind in ["step_viewed", "setup_abandoned"] {
+        for kind in ["step_viewed", "setup_abandoned", "setup_restart_required"] {
             let sent = serde_json::json!({ "kind": kind, "step": "connect_openbot" });
             let event = serde_json::from_value::<EventData>(sent.clone()).unwrap();
             assert_eq!(serde_json::to_value(event).unwrap(), sent);
@@ -2472,6 +2608,43 @@ mod tests {
             (&window, "url", serde_json::json!("tauri://localhost")),
         ] {
             let mut open = base.clone();
+            open[path] = value;
+            assert!(serde_json::from_value::<EventData>(open).is_err(), "{path}");
+        }
+    }
+
+    /// A Windows probe that ran long or out of time: its name, how it went and how long, and
+    /// nothing open. The command a probe ran, its output and its error never fit.
+    #[test]
+    fn windows_probe_events_round_trip_and_refuse_anything_open() {
+        let probe = serde_json::json!({
+            "kind": "windows_probe",
+            "probe": "wsl_feature",
+            "outcome": "timed_out",
+            "duration_ms": 30012
+        });
+        let event = serde_json::from_value::<EventData>(probe.clone()).unwrap();
+        assert_eq!(event.event_name(), "oss.desktop.windows_probe");
+        assert_eq!(serde_json::to_value(event).unwrap(), probe);
+        for kind in WindowsProbeKind::ALL {
+            let mut named = probe.clone();
+            named["probe"] = serde_json::json!(kind.as_str());
+            let event = serde_json::from_value::<EventData>(named).unwrap();
+            assert!(matches!(event, EventData::WindowsProbe { probe, .. } if probe == kind));
+        }
+        for (path, value) in [
+            (
+                "probe",
+                serde_json::json!("Get-CimInstance Win32_OptionalFeature"),
+            ),
+            ("probe", serde_json::json!("powershell")),
+            ("outcome", serde_json::json!("failed")),
+            ("duration_ms", serde_json::json!(-1)),
+            ("duration_ms", serde_json::json!("30012")),
+            ("command", serde_json::json!("wsl.exe --version")),
+            ("stderr", serde_json::json!("Access is denied.")),
+        ] {
+            let mut open = probe.clone();
             open[path] = value;
             assert!(serde_json::from_value::<EventData>(open).is_err(), "{path}");
         }
@@ -2934,6 +3107,114 @@ mod tests {
                 step: Step::Install
             }
         )));
+    }
+
+    /// A first Windows install that needs WSL restarts Windows. Windows ends the app without a Quit
+    /// and OpenBot opens again after sign-in. That launch sends `setup_restart_required` at the
+    /// step, and never `setup_abandoned`; setup then goes on under the same installation id.
+    #[test]
+    fn a_planned_windows_restart_sends_restart_required_and_setup_goes_on_after_it() {
+        let dir = temp_dir("windows-restart");
+        let before = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            Config::disabled_for_tests(),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        let install_id = before.install_id().unwrap();
+        before
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        // Restart now: saved, then Windows ends the process. No Quit, so no `shutdown`.
+        before.restart_required().unwrap();
+        drop(before);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            vec![
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        let after = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        after.flush().unwrap();
+        let sent = server.join().unwrap();
+        assert!(sent[0].contains("oss.desktop.step_viewed"), "{sent:?}");
+        assert!(
+            sent[1].contains("oss.desktop.setup_restart_required"),
+            "{sent:?}"
+        );
+        assert!(sent[1].contains(r#""step":"install""#), "{sent:?}");
+        assert!(sent.iter().all(|request| request.contains(&install_id)));
+        assert!(after.snapshot().unwrap().queue.is_empty(), "nothing else");
+
+        // The same setup goes on: the same installation, and the step the window shows next is
+        // counted, so a real quit after the restart is still an abandonment.
+        assert_eq!(after.install_id().unwrap(), install_id);
+        after
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        after.record(EventData::Activated).unwrap();
+        let queue = after.snapshot().unwrap().queue;
+        assert!(matches!(
+            queue.iter().map(|event| &event.data).collect::<Vec<_>>()[..],
+            [
+                EventData::StepViewed {
+                    step: Step::Install
+                },
+                EventData::Activated
+            ]
+        ));
+    }
+
+    /// Quit during setup, with no restart planned, is an abandonment as it always was.
+    #[test]
+    fn a_plain_quit_during_setup_still_sends_setup_abandoned() {
+        let dir = temp_dir("plain-quit");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            vec![
+                one_response(listener.try_clone().unwrap()),
+                one_response(listener),
+            ]
+        });
+        let telemetry = Telemetry::open_with_env(
+            &dir,
+            context("1.1.0-rc.2", Engine::None),
+            enabled(endpoint),
+            EnvOverride::Enabled,
+        )
+        .unwrap();
+        telemetry
+            .record(EventData::StepViewed {
+                step: Step::Install,
+            })
+            .unwrap();
+        telemetry.shutdown().unwrap();
+        let sent = server.join().unwrap();
+        assert!(sent[0].contains("oss.desktop.step_viewed"), "{sent:?}");
+        assert!(sent[1].contains("oss.desktop.setup_abandoned"), "{sent:?}");
+        assert!(sent[1].contains(r#""step":"install""#), "{sent:?}");
+        assert!(
+            telemetry.snapshot().unwrap().queue.is_empty(),
+            "nothing else"
+        );
+        // A restart asked for after that is not a second ending of the same setup session.
+        telemetry.restart_required().unwrap();
+        assert!(telemetry.snapshot().unwrap().queue.is_empty());
     }
 
     #[test]

@@ -99,7 +99,7 @@ export const AskWhatIfHeader = zod.object({
 export const askWhatIfBodyQuestionMax = 500;
 
 export const askWhatIfBodyQuestionRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const AskWhatIfBody = zod.object({

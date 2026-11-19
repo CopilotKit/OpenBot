@@ -55,6 +55,8 @@ const REJECTED = "invalid x-api-key";
 /** How the next `/run` goes. A fresh one per test. */
 type RunPlan =
   | { kind: "fails"; message: string }
+  /** The Bot works (it says what it found, and reads an app) and then the run fails. */
+  | { kind: "worksThenFails"; text: string; message: string }
   | { kind: "calls"; tool: string }
   | { kind: "answers"; text: string }
   | { kind: "stalls"; text: string }
@@ -163,6 +165,33 @@ function run(input: RunAgentInput): Response {
   if (plan.kind === "fails") {
     const events = [
       started,
+      { type: "RUN_ERROR", message: plan.message, code: "agent_error" },
+    ];
+    record(input.threadId, events);
+    return sse(events);
+  }
+  if (plan.kind === "worksThenFails") {
+    const said = `said-${input.runId}`;
+    const read = `read-${input.runId}`;
+    const events = [
+      started,
+      { type: "TEXT_MESSAGE_START", messageId: said, role: "assistant" },
+      { type: "TEXT_MESSAGE_CONTENT", messageId: said, delta: plan.text },
+      { type: "TEXT_MESSAGE_END", messageId: said },
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: read,
+        toolCallName: "mcp__composio-hubspot__HUBSPOT_SEARCH_DEALS",
+        parentMessageId: said,
+      },
+      { type: "TOOL_CALL_ARGS", toolCallId: read, delta: "{}" },
+      { type: "TOOL_CALL_END", toolCallId: read },
+      {
+        type: "TOOL_CALL_RESULT",
+        messageId: `result-${input.runId}`,
+        toolCallId: read,
+        content: '{"deals":2}',
+      },
       { type: "RUN_ERROR", message: plan.message, code: "agent_error" },
     ];
     record(input.threadId, events);
@@ -558,6 +587,52 @@ test("a Bot that says why it failed is not asked about again", async () => {
     REJECTED,
   );
   expect(botReads).toBe(before);
+});
+
+/** What is typed in the composer: the editor the words live in. */
+function typed(view: ReturnType<typeof open>): string {
+  return (
+    view.container.querySelector("[contenteditable]")?.textContent ?? ""
+  ).trim();
+}
+
+/*
+ * FOUND IN DOGFOODING. A Bot looked up HubSpot deals for five minutes, then its run failed, and the
+ * person's message came back in the box, ready to send again. Sent again, it runs the whole request
+ * from the start and repeats what already ran. A turn that never got going still hands its words
+ * back, so they can be sent once it can.
+ */
+test("a turn that failed after it had done some work keeps its message sent, and the box stays empty", async () => {
+  const FAILED =
+    "Claude's reply came back incomplete, so the Bot stopped. Ask it to carry on.";
+  plans = [
+    {
+      kind: "worksThenFails",
+      text: "Looking up deals at S1 and later.",
+      message: FAILED,
+    },
+  ];
+  const live = open();
+  await send(live, "Find all HubSpot deals at S1 and later");
+  expect((await live.findByTestId("transcript-stopped")).textContent).toBe(
+    FAILED,
+  );
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  expect(typed(live)).toBe("");
+  // Once, where it was sent.
+  expect(
+    live.getAllByText("Find all HubSpot deals at S1 and later"),
+  ).toHaveLength(1);
+});
+
+test("a turn that failed before it did anything hands the words back to send again", async () => {
+  plans = [{ kind: "fails", message: REJECTED }];
+  const live = open();
+  await send(live, "Summarise my inbox");
+  await live.findByTestId("transcript-stopped");
+  await waitFor(() => expect(typed(live)).toBe("Summarise my inbox"));
 });
 
 test("a turn that fails in a run after its browser steps says so, as one that fails at once does", async () => {

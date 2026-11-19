@@ -34,7 +34,7 @@ def _sse(events):
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-def _provider_app(seen):
+def _provider_app(seen, bodies):
     app = FastAPI()
 
     @app.post("/v1/chat/completions")
@@ -79,6 +79,20 @@ def _provider_app(seen):
     async def anthropic_messages(request: Request):
         body = await request.json()
         seen.append(("anthropic", body["model"]))
+        bodies.append(body)
+        # What Anthropic answers for Claude 4.5 and 4.6 (Haiku, Sonnet and Opus), word for word
+        # from the model-compatibility run: they take a temperature or a `top_p`, never both.
+        if "temperature" in body and "top_p" in body:
+            return JSONResponse(
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "`temperature` and `top_p` cannot both be specified for this model.",
+                    },
+                },
+                status_code=400,
+            )
         message = {
             "id": "msg",
             "type": "message",
@@ -111,18 +125,19 @@ def _provider_app(seen):
 @pytest.fixture
 def provider():
     seen = []
+    bodies = []
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     server = uvicorn.Server(
-        uvicorn.Config(_provider_app(seen), host="127.0.0.1", port=port, log_level="error")
+        uvicorn.Config(_provider_app(seen, bodies), host="127.0.0.1", port=port, log_level="error")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.01)
-    yield f"http://127.0.0.1:{port}", seen
+    yield f"http://127.0.0.1:{port}", seen, bodies
     server.should_exit = True
     thread.join(timeout=10)
 
@@ -188,21 +203,58 @@ CHOICES = {
 
 @pytest.mark.parametrize("choice", list(CHOICES))
 def test_a_run_reaches_the_model_the_setup_screen_chose(monkeypatch, provider, choice):
-    base, seen = provider
+    base, seen, _ = provider
     environment, expected = CHOICES[choice]
-    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
-    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
-    for key, value in environment(base).items():
-        monkeypatch.setenv(key, value)
-
-    from src import main
-
-    main = importlib.reload(main)
-    response = TestClient(main.app).post(
-        "/agui", json=RUN, headers={"x-openbot-agent-token": TOKEN}
-    )
+    response = _run(monkeypatch, environment(base))
 
     assert response.status_code == 200
     assert '"RUN_FINISHED"' in response.text
     assert '"RUN_ERROR"' not in response.text
     assert seen == [expected]
+
+
+# The Claude models the picker lists that take a temperature or a `top_p` but not both. Agno sends
+# both on every request (0.7 and 1.0), so every run on one of them was refused before this Bot
+# answered.
+CLAUDE_TAKING_ONE_SAMPLING_PARAM = [
+    "claude-haiku-4-5",
+    "claude-opus-4-5",
+    "claude-opus-4-6",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4-6",
+]
+
+
+@pytest.mark.parametrize("model", CLAUDE_TAKING_ONE_SAMPLING_PARAM)
+def test_a_claude_model_is_sent_a_temperature_and_no_top_p(monkeypatch, provider, model):
+    base, seen, bodies = provider
+    response = _run(
+        monkeypatch,
+        {
+            "BOT_PROVIDER": "anthropic",
+            "BOT_MODEL": model,
+            "ANTHROPIC_API_KEY": "test-key",
+            "ANTHROPIC_BASE_URL": base,
+            "OPENAI_API_KEY": "",
+            "OPENAI_BASE_URL": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert '"RUN_ERROR"' not in response.text
+    assert '"RUN_FINISHED"' in response.text
+    assert seen == [("anthropic", model)]
+    assert bodies[0]["temperature"] == 0.7
+    assert "top_p" not in bodies[0]
+
+
+def _run(monkeypatch, environment):
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+
+    from src import main
+
+    main = importlib.reload(main)
+    return TestClient(main.app).post("/agui", json=RUN, headers={"x-openbot-agent-token": TOKEN})

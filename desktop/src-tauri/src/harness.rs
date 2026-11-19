@@ -66,6 +66,11 @@ path that speaks that vendor's subscription auth. Anthropic's is the Claude Agen
 `CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the Codex model, which the LangGraph AG-UI image selects from
 the token store.
 
+A ChatGPT plan runs on the TypeScript LangGraph Bot, like every other sign-in but the Claude plan,
+and that Bot sends its model calls to the Python LangGraph image, which holds the Codex transport.
+So a ChatGPT-plan installation keeps the Python image running beside its Bot: see
+`crate::plan::CHATGPT_PLAN_SERVICE`.
+
 MEASURED, on the screen built to catch it: signing in to a Claude plan and keeping the default Bot
 produced a stack that came up clean and a Bot whose own log said "Missing credentials. Please pass
 an `api_key`". The last screen showed the failure, which is what it is for, but the person had done
@@ -76,8 +81,46 @@ Nobody is asked to know this. The plan picks the Bot that can use it.
 pub fn speaking_for(provider: &str) -> Option<&'static str> {
     match provider {
         "anthropic" => Some("claude-agent-sdk"),
-        "openai" => Some("langgraph"),
+        "openai" => Some(DEFAULT_HARNESS),
         _ => None,
+    }
+}
+
+/**
+The Bot a start runs, from the Bot the window asked for and the credential the model screen chose.
+
+A plan chooses its own Bot, because only one Bot can spend it (see `speaking_for`). Anything else
+is a key or a provider sign-in, where the Bot and the model are independent and the window's choice
+stands.
+*/
+pub fn for_credential(
+    credential: &crate::env::ModelCredential,
+    chosen: Option<HarnessChoice>,
+) -> Option<HarnessChoice> {
+    let plan = match credential {
+        crate::env::ModelCredential::ClaudePlan { .. } => speaking_for("anthropic"),
+        crate::env::ModelCredential::ChatGptPlan { .. } => speaking_for("openai"),
+        _ => return chosen,
+    };
+    plan.map(|id| HarnessChoice {
+        id: id.into(),
+        agent_url: None,
+    })
+}
+
+/**
+The id an installation's saved choice means in this release.
+
+`langgraph` was the default Bot until the TypeScript LangGraph Bot replaced it. The setup window
+has no picker: it installs the default, and a plan re-points it. So an installation that saved
+`langgraph` either took the default or was on a ChatGPT plan, and both now run on the default.
+Moved here, where the image is resolved, so Install pulls the image Start then runs, and the
+installation's Bot (`picked-harness` in the package) keeps its id and its threads.
+*/
+fn current_id(id: &str) -> &str {
+    match id {
+        "langgraph" => DEFAULT_HARNESS,
+        other => other,
     }
 }
 
@@ -139,7 +182,7 @@ fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
 
 /// The Bot a first setup installs, as the setup window names it (`DEFAULT_HARNESS` in
 /// desktop/src/harness.ts). The early downloads pull its images before Install is clicked.
-pub const DEFAULT_HARNESS: &str = "langgraph";
+pub const DEFAULT_HARNESS: &str = "langgraph-ts";
 
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
 /// because each misleads alone.
@@ -239,7 +282,7 @@ pub fn picked(
     let Some(choice) = choice else {
         return Ok(None);
     };
-    let id = choice.id.trim();
+    let id = current_id(choice.id.trim());
     if id.is_empty() {
         return Ok(None);
     };
@@ -318,6 +361,124 @@ mod tests {
         assert!(super::catalogue()
             .iter()
             .any(|row| row.id == super::DEFAULT_HARNESS && row.image.is_some()));
+    }
+
+    /// The default Bot is the TypeScript LangGraph image, replacing the Python one rather than
+    /// running beside it.
+    #[test]
+    fn the_default_bot_is_the_typescript_langgraph_image() {
+        let root = deployment_naming_everything("default-ts");
+        let row = catalogue()
+            .into_iter()
+            .find(|row| row.id == DEFAULT_HARNESS)
+            .expect("the default Bot is in the catalogue");
+        assert_eq!(row.id, "langgraph-ts");
+        assert_eq!(row.image.as_deref(), Some("agent-langgraph-ts"));
+        assert_eq!(row.port, Some(4215));
+        assert_eq!(row.health_path.as_deref(), Some("/health"));
+        let crate::env::PickedHarness::Installed {
+            image,
+            port,
+            run_path,
+            ..
+        } = picked(Some(&choice(DEFAULT_HARNESS)), &root)
+            .expect("refused")
+            .expect("nothing")
+        else {
+            panic!("the default Bot installs an image");
+        };
+        assert_eq!(
+            image,
+            "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc"
+        );
+        assert_eq!(port, 4215);
+        assert_eq!(run_path, "");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn installed_image(root: &std::path::Path, chosen: Option<HarnessChoice>) -> String {
+        match picked(chosen.as_ref(), root).expect("refused") {
+            Some(crate::env::PickedHarness::Installed { image, .. }) => image,
+            other => panic!("expected an installed Bot, got {other:?}"),
+        }
+    }
+
+    /**
+    Which image each sign-in runs its Bot on.
+
+    A Claude plan can only be spent through the Claude Agent SDK. Every other sign-in runs the
+    TypeScript LangGraph Bot: an API key and a Gemini sign-in reach their provider directly, and a
+    ChatGPT plan's Bot sends its model calls on to the Python image, which keeps running for it
+    (`crate::env` writes the address, `crate::stack::selected_services` starts it).
+    */
+    #[test]
+    fn each_sign_in_runs_the_bot_its_routing_names() {
+        use crate::env::ModelCredential;
+        let root = deployment_naming_everything("sign-ins");
+        let default = Some(choice(DEFAULT_HARNESS));
+        let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
+        for (credential, image) in [
+            (
+                ModelCredential::OpenAi {
+                    api_key: "sk-test".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::Anthropic {
+                    api_key: "sk-ant-test".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::ProviderOAuth {
+                    provider: "google".into(),
+                    path: "/openbot/model-oauth.json".into(),
+                    proxy_token: "proxy".into(),
+                    model: "gemini-3-pro".into(),
+                },
+                ts,
+            ),
+            (ModelCredential::ChatGptPlan { store: "{}".into() }, ts),
+            (
+                ModelCredential::ClaudePlan {
+                    token: "plan".into(),
+                },
+                "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:abc",
+            ),
+        ] {
+            assert_eq!(
+                installed_image(&root, for_credential(&credential, default.clone())),
+                image,
+                "{credential:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An installation from before this release saved `langgraph`, the Python image, as its Bot.
+    /// It moves to the TypeScript image on its next Install and Start, whatever it signs in with.
+    #[test]
+    fn an_installation_that_saved_the_python_default_moves_to_the_typescript_one() {
+        use crate::env::ModelCredential;
+        let root = deployment_naming_everything("saved-python");
+        let saved = Some(choice("langgraph"));
+        let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
+        // Install, which has no credential and pulls what the saved choice resolves to.
+        assert_eq!(installed_image(&root, saved.clone()), ts);
+        for credential in [
+            ModelCredential::OpenAi {
+                api_key: "sk-test".into(),
+            },
+            ModelCredential::ChatGptPlan { store: "{}".into() },
+        ] {
+            assert_eq!(
+                installed_image(&root, for_credential(&credential, saved.clone())),
+                ts,
+                "{credential:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Both plans name a Bot that exists and can actually use them.

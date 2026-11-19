@@ -70,6 +70,7 @@ mock.module("@tauri-apps/api/event", () => ({
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
   ButtonMark: () => null,
+  MarkImage: () => null,
 }));
 
 const { App } = await import("./App");

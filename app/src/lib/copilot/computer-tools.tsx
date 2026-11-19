@@ -1,6 +1,12 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { SECRET_FIELD_BY_REF } from "@openbot/shared/computer-control";
+import {
+  SEND_FILE_NO_CONVERSATION,
+  SEND_FILE_TOOL,
+  SEND_FILE_TOOL_DESCRIPTION,
+} from "@openbot/shared/send-file";
 import { z } from "zod";
+import { SentFileCard } from "@/components/channels/sent-file-card";
 import { ToolLine } from "@/components/channels/tool-line";
 import { ComputerView } from "@/components/computer/computer-view";
 import { HelpRequestCard } from "@/components/computer/help-request-card";
@@ -19,6 +25,7 @@ import {
   runNavigation,
 } from "@/lib/computers/handoff";
 import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
+import { sentFileOf } from "@/lib/computers/sent-file";
 import {
   type ToolCallContext,
   useActiveBotHolder,
@@ -184,6 +191,16 @@ function refusedDetail(target: string | undefined, outcome: ComputerOutcome) {
   return [target, reason].filter(Boolean).join(" · ");
 }
 
+/**
+ * A file that was not sent: the server's sentence already names the file ("budget.xlsx can't be
+ * sent. ..."), so the line leads with it rather than saying the name twice in a narrow column.
+ */
+function sendRefusedDetail(path: string | undefined, outcome: ComputerOutcome) {
+  const reason = outcomeForPerson(String(outcome.reason ?? ""));
+  const name = path?.split("/").pop();
+  return name && reason.includes(name) ? reason : refusedDetail(path, outcome);
+}
+
 /** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
 function didNotWork(outcome: ComputerOutcome): boolean {
   return (
@@ -326,6 +343,7 @@ const OFFERED: Readonly<Record<string, OfferRule>> = {
   computer_read_file: offeredComputer,
   computer_run_command: offeredComputer,
   computer_write_file: offeredComputer,
+  [SEND_FILE_TOOL]: offeredComputer,
   computer_scroll: offeredBrowser,
 };
 
@@ -933,6 +951,50 @@ export function ComputerTools() {
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
+          }
+          refused={outcome.refused === true}
+          failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
+        />
+      );
+    },
+  });
+
+  useFrontendTool({
+    name: SEND_FILE_TOOL,
+    description: SEND_FILE_TOOL_DESCRIPTION,
+    parameters: z.object({
+      path: z
+        .string()
+        .describe(
+          "Path of the file relative to your workspace, such as reports/august.pdf",
+        ),
+    }),
+    /*
+     * NEVER CALLED IN A CONVERSATION. Sending a file is in the approval wrapper's `writes`, so it
+     * always goes to the server's gate with the conversation: the server pulls the file through the
+     * governed download, stores it in this conversation and answers with it. This answers only a
+     * surface with no conversation to send a file into.
+     */
+    handler: async () => ({ ok: false, reason: SEND_FILE_NO_CONVERSATION }),
+    render: ({ args, result, status }) => {
+      const sent = sentFileOf(readOutcome(result));
+      if (sent) return <SentFileCard file={sent} />;
+      const outcome = outcomeOf(result);
+      const path = typeof args?.path === "string" ? args.path : undefined;
+      const finished = status === "complete" || result !== undefined;
+      return (
+        <ActionLine
+          running={!finished}
+          label={finished ? "Sent a file" : "Sending a file"}
+          attempted="Send a file"
+          // Not "Sent a file, didn't work": nothing arrived, so the line says so.
+          failedLabel="Didn't send a file"
+          detail={
+            outcome.refused === true || didNotWork(outcome)
+              ? sendRefusedDetail(path, outcome)
+              : path
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}

@@ -14,6 +14,7 @@ export const BotAgentHarness = {
   llamaindex: "llamaindex",
   agno: "agno",
   langgraph: "langgraph",
+  "langgraph-ts": "langgraph-ts",
   "google-adk": "google-adk",
   antigravity: "antigravity",
   "pydantic-ai": "pydantic-ai",

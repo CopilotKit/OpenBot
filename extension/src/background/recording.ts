@@ -46,7 +46,11 @@ import {
   KEPT_FOR_PERSON_MS,
   RECORDER_ACTION_NOTICE_AT,
 } from "../shared/limits";
-import { OpenBotError, ORGANIZATION_ID } from "../shared/openbot-client";
+import {
+  OpenBotError,
+  ORGANIZATION_ID,
+  updateRequiredSentence,
+} from "../shared/openbot-client";
 import { isRecordablePage } from "../shared/origin";
 import {
   allowsOpenBot,
@@ -573,6 +577,8 @@ const signedOutReason = (error: unknown): SignedOutReason | null =>
  * text in its answer, which the popup would show in the Recorder's own voice. */
 const sentenceFor = (error: unknown, fallback: string): string => {
   if (!(error instanceof OpenBotError)) return fallback;
+  const update = updateRequiredSentence(error);
+  if (update) return update;
   if (error.body?.code === RECORDER_AUTHORITY_UNAVAILABLE)
     return SENTENCES.authorityUnavailable;
   return error.status === 403 ? SENTENCES.forbidden : fallback;

@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, within } from "@testing-library/react";
 import type * as React from "react";
+import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
 import { IDENTITY_PROVIDERS_PATH, PEOPLE_PATH } from "./accounts-api";
@@ -24,6 +25,7 @@ import {
   COMPUTER_ACTIONS_PATH,
   isOverviewRead,
   MODEL_USAGE_PATH,
+  SETTINGS_PATH,
 } from "./admin-settings-api";
 import { answerBotsList } from "./bots-api";
 import { MODEL_CATALOGUE_PATH } from "./models-api";
@@ -71,6 +73,7 @@ const { Route: LearningRoute } = await import(
 const { Route: ComputersRoute } = await import(
   "@/routes/_authed/admin/computers"
 );
+const { Route: AdminRoute } = await import("@/routes/_authed/admin/index");
 const { CheckInsPage } = await import("@/routes/_authed/admin/proactive");
 const { ProvidersPage } = await import("@/routes/_authed/admin/providers");
 
@@ -281,3 +284,31 @@ test("in the team edition the same pages are the team's, and ask for what they s
   expect(view.queryByText(FOR_A_TEAM)).toBeNull();
   expect(asked.some((path) => path.startsWith(PEOPLE_PATH))).toBe(true);
 });
+
+/*
+ * The personal edition's one person is its admin, and its server keeps no organization settings: it
+ * answers them 404. Admin's overview and Computers asked for them anyway, for the notice about
+ * shared computers, and the personal edition's Admin journey failed on the 404s. That notice is for
+ * a team's OpenBot, where every person's Bots can share one computer; here the computer is the
+ * person's own.
+ */
+// Computers is titled Computer here: one person's one computer.
+test.each([
+  ["Admin", AdminRoute],
+  ["Computer", ComputersRoute],
+])(
+  "%s asks the one person's server for no settings it has not got",
+  async (title, route) => {
+    queryClient.setQueryData(authKeys.currentUser(), {
+      id: "dev-local-user",
+      email: "dev@openbot.local",
+      name: "Dana",
+      role: "admin",
+    } as never);
+    const view = await draw(component(route));
+    await view.findByRole("heading", { level: 1, name: title });
+    await settleReactWork();
+    expect(asked).not.toContain(SETTINGS_PATH);
+    expect(view.queryByText("Everyone's Bots share one computer.")).toBeNull();
+  },
+);

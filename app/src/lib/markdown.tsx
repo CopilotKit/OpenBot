@@ -19,6 +19,8 @@ import {
   Streamdown,
   type StreamdownProps,
 } from "streamdown";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
+import { attachmentAddress } from "@/lib/channels/attachments";
 import { hasMaths, withMathDelimiters } from "@/lib/maths";
 import {
   NO_SLACK_NAMES,
@@ -151,10 +153,42 @@ function AppLink({
   );
 }
 
+/**
+ * The address a link to a stored file downloads it from, or null for a link that is not one.
+ *
+ * A Bot that sends a file names it in its words, linked to the form a message stores
+ * (`/api/attachments/<id>`, from the send's answer), or now and then to the API's own address. Read
+ * as a page of the app, a click asked the router for it, found no such page and landed on home, so
+ * the person never got the file from the words (found by the end-to-end pass). It is the file, from
+ * the conversation's own address, the one the card's Download button uses.
+ */
+export function fileAddress(path: string): string | null {
+  if (path.startsWith(storedAttachmentUrl(""))) return attachmentAddress(path);
+  return /^\/api\/v2\/organizations\/[^/]+\/attachments\/[^/?#]+/.test(path)
+    ? path
+    : null;
+}
+
 export const markdownComponents = {
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
     const path = inAppPath(href);
-    if (path !== null)
+    const file = path === null ? null : fileAddress(path);
+    if (file !== null)
+      return (
+        <a
+          {...rest}
+          className="underline underline-offset-2 hover:no-underline"
+          // The server names the file; a download, so it never replaces the conversation.
+          download
+          href={file}
+          rel={undefined}
+          target={undefined}
+        >
+          {children}
+        </a>
+      );
+    // Any other address under /api is the server's, not a page: the router has nothing to open.
+    if (path !== null && !path.startsWith("/api/"))
       return (
         <AppLink {...rest} path={path}>
           {children}

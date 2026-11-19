@@ -266,6 +266,29 @@ test("a dropped screenshot shows its preview and goes up to the conversation", a
   expect(view.container.querySelector('[role="alert"]')).toBeNull();
 });
 
+/*
+ * THE CHIP IS DRAWN FROM THE FILE ON THIS DEVICE, NOT FETCHED BACK. Pictures go up to 100MB, and a
+ * chip drawn from the server's address downloads the whole file again straight after uploading it,
+ * to draw an 80px square.
+ */
+test("an uploaded picture's chip draws from the file on this device, not from the server", async () => {
+  serverSniffs("image/png");
+  const picture = new File(
+    [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    "site-survey.png",
+    { type: "image/png" },
+  );
+  const view = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  drop(view.container.querySelector("form") as HTMLFormElement, [picture]);
+  await uploaded(view, picture.name);
+
+  const src = view.container.querySelector("img")?.getAttribute("src") ?? "";
+  expect(src.startsWith("blob:")).toBe(true);
+});
+
 /**
  * A drag that announced files and handed over none (the webview could not read what was dragged)
  * used to stage an empty list: no chip, no refusal, nothing. It says so now.

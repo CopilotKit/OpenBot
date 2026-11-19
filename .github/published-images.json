@@ -3,6 +3,7 @@
   "agent-llamaindex",
   "agent-agno",
   "agent-langgraph-agui",
+  "agent-langgraph-ts",
   "agent-adk",
   "agent-pydantic-ai",
   "agent-microsoft",

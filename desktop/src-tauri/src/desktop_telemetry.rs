@@ -766,6 +766,7 @@ pub fn cli_failure(failure: local_eval::Failure) -> telemetry::CliFailure {
         F::InvalidAcceptance => T::InvalidAcceptance,
         F::RootlessPodman => T::RootlessPodman,
         F::DownloadStalled => T::DownloadStalled,
+        F::BelowSecurityFloor => T::BelowSecurityFloor,
     }
 }
 
@@ -1198,6 +1199,16 @@ pub fn update_not_restored<R: tauri::Runtime>(
     }
 }
 
+/// Windows is restarting for the fix setup asked for (`Telemetry::restart_required`). Saved at
+/// once: Windows ends the app without a Quit, and the launch after the restart sends what is left.
+pub fn restart_required<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<DesktopTelemetry>() {
+        if state.emitter.restart_required().is_err() {
+            log::warn!("[telemetry] setup event could not be saved");
+        }
+    }
+}
+
 pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<DesktopTelemetry>() {
         if state.emitter.shutdown().is_err() {
@@ -1230,10 +1241,17 @@ fn main() {
     if dir.join("slow").exists() {
         std::thread::sleep(std::time::Duration::from_secs(30));
     }
-    if let Ok(answer) = std::fs::read_to_string(dir.join("answer")) {
-        print!("{answer}");
-        let code = std::fs::read_to_string(dir.join("exit")).unwrap_or_default();
-        std::process::exit(code.trim().parse().unwrap_or(0));
+    // An answer for this command (`local update` reads `answer-update`), else for every call.
+    let command = args.get(1).cloned().unwrap_or_default();
+    for (answer, exit) in [
+        (format!("answer-{command}"), format!("exit-{command}")),
+        ("answer".to_owned(), "exit".to_owned()),
+    ] {
+        if let Ok(answer) = std::fs::read_to_string(dir.join(answer)) {
+            print!("{answer}");
+            let code = std::fs::read_to_string(dir.join(exit)).unwrap_or_default();
+            std::process::exit(code.trim().parse().unwrap_or(0));
+        }
     }
     println!("{{\"type\":\"skipped\"}}");
 }
@@ -1273,6 +1291,12 @@ fn main() {
         pub(crate) fn answer(&self, stdout: &str, exit: i32) {
             std::fs::write(self.dir.join("answer"), stdout).unwrap();
             std::fs::write(self.dir.join("exit"), exit.to_string()).unwrap();
+        }
+
+        /// Answer later `local <command>` calls with `stdout` and `exit`, ahead of `answer`.
+        pub(crate) fn answer_to(&self, command: &str, stdout: &str, exit: i32) {
+            std::fs::write(self.dir.join(format!("answer-{command}")), stdout).unwrap();
+            std::fs::write(self.dir.join(format!("exit-{command}")), exit.to_string()).unwrap();
         }
 
         /// Every call so far, one line each, arguments space-separated.
@@ -2022,6 +2046,7 @@ mod tests {
                 drive: None,
                 disk_gb: None,
                 free_on_drive: false,
+                mac: false,
                 measured: local_eval::EngineMeasure {
                     cpus: 4,
                     memory_bytes: 2 * 1024 * 1024 * 1024,
