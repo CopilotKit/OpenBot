@@ -8,8 +8,7 @@ import type { MessageListEmphasis } from "@/lib/settings/message-list";
  *
  * `view` picks the row's shape. Detailed (the default here) is two lines: the Bot's name, its time
  * and marks, then the title. Compact is one line, as Claude's sidebar lists chats: a small avatar
- * and the title, with the unread dot and the pin at the right. It names no Bot and shows no time,
- * and says nothing in words while a Bot works: the avatar moves.
+ * and the title, then the time, the unread dot and the pin at the right. It names no Bot.
  */
 export function ChannelItemContent({
   participantIds,
@@ -48,6 +47,20 @@ export function ChannelItemContent({
       data-slot="pinned"
     />
   ) : null;
+  /*
+   * While a Bot works on it, the row says so where its time goes, in the one colour that means a Bot
+   * is acting right now: said as well as shown by the orb, and the time is news only once the work
+   * is done.
+   */
+  const time = busy ? (
+    <span className="shrink-0 whitespace-nowrap font-medium text-[12px] text-indigo-600 leading-4 dark:text-indigo-300">
+      Working
+    </span>
+  ) : (
+    <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
+      {lastMessageAt}
+    </span>
+  );
   const caret = revealing ? (
     <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
   ) : null;
@@ -69,6 +82,7 @@ export function ChannelItemContent({
           {displayedTitle}
           {caret}
         </span>
+        {time}
         {unreadDot}
         {pin}
       </div>
@@ -95,19 +109,7 @@ export function ChannelItemContent({
           >
             {name}
           </span>
-          {/*
-           * While a Bot works on it, the row says so where its time goes, in the one colour that means a Bot is acting
-           * right now: said as well as shown by the orb, and the time is news only once the work is done.
-           */}
-          {busy ? (
-            <span className="shrink-0 whitespace-nowrap font-medium text-[12px] text-indigo-600 leading-4 dark:text-indigo-300">
-              Working
-            </span>
-          ) : (
-            <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
-              {lastMessageAt}
-            </span>
-          )}
+          {time}
           {unreadDot}
           {pin}
         </div>

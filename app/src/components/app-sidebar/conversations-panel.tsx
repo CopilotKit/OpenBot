@@ -1,8 +1,4 @@
-import {
-  IconLayoutList,
-  IconMessagePlus,
-  IconSearch,
-} from "@tabler/icons-react";
+import { IconMessagePlus, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -39,15 +35,6 @@ import {
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
 import { Button } from "../ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
 import { ChannelPagination } from "./channel-pagination";
@@ -314,60 +301,13 @@ function SearchResults({
 }
 
 /**
- * How the list is drawn: Compact, one line each, or Detailed, the Bot's name over the title. Only
- * this browser remembers the choice.
- */
-function ViewMenu({
-  view,
-  onChange,
-}: {
-  view: ConversationView;
-  onChange: (view: ConversationView) => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label="View"
-            className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
-            size="icon"
-            variant="ghost"
-          />
-        }
-      >
-        <IconLayoutList />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-40">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>View</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            onValueChange={(value) =>
-              onChange(value === "detailed" ? "detailed" : "compact")
-            }
-            value={view}
-          >
-            <DropdownMenuRadioItem closeOnClick value="compact">
-              Compact
-            </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem closeOnClick value="detailed">
-              Detailed
-            </DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/**
  * The Conversations section's panel: every conversation, pinned first and newest first after, with
  * a search over the whole history and New conversation at the top. Today's roster, moved beside the
  * strip and otherwise unchanged.
  */
 export function ConversationsPanel() {
   const emphasis = useMessageListEmphasis();
-  const [view, setView] = useConversationView();
+  const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
@@ -406,27 +346,24 @@ export function ConversationsPanel() {
       className="group-data-[collapsible=icon]:hidden"
       title="Conversations"
       actions={
-        <>
-          <ViewMenu onChange={setView} view={view} />
-          {/* The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour. */}
-          <Button
-            aria-label="New conversation"
-            className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
-            size="icon"
-            variant="ghost"
-            render={(props) => (
-              <Link
-                {...props}
-                to="/channel/new"
-                activeProps={{
-                  className: "bg-foreground/5",
-                }}
-              />
-            )}
-          >
-            <IconMessagePlus />
-          </Button>
-        </>
+        // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.
+        <Button
+          aria-label="New conversation"
+          className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
+          size="icon"
+          variant="ghost"
+          render={(props) => (
+            <Link
+              {...props}
+              to="/channel/new"
+              activeProps={{
+                className: "bg-foreground/5",
+              }}
+            />
+          )}
+        >
+          <IconMessagePlus />
+        </Button>
       }
     >
       <SidebarContent ref={scrollRoot} className="scroll-fade-b">

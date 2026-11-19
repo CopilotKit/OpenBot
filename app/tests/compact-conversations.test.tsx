@@ -19,6 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { ChannelItemContent } from "@/components/app-sidebar/channel-item-content";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { MessageListPreference } from "@/components/settings/message-list-preference";
 import { agentKeys, agentListQueryOptions } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
@@ -34,9 +35,9 @@ import { settleReactWork } from "./settle-react-work";
 
 /*
  * The Conversations panel lists each conversation on one line by default, as Claude's sidebar does:
- * a small avatar and the conversation's title, with nothing about which Bot it is or what was said
- * last. Today's two lines, Bot name and title, are one choice away in the panel's View menu, and
- * this browser remembers the choice.
+ * a small avatar, the conversation's title and its time, with nothing about which Bot it is or what
+ * was said last. Today's two lines, Bot name and title, are one choice away in Settings › Appearance,
+ * and this browser remembers the choice.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -107,17 +108,17 @@ function compactRow(
   );
 }
 
-test("a compact row is the title alone: no Bot name and no time", () => {
+test("a compact row is the title and its time: no Bot name", () => {
   const view = compactRow();
   expect(view.getByText("Trip budget for Lisbon")).toBeTruthy();
+  expect(view.getByText("2m")).toBeTruthy();
   expect(view.queryByText("Personal Assistant")).toBeNull();
-  expect(view.queryByText("2m")).toBeNull();
 });
 
-test("a compact row says nothing in words while its Bot works: its avatar shows it", () => {
+test("while its Bot works, a compact row says Working where its time goes", () => {
   const view = compactRow({ busy: true });
-  expect(view.queryByText("Working")).toBeNull();
-  expect(view.getByText("Trip budget for Lisbon")).toBeTruthy();
+  expect(view.getByText("Working")).toBeTruthy();
+  expect(view.queryByText("2m")).toBeNull();
 });
 
 test("a compact row keeps the unread dot and the pin", () => {
@@ -222,26 +223,10 @@ test("the panel lists conversations compact by default, without the Bot's name o
   expect(view.queryByText("Here is the breakdown by day.")).toBeNull();
 });
 
-test("View › Detailed brings back the Bot's name, and this browser remembers it", async () => {
-  const { view, user } = renderPanel();
+test("the panel has no view switch of its own: it lives in Settings", async () => {
+  const { view } = renderPanel();
   await view.findByRole("link", { name: /Trip budget for Lisbon/ });
-  await user.click(view.getByRole("button", { name: "View" }));
-  const menu = await view.findByRole("menu");
-  await user.click(
-    within(menu).getByRole("menuitemradio", { name: "Detailed" }),
-  );
-  await waitFor(() =>
-    expect(
-      within(
-        view.getByRole("link", { name: /Trip budget for Lisbon/ }),
-      ).getByText("Personal Assistant"),
-    ).toBeTruthy(),
-  );
-  expect(window.localStorage.getItem(CONVERSATION_VIEW_STORAGE_KEY)).toBe(
-    "detailed",
-  );
-  // Picking a view is the menu's whole job, so picking one closes it.
-  await waitFor(() => expect(view.queryByRole("menu")).toBeNull());
+  expect(view.queryByRole("button", { name: "View" })).toBeNull();
 });
 
 test("a browser that chose Detailed opens Detailed", async () => {
@@ -249,4 +234,50 @@ test("a browser that chose Detailed opens Detailed", async () => {
   const { view } = renderPanel();
   const row = await view.findByRole("link", { name: /Trip budget for Lisbon/ });
   expect(within(row).getByText("Personal Assistant")).toBeTruthy();
+});
+
+function renderSettings() {
+  const queryClient = client();
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "maya",
+    name: "Maya Chen",
+    email: "maya@example.com",
+    role: "user",
+    onboarding: null,
+  });
+  queryClient.setQueryData(userPreferencesQueryOptions("maya").queryKey, {
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: true,
+    dismissedNotices: [],
+    narration: null,
+    skin: "openbot",
+    proactive: "on",
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <MessageListPreference />
+    </QueryClientProvider>,
+  );
+  return { view, user: userEvent.setup({ document }) };
+}
+
+test("Settings offers Compact and Detailed, and only Detailed has an emphasis to choose", async () => {
+  const { view, user } = renderSettings();
+  const list = await view.findByRole("combobox", { name: "Conversation list" });
+  expect(list.textContent).toContain("Compact");
+  // Emphasis picks which of two lines stands out; a compact row has one.
+  expect(view.queryByRole("combobox", { name: "Message list emphasis" })).toBe(
+    null,
+  );
+
+  await user.click(list);
+  await user.click(await view.findByRole("option", { name: "Detailed" }));
+  await waitFor(() =>
+    expect(window.localStorage.getItem(CONVERSATION_VIEW_STORAGE_KEY)).toBe(
+      "detailed",
+    ),
+  );
+  expect(
+    await view.findByRole("combobox", { name: "Message list emphasis" }),
+  ).toBeTruthy();
 });
