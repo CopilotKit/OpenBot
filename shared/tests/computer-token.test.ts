@@ -16,8 +16,10 @@ const DEPLOYMENT = "deployment-token";
 
 describe("a computer's own token", () => {
   test("in default, and with no organization, is exactly the token it was before", () => {
-    const person = "3eed5a997a504f19f0daf0d625977086fa9de6e7a0790924b6fa36a3810757b6";
-    const browser = "7718aa69701fa22a1ee6c725ab7c9ee95ceabf11925075e0c204ed22d9116153";
+    const person =
+      "3eed5a997a504f19f0daf0d625977086fa9de6e7a0790924b6fa36a3810757b6";
+    const browser =
+      "7718aa69701fa22a1ee6c725ab7c9ee95ceabf11925075e0c204ed22d9116153";
     expect(computerTokenFor(DEPLOYMENT, { kind: "person", id: "ada" })).toBe(
       person,
     );
