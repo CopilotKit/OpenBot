@@ -46,6 +46,7 @@ import {
   type Delegation,
   TASK_THREADS_OFFERED,
   whereItRuns,
+  workingMode,
 } from "@/lib/bot-agents/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
@@ -72,8 +73,8 @@ type Choice = Pick<
  * agents it may use while it answers quickly. One form, saved together, because the switch means
  * nothing without the agents it switches to.
  *
- * The switch is drawn only while task threads are offered (`TASK_THREADS_OFFERED`), or for a Bot
- * that already hands work out, so its owner can turn that off.
+ * While task threads are not offered (`TASK_THREADS_OFFERED`), there is no switch and every Bot is
+ * drawn as one that does the work itself, on the agent it runs on.
  */
 export function BotDelegation({
   agent,
@@ -127,11 +128,12 @@ function DelegationForm({
   const save = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const editable = saved.canManage;
 
-  const orchestrate = saved.mode === "orchestrate";
+  // A Bot set to hand work out reads as doing the work itself, on its default, while that is hidden.
+  const orchestrate = workingMode(saved, offerTaskThreads) === "orchestrate";
   const toggle = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const [runsOn, setRunsOn] = useState(saved.agents[0]?.id ?? "");
   const [chosen, setChosen] = useState<string[]>(
-    saved.mode === "orchestrate" ? saved.agents.map((each) => each.id) : [],
+    orchestrate ? saved.agents.map((each) => each.id) : [],
   );
   const [model, setModel] = useState(saved.model ?? DEFAULT_MODEL);
   const [instructions, setInstructions] = useState(saved.instructions);
@@ -178,15 +180,35 @@ function DelegationForm({
       );
       return;
     }
+    /*
+     * A Bot set to hand work out, drawn as doing the work itself while task threads are hidden, keeps
+     * what it is set to, so turning them back on brings it back as it was. The API replaces the whole
+     * answer and names the default by putting it first, so the Bot's own mode, model, effort, words and
+     * agents go back unchanged, with the agent chosen here moved to the front.
+     */
+    const keepsHandingOut = !orchestrate && saved.mode === "orchestrate";
     await save.mutateAsync({
       botId,
-      input: {
-        mode: orchestrate ? "orchestrate" : "self",
-        model: model === DEFAULT_MODEL ? null : model,
-        effort: saved.effort,
-        instructions,
-        agentIds,
-      },
+      input: keepsHandingOut
+        ? {
+            mode: saved.mode,
+            model: saved.model,
+            effort: saved.effort,
+            instructions: saved.instructions,
+            agentIds: [
+              runsOn,
+              ...saved.agents
+                .map((each) => each.id)
+                .filter((id) => id !== runsOn),
+            ],
+          }
+        : {
+            mode: orchestrate ? "orchestrate" : "self",
+            model: model === DEFAULT_MODEL ? null : model,
+            effort: saved.effort,
+            instructions,
+            agentIds,
+          },
     });
     setDone(true);
   };
@@ -215,7 +237,7 @@ function DelegationForm({
 
   return (
     <>
-      {offerTaskThreads || orchestrate ? (
+      {offerTaskThreads ? (
         <PageSection>
           <PageRows>
             <Item size="sm">
