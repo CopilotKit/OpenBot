@@ -1,7 +1,8 @@
 import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
 import { PRIVATE_SHARE_TOOL_REF } from "@openbot/shared/tool-name";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { SentFileCard } from "@/components/channels/sent-file-card";
+import { useOverflows } from "@/hooks/use-overflows";
 import type { SentFile } from "@/lib/computers/sent-file";
 import {
   BotMarkdown,
@@ -105,10 +106,7 @@ export function ShareText({
   files?: readonly SentFile[];
 }) {
   const [open, setOpen] = useState(false);
-  const [long, setLong] = useState(false);
-  const measure = useCallback((element: HTMLQuoteElement | null) => {
-    if (element) setLong(element.scrollHeight > element.clientHeight + 1);
-  }, []);
+  const { ref, long } = useOverflows<HTMLQuoteElement>();
   if (!text) return <SharedFiles files={files} />;
   return (
     <div className="space-y-2">
@@ -119,7 +117,7 @@ export function ShareText({
             "relative break-words text-foreground text-sm",
             open ? "" : "max-h-40 overflow-hidden",
           )}
-          ref={measure}
+          ref={ref}
         >
           <BotMarkdown
             components={markdownComponents}

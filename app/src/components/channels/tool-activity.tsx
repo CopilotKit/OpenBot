@@ -33,6 +33,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { useOverflows } from "@/hooks/use-overflows";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import {
   type FolderNames,
@@ -859,15 +860,12 @@ export function StepOutput({
   verbatim?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [long, setLong] = useState(false);
-  const measure = useCallback((element: HTMLDivElement | null) => {
-    if (element) setLong(element.scrollHeight > element.clientHeight + 1);
-  }, []);
+  const { ref, long } = useOverflows<HTMLDivElement>();
   return (
     <div className="rounded-md bg-muted/50 px-3 py-2">
       <div
         className={`relative ${open ? "" : "max-h-40 overflow-hidden"}`}
-        ref={measure}
+        ref={ref}
       >
         {verbatim ? (
           <pre className="font-mono whitespace-pre-wrap break-words">
