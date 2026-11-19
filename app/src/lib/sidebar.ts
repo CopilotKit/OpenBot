@@ -92,3 +92,28 @@ export function clampSidebarWidth(pixels: number, min: number): number {
     Math.min(SIDEBAR_MAX_WIDTH, Math.max(min, SIDEBAR_MIN_WIDTH, pixels)),
   );
 }
+
+/**
+ * Whether a page draws its "Show sidebar" button: the way back to a panel that is hidden. Not while
+ * the panel is showing, and not on a section with no panel, where the strip beside the page is the
+ * way to Conversations. Always in a narrow window, whose sheet starts closed.
+ */
+export function sidebarToggleShown({
+  isMobile,
+  open,
+  panelAvailable,
+}: {
+  isMobile: boolean;
+  open: boolean;
+  panelAvailable: boolean;
+}): boolean {
+  return isMobile || (!open && panelAvailable);
+}
+
+/**
+ * The shared width as a sidebar with a strip draws it: never under the panel's floor plus the strip,
+ * since Admin and Settings, which have no strip, may be dragged down to the floor alone.
+ */
+export function widthBesideStrip(width: string): string {
+  return `max(${width}, calc(${SIDEBAR_MIN_WIDTH}px + var(--sidebar-width-icon)))`;
+}

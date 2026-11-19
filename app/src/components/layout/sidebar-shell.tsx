@@ -1,7 +1,9 @@
 import {
   type CSSProperties,
+  createContext,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -17,6 +19,7 @@ import {
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
   storedSidebarWidth,
+  widthBesideStrip,
 } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +29,16 @@ import { cn } from "@/lib/utils";
  * person's avatar share one left edge.
  */
 const SIDEBAR_GUTTER = "[&_[data-sidebar=menu-button]]:px-2.5";
+
+const PanelAvailableContext = createContext(true);
+
+/**
+ * Whether the open section has a panel to show. Only the app's sidebar of sections ever says no; the
+ * page's "Show sidebar" button asks, so it never offers a panel there is not.
+ */
+export function useSidebarPanelAvailable(): boolean {
+  return useContext(PanelAvailableContext);
+}
 
 /**
  * The frame the three shells — app, admin, settings — hang their sidebar in.
@@ -101,12 +114,14 @@ export function SidebarShell({
        */
       style={
         {
-          "--sidebar-width": width,
+          "--sidebar-width": panel ? widthBesideStrip(width) : width,
           "--sidebar-width-mobile": "20rem",
         } as CSSProperties
       }
     >
-      <SidebarResizeProvider value={resize}>{children}</SidebarResizeProvider>
+      <PanelAvailableContext.Provider value={available}>
+        <SidebarResizeProvider value={resize}>{children}</SidebarResizeProvider>
+      </PanelAvailableContext.Provider>
     </SidebarProvider>
   );
 }

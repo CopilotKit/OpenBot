@@ -8,7 +8,9 @@ import {
   SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_STORAGE_KEY,
   sidebarFloor,
+  sidebarToggleShown,
   storedSidebarWidth,
+  widthBesideStrip,
 } from "../src/lib/sidebar";
 
 describe("sidebar preference", () => {
@@ -123,4 +125,52 @@ describe("the floor a drag stops at", () => {
   test("holds a drag narrower than the panel's floor at it", () => {
     expect(clampSidebarWidth(200, sidebarFloor(64, null))).toBe(284);
   });
+});
+
+/*
+ * The page's "Show sidebar" button is the way back to a hidden panel. On a section with no panel
+ * there is nothing to show, and the strip beside the page is the way to Conversations.
+ */
+describe("the page's Show sidebar button", () => {
+  test("shows when the panel is hidden and its section has one", () => {
+    expect(
+      sidebarToggleShown({
+        isMobile: false,
+        open: false,
+        panelAvailable: true,
+      }),
+    ).toBe(true);
+  });
+
+  test("does not show while the panel is showing", () => {
+    expect(
+      sidebarToggleShown({ isMobile: false, open: true, panelAvailable: true }),
+    ).toBe(false);
+  });
+
+  test("does not show on a section with no panel", () => {
+    expect(
+      sidebarToggleShown({
+        isMobile: false,
+        open: false,
+        panelAvailable: false,
+      }),
+    ).toBe(false);
+  });
+
+  test("always shows in a narrow window, where the sheet starts closed", () => {
+    expect(
+      sidebarToggleShown({ isMobile: true, open: true, panelAvailable: false }),
+    ).toBe(true);
+  });
+});
+
+/*
+ * Admin and Settings share the width and may be dragged to 220px, which beside the strip would
+ * leave the panel narrower than it may ever be dragged.
+ */
+test("beside a strip, the shared width never goes under the panel's floor plus the strip", () => {
+  expect(widthBesideStrip("220px")).toBe(
+    "max(220px, calc(220px + var(--sidebar-width-icon)))",
+  );
 });
