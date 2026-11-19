@@ -45,6 +45,12 @@ unless you rely on task threads.
   public, such as an open-source project's release or a dead public link, is still answered from
   the web, and a routine, which nobody is watching, says which app needs connecting instead of
   showing a card.
+- **Whoever manages a Bot that runs at an address of its own can change its Agent URL on Setup.**
+  The row opens a dialog that checks the address's shape before saving it, and shows the server's
+  refusal under the field; saving the same address sends nothing. For anyone who can't manage the
+  Bot it stays read-only, and a built-in Bot is unchanged. Other Setup edits no longer send the
+  stored address, so a Bot saved at an address the deployment's rules have since closed can still
+  be renamed.
 
 ### OpenBot Desktop
 
