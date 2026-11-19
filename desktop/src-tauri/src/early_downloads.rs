@@ -571,15 +571,19 @@ pub struct Summary {
     pub size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_per_second: Option<u64>,
-    /// When the disk is short: free on this computer's disk, what OpenBot needs free to run (the
-    /// back end's 40 GiB, the figure the account step's check says too), and what the downloads
-    /// add to the disk on top of it (`Needed`).
+    /// When the disk is short: free on the drive of the engine's disk (`disk_place`), what OpenBot
+    /// needs free to run (the back end's 40 GiB, the figure the account step's check says too), and
+    /// what the downloads add to the disk on top of it (`Needed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub free: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub needed: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub download: Option<u64>,
+    /// When the disk is short: the drive (`F:`) the engine's disk can move to, to make room
+    /// (`move_offer`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub move_to: Option<String>,
     /// Downloading, and holding until there is room (`wait_for_room`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub paused: bool,
@@ -620,6 +624,7 @@ struct Table {
     images: Option<crate::pull_metrics::Downloads>,
     free: Option<u64>,
     needed: Option<Needed>,
+    move_to: Option<String>,
     /// The account step found the disk short: downloads hold until there is room.
     held: bool,
     speed: Speed,
@@ -682,6 +687,7 @@ impl Table {
                 .needed
                 .filter(|_| self.state == State::Short)
                 .map(|needed| needed.downloads),
+            move_to: self.move_to.clone().filter(|_| self.state == State::Short),
             paused: self.held && self.state == State::Downloading,
         }
     }
@@ -1026,12 +1032,104 @@ pub fn start(root: PathBuf, hooks: Hooks) {
         let needed = needed_for(&plan);
         let jobs = jobs(&root, &plan, &cache, &hooks);
         let said = |summary| (hooks.said)(summary);
-        run(jobs, needed, || free_space(&cache), &said, DISK_RECHECK);
+        // `wsl --help` runs at most once, and only when the rest of the offer already holds.
+        let can_move = std::cell::OnceCell::new();
+        run(
+            jobs,
+            needed,
+            engine_disk_free,
+            |need| engine_move_offer(need, || *can_move.get_or_init(crate::windows::wsl_can_move)),
+            &said,
+            DISK_RECHECK,
+        );
     });
 }
 
 /// How long between two looks at the free disk, while it is short.
 const DISK_RECHECK: Duration = Duration::from_secs(10);
+
+/// Where the space check looks. The back end's 40 GiB and the image downloads both go into the
+/// Podman machine's disk, and that disk can be on another drive than the download cache.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DiskPlace {
+    /// The machine exists: the drive WSL keeps its disk on, and the space free there.
+    Machine(crate::windows::MachineDrive),
+    /// No machine yet: the folder that a new machine's disk goes into.
+    Folder(PathBuf),
+}
+
+/// Where the engine's disk is: the drive of the `machine` that exists, else the machine `home` that
+/// a new machine goes into, else the user `profile`, where Podman puts the disk with no home. None
+/// when none of them is known.
+fn disk_place(
+    machine: Option<crate::windows::MachineDrive>,
+    home: Option<PathBuf>,
+    profile: Option<PathBuf>,
+) -> Option<DiskPlace> {
+    match machine {
+        Some(machine) => Some(DiskPlace::Machine(machine)),
+        None => home.or(profile).map(DiskPlace::Folder),
+    }
+}
+
+/// The user profile: where Podman puts the machine's disk when there is no machine home.
+fn profile() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+}
+
+/// The bytes free on the drive of the engine's disk on this computer now. None when it cannot be
+/// read, which is not judged.
+fn engine_disk_free() -> Option<u64> {
+    let place = disk_place(
+        crate::windows::podman_machine_drive(crate::acquire::MACHINE),
+        crate::engine::machine_home(),
+        profile(),
+    )?;
+    match place {
+        DiskPlace::Machine(machine) => Some(machine.free),
+        DiskPlace::Folder(folder) => free_space(&folder),
+    }
+}
+
+/// The drive to offer the engine's disk a move to, for `need` bytes (`move_offer`). `can_move`
+/// starts a process (`wsl --help`), so it is asked only when the rest of the offer already holds.
+fn engine_move_offer(need: u64, can_move: impl FnOnce() -> bool) -> Option<String> {
+    let machine = crate::windows::podman_machine_drive(crate::acquire::MACHINE);
+    let home = crate::engine::machine_home();
+    let home_drive = home
+        .as_deref()
+        .and_then(|home| crate::windows::drive_of(&home.to_string_lossy()));
+    let home_free = home.as_deref().and_then(free_space);
+    // With `can_move` true, this is the offer if this WSL can move a distro. Only then ask it.
+    move_offer(
+        machine
+            .as_ref()
+            .and_then(|machine| machine.drive.as_deref()),
+        home_drive.as_deref(),
+        home_free,
+        need,
+        true,
+    )
+    .filter(|_| can_move())
+}
+
+/// The drive the engine's disk can move to while the disk is short: the machine home's drive, only
+/// when a machine exists on another drive, the home's drive has `need` bytes free, and this WSL can
+/// move a distro (`can_move`). Drives are written as `F:`.
+fn move_offer(
+    machine_drive: Option<&str>,
+    home_drive: Option<&str>,
+    home_free: Option<u64>,
+    need: u64,
+    can_move: bool,
+) -> Option<String> {
+    let (machine_drive, home_drive) = (machine_drive?, home_drive?);
+    let is_other_drive = !machine_drive.eq_ignore_ascii_case(home_drive);
+    let home_has_room = home_free.is_some_and(|free| free >= need);
+    (is_other_drive && home_has_room && can_move).then(|| home_drive.to_string())
+}
 
 /// The free disk OpenBot needs before the downloads start, as two figures the window says apart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1166,12 +1264,14 @@ fn jobs(root: &Path, plan: &Plan, cache: &Path, hooks: &Arc<Hooks>) -> Vec<Job> 
 }
 
 /// Run `jobs` once `free` says there is `needed` free, all at once, saying where they are through
-/// `said` while they run. With less free, nothing starts: the window is told the numbers, and
+/// `said` while they run. With less free, nothing starts: the window is told the numbers and the
+/// drive `move_to` names for the whole need (a drive the engine's disk can move to, or None), and
 /// `free` is asked again every `recheck`.
 pub fn run(
     jobs: Vec<Job>,
     needed: Needed,
     free: impl Fn() -> Option<u64>,
+    move_to: impl Fn(u64) -> Option<String>,
     said: &(dyn Fn(Summary) + Sync),
     recheck: Duration,
 ) {
@@ -1183,11 +1283,13 @@ pub fn run(
     loop {
         match free() {
             Some(free) if free < needed.total() => {
+                let move_to = move_to(needed.total());
                 {
                     let mut table = table();
                     table.state = State::Short;
                     table.free = Some(free);
                     table.needed = Some(needed);
+                    table.move_to = move_to;
                 }
                 log::warn!(
                     "[early downloads] {free} bytes free, {} needed ({} to run and {} to download): waiting for space",
@@ -1214,6 +1316,7 @@ pub fn run(
         table.state = State::Downloading;
         table.free = None;
         table.needed = None;
+        table.move_to = None;
         for job in &jobs {
             for key in std::iter::once(job.key).chain(job.also.iter().copied()) {
                 let entry = table.entries.entry(key).or_default();

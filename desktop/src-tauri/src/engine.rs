@@ -32,7 +32,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use crate::quiet::command;
 
@@ -545,6 +545,40 @@ fn tools_dir() -> Option<&'static PathBuf> {
     TOOLS.get()
 }
 
+/// The folder that holds OpenBot's Podman machine disk on Windows: `<install>\engine`.
+///
+/// A Mutex and not a OnceLock, because Install can set it again. Unset in tests and wherever no
+/// install folder is known, so Podman then uses its default place.
+static MACHINE_HOME: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Tell this module where OpenBot's Podman machine keeps its disk.
+pub fn machine_home_is(home: Option<PathBuf>) {
+    *MACHINE_HOME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = home;
+}
+
+/// Where OpenBot's Podman machine keeps its disk, if it is known.
+pub fn machine_home() -> Option<PathBuf> {
+    MACHINE_HOME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+/// The environment variable that puts Podman's machine disk in `home`, for this engine on `os`.
+///
+/// On Windows, Podman puts the machine's WSL disk under `XDG_DATA_HOME`, else under
+/// `%USERPROFILE%\.local\share`. No flag or containers.conf key changes this. The machine's config
+/// stays in `%USERPROFILE%\.config` with absolute paths, so a command with or without this
+/// variable still finds the machine.
+fn data_home_env(engine: Engine, os: &str, home: Option<&Path>) -> Option<(&'static str, PathBuf)> {
+    if engine != Engine::Podman || os != "windows" {
+        return None;
+    }
+    home.map(|home| ("XDG_DATA_HOME", home.to_path_buf()))
+}
+
 /// A command that runs this engine's binary, wherever it actually is.
 pub fn tool(engine: Engine) -> Command {
     command_at(
@@ -601,6 +635,11 @@ fn command_configured(engine: Engine, binary: &Path, docker_config: Option<&Path
         crate::docker_config::for_commands_in(owned, |name| std::env::var_os(name))
     }) {
         built.env("DOCKER_CONFIG", dir);
+    }
+    if let Some((name, home)) =
+        data_home_env(engine, std::env::consts::OS, machine_home().as_deref())
+    {
+        built.env(name, home);
     }
     built
 }
@@ -1030,6 +1069,53 @@ fn main() {
         );
         assert!(owned.join("contexts/meta").is_dir());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn podman_on_windows_keeps_its_data_in_the_machine_home() {
+        let home = PathBuf::from(r"D:\OpenBot\engine");
+        assert_eq!(
+            data_home_env(Engine::Podman, "windows", Some(&home)),
+            Some(("XDG_DATA_HOME", PathBuf::from(r"D:\OpenBot\engine")))
+        );
+    }
+
+    #[test]
+    fn docker_gets_no_data_home() {
+        let home = PathBuf::from(r"D:\OpenBot\engine");
+        assert_eq!(data_home_env(Engine::Docker, "windows", Some(&home)), None);
+    }
+
+    #[test]
+    fn podman_outside_windows_gets_no_data_home() {
+        let home = PathBuf::from("/opt/openbot/engine");
+        assert_eq!(data_home_env(Engine::Podman, "macos", Some(&home)), None);
+    }
+
+    #[test]
+    fn podman_without_a_machine_home_gets_no_data_home() {
+        assert_eq!(data_home_env(Engine::Podman, "windows", None), None);
+    }
+
+    /// Every Podman command OpenBot runs on Windows must find the machine's disk in the install
+    /// folder, so the built command carries `XDG_DATA_HOME`.
+    #[cfg(windows)]
+    #[test]
+    fn podman_commands_on_windows_carry_the_machine_home() {
+        if crate::test_support::isolated_process(
+            "engine::tests::podman_commands_on_windows_carry_the_machine_home",
+        ) {
+            return;
+        }
+        machine_home_is(Some(PathBuf::from(r"D:\OpenBot\engine")));
+
+        let command = command_configured(Engine::Podman, Path::new("podman"), None);
+
+        let data_home = command
+            .get_envs()
+            .find(|(key, _)| *key == "XDG_DATA_HOME")
+            .and_then(|(_, value)| value);
+        assert_eq!(data_home, Some(std::ffi::OsStr::new(r"D:\OpenBot\engine")));
     }
 
     #[cfg(unix)]

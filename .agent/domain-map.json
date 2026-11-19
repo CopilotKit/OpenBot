@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "domains": [
+    {
+      "id": "desktop-window",
+      "owns": ["desktop/src"],
+      "talksTo": ["desktop-native"]
+    },
+    {
+      "id": "desktop-native",
+      "owns": ["desktop/src-tauri", "desktop/scripts"],
+      "talksTo": ["desktop-window"]
+    },
+    {
+      "id": "app",
+      "owns": ["app"],
+      "talksTo": ["shared"]
+    },
+    {
+      "id": "shared",
+      "owns": ["shared"],
+      "talksTo": []
+    },
+    {
+      "id": "api",
+      "owns": ["api"],
+      "talksTo": ["shared"]
+    },
+    {
+      "id": "extension",
+      "owns": ["extension"],
+      "talksTo": ["shared"]
+    },
+    {
+      "id": "management-agent",
+      "owns": ["management-agent"],
+      "talksTo": []
+    },
+    {
+      "id": "mobile",
+      "owns": ["mobile"],
+      "talksTo": []
+    },
+    {
+      "id": "agents",
+      "owns": [
+        "agent-adk",
+        "agent-ag2",
+        "agent-agno",
+        "agent-antigravity",
+        "agent-claude-sdk",
+        "agent-crewai",
+        "agent-langgraph-agui",
+        "agent-langgraph-ts",
+        "agent-langroid",
+        "agent-llamaindex",
+        "agent-mastra",
+        "agent-microsoft",
+        "agent-pydantic-ai",
+        "agent-strands"
+      ],
+      "talksTo": []
+    },
+    {
+      "id": "docs",
+      "owns": ["docs"],
+      "talksTo": []
+    }
+  ]
+}

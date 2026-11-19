@@ -1399,6 +1399,181 @@ pub(crate) fn free_space(folder: &str) -> Option<u64> {
     Some(free)
 }
 
+/*
+The drive types that `GetDriveTypeW` returns (WinBase.h). They are written here because the
+`windows` crate keeps them in a module this crate does not turn on, and because the rule that uses
+them is tested on every platform.
+*/
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_REMOVABLE: u32 = 2;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_FIXED: u32 = 3;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_REMOTE: u32 = 4;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_CDROM: u32 = 5;
+
+/// The reason `wsl_disk_judge` gives for a file system that cannot hold a WSL disk.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const OTHER_FILE_SYSTEM: &str = "uses a file system other than NTFS or ReFS";
+
+/// Whether a drive of this type and file system can hold a WSL disk. WSL keeps a distribution's
+/// disk only on a fixed local drive with NTFS or ReFS. The reason completes "F: ...".
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wsl_disk_judge(drive_type: u32, file_system: &str) -> Result<(), &'static str> {
+    match drive_type {
+        DRIVE_FIXED => {}
+        DRIVE_REMOTE => return Err("is a network drive"),
+        DRIVE_REMOVABLE => return Err("is a removable drive"),
+        DRIVE_CDROM => return Err("is a CD or DVD drive"),
+        _ => return Err("is not a fixed local drive"),
+    }
+    if file_system.eq_ignore_ascii_case("NTFS") || file_system.eq_ignore_ascii_case("ReFS") {
+        Ok(())
+    } else {
+        Err(OTHER_FILE_SYSTEM)
+    }
+}
+
+/// Whether the drive of `folder` can hold a WSL disk. The error is a short reason that names
+/// the drive, for example "F: is a network drive" or "F: uses exFAT". The folder does not have
+/// to exist. A `\\?\` prefix is allowed.
+pub fn holds_wsl_disk(folder: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        holds_wsl_disk_with(folder, read_volume)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = folder;
+        Err("not Windows".into())
+    }
+}
+
+/// `holds_wsl_disk`, with `volume` to read the drive type and file system at a drive root
+/// (`F:\`). The file system is empty when Windows cannot read it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn holds_wsl_disk_with(
+    folder: &Path,
+    volume: impl FnOnce(&str) -> (u32, String),
+) -> Result<(), String> {
+    let Some(drive) = drive_of(&folder.to_string_lossy()) else {
+        return Err(format!(
+            "{} is not on a drive with a letter",
+            folder.display()
+        ));
+    };
+    let (drive_type, file_system) = volume(&format!(r"{drive}\"));
+    wsl_disk_judge(drive_type, &file_system).map_err(|reason| {
+        if reason == OTHER_FILE_SYSTEM && !file_system.is_empty() {
+            format!("{drive} uses {file_system}")
+        } else {
+            format!("{drive} {reason}")
+        }
+    })
+}
+
+/// The drive type and file system name of the volume at `root` (`F:\`).
+#[cfg(target_os = "windows")]
+fn read_volume(root: &str) -> (u32, String) {
+    use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumeInformationW};
+    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+    let root = windows::core::PCWSTR(wide.as_ptr());
+    // MAX_PATH + 1, the size Microsoft gives for the file system name buffer.
+    let mut name = [0u16; 261];
+    // SAFETY: `wide` is a NUL-terminated path that outlives the call.
+    let drive_type = unsafe { GetDriveTypeW(root) };
+    // SAFETY: as above, and `name` is a buffer the call writes into, no more than its length.
+    let read = unsafe { GetVolumeInformationW(root, None, None, None, None, Some(&mut name)) };
+    let file_system = match read {
+        Ok(()) => {
+            let end = name
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(name.len());
+            String::from_utf16_lossy(&name[..end])
+        }
+        Err(_) => String::new(),
+    };
+    (drive_type, file_system)
+}
+
+/// Whether this WSL can move a distribution (`wsl --manage <distro> --move`). Some builds exit
+/// with an error code from `--help`, so the text decides, not the exit code.
+pub fn wsl_can_move() -> bool {
+    let Ok(output) = crate::quiet::output_within(
+        crate::quiet::command("wsl.exe").arg("--help"),
+        PROBE_LIMITS.wsl_version,
+    ) else {
+        return false;
+    };
+    let help = format!(
+        "{}\n{}",
+        decode_probe_text(&output.stdout).unwrap_or_default(),
+        decode_probe_text(&output.stderr).unwrap_or_default()
+    );
+    help_lists_move(&help)
+}
+
+/// Whether `wsl --help` lists the `--move` option.
+fn help_lists_move(help: &str) -> bool {
+    help.split(|character: char| character.is_whitespace() || character == ',')
+        .any(|word| word == "--move")
+}
+
+/// Move the WSL disk of `distribution` into the folder `to`, which is made first.
+///
+/// WSL is shut down first, which stops every distribution on this computer, Docker Desktop's
+/// too. On a live run `wsl --terminate` was not enough: the move failed with
+/// ERROR_SHARING_VIOLATION until `wsl --shutdown`. It stops at the first step that fails, and
+/// the error includes what WSL said.
+pub fn move_distribution(distribution: &str, to: &Path) -> Result<(), String> {
+    move_distribution_with(distribution, to, |args| {
+        crate::quiet::command("wsl.exe").args(args).output()
+    })
+}
+
+/// `move_distribution`, with `run` to run `wsl.exe` with the given arguments.
+fn move_distribution_with(
+    distribution: &str,
+    to: &Path,
+    mut run: impl FnMut(&[&std::ffi::OsStr]) -> std::io::Result<std::process::Output>,
+) -> Result<(), String> {
+    use std::ffi::OsStr;
+    std::fs::create_dir_all(to)
+        .map_err(|error| format!("could not make the folder {}: {error}", to.display()))?;
+    let steps: [&[&OsStr]; 2] = [
+        &[OsStr::new("--shutdown")],
+        &[
+            OsStr::new("--manage"),
+            OsStr::new(distribution),
+            OsStr::new("--move"),
+            to.as_os_str(),
+        ],
+    ];
+    for args in steps {
+        let shown = args
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let output = run(args).map_err(|error| format!("could not run `wsl {shown}`: {error}"))?;
+        if !output.status.success() {
+            let text = |bytes: &[u8]| {
+                decode_probe_text(bytes)
+                    .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned())
+            };
+            let said = format!("{}\n{}", text(&output.stdout), text(&output.stderr));
+            return Err(format!(
+                "`wsl {shown}` failed ({}): {}",
+                output.status,
+                said.trim()
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3060,5 +3235,187 @@ mod tests {
             "Invalid command line option: --version",
             true
         ));
+    }
+
+    /// The drive types are the values in WinBase.h, written here so the rule runs off Windows.
+    #[test]
+    fn the_drive_types_are_the_values_windows_returns() {
+        assert_eq!(
+            (DRIVE_REMOVABLE, DRIVE_FIXED, DRIVE_REMOTE, DRIVE_CDROM),
+            (2, 3, 4, 5)
+        );
+    }
+
+    /// A WSL disk needs a fixed local drive with NTFS or ReFS. Any other drive gets a short reason.
+    #[test]
+    fn only_a_fixed_ntfs_or_refs_drive_can_hold_a_wsl_disk() {
+        assert_eq!(wsl_disk_judge(DRIVE_FIXED, "NTFS"), Ok(()));
+        assert_eq!(wsl_disk_judge(DRIVE_FIXED, "ReFS"), Ok(()));
+        assert_eq!(
+            wsl_disk_judge(DRIVE_REMOTE, "NTFS"),
+            Err("is a network drive")
+        );
+        assert_eq!(
+            wsl_disk_judge(DRIVE_REMOVABLE, "NTFS"),
+            Err("is a removable drive")
+        );
+        assert_eq!(
+            wsl_disk_judge(DRIVE_FIXED, "exFAT"),
+            Err("uses a file system other than NTFS or ReFS")
+        );
+        assert_eq!(
+            wsl_disk_judge(DRIVE_FIXED, "FAT32"),
+            Err("uses a file system other than NTFS or ReFS")
+        );
+    }
+
+    /// The saved install folder has the `\\?\` prefix. Its drive is still found, the volume is
+    /// read at that drive's root, and the reason names the drive.
+    #[test]
+    fn the_reason_names_the_drive_of_a_prefixed_install_folder() {
+        let folder = Path::new(r"\\?\F:\openbot");
+        let judged = |drive_type: u32, file_system: &'static str| {
+            let mut roots = Vec::new();
+            let said = holds_wsl_disk_with(folder, |root| {
+                roots.push(root.to_owned());
+                (drive_type, file_system.to_owned())
+            });
+            (said, roots)
+        };
+        assert_eq!(
+            judged(DRIVE_FIXED, "NTFS"),
+            (Ok(()), vec![r"F:\".to_owned()])
+        );
+        assert_eq!(
+            judged(DRIVE_REMOTE, "NTFS").0,
+            Err("F: is a network drive".to_owned())
+        );
+        assert_eq!(
+            judged(DRIVE_FIXED, "exFAT").0,
+            Err("F: uses exFAT".to_owned())
+        );
+        // The file system could not be read.
+        assert_eq!(
+            judged(DRIVE_FIXED, "").0,
+            Err("F: uses a file system other than NTFS or ReFS".to_owned())
+        );
+    }
+
+    /// A folder on a network share has no drive letter, so nothing is read.
+    #[test]
+    fn a_folder_without_a_drive_letter_cannot_hold_a_wsl_disk() {
+        let said = holds_wsl_disk_with(Path::new(r"\\server\share\openbot"), |_| {
+            panic!("no volume is read for a folder without a drive letter")
+        });
+        assert_eq!(
+            said,
+            Err(r"\\server\share\openbot is not on a drive with a letter".to_owned())
+        );
+    }
+
+    /// The real Win32 calls: the temporary folder is on the system's own fixed NTFS drive.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_temporary_folders_drive_can_hold_a_wsl_disk() {
+        assert_eq!(holds_wsl_disk(&std::env::temp_dir()), Ok(()));
+    }
+
+    /// WSL 2.x lists `--move` under `--manage`. Older builds have `--manage` without it.
+    #[test]
+    fn wsl_can_move_only_when_its_help_lists_move() {
+        let modern = "    --manage <Distro> <Options...>\n\
+                      \x20       Changes distro specific options.\n\n\
+                      \x20       Options:\n\
+                      \x20           --move <Location>\n\
+                      \x20               Move the distribution to a new location.\n\n\
+                      \x20           --set-sparse, -s <true|false>\n";
+        let older = "    --manage <Distro> <Options...>\n\
+                     \x20       Changes distro specific options.\n\n\
+                     \x20       Options:\n\
+                     \x20           --set-sparse, -s <true|false>\n";
+        assert!(help_lists_move(modern));
+        assert!(!help_lists_move(older));
+        assert!(!help_lists_move(""));
+    }
+
+    /// Runs the move with a stand-in for `wsl.exe` that answers each call with the next output,
+    /// and returns what the move said and the arguments of each call.
+    fn move_with(
+        to: &Path,
+        mut answers: Vec<std::process::Output>,
+    ) -> (Result<(), String>, Vec<Vec<String>>) {
+        let mut calls = Vec::new();
+        let said = move_distribution_with("podman-openbot", to, |args| {
+            calls.push(
+                args.iter()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect(),
+            );
+            Ok(answers.remove(0))
+        });
+        (said, calls)
+    }
+
+    fn utf16(text: &str) -> Vec<u8> {
+        text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+    }
+
+    /// `wsl --terminate` was not enough on a live run: the move failed with
+    /// ERROR_SHARING_VIOLATION until `wsl --shutdown`. So it shuts WSL down first, then moves.
+    #[test]
+    fn the_move_shuts_wsl_down_then_moves_into_a_folder_it_made() {
+        let to = temp_root("wsl-move").join("engine");
+        let (said, calls) = move_with(&to, vec![probe_output(0, "", ""), probe_output(0, "", "")]);
+        let made = to.is_dir();
+        let _ = std::fs::remove_dir_all(to.parent().unwrap());
+        assert_eq!(said, Ok(()));
+        assert_eq!(
+            calls,
+            vec![
+                vec!["--shutdown".to_owned()],
+                vec![
+                    "--manage".to_owned(),
+                    "podman-openbot".to_owned(),
+                    "--move".to_owned(),
+                    to.display().to_string(),
+                ],
+            ]
+        );
+        assert!(made, "the target folder was made before the move");
+    }
+
+    /// A failed shutdown stops the move before it starts, and WSL's words come back.
+    #[test]
+    fn a_failed_shutdown_stops_before_the_move() {
+        let to = temp_root("wsl-move-shutdown");
+        let (said, calls) = move_with(&to, vec![probe_output(1, "", "The service is busy.")]);
+        let _ = std::fs::remove_dir_all(&to);
+        assert_eq!(calls, vec![vec!["--shutdown".to_owned()]]);
+        let said = said.expect_err("a failed shutdown is an error");
+        assert!(said.contains("wsl --shutdown"), "{said}");
+        assert!(said.contains("The service is busy."), "{said}");
+    }
+
+    /// WSL writes UTF-16 to a pipe. A failed move comes back as readable text.
+    #[test]
+    fn a_failed_move_says_what_wsl_said() {
+        let to = temp_root("wsl-move-failed");
+        let mut refused = probe_output(1, "", "");
+        refused.stdout = utf16(
+            "The process cannot access the file because it is being used by another process.\r\n\
+             Error code: Wsl/Service/MoveDistro/ERROR_SHARING_VIOLATION\r\n",
+        );
+        let (said, calls) = move_with(&to, vec![probe_output(0, "", ""), refused]);
+        let _ = std::fs::remove_dir_all(&to);
+        assert_eq!(calls.len(), 2);
+        let said = said.expect_err("a failed move is an error");
+        assert!(
+            said.contains("wsl --manage podman-openbot --move"),
+            "{said}"
+        );
+        assert!(
+            said.contains("Wsl/Service/MoveDistro/ERROR_SHARING_VIOLATION"),
+            "{said}"
+        );
     }
 }

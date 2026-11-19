@@ -1627,6 +1627,7 @@ fn report_downloads<R: tauri::Runtime>(
 
 fn remember_selected_root(shell: &Shell, root: &Path) {
     *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
+    use_machine_home(root);
 }
 
 fn cleanup_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
@@ -3508,6 +3509,125 @@ async fn early_downloads_measured() -> early_downloads::Summary {
     .unwrap_or_default()
 }
 
+/**
+The person clicked "Move the engine to F:" on the space message: the disk of OpenBot's Podman
+machine moves into the install folder (`engine::machine_home`), and the machine starts again.
+Windows only. Every WSL distribution on this computer stops for a moment (`win::move_distribution`).
+
+The window gets the new numbers from the early downloads: while the disk is short, they look at the
+machine's drive again every few seconds and send `setup:downloads`.
+*/
+#[tauri::command]
+async fn move_engine_here(app: tauri::AppHandle) -> Result<(), Problem> {
+    desktop_connected::local_only(&app)?;
+    if !cfg!(target_os = "windows") {
+        return Err(Problem::plain("OpenBot moves the engine only on Windows."));
+    }
+    let home = engine::machine_home()
+        .ok_or_else(|| Problem::plain("OpenBot has no folder to move the engine to."))?;
+    let target = home
+        .join("containers")
+        .join("podman")
+        .join("machine")
+        .join("wsl")
+        .join("wsldist")
+        .join(acquire::MACHINE);
+    let to = win::drive_of(&target.to_string_lossy());
+    let (moved, now_on) = tauri::async_runtime::spawn_blocking(move || {
+        let machine_drive =
+            || win::podman_machine_drive(acquire::MACHINE).and_then(|machine| machine.drive);
+        log::info!(
+            "[engine move] moving the machine's disk from {} to {}",
+            machine_drive().as_deref().unwrap_or("an unknown drive"),
+            target.display()
+        );
+        // The containers running now start again with the machine, as a pause gives them back.
+        let containers = acquire::running_containers(acquire::MACHINE);
+        let moved = move_steps(
+            || {
+                let stopped = match acquire::machine_listed(acquire::MACHINE) {
+                    // A machine that is not running has nothing to stop.
+                    Ok(Some(false)) => Ok(()),
+                    _ => acquire::stop_machine_named(acquire::MACHINE),
+                };
+                logged_move_step("stop the machine", stopped)
+            },
+            || {
+                logged_move_step(
+                    "shut down WSL and move the disk",
+                    win::move_distribution(&win::podman_distribution(acquire::MACHINE), &target),
+                )
+            },
+            || {
+                logged_move_step(
+                    "start the machine",
+                    acquire::start_machine_named(acquire::MACHINE, &containers),
+                )
+            },
+        );
+        (moved, machine_drive())
+    })
+    .await
+    .unwrap_or_else(|error| (Err(format!("the move did not run: {error}")), None));
+    moved.map_err(|detail| {
+        Problem::with(
+            move_engine_failed_line(to.as_deref(), now_on.as_deref()),
+            detail,
+        )
+    })
+}
+
+/// `result` of the step `step` of the engine move, said in the log.
+fn logged_move_step(step: &str, result: Result<(), String>) -> Result<(), String> {
+    match &result {
+        Ok(()) => log::info!("[engine move] {step}: done"),
+        Err(error) => log::warn!("[engine move] {step}: failed: {error}"),
+    }
+    result
+}
+
+/**
+The engine move's steps: `stop` the machine, then `shutdown_and_move` its disk, then `start` it.
+
+A machine that did not stop is not moved, so it still runs where it was. A failed move still starts
+the machine again where it was, and the result is the move's error, with the start's error after it
+when the start fails too. After a good move, the result is the start's.
+*/
+fn move_steps(
+    stop: impl FnOnce() -> Result<(), String>,
+    shutdown_and_move: impl FnOnce() -> Result<(), String>,
+    start: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    stop()?;
+    let moved = shutdown_and_move();
+    let started = start();
+    match (moved, started) {
+        (Ok(()), started) => started,
+        (Err(moved), Ok(())) => Err(moved),
+        (Err(moved), Err(started)) => Err(format!(
+            "{moved}; then the machine did not start again: {started}"
+        )),
+    }
+}
+
+/// The window's sentence when the engine move fails. `to` is the drive the disk was moving to, and
+/// `now_on` the drive it is on after the failure.
+fn move_engine_failed_line(to: Option<&str>, now_on: Option<&str>) -> String {
+    match (to, now_on) {
+        (Some(to), Some(now_on)) if to == now_on => {
+            format!("OpenBot moved the engine to {to}, but couldn't start it again.")
+        }
+        (Some(to), Some(now_on)) => {
+            format!("OpenBot couldn't move the engine to {to}. It is still on {now_on}.")
+        }
+        (Some(to), None) => format!("OpenBot couldn't move the engine to {to}."),
+        (None, Some(now_on)) => {
+            format!("OpenBot couldn't move the engine. It is still on {now_on}.")
+        }
+        (None, None) => "OpenBot couldn't move the engine.".to_string(),
+    }
+}
+
 /// The images row while downloads hold for room (`early_downloads::wait_for_room`).
 const HOLDING_FOR_ROOM: &str =
     "The download is paused until there's enough free space. It carries on by itself.";
@@ -4030,7 +4150,20 @@ async fn engine_answering(
     if cfg!(target_os = "windows") {
         bring_to_front(app, "the engine machine is prepared");
     }
-    report(app, "create-machine", created.ok, created.said.clone());
+    // When the install folder's drive cannot hold the disk, the row says where the disk went.
+    let fallback = MACHINE_HOME_FALLBACK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    match fallback.filter(|_| created.ok) {
+        Some(line) => report_line(
+            app,
+            "create-machine",
+            true,
+            engine::StepLine::here(line).logged(created.said.clone()),
+        ),
+        None => report(app, "create-machine", created.ok, created.said.clone()),
+    }
     if !created.ok {
         return Err(created.problem());
     }
@@ -6218,6 +6351,66 @@ fn use_engine_folders(root: &Path, local_data: Option<&Path>) {
     }
 }
 
+/// The `create-machine` row's line when the install folder's drive cannot hold the machine's disk,
+/// so the disk is in the user profile. `None` when the disk goes in the install folder.
+static MACHINE_HOME_FALLBACK: Mutex<Option<String>> = Mutex::new(None);
+
+/// Where the Podman machine keeps its disk for the install folder `root`: `<root>\engine`, without
+/// the `\\?\` prefix the saved folder has, when `holds` says the drive can hold a WSL disk. The
+/// error is the reason it cannot.
+fn machine_home_for(
+    root: &Path,
+    holds: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    let root = openbot_desktop_lib::paths::plain(root.to_path_buf());
+    holds(&root)?;
+    Ok(root.join("engine"))
+}
+
+/// The row's line when the disk stays in the user profile: "F: can't hold the engine's disk, so
+/// it's on C:." `profile` is `%USERPROFILE%`. Without it, the profile is on C:.
+fn machine_home_fallback_line(root: &Path, profile: Option<&str>) -> String {
+    let install =
+        win::drive_of(&root.to_string_lossy()).unwrap_or_else(|| "The install folder".to_string());
+    let profile = profile
+        .and_then(win::drive_of)
+        .unwrap_or_else(|| "C:".to_string());
+    format!("{install} can't hold the engine's disk, so it's on {profile}.")
+}
+
+/// On Windows, put the Podman machine's disk in the install folder `root`, or in the user profile
+/// when the drive cannot hold it. Other systems keep Podman's own place.
+fn use_machine_home(root: &Path) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    // An installation set up on Docker Desktop has no Podman machine. Docker keeps its own disk
+    // where its settings say, and the space check measures the user profile, as before.
+    if preparation::saved_engine(root) == Some(engine::Engine::Docker) {
+        engine::machine_home_is(None);
+        *MACHINE_HOME_FALLBACK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        return;
+    }
+    let fallback = match machine_home_for(root, win::holds_wsl_disk) {
+        Ok(home) => {
+            log::info!("[engine] the machine's disk goes in {}", home.display());
+            engine::machine_home_is(Some(home));
+            None
+        }
+        Err(reason) => {
+            log::info!("[engine] {reason}, so the machine's disk is in the user profile");
+            engine::machine_home_is(None);
+            let profile = std::env::var("USERPROFILE").ok();
+            Some(machine_home_fallback_line(root, profile.as_deref()))
+        }
+    };
+    *MACHINE_HOME_FALLBACK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = fallback;
+}
+
 /// The uninstaller's stop, set up as the app sets itself up (`use_engine_folders`).
 fn prepare_for_uninstall() {
     use_engine_folders(&stack::default_root(), headless_local_data_dir().as_deref());
@@ -6289,8 +6482,8 @@ impl uninstall::Computer for ThisComputerAtUninstall {
         })
     }
 
-    fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
-        uninstall::remove_installation(root, dirs::home_dir().as_deref())
+    fn remove_installation(&mut self, root: &Path, keep_engine: bool) -> Result<(), String> {
+        uninstall::remove_installation(root, dirs::home_dir().as_deref(), keep_engine)
     }
 }
 
@@ -13702,6 +13895,7 @@ fn main() {
             start_early_downloads,
             early_downloads_now,
             early_downloads_measured,
+            move_engine_here,
             local_eval_room,
             podman_machine_plan,
             resize_podman_machine,
@@ -13963,6 +14157,8 @@ fn main() {
                 &stack::default_root(),
                 app.path().app_local_data_dir().ok().as_deref(),
             );
+            // On Windows, the Podman machine's disk goes in the install folder.
+            use_machine_home(&selected_root_or_default(app.handle()));
 
             remember_setup_url(app.handle())?;
             // After the setup page's address is known, which the notice is shown at.
@@ -14680,6 +14876,152 @@ mod runtime_update_tests {
 
 #[cfg(test)]
 mod tests {
+    /// The install folder is saved as `\\?\F:\openbot`. Podman must get the plain path.
+    #[cfg(windows)]
+    #[test]
+    fn machine_home_for_puts_the_engine_folder_in_the_plain_install_folder() {
+        let mut judged = None;
+        let home = machine_home_for(Path::new(r"\\?\F:\openbot"), |folder| {
+            judged = Some(folder.to_path_buf());
+            Ok(())
+        });
+        assert_eq!(home, Ok(PathBuf::from(r"F:\openbot\engine")));
+        assert_eq!(judged, Some(PathBuf::from(r"F:\openbot")));
+    }
+
+    #[test]
+    fn machine_home_for_gives_the_reason_when_the_drive_cannot_hold_the_disk() {
+        let home = machine_home_for(Path::new(r"\\?\F:\openbot"), |_| {
+            Err("F: uses exFAT".to_string())
+        });
+        assert_eq!(home, Err("F: uses exFAT".to_string()));
+    }
+
+    #[test]
+    fn machine_home_fallback_line_names_both_drives() {
+        assert_eq!(
+            machine_home_fallback_line(Path::new(r"\\?\F:\openbot"), Some(r"D:\Users\ada")),
+            "F: can't hold the engine's disk, so it's on D:."
+        );
+    }
+
+    /// A network folder has no drive letter, and a profile that is not known is on C:.
+    #[test]
+    fn machine_home_fallback_line_without_drive_letters() {
+        assert_eq!(
+            machine_home_fallback_line(Path::new(r"\\fileserver\homes\openbot"), None),
+            "The install folder can't hold the engine's disk, so it's on C:."
+        );
+    }
+
+    /// `move_steps` with each step giving `stop`, `moved` and `started`: what it returns, and the
+    /// steps that ran, in order.
+    fn move_steps_with(
+        stop: Result<(), String>,
+        moved: Result<(), String>,
+        started: Result<(), String>,
+    ) -> (Result<(), String>, Vec<&'static str>) {
+        let ran = std::cell::RefCell::new(Vec::new());
+        let result = move_steps(
+            || {
+                ran.borrow_mut().push("stop");
+                stop
+            },
+            || {
+                ran.borrow_mut().push("move");
+                moved
+            },
+            || {
+                ran.borrow_mut().push("start");
+                started
+            },
+        );
+        (result, ran.into_inner())
+    }
+
+    #[test]
+    fn move_steps_stop_the_machine_then_move_it_then_start_it() {
+        assert_eq!(
+            move_steps_with(Ok(()), Ok(()), Ok(())),
+            (Ok(()), vec!["stop", "move", "start"])
+        );
+    }
+
+    /// The machine still runs where it was, so nothing is moved or started.
+    #[test]
+    fn move_steps_do_not_move_a_machine_that_did_not_stop() {
+        assert_eq!(
+            move_steps_with(Err("machine is busy".into()), Ok(()), Ok(())),
+            (Err("machine is busy".to_string()), vec!["stop"])
+        );
+    }
+
+    /// WSL is shut down, but the disk did not move: the machine starts again where it was.
+    #[test]
+    fn move_steps_start_the_machine_again_when_the_move_fails() {
+        assert_eq!(
+            move_steps_with(Ok(()), Err("ERROR_SHARING_VIOLATION".into()), Ok(())),
+            (
+                Err("ERROR_SHARING_VIOLATION".to_string()),
+                vec!["stop", "move", "start"]
+            )
+        );
+    }
+
+    #[test]
+    fn move_steps_give_both_errors_when_the_move_and_the_start_fail() {
+        assert_eq!(
+            move_steps_with(
+                Ok(()),
+                Err("ERROR_SHARING_VIOLATION".into()),
+                Err("WSL is not running".into())
+            ),
+            (
+                Err(
+                    "ERROR_SHARING_VIOLATION; then the machine did not start again: WSL is not running"
+                        .to_string()
+                ),
+                vec!["stop", "move", "start"]
+            )
+        );
+    }
+
+    #[test]
+    fn move_steps_give_the_start_error_after_a_good_move() {
+        assert_eq!(
+            move_steps_with(Ok(()), Ok(()), Err("WSL is not running".into())),
+            (
+                Err("WSL is not running".to_string()),
+                vec!["stop", "move", "start"]
+            )
+        );
+    }
+
+    #[test]
+    fn move_engine_failed_line_says_the_engine_is_still_on_its_drive() {
+        assert_eq!(
+            move_engine_failed_line(Some("F:"), Some("C:")),
+            "OpenBot couldn't move the engine to F:. It is still on C:."
+        );
+    }
+
+    /// The disk moved, and only the start failed.
+    #[test]
+    fn move_engine_failed_line_says_the_engine_moved_when_it_is_on_the_new_drive() {
+        assert_eq!(
+            move_engine_failed_line(Some("F:"), Some("F:")),
+            "OpenBot moved the engine to F:, but couldn't start it again."
+        );
+    }
+
+    #[test]
+    fn move_engine_failed_line_without_known_drives() {
+        assert_eq!(
+            move_engine_failed_line(None, None),
+            "OpenBot couldn't move the engine."
+        );
+    }
+
     /// Saved logs are shown in the file manager only from the task handed to the main thread,
     /// never on the thread that saved them, and with the file that was saved.
     #[test]
