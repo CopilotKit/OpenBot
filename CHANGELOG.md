@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Bots and models
+
+- **A Bot asks for the app a request needs instead of searching around it.** Asked about what is
+  private to the person or their team in an app it has no tools for, such as the team's own GitHub
+  repositories, a Bot shows that app's card first, which connects it or asks an admin for it,
+  instead of searching the public web and missing it. A page of theirs that comes back not found on
+  the web and could be private, such as a private repository's 404, gets the same card instead of
+  "it may not exist". So does telling a Bot that something is private, which a Bot handing its work
+  to tasks used to answer with a 👍. Anything public, such as an open-source project's release or a
+  dead public link, is still answered from the web, and a routine, which nobody is watching, says
+  which app needs connecting instead of showing a card.
+
 ### OpenBot Desktop
 
 - **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
