@@ -180,15 +180,35 @@ function DelegationForm({
       );
       return;
     }
+    /*
+     * A Bot set to hand work out, drawn as doing the work itself while task threads are hidden, keeps
+     * what it is set to, so turning them back on brings it back as it was. The API replaces the whole
+     * answer and names the default by putting it first, so the Bot's own mode, model, effort, words and
+     * agents go back unchanged, with the agent chosen here moved to the front.
+     */
+    const keepsHandingOut = !orchestrate && saved.mode === "orchestrate";
     await save.mutateAsync({
       botId,
-      input: {
-        mode: orchestrate ? "orchestrate" : "self",
-        model: model === DEFAULT_MODEL ? null : model,
-        effort: saved.effort,
-        instructions,
-        agentIds,
-      },
+      input: keepsHandingOut
+        ? {
+            mode: saved.mode,
+            model: saved.model,
+            effort: saved.effort,
+            instructions: saved.instructions,
+            agentIds: [
+              runsOn,
+              ...saved.agents
+                .map((each) => each.id)
+                .filter((id) => id !== runsOn),
+            ],
+          }
+        : {
+            mode: orchestrate ? "orchestrate" : "self",
+            model: model === DEFAULT_MODEL ? null : model,
+            effort: saved.effort,
+            instructions,
+            agentIds,
+          },
     });
     setDone(true);
   };

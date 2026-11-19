@@ -226,7 +226,7 @@ test("a Bot's Agents page doesn't offer Hand work to agents while task threads a
 /*
  * OpenBot runs every Bot as one that does the work itself while task threads are hidden, whatever it
  * was set to. A Bot set to hand work out draws the page of a Bot that does the work itself, on its
- * default agent, and saving it says so.
+ * default agent.
  */
 test("a Bot set to hand work to agents shows the Agents page of a Bot that does the work itself", async () => {
   delegation = {
@@ -241,7 +241,6 @@ test("a Bot set to hand work to agents shows the Agents page of a Bot that does 
     ],
     canManage: true,
   };
-  const user = userEvent.setup({ document });
   const view = draw(<BotDelegation agent={BOT} />);
 
   const own = await view.findByRole("button", { name: /^OpenBot/ });
@@ -252,18 +251,59 @@ test("a Bot set to hand work to agents shows the Agents page of a Bot that does 
   expect(view.queryByText("Handing out work")).toBeNull();
   expect(view.queryByRole("list", { name: "Agents it may use" })).toBeNull();
   expect(view.queryByLabelText("Model")).toBeNull();
+});
 
-  await user.click(view.getByRole("button", { name: "Save" }));
-  await waitFor(() =>
-    expect(seen.some((each) => each.line.startsWith("PUT"))).toBe(true),
-  );
-  expect(seen.find((each) => each.line.startsWith("PUT"))?.body).toEqual({
-    mode: "self",
-    model: null,
-    effort: null,
-    instructions: "",
-    agentIds: ["bag_openbot"],
+/*
+ * Turning task threads back on brings every Bot back as it was set. So while they are hidden, saving a
+ * Bot set to hand work out keeps what it is set to: the same mode, model, effort, words and agents.
+ * The agent chosen to run on becomes its default, the first of its agents, which is the one thing the
+ * Runs on card sets.
+ */
+test("saving a Bot set to hand work to agents while task threads are hidden keeps its mode and its agents", async () => {
+  const kept = {
+    model: "gpt-x",
+    effort: "high",
+    instructions: "Send anything about the pipeline to the analyst.",
+  };
+  delegation = {
+    botId: BOT.id,
+    mode: "orchestrate",
+    ...kept,
+    agents: [
+      { ...OPENBOT, available: true },
+      { ...ANALYST, available: true },
+    ],
+    canManage: true,
+  };
+  const user = userEvent.setup({ document });
+  const view = draw(<BotDelegation agent={BOT} />);
+  const puts = () => seen.filter((each) => each.line.startsWith("PUT"));
+
+  await user.click(await view.findByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts()).toHaveLength(1));
+  expect(puts()[0]?.body).toEqual({
+    mode: "orchestrate",
+    ...kept,
+    agentIds: ["bag_openbot", "bag_analyst"],
   });
+  expect(delegation.mode).toBe("orchestrate");
+  expect(delegation.agents.map((each) => each.id)).toEqual([
+    "bag_openbot",
+    "bag_analyst",
+  ]);
+
+  // Running it on the analyst makes the analyst its default, and keeps the rest as they were.
+  await user.click(
+    await view.findByRole("button", { name: /Pipeline analyst/ }),
+  );
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts()).toHaveLength(2));
+  expect(puts()[1]?.body).toEqual({
+    mode: "orchestrate",
+    ...kept,
+    agentIds: ["bag_analyst", "bag_openbot"],
+  });
+  expect(delegation.mode).toBe("orchestrate");
 });
 
 test("the Hand work to agents switch saves on its own, keeping the agent the Bot ran on as its default, and the agents ticked after it save with Save", async () => {
