@@ -27,6 +27,14 @@ export type AgentRecord = BotAgent;
 /** How a Bot works, and the agents it may use, the first being its default. */
 export type Delegation = BotDelegation;
 
+/**
+ * Whether a Bot's Agents page offers "Hand work to agents", the switch that starts task threads.
+ * Off for now: no Bot is offered handing work out, so the switch and the agents it picks are hidden.
+ * A Bot that already hands work out still shows the switch, so its owner can turn it off, and its
+ * task cards and threads still read as before. Set it back to true to offer task threads again.
+ */
+export const TASK_THREADS_OFFERED: boolean = false;
+
 export const botAgentKeys = {
   all: ["bot-agents"] as const,
   list: (scope: ListBotAgentsScope = "caller") =>
