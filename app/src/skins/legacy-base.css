@@ -132,6 +132,8 @@
   --color-check-disabled: var(--primary-foreground);
   --check-disabled-opacity: 0.5;
   --check-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --color-radio-hover: var(--primary);
+  --color-radio-disabled: var(--primary);
 
   --color-tabs: var(--muted);
   --color-tab-active: var(--background);

@@ -368,6 +368,15 @@ body {
   --check-disabled-opacity: 1;
   --check-shadow: 0 0 #0000;
   /*
+   * Radio ("Radio"): chosen, its edge and its 8px dot are the tickbox's ink, and every other state is
+   * the tickbox's too. The kit drew it blue (#114cee); the designer chose the tickbox's colours
+   * instead (November 2026). Disabled, its dot is gray on the frame's gray, as the tickbox's tick is
+   * (radio-group.tsx).
+   */
+  --color-radio: var(--primary);
+  --color-radio-hover: var(--color-primary-hover);
+  --color-radio-disabled: var(--color-field-disabled);
+  /*
    * Tabs ("Tabs", Clear): a #f1f2f7 pill holding pill tabs, the chosen one white, labelled in 14px
    * regular and gray until chosen. M (the default) is 40px with the tabs 4px in, 16px to a side and
    * 8px from icon to label; S is 32px, 2px in, 12px to a side and 4px apart (tabs.tsx).
