@@ -8,27 +8,100 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
+unless you rely on task threads.
+
+- **No migrations.** The database stays at `0137_ai_connections`, where 1.1.1 left it, so 1.1.1
+  upgrades to 1.1.2 with its servers rolling one by one, with no downtime, and goes back to 1.1.1
+  the same way. Upgrading from 1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before
+  upgrading first.
+- **Task threads are off unless you turn them on.** No Bot hands a person's request to a task
+  thread any more: every Bot does the work in the conversation, including one set to hand work to
+  agents. Set `OPENBOT_TASK_THREADS=on` on the server (also `true` or `1`) to bring them back as
+  they were. Nothing is removed: a Bot keeps what it is set to, and task cards and threads already
+  in conversations still show and can still be followed up or stopped.
+- **Deprecated:** nothing.
+
 ### Bots and models
 
-- **A Bot asks for the app a request needs instead of searching around it.** Asked about what is
-  private to the person or their team in an app it has no tools for, such as the team's own GitHub
-  repositories, a Bot shows that app's card first, which connects it or asks an admin for it,
-  instead of searching the public web and missing it. A page of theirs that comes back not found on
-  the web and could be private, such as a private repository's 404, gets the same card instead of
-  "it may not exist". So does telling a Bot that something is private, which a Bot handing its work
-  to tasks used to answer with a 👍. Anything public, such as an open-source project's release or a
-  dead public link, is still answered from the web, and a routine, which nobody is watching, says
-  which app needs connecting instead of showing a card.
+- **Bots do the work in the conversation.** With task threads off (above), no Bot is offered a task
+  thread to hand work to, and a Bot set to hand work to agents runs on its default agent with its
+  apps, as a Bot that does the work itself does. With `OPENBOT_TASK_THREADS=on`, only a Bot set to
+  hand work to agents does so: since 1.1.0 every Bot, the General and Personal Assistants included,
+  handed requests in a person's own conversation to task threads even with Hand work to agents off.
+- **A Bot's Agents page has no Hand work to agents switch.** Every Bot shows the Runs on card, a Bot
+  set to hand work out included, with its default agent chosen. Saving the page keeps what the Bot
+  is set to, its model, effort, instructions and agents too, so turning task threads back on brings
+  it back as it was. A Bot's profile says what a Bot that does the work itself says, such as "Does
+  the work itself on OpenBot", and a conversation with such a Bot takes a model pick like any other.
+- **A Bot asks for the app a request needs instead of searching around it.** A Bot is told that what
+  is private to the person or their team in an app it has no tools for, such as the team's own
+  GitHub repositories, starts with that app's card, which connects it or asks an admin for it, and
+  not with the public web, which shows only what is public. A page of theirs that comes back not
+  found on the web and could be private, such as a private repository's 404, gets the same card
+  instead of "it may not exist", and so does the person saying something is private. Anything
+  public, such as an open-source project's release or a dead public link, is still answered from
+  the web, and a routine, which nobody is watching, says which app needs connecting instead of
+  showing a card.
 
 ### OpenBot Desktop
 
-- **Install on a computer with an earlier OpenBot install** sets up the software OpenBot runs on
-  again when it is gone. On Windows, after Podman was removed, the window stayed on "Setting up this
-  computer" after sign-in, because Install took the old install as done.
+- **Approved folders survive a server restart.** A restart of OpenBot's server, Restart in the Status
+  window among them, dropped every folder approved in Settings > Computer: Settings read "No folders
+  approved" and a Bot was told its folder access had ended. OpenBot Desktop now holds the folders
+  for up to two minutes while the server is away, ending only the work that was running, and hands
+  them back when it answers. The server takes back only the folders OpenBot Desktop held for it, and
+  never one revoked or stopped in the meantime. Stop and Quit still end them, as does a server that
+  stays away for more than two minutes.
+- **Install sets OpenBot up again over an earlier install whose engine is gone.** On Windows, with
+  Podman removed after an earlier install, Install took the old install as done and the window
+  stayed on "Setting up this computer" after sign-in. Install now always checks: it brings the
+  engine back first, and skips the download when the install is still whole.
 - **On Windows, setup no longer waits for ever on "Checking what OpenBot needs to download".** A
   command OpenBot runs in its engine's machine now stops after 60 seconds. If Windows refused the
   machine's key because other accounts can open it, setup says so and names the file and the
   account.
+
+### Kubernetes
+
+- **OpenBot can be kept up to date for you, if you ask.** The `openbot-agent` chart, published with
+  each release at `oci://ghcr.io/copilotkit/charts/openbot-agent`, installs a management agent into
+  `openbot-system`, beside an OpenBot install, with Flux's source and Helm controllers limited to
+  that namespace. Nothing is managed without it: the `openbot` and `openbot-bundle` charts never
+  reference it, and an install without it is unchanged. To opt in, CopilotKit gives you an install
+  id and a client certificate. Put the certificate in a Secret and your product values in another,
+  choose a weekly window of at least four hours (UTC) and how your database is backed up, and
+  `helm install` the chart.
+  - The agent only calls out: every minute, over HTTPS with that certificate, to
+    `https://fleet.bot.copilotkit.ai`. A heartbeat carries only the fields in
+    `shared/management-contract.ts`: the install id, versions and image digests, the last
+    migration, Flux's readiness, ready and wanted pods per workload, and the upgrade's state. A
+    metrics collector sends a fixed list of health metrics with nothing that names a person, an
+    organization or a tenant; `otel.enabled: false` turns it off.
+  - It upgrades only to a release the management service names, only inside both your window and
+    the service's, only along the release's upgrade paths, by pinning Flux to that release's exact
+    chart digest. Before an upgrade that changes the database it stops writes and takes a backup,
+    and goes on only once the backup succeeds. A failed backup puts the install back as it was, and
+    the same release is not tried again for 30 minutes. It never rolls back by itself: an upgrade
+    that stops after the database may have changed waits for a person.
+  - It runs five commands, each signed and short-lived: restart, rollback (only where the release
+    says the previous one runs on its database), pause, resume, and a support bundle that is
+    redacted and written to a volume in your cluster, never uploaded.
+  - It installs the product as `openbot-deployer`, an admin of the product namespace only, which
+    also holds the HTTPRoutes, ExternalSecrets and Sandboxes the product charts create there. It
+    turns on the server's internal status port for the release it manages, open to
+    `openbot-system`, and keeps your own `server.internalStatus.allowFrom` peers.
+  - Pause it with `helm upgrade openbot-agent ... --set paused=true`, which works under Helm 4 on an
+    install the agent has already upgraded. `helm uninstall openbot-agent` turns it off and leaves
+    OpenBot installed for a plain `helm upgrade`.
+  - Its image is the release's own, `ghcr.io/copilotkit/openbot-management-agent:v<release>`. The
+    chart published with 1.1.1 named a tag that was never published.
+- **`bun scripts/update.ts kubernetes apply` accepts a published release.** It compared the commit
+  the running server reports with the one the release names, which never match for a published
+  release, so an upgrade that had worked ended in recovery-required with "Running server release
+  identity does not match the candidate", and a release that stops writes for its upgrade was
+  scaled back to zero. It now checks the version, distribution, repository and channel, with the
+  image digest the server Deployment is pinned to, as before.
 
 ## 1.1.1
 
