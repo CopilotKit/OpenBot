@@ -260,6 +260,7 @@ def _model(plan_models=None):
             model,
             **_google_genai_kwargs(prefix),
             **_provider_kwargs(prefix, named, run.effort),
+            **_gateway_key(run, prefix),
             **_retries(run),
         )
     return init_chat_model(
@@ -267,8 +268,23 @@ def _model(plan_models=None):
         model_provider=provider,
         **_google_genai_kwargs(provider),
         **_provider_kwargs(provider, model, run.effort),
+        **_gateway_key(run, provider),
         **_retries(run),
     )
+
+
+def _gateway_key(run, provider: str) -> dict:
+    """The run's own model gateway token as the key, when the server sent one.
+
+    One harness serves every organization of an OpenBot, and the deployment's gateway token in the
+    environment means one organization only. The server sends each run a token for its own
+    organization (`openbotModelRoute`), so the call goes out on that organization's AI connection.
+    The address stays the configured one: the server sends a token only to a harness it runs, which
+    reaches the model through its gateway.
+    """
+    if not run.gateway_token or provider not in ("openai", "anthropic"):
+        return {}
+    return {"api_key": run.gateway_token}
 
 
 async def _plan_model():
