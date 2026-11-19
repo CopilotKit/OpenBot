@@ -44,6 +44,7 @@ import {
   botAgentListQueryOptions,
   botDelegationQueryOptions,
   type Delegation,
+  TASK_THREADS_OFFERED,
   whereItRuns,
 } from "@/lib/bot-agents/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
@@ -70,8 +71,17 @@ type Choice = Pick<
  * How a Bot works: on its one agent, doing the work itself with its apps, or handing the work to the
  * agents it may use while it answers quickly. One form, saved together, because the switch means
  * nothing without the agents it switches to.
+ *
+ * The switch is drawn only while task threads are offered (`TASK_THREADS_OFFERED`), or for a Bot
+ * that already hands work out, so its owner can turn that off.
  */
-export function BotDelegation({ agent }: { agent: AgentProfile }) {
+export function BotDelegation({
+  agent,
+  offerTaskThreads = TASK_THREADS_OFFERED,
+}: {
+  agent: AgentProfile;
+  offerTaskThreads?: boolean;
+}) {
   const delegation = useQuery(botDelegationQueryOptions(agent.id));
   /*
    * Kept out here: the save's own refetch remounts the form below (it is keyed by what was saved), and
@@ -91,6 +101,7 @@ export function BotDelegation({ agent }: { agent: AgentProfile }) {
       botId={agent.id}
       done={saved}
       key={JSON.stringify(delegation.data)}
+      offerTaskThreads={offerTaskThreads}
       onDone={setSaved}
       saved={delegation.data}
     />
@@ -101,10 +112,12 @@ function DelegationForm({
   botId,
   saved,
   done,
+  offerTaskThreads,
   onDone: setDone,
 }: {
   botId: string;
   saved: Delegation;
+  offerTaskThreads: boolean;
   /** Whether the last save went through. */
   done: boolean;
   onDone: (done: boolean) => void;
@@ -202,38 +215,40 @@ function DelegationForm({
 
   return (
     <>
-      <PageSection>
-        <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconSitemap />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle id={`hand-work-${botId}`}>
-                Hand work to agents
-              </ItemTitle>
-              <ItemDescription className="line-clamp-none">
-                {orchestrate
-                  ? "This Bot answers quickly and hands the work to the agents below. They act with this Bot's apps, as the person who asked."
-                  : "This Bot does the work itself, with its apps."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-labelledby={`hand-work-${botId}`}
-                checked={toggle.isPending ? !orchestrate : orchestrate}
-                disabled={!editable || toggle.isPending}
-                onCheckedChange={flip}
-              />
-            </ItemActions>
-          </Item>
-        </PageRows>
-        {toggle.error ? (
-          <p className="mt-3 text-destructive text-sm" role="alert">
-            {toggle.error.message}
-          </p>
-        ) : null}
-      </PageSection>
+      {offerTaskThreads || orchestrate ? (
+        <PageSection>
+          <PageRows>
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconSitemap />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle id={`hand-work-${botId}`}>
+                  Hand work to agents
+                </ItemTitle>
+                <ItemDescription className="line-clamp-none">
+                  {orchestrate
+                    ? "This Bot answers quickly and hands the work to the agents below. They act with this Bot's apps, as the person who asked."
+                    : "This Bot does the work itself, with its apps."}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  aria-labelledby={`hand-work-${botId}`}
+                  checked={toggle.isPending ? !orchestrate : orchestrate}
+                  disabled={!editable || toggle.isPending}
+                  onCheckedChange={flip}
+                />
+              </ItemActions>
+            </Item>
+          </PageRows>
+          {toggle.error ? (
+            <p className="mt-3 text-destructive text-sm" role="alert">
+              {toggle.error.message}
+            </p>
+          ) : null}
+        </PageSection>
+      ) : null}
       <PageSection title={orchestrate ? "Handing out work" : "Runs on"}>
         <form
           noValidate
