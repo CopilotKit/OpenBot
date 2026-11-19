@@ -29,4 +29,13 @@ describe("workspace download headers", () => {
     expect(headers.get("content-disposition")).not.toMatch(/[\r\n]/);
     expect(headers.get("x-injected")).toBeNull();
   });
+
+  test("replaces unpaired UTF-16 surrogates without throwing URIError", () => {
+    expect(contentDisposition("\uD800report\uDC00.pdf")).toBe(
+      "attachment; filename=\"_report_.pdf\"; filename*=UTF-8''_report_.pdf",
+    );
+    expect(contentDisposition("🚀.pdf")).toBe(
+      "attachment; filename=\"_.pdf\"; filename*=UTF-8''%F0%9F%9A%80.pdf",
+    );
+  });
 });

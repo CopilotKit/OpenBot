@@ -13,9 +13,11 @@ function headerSafeFilename(name: string): string {
   const cleaned = Array.from(name.normalize("NFC"), (character) => {
     const code = character.codePointAt(0) ?? 0;
     // Header injection is removed before any quoting: a quote or backslash would otherwise escape
-    // the quoted parameter and let a filename carry its own directive.
+    // the quoted parameter and let a filename carry its own directive. Lone UTF-16 surrogates
+    // (U+D800–U+DFFF) are replaced too so encodeURIComponent never throws URIError.
     return code <= 0x1f ||
       code === 0x7f ||
+      (code >= 0xd800 && code <= 0xdfff) ||
       character === '"' ||
       character === "\\"
       ? "_"
