@@ -40,15 +40,19 @@ function agUiContextEntries(
   requestContext?: OpenBotInstructionArgs["requestContext"],
 ) {
   const agUi = requestContext?.get("ag-ui");
-  if (
-    typeof agUi !== "object" ||
-    agUi === null ||
-    !("context" in agUi) ||
-    !Array.isArray(agUi.context)
-  ) {
-    return [];
-  }
+  if (typeof agUi !== "object" || agUi === null) return [];
+  if (!("context" in agUi) || !Array.isArray(agUi.context)) return [];
   return agUi.context;
+}
+
+function openBotContextValue(entry: unknown, description: string) {
+  if (typeof entry !== "object" || entry === null) return undefined;
+  if (!("description" in entry) || !("value" in entry)) return undefined;
+  if (entry.description !== description) return undefined;
+  if (typeof entry.value !== "string") return undefined;
+  const value = entry.value.trim();
+  if (value.length === 0) return undefined;
+  return value;
 }
 
 export function buildOpenBotInstructions({
@@ -57,18 +61,10 @@ export function buildOpenBotInstructions({
   const contextEntries = agUiContextEntries(requestContext);
   const openbotInstructions = OPENBOT_CONTEXT_DESCRIPTIONS.flatMap(
     (description) =>
-      contextEntries
-        .filter(
-          (entry): entry is { description: string; value: string } =>
-            typeof entry === "object" &&
-            entry !== null &&
-            "description" in entry &&
-            entry.description === description &&
-            "value" in entry &&
-            typeof entry.value === "string" &&
-            entry.value.trim().length > 0,
-        )
-        .map((entry) => entry.value.trim()),
+      contextEntries.flatMap((entry) => {
+        const value = openBotContextValue(entry, description);
+        return value === undefined ? [] : [value];
+      }),
   );
 
   if (openbotInstructions.length === 0) return openbotBaseInstructions;

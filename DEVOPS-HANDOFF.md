@@ -79,13 +79,13 @@ docker run --rm --env-file .env --entrypoint sh agentforce \
 
 ## Env the container will not start without
 
-| Variable                                                                      | Notes                                                                |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Variable                                                                      | Notes                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`                                                                | Postgres with the `vector` extension. Skip if `EMBEDDED_POSTGRES=on`. For RDS/managed DB use `?sslmode=require` on the URL; both the Bun SQL pool and postgres.js clients enable TLS from that setting (see `server/src/db/client.ts` and `server/src/db/postgres-js.ts`). Optional: `DATABASE_SSL=require` also forces TLS. |
-| `KEY_ENCRYPTION_KEY`                                                          | `openssl rand -base64 32`. The example key is refused in production  |
-| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence (`cpk-...` key)                              |
-| `OPENAI_API_KEY`                                                              | or whichever model provider you configured                           |
-| Auth                                                                          | Google / Microsoft / Okta **or** `OPENBOT_SINGLE_USER=true`          |
+| `KEY_ENCRYPTION_KEY`                                                          | `openssl rand -base64 32`. The example key is refused in production                                                                                                                                                                                                                                                          |
+| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence (`cpk-...` key)                                                                                                                                                                                                                                                                                      |
+| `OPENAI_API_KEY`                                                              | or whichever model provider you configured                                                                                                                                                                                                                                                                                   |
+| Auth                                                                          | Google / Microsoft / Okta **or** `OPENBOT_SINGLE_USER=true`                                                                                                                                                                                                                                                                  |
 
 We are currently running **without OAuth**: `OPENBOT_SINGLE_USER=true`. Put TLS in front of any shared URL.
 
