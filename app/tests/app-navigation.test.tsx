@@ -15,7 +15,7 @@ import {
   isRedirect,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
@@ -193,13 +193,7 @@ test.each(["user", "admin"] as const)(
   "the sidebar draws exactly the shared list for a %s",
   async (role) => {
     const { view, user } = renderSidebar(role);
-    const footer = await waitFor(() => {
-      const element = view.container.querySelector<HTMLElement>(
-        '[data-sidebar="footer"]',
-      );
-      if (!element) throw new Error("No sidebar footer");
-      return element;
-    });
+    const footer = await view.findByRole("navigation", { name: "Sections" });
     expect(
       links(footer).map(({ label, to }) => ({
         label: label.replace(/\d+$/, ""),
@@ -234,11 +228,11 @@ test.each(["user", "admin"] as const)(
   },
 );
 
-test("the running OpenBot version sits to the right of the person's name, in one row, from /api/me", async () => {
-  const { view } = renderSidebar("user", "team", { version: "v0.3.1" });
-  const version = await view.findByText("v0.3.1");
-  const account = view.getByRole("button", { name: /Maya Chen/ });
-  expect(account.contains(version)).toBe(true);
+test("the running OpenBot version sits to the right of the person's name, in one row, from /api/me, at the top of the account menu", async () => {
+  const { view, user } = renderSidebar("user", "team", { version: "v0.3.1" });
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  const account = await view.findByRole("menu");
+  const version = await within(account).findByText("v0.3.1");
   // The name, then the version, side by side in one row: the version as wide as its words, the
   // name in the rest (account-version-layout.test.tsx measures it in a browser).
   const name = within(account).getByText("Maya Chen");
