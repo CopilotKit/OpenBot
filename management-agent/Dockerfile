@@ -38,6 +38,8 @@ RUN set -eu; \
     chmod 0755 /kubectl
 
 FROM oven/bun@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288
+# The repository this image is built from, as every published OpenBot image names it.
+LABEL org.opencontainers.image.source="https://github.com/CopilotKit/OpenBot"
 COPY --from=kubectl /kubectl /usr/local/bin/kubectl
 COPY --from=build /out/agent.js /app/agent.js
 # Not root, and no shell needed at run time.
