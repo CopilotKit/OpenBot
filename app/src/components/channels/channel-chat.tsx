@@ -1016,13 +1016,7 @@ export function ChannelChat({
       offSaidOffTheList();
       pullHistoryRef.current = null;
     };
-  }, [
-    channel.id,
-    channel.threadId,
-    joinGatePromise,
-    joinedPromise,
-    runtimeAgentId,
-  ]);
+  }, [channel.id, channel.threadId, joinGatePromise, joinedPromise]);
 
   /*
    * A RUN OF A TURN GOING ON IN A CHAT THAT CLOSED, JOINED HERE AS IT STARTS. The join above carries a run only if one
@@ -1730,7 +1724,7 @@ export function ChannelChat({
       },
     });
     return () => subscription?.unsubscribe();
-  }, [agent, activeAgentId]);
+  }, [agent, runtimeAgentId]);
 
   /** Stable reference for effects and component callbacks. */
   /*
@@ -1833,6 +1827,7 @@ export function ChannelChat({
     documentIds: string[];
   } | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: must re-check when the active Bot changes, not only when the roster does.
   useEffect(() => {
     if (!channel.agentIds.includes(activeAgentId)) {
       const next = channel.agentIds[0];
@@ -1840,6 +1835,7 @@ export function ChannelChat({
     }
   }, [activeAgentId, channel.agentIds]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fires when the bound agent catches up so a queued delivery can send.
   useEffect(() => {
     const pending = pendingDelivery.current;
     if (!pending || boundAgentId !== activeAgentId) return;
@@ -1887,7 +1883,7 @@ export function ChannelChat({
       .catch(() => undefined);
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
-  }, [seedDocumentIds]);
+  }, []);
 
   return (
     // Activity renderers resolve their agent through this SDK context. It must match useAgent's
