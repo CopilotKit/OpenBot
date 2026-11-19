@@ -1710,7 +1710,7 @@ const notStartedOnC = report({
 });
 const shortOnC = notStartedOnC.shortfall;
 const ACCOUNT_STEP_SAYS =
-  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.";
+  "Drive C: has 13.9 GB of free space, and OpenBot needs 15 GB. Free up some space, then Try again.";
 
 /**
  * On Windows G that setup was a red "Setup stopped" card with Retry and the troubleshooting logs,

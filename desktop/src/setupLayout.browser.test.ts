@@ -1684,7 +1684,7 @@ describe.skipIf(!asked)("an update this computer has no room for", () => {
   const cases = [
     {
       hash: "#update-short",
-      said: "This computer has 7.4 GB of free space on drive C:, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+      said: "Drive C: has 7.4 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
     },
     {
       hash: "#backend-short",

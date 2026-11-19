@@ -307,7 +307,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }).said,
   ).toBe(
-    "This computer has 12 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Retry.",
+    "Drive C: has 12 GB of free space, and OpenBot needs 15 GB. Free up some space, then Retry.",
   );
   // OpenBot's machine's own disk is what ran short, and C: has room: never said as C:'s.
   expect(
@@ -412,7 +412,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }),
   ).toBe(
-    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.",
+    "Drive C: has 13.2 GB of free space, and OpenBot needs 15 GB. Free up some space, then Try again.",
   );
   // Windows G on Docker Desktop: its disk is a sparse virtual disk on C:, and C: ran short. Said
   // as C:'s, never as Docker's disk limit, which had 938.3 GB free.
@@ -427,7 +427,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }),
   ).toBe(
-    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.",
+    "Drive C: has 13.9 GB of free space, and OpenBot needs 15 GB. Free up some space, then Try again.",
   );
   // A disk that is short is never said as out of space, measured or not.
   expect(
@@ -838,7 +838,7 @@ test("an update with no room says what is free and what the update needs", () =>
       diskGb: "11.8",
     }),
   ).toBe(
-    "This computer has 11.8 GB of free space on drive C:, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+    "Drive C: has 11.8 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
   );
   // Docker Desktop's own disk limit is what is short: raised or freed there.
   expect(

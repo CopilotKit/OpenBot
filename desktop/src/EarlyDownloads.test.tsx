@@ -205,8 +205,9 @@ const WINDOWS_F_SHORT: EarlyDownloads = {
 
 /**
  * mac3 at 24 GB free: this line said OpenBot "needs 25 GB" where the account step said 26 for the
- * same 25.34 GiB. What OpenBot needs is rounded up, as the account step rounds it, so the two screens
- * say one figure and it is never less than what is needed.
+ * same 25.34 GiB, and "24 GB" free where the account step said "23.9 GB". What OpenBot needs is
+ * rounded up, and what is free said to a tenth, rounded down, as the account step says them, so
+ * the two screens say one figure for each.
  */
 test("what OpenBot needs is said rounded up, the figure the account step says", () => {
   expect(
@@ -221,7 +222,7 @@ test("what OpenBot needs is said rounded up, the figure the account step says", 
       true,
     )?.replaceAll(" ", " "),
   ).toBe(
-    "This computer has 24 GB of free space, and OpenBot needs 26 GB plus about 6 GB for its download. Free up some space and the download starts by itself.",
+    "This computer has 23.9 GB of free space, and OpenBot needs 26 GB plus about 6 GB for its download. Free up some space and the download starts by itself.",
   );
 });
 
@@ -248,7 +249,7 @@ test("a disk too full to download to says what is free and what is needed, and I
   // Each figure and its unit are kept on one line.
   expect(line.textContent).toContain("5\u00a0GB for its download");
   expect(line.textContent?.replaceAll("\u00a0", " ")).toBe(
-    "This computer has 15 GB of free space, and OpenBot needs 15 GB plus about 5 GB for its download. Free up some space and the download starts by itself.",
+    "This computer has 14.9 GB of free space, and OpenBot needs 15 GB plus about 5 GB for its download. Free up some space and the download starts by itself.",
   );
   // Nothing is downloading, so nothing spins and there is no bar.
   expect(line.querySelector(".step-spinner")).toBeNull();
@@ -293,7 +294,7 @@ test("an Install pressed before the disk is looked at builds nothing on a disk t
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   expect(
     view.getByRole("status").textContent?.replaceAll("\u00a0", " "),
-  ).toContain("This computer has 15 GB of free space");
+  ).toContain("This computer has 14.9 GB of free space");
   expect(install.disabled).toBe(true);
 });
 

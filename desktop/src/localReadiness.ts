@@ -264,7 +264,7 @@ function podmanFix(short: Resource[], shortfall: Shortfall): string {
 function onTheDrive(shortfall: Shortfall): string {
   return shortfall.mac || !shortfall.drive
     ? `This ${shortfall.mac ? "Mac" : "computer"} has ${shortfall.diskGb} GB of free space`
-    : `This computer has ${shortfall.diskGb} GB of free space on drive ${shortfall.drive}`;
+    : `Drive ${shortfall.drive} has ${shortfall.diskGb} GB of free space`;
 }
 
 /**

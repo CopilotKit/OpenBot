@@ -89,6 +89,15 @@ function gigabytes(bytes: number, round = Math.round): string {
   return `${Math.max(1, round(bytes / GB))}\u00a0GB`;
 }
 
+/**
+ * What is free, to a tenth of a GB rounded down, as the account step says it ("23.9 GB", "15 GB"):
+ * the first screen said "24 GB" where the next one said "23.9 GB".
+ */
+function freeGigabytes(bytes: number): string {
+  const tenths = Math.floor((Math.max(0, bytes) / GB) * 10) / 10;
+  return `${tenths.toFixed(1).replace(/\.0$/, "")} GB`;
+}
+
 /** The download's own part of what OpenBot needs, said apart, and rounded up so it is enough. */
 function downloadSaid(download: number | undefined): string {
   return download
@@ -125,7 +134,7 @@ export function earlyDownloadsSaid(
     case "short":
       return free != null && needed != null
         ? // What OpenBot needs is rounded up, as the account step rounds the same figure.
-          `This computer has ${gigabytes(free)} of free space, and OpenBot needs ${gigabytes(needed, Math.ceil)}${downloadSaid(download)}. Free up some space and the download starts by itself.`
+          `This computer has ${freeGigabytes(free)} of free space, and OpenBot needs ${gigabytes(needed, Math.ceil)}${downloadSaid(download)}. Free up some space and the download starts by itself.`
         : null;
     case "done":
       return null;
