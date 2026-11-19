@@ -9,7 +9,10 @@
  *  3. inside the window: quiesce, a backup Job (backup.kind=command, pg_dump of the bundle's real
  *     PostgreSQL, verified with pg_restore) that finishes before Flux is pinned to the new chart
  *     digest, then verification through /release;
- *  4. a signed rollback is refused because the release's policy says restore-backup.
+ *  4. a signed rollback is refused because the release's policy says restore-backup;
+ *  5. a release whose image does not exist: backup, Flux fails the upgrade, recovery-required;
+ *     then, as a person recovers (journal.json removed, the desired version set back to the
+ *     accepted release), the agent pins Flux back to the accepted chart and verifies it.
  *
  * Opt-in, because it needs a cluster it may write to and the release builds. On a kind cluster
  * with a plain-HTTP registry on the kind network:
@@ -33,7 +36,13 @@ import {
   test,
 } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { releaseManifestDigest } from "../../shared/management-contract";
 import {
@@ -101,8 +110,11 @@ interface Build {
   manifest: string;
   digest: string;
 }
-function push(version: string): Build {
-  const directory = join(env.OPENBOT_AGENT_E2E_RELEASES ?? "", version);
+function push(
+  version: string,
+  releases = env.OPENBOT_AGENT_E2E_RELEASES ?? "",
+): Build {
+  const directory = join(releases, version);
   const chart = readdirSync(directory).find(
     (file) => file.startsWith("openbot-bundle-") && file.endsWith(".tgz"),
   );
@@ -125,10 +137,7 @@ function push(version: string): Build {
   if (!digest) throw new Error(`helm push printed no digest: ${output}`);
   return {
     version,
-    manifest: readFileSync(
-      join(env.OPENBOT_AGENT_E2E_RELEASES ?? "", `${version}.json`),
-      "utf8",
-    ),
+    manifest: readFileSync(join(releases, `${version}.json`), "utf8"),
     digest,
   };
 }
@@ -552,5 +561,194 @@ run("management agent on a real cluster", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("policy: restore-backup needs a person");
     expect(pinned()).toBe(to.digest);
+  });
+
+  test("after a failed upgrade and a person's recovery, Flux is pinned back to the accepted release", async () => {
+    service.window = { weekday: 0, startUtc: "00:00", hours: 168 };
+    // A release whose image does not exist: this build's bundle under another chart version (so
+    // another chart digest), and a manifest that names an image digest no registry has.
+    const base = join(pki.directory, "broken");
+    const version = `${to.version}-broken`;
+    const source = join(base, "source");
+    mkdirSync(source, { recursive: true });
+    mkdirSync(join(base, version), { recursive: true });
+    const toDirectory = join(env.OPENBOT_AGENT_E2E_RELEASES ?? "", to.version);
+    const toChart = readdirSync(toDirectory).find(
+      (file) => file.startsWith("openbot-bundle-") && file.endsWith(".tgz"),
+    );
+    sh("tar", ["-xzf", join(toDirectory, toChart ?? ""), "-C", source]);
+    const chartYaml = join(source, "openbot-bundle", "Chart.yaml");
+    writeFileSync(
+      chartYaml,
+      readFileSync(chartYaml, "utf8").replace(
+        /^version:\s*"?([^"\s]+)"?\s*$/m,
+        "version: $1-broken",
+      ),
+    );
+    sh("helm", [
+      "package",
+      join(source, "openbot-bundle"),
+      "--destination",
+      join(base, version),
+    ]);
+    const manifest = JSON.parse(to.manifest);
+    const missing = `sha256:${"0123456789abcdef".repeat(4)}`;
+    manifest.version = version;
+    for (const image of Object.values(
+      manifest.artifacts.images as Record<string, { reference: string }>,
+    ))
+      image.reference = image.reference.replace(
+        /@sha256:[0-9a-f]{64}$/,
+        `@${missing}`,
+      );
+    manifest.upgrade.fromVersions = [to.version];
+    manifest.compatibility.database.from = [manifest.compatibility.database.to];
+    writeFileSync(join(base, `${version}.json`), JSON.stringify(manifest));
+    const broken = push(version, base);
+    expect(broken.digest).not.toBe(to.digest);
+
+    // So the failed upgrade fails in minutes rather than after the bundle's 20 minutes.
+    const timeout = (value: string) =>
+      shAsync("helm", [
+        "upgrade",
+        "openbot-agent",
+        env.OPENBOT_AGENT_E2E_CHART ?? "",
+        "-n",
+        SYSTEM,
+        "--reuse-values",
+        "--set",
+        `product.timeout=${value}`,
+      ]);
+    await timeout("4m");
+
+    const state = () =>
+      json<{ data: Record<string, string> }>(
+        "-n",
+        SYSTEM,
+        "get",
+        "configmap",
+        "openbot-agent-state",
+      ).data;
+    const journal = () => JSON.parse(state()["journal.json"] ?? "{}");
+    const backups = () =>
+      kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")
+        .split("\n")
+        .filter((name) => name.includes("openbot-backup-"));
+    const backupsBefore = backups().length;
+
+    await desire(broken);
+    const failed = await until(
+      "the failed upgrade journaled as recovery-required",
+      () => {
+        const entry = journal();
+        return (
+          entry.toVersion === version &&
+          entry.phase === "recovery-required" &&
+          entry
+        );
+      },
+      30,
+    );
+    expect(failed.databaseMayHaveChanged).toBe(true);
+    expect(failed.backupReference).toMatch(/^openbot-/);
+    expect(backups()).toHaveLength(backupsBefore + 1);
+    await until(
+      "recovery-required in the heartbeat",
+      () => latest()?.upgrade.state === "recovery-required",
+      5,
+    );
+    // Left as it failed: Flux on the failed chart, the pins naming the missing image.
+    expect(pinned()).toBe(broken.digest);
+    expect(
+      kubectl(
+        "-n",
+        SYSTEM,
+        "get",
+        "configmap",
+        "openbot-agent-pins",
+        "-o",
+        "json",
+      ),
+    ).toContain(missing);
+
+    // The person recovers as the journal says. The failed release's image never ran, so the
+    // database is the one the accepted release left and restoring the backup changes nothing here.
+    // The desired version goes back to the accepted release, then journal.json is removed.
+    await desire(to);
+    kubectl(
+      "-n",
+      SYSTEM,
+      "patch",
+      "configmap",
+      "openbot-agent-state",
+      "--type=json",
+      "-p",
+      JSON.stringify([{ op: "remove", path: "/data/journal.json" }]),
+    );
+
+    await until(
+      `Flux pinned back to ${to.version}, verified`,
+      () => {
+        const last = latest();
+        return (
+          pinned() === to.digest &&
+          journal().phase === "accepted" &&
+          last?.openbot.version === to.version &&
+          last.upgrade.state === "idle" &&
+          last.flux.helmReleases[0]?.ready === true
+        );
+      },
+      30,
+    );
+    const restored = journal();
+    expect(restored.fromVersion).toBe(`chart ${broken.digest}`);
+    expect(restored.toVersion).toBe(to.version);
+    expect(restored.backupReference).toBe("none");
+    // Returning to the accepted release takes no second backup.
+    expect(backups()).toHaveLength(backupsBefore + 1);
+
+    const release = json<{
+      status: {
+        lastAttemptedRevisionDigest?: string;
+        conditions?: { type: string; status: string }[];
+      };
+    }>("-n", SYSTEM, "get", "helmreleases.helm.toolkit.fluxcd.io", "openbot");
+    expect(release.status.lastAttemptedRevisionDigest).toBe(to.digest);
+    expect(
+      release.status.conditions?.find((c) => c.type === "Ready")?.status,
+    ).toBe("True");
+    const accepted = JSON.parse(state()["state.json"] ?? "{}");
+    expect(accepted.accepted.version).toBe(to.version);
+    expect(accepted.accepted.digest).toBe(to.digest);
+
+    // The server runs the accepted release's image again, with its replicas back.
+    const image = JSON.parse(to.manifest).artifacts.images.openbot.reference;
+    const server = json<{
+      items: {
+        spec: {
+          template: { spec: { containers: { name: string; image: string }[] } };
+        };
+        status: { readyReplicas?: number };
+      }[];
+    }>(
+      "-n",
+      PRODUCT,
+      "get",
+      "deployment",
+      "-l",
+      "app.kubernetes.io/instance=openbot,app.kubernetes.io/component=server",
+    ).items[0];
+    expect(
+      server?.spec.template.spec.containers.find((c) => c.name === "server")
+        ?.image,
+    ).toEndWith(`@${image.split("@")[1]}`);
+    expect(server?.status.readyReplicas ?? 0).toBeGreaterThan(0);
+    // No pod is left on the missing image: the StatefulSet pod the failed release started was
+    // deleted so the StatefulSet could roll back (Kubernetes' forced rollback).
+    expect(kubectl("-n", PRODUCT, "get", "pods", "-o", "json")).not.toContain(
+      missing,
+    );
+
+    await timeout("20m");
   });
 });
