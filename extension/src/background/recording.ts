@@ -48,7 +48,7 @@ import {
 } from "../shared/limits";
 import {
   OpenBotError,
-  ORGANIZATION_ID,
+  organizationOf,
   updateRequiredSentence,
 } from "../shared/openbot-client";
 import { isRecordablePage } from "../shared/origin";
@@ -560,6 +560,8 @@ type Live = {
   openbotUrl: string;
   token: string;
   userId: string;
+  /** The organization of the connection it records with (`organizationOf`). */
+  organizationId?: string;
 };
 
 type StopMode =
@@ -592,12 +594,18 @@ function report(what: string): (error: unknown) => void {
   return (error) => console.error(`Recorder: ${what} failed`, error);
 }
 
-function liveFrom(record: DrainRecord, token: string): Live {
+function liveFrom(
+  record: DrainRecord,
+  connection: Pick<ConnectionRecord, "token" | "organizationId">,
+): Live {
   return {
     recordingId: record.recordingId,
     openbotUrl: record.openbotUrl,
-    token,
+    token: connection.token,
     userId: record.userId,
+    ...(connection.organizationId
+      ? { organizationId: connection.organizationId }
+      : {}),
   };
 }
 
@@ -704,6 +712,7 @@ export function installRecording(
           openbotUrl: live.openbotUrl,
           token: live.token,
           userId: live.userId,
+          organizationId: live.organizationId,
         };
       const connection = await currentConnection();
       return connection
@@ -711,6 +720,7 @@ export function installRecording(
             openbotUrl: connection.openbotUrl,
             token: connection.token,
             userId: connection.user.id,
+            organizationId: connection.organizationId,
           }
         : null;
     },
@@ -830,7 +840,7 @@ export function installRecording(
     if (narration) external = { language: narration.language, before: "" };
     const connection = await currentConnection();
     if (!record || !connection || !ownedBy(record, connection)) return;
-    live = liveFrom(record, connection.token);
+    live = liveFrom(record, connection);
     openSteps(live.recordingId, takeRestored(live.recordingId));
   })();
   ready.catch(report("loading the recorder state"));
@@ -1719,6 +1729,9 @@ export function installRecording(
         openbotUrl: connection.openbotUrl,
         token: connection.token,
         userId: connection.user.id,
+        ...(connection.organizationId
+          ? { organizationId: connection.organizationId }
+          : {}),
       };
       watchConnection();
       external = session.narration
@@ -2053,7 +2066,7 @@ export function installRecording(
     const current = live;
     if (!current || state.phase !== "recording") return;
     try {
-      await getRecorderIdentity(ORGANIZATION_ID, {
+      await getRecorderIdentity(organizationOf(current), {
         target: { openbotUrl: current.openbotUrl, token: current.token },
       });
     } catch (error) {
@@ -2507,10 +2520,10 @@ export function installRecording(
       return null;
     }
     const connection = await currentConnection();
-    const token =
-      connection && ownedBy(record, connection) ? connection.token : "";
+    const owner =
+      connection && ownedBy(record, connection) ? connection : { token: "" };
     await trackStop(
-      endRecording(liveFrom(record, token), { kind: "person" }, stopping),
+      endRecording(liveFrom(record, owner), { kind: "person" }, stopping),
     );
     return record.recordingId;
   }
@@ -2560,7 +2573,7 @@ export function installRecording(
       return;
     }
     await trackStop(
-      endRecording(liveFrom(record, ""), {
+      endRecording(liveFrom(record, { token: "" }), {
         kind: "signed-out",
         reason: await waitingReason(),
         forgot: true,
@@ -2623,7 +2636,7 @@ export function installRecording(
     )
       return cached.value;
     try {
-      const value = await getRecorderIdentity(ORGANIZATION_ID, {
+      const value = await getRecorderIdentity(organizationOf(connection), {
         target: connection,
       });
       await writeSession("me", { value, fetchedAt: deps.now() });
@@ -2685,7 +2698,7 @@ export function installRecording(
     const connection = await currentConnection();
     if (!connection) return { ok: false, error: SENTENCES.noConnection };
     try {
-      const answer = await getRecorderLearning(ORGANIZATION_ID, {
+      const answer = await getRecorderLearning(organizationOf(connection), {
         target: connection,
       });
       learningSpace = answer.learning;
