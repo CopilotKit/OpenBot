@@ -1,6 +1,7 @@
 import {
   type Icon,
   IconBolt,
+  IconCode,
   IconPlug,
   IconSettings,
   IconShieldLock,
@@ -44,6 +45,7 @@ export type NavigationItem =
         | "memory"
         | "skills"
         | "connections"
+        | "product-engineer"
         | "teams"
         | "admin"
         | "settings";
@@ -55,6 +57,7 @@ export type NavigationItem =
         | "/memory"
         | "/skills"
         | "/connections"
+        | "/product-engineer"
         | "/teams"
         | "/admin"
         | "/settings";
@@ -137,6 +140,13 @@ export const NAVIGATION: readonly NavigationItem[] = [
     label: "Connections",
     to: "/connections",
     icon: IconPlug,
+    section: "primary",
+  },
+  {
+    id: "product-engineer",
+    label: "Product Engineer",
+    to: "/product-engineer",
+    icon: IconCode,
     section: "primary",
   },
   {

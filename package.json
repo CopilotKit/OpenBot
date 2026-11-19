@@ -8,11 +8,14 @@
     "app",
     "shared",
     "extension",
-    "management-agent"
+    "management-agent",
+    "product-engineer-loop",
+    "product-engineer-sidecar"
   ],
   "scripts": {
     "build": "bun run generate:app-config && bun run --filter '*' build",
     "dev": "bun run generate:app-config && bun run --filter app dev",
+    "dev:pe": "bun run --filter product-engineer-sidecar start",
     "generate:app-config": "bun --env-file=.env scripts/generate-app-config.ts",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
@@ -24,7 +27,7 @@
     "api:generate": "bun run api:bundle && orval --config app/orval.config.ts && orval --config mobile/orval.config.ts && orval --config extension/orval.config.ts",
     "api:live:diff": "bun api/asyncapi-diff.ts",
     "test:ci": "bun scripts/test-ci.ts",
-    "pretest": "bun run generate:app-config",
+    "pretest": "bun run generate:app-config && bun run --filter product-engineer-loop build",
     "test:smoke": "OPENBOT_SMOKE=1 bun test tests/smoke",
     "diagram": "bun scripts/architecture-diagram.ts",
     "setup:composio": "bun scripts/setup-composio.ts",

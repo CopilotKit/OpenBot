@@ -767,7 +767,43 @@ networks:
   # service without a `networks:` key keeps landing beside the Bots rather than beside the database.
   default:
 
+  # Product Engineer sidecar (Cursor cloud coding). Behind profile `pe` so a plain
+  # `docker compose up` stays OpenBot-only. Needs CURSOR_API_KEY, LINEAR_API_KEY, PE_REPOS.
+  product-engineer:
+    profiles: ["pe"]
+    build:
+      context: .
+      dockerfile: product-engineer-sidecar/Dockerfile
+    image: ${PE_IMAGE:-${COMPOSE_PROJECT_NAME:-openbot}-product-engineer:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
+    ports:
+      - "127.0.0.1:${PE_PORT:-3020}:3020"
+      - "[::1]:${PE_PORT:-3020}:3020"
+    environment:
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      PE_REPOS: ${PE_REPOS:-}
+      PE_STARTING_REF: ${PE_STARTING_REF:-}
+      PE_MODEL: ${PE_MODEL:-composer-2.5}
+      PE_PORT: "3020"
+      PE_RUNS_DIR: /data/runs
+      PE_SIDECAR_TOKEN: ${PE_SIDECAR_TOKEN:-}
+    volumes:
+      - pe-runs:/data/runs
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:3020/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres-data:
   agent-workspace:
   agent-profiles:
+  pe-runs:

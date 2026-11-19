@@ -32,6 +32,7 @@ agents:
     skills:
       - bot-creator
       - skill-creator
+      - implement-a-ticket
   - id: knowledge
     name: Knowledge
     title: Descasio Knowledge

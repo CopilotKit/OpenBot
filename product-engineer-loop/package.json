@@ -1,0 +1,39 @@
+{
+  "name": "product-engineer-loop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Orchestrator: Linear ticket → Cursor cloud Product Engineer → PR → human/QA feedback → resume until approve.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "pe-loop": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/cli.ts start",
+    "resume": "tsx src/cli.ts resume",
+    "status": "tsx src/cli.ts status",
+    "approve": "tsx src/cli.ts approve",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

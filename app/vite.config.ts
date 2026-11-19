@@ -79,6 +79,10 @@ const apiPort = listenPort(process.env.SERVER_PORT, 3001);
 if (!apiPort.ok) {
   throw new Error(apiPort.reason.replace(/^PORT /, "SERVER_PORT "));
 }
+const pePort = listenPort(process.env.PE_PORT, 3020);
+if (!pePort.ok) {
+  throw new Error(pePort.reason.replace(/^PORT /, "PE_PORT "));
+}
 
 /**
  * Only this machine, unless the deployment names an address beyond it (`appListenHosts`).
@@ -129,6 +133,14 @@ const serving = {
   port: appPort.port,
   strictPort: true,
   proxy: {
+    /*
+     * Product Engineer lives in product-engineer-sidecar (not the published OpenBot image).
+     * Match this path before the catch-all `/api` proxy so Vite does not send PE calls to :3001.
+     */
+    "/api/product-engineer": {
+      target: `http://localhost:${pePort.port}`,
+      changeOrigin: true,
+    },
     "/api": {
       target: `http://localhost:${apiPort.port}`,
       /*

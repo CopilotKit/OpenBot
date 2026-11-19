@@ -214,6 +214,7 @@ test.each(["user", "admin"] as const)(
       "/memory",
       "/skills",
       "/connections",
+      "/product-engineer",
     ]);
     // Bots keeps its count of what waits on the person, and only Bots has one.
     const badge = within(footer).getByRole("img", {
@@ -274,6 +275,7 @@ test("Admin is in the list for admins only", () => {
     "memory",
     "skills",
     "connections",
+    "product-engineer",
     "teams",
     "settings",
   ]);
@@ -369,6 +371,7 @@ test("the personal edition has Admin, and the feature list beside it", () => {
     "routines",
     "skills",
     "connections",
+    "product-engineer",
     "admin",
     "team-features",
     "settings",
@@ -380,6 +383,7 @@ test("the personal edition has Admin, and the feature list beside it", () => {
     "routines",
     "skills",
     "connections",
+    "product-engineer",
     "team-features",
     "settings",
   ]);

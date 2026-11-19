@@ -198,6 +198,20 @@ skills:
   # `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` — are the app's own, registered in the
   # browser, and offered to whichever Bot holds this slug. `tools:` here is intersected with a Bot's
   # MCP GRANTS, so naming them would name nothing. The grant of this skill is the whole gate.
+  # Ticket → Cursor PR path. Coding runs on the Product Engineer sidecar + Cursor cloud, not in
+  # this Bot's computer. Direct people to /product-engineer; do not invent PR URLs.
+  - slug: implement-a-ticket
+    title: Implement a Linear ticket
+    summary: Send a Linear ticket through Product Engineer to open Cursor cloud PRs.
+    instructions: >-
+      When someone wants a Linear ticket implemented across the product repos, send them to the
+      Product Engineer page at /product-engineer with the ticket id (for example ORC-424). That page
+      drafts a plan, waits for human approval, then starts Cursor cloud coding and returns PR URLs.
+      You do not open pull requests yourself, and you must not invent a PR URL. If they ask how a
+      run is going, tell them to open /product-engineer or paste the ticket id there. Merge stays
+      in GitHub after a human certifies the run.
+    tools: []
+
   - slug: bot-creator
     title: Make a Bot
     summary: Work out what a new Bot should be, then put it in front of you to create.

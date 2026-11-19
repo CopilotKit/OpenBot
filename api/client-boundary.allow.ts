@@ -447,4 +447,77 @@ export const ALLOWED: Allowed[] = [
  * Today's calls made by hand that are moving onto the API. Each change that moves one deletes its
  * entry here; the test then fails if the call is still made by hand.
  */
-export const TEMPORARY: Temporary[] = [];
+export const TEMPORARY: Temporary[] = [
+  {
+    file: "app/src/lib/product-engineer/queries.ts",
+    what: "/api/product-engineer/runs",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs/{}/resume",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs/{}/approve",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs/{}/approve-plan",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs/{}/reject-plan",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs/{}/sync",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/src/lib/product-engineer/mutations.ts",
+    what: "/api/product-engineer/runs/{}/abandon",
+    rule: "temporary",
+    why: "Product Engineer sidecar HTTP API; not in OpenBot openapi.yaml",
+    until:
+      "Move PE dispatch onto an OpenAPI area or keep third-party allow once the sidecar is the permanent path",
+  },
+  {
+    file: "app/vite.config.ts",
+    what: "/api/product-engineer",
+    rule: "temporary",
+    why: "Vite proxies Product Engineer to the sidecar beside OpenBot",
+    until:
+      "Documented ALB/path routing replaces the Vite-only proxy for production",
+  },
+];

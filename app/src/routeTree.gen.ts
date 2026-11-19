@@ -22,6 +22,7 @@ import { Route as AuthedAppApprovalsRouteImport } from './routes/_authed/_app/ap
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
 import { Route as AuthedAppBrowserRouteImport } from './routes/_authed/_app/browser'
 import { Route as AuthedAppMemoryRouteImport } from './routes/_authed/_app/memory'
+import { Route as AuthedAppProductEngineerRouteImport } from './routes/_authed/_app/product-engineer'
 import { Route as AuthedAppReachabilityRouteImport } from './routes/_authed/_app/reachability'
 import { Route as AuthedAppResponsibilitiesRouteImport } from './routes/_authed/_app/responsibilities'
 import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
@@ -196,6 +197,12 @@ const AuthedAppMemoryRoute = AuthedAppMemoryRouteImport.update({
   path: '/memory',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAppProductEngineerRoute =
+  AuthedAppProductEngineerRouteImport.update({
+    id: '/product-engineer',
+    path: '/product-engineer',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAppReachabilityRoute = AuthedAppReachabilityRouteImport.update({
   id: '/reachability',
   path: '/reachability',
@@ -814,6 +821,7 @@ export interface FileRoutesByFullPath {
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
   '/memory': typeof AuthedAppMemoryRoute
+  '/product-engineer': typeof AuthedAppProductEngineerRoute
   '/reachability': typeof AuthedAppReachabilityRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
@@ -934,6 +942,7 @@ export interface FileRoutesByTo {
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
   '/memory': typeof AuthedAppMemoryRoute
+  '/product-engineer': typeof AuthedAppProductEngineerRoute
   '/reachability': typeof AuthedAppReachabilityRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
@@ -1058,6 +1067,7 @@ export interface FileRoutesById {
   '/_authed/_app/bot': typeof AuthedAppBotRoute
   '/_authed/_app/browser': typeof AuthedAppBrowserRoute
   '/_authed/_app/memory': typeof AuthedAppMemoryRoute
+  '/_authed/_app/product-engineer': typeof AuthedAppProductEngineerRoute
   '/_authed/_app/reachability': typeof AuthedAppReachabilityRoute
   '/_authed/_app/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
@@ -1184,6 +1194,7 @@ export interface FileRouteTypes {
     | '/bot'
     | '/browser'
     | '/memory'
+    | '/product-engineer'
     | '/reachability'
     | '/responsibilities'
     | '/routines'
@@ -1304,6 +1315,7 @@ export interface FileRouteTypes {
     | '/bot'
     | '/browser'
     | '/memory'
+    | '/product-engineer'
     | '/reachability'
     | '/responsibilities'
     | '/routines'
@@ -1427,6 +1439,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/bot'
     | '/_authed/_app/browser'
     | '/_authed/_app/memory'
+    | '/_authed/_app/product-engineer'
     | '/_authed/_app/reachability'
     | '/_authed/_app/responsibilities'
     | '/_authed/_app/routines'
@@ -1638,6 +1651,13 @@ declare module '@tanstack/react-router' {
       path: '/memory'
       fullPath: '/memory'
       preLoaderRoute: typeof AuthedAppMemoryRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/product-engineer': {
+      id: '/_authed/_app/product-engineer'
+      path: '/product-engineer'
+      fullPath: '/product-engineer'
+      preLoaderRoute: typeof AuthedAppProductEngineerRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/reachability': {
@@ -2576,6 +2596,7 @@ interface AuthedAppRouteChildren {
   AuthedAppBotRoute: typeof AuthedAppBotRoute
   AuthedAppBrowserRoute: typeof AuthedAppBrowserRoute
   AuthedAppMemoryRoute: typeof AuthedAppMemoryRoute
+  AuthedAppProductEngineerRoute: typeof AuthedAppProductEngineerRoute
   AuthedAppReachabilityRoute: typeof AuthedAppReachabilityRoute
   AuthedAppResponsibilitiesRoute: typeof AuthedAppResponsibilitiesRoute
   AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
@@ -2632,6 +2653,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBotRoute: AuthedAppBotRoute,
   AuthedAppBrowserRoute: AuthedAppBrowserRoute,
   AuthedAppMemoryRoute: AuthedAppMemoryRoute,
+  AuthedAppProductEngineerRoute: AuthedAppProductEngineerRoute,
   AuthedAppReachabilityRoute: AuthedAppReachabilityRoute,
   AuthedAppResponsibilitiesRoute: AuthedAppResponsibilitiesRoute,
   AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
