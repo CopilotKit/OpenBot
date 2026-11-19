@@ -143,6 +143,36 @@ function isReady(report: LocalReport): boolean {
   }).open;
 }
 
+/*
+ * A back end that runs but does not answer yet because some of its services are still coming up:
+ * `degraded`, its checks failing, and a service the CLI saw running or pending but not ready. It
+ * gets there on its own, so it is waited on like one that says `starting`. Found in a dogfooding
+ * report on a Mac: the server stopped mid-use, and on Retry six of eight services were ready and
+ * the other two were running but not ready yet. The window gave up on the first answer.
+ *
+ * Not a back end with a disk OpenBot found short (`shortfall`), or with an update on record: those
+ * do not come back by themselves, and their rows say what to do. Not one the CLI did not say the
+ * services of, as an older one does not: nothing says it is on its way.
+ */
+function servicesComingUp(report: LocalReport): boolean {
+  if (
+    report.outcome !== "completed" ||
+    report.reason !== null ||
+    report.readiness !== "degraded" ||
+    report.checksPassed === true ||
+    report.shortfall ||
+    (report.licence !== "valid" && report.licence !== "unknown") ||
+    report.stack?.unfinishedUpdate
+  ) {
+    return false;
+  }
+  return (report.stack?.observed?.services ?? []).some(
+    (service) =>
+      !service.ready &&
+      (service.phase === "Running" || service.phase === "Pending"),
+  );
+}
+
 type State = {
   at: Phase | null;
   running: boolean;
@@ -669,7 +699,8 @@ export function useLocalSequence({
 
   /**
    * Status until the CLI reports ready and valid, or anything that waiting will not change.
-   * Only "starting" is waited on: unknown is what an older CLI always says. A stopped stack is
+   * Only "starting" is waited on, and a back end whose services are still coming up
+   * (`servicesComingUp`): unknown is what an older CLI always says. A stopped stack is
    * started once, as its own readiness row offers.
    */
   async function waitForReady(
@@ -817,12 +848,16 @@ export function useLocalSequence({
       }
       const waking =
         woken && found.readiness === "degraded" && unfinished !== null;
+      const comingUp = servicesComingUp(found);
       if (
         !waking &&
+        !comingUp &&
         (found.readiness !== "starting" || row.state === "blocked")
       ) {
         return stuck(found);
       }
+      // Still not working when the time is up: said as it is, and the log says how long it waited.
+      if (comingUp && tries >= pollDelays.length) return stuck(found);
       if (tries >= pollDelays.length) {
         const timedOut =
           "OpenBot didn't get ready in time. Retry to check again.";
