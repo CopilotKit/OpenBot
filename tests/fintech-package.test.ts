@@ -16,6 +16,6 @@ test("includes the complete fintech deployment package example", () => {
   }
 
   expect(readFileSync(join(fintechDirectory, "brand.yaml"), "utf8")).toContain(
-    "id: openbot",
+    "id: plugiq-agentforce",
   );
 });

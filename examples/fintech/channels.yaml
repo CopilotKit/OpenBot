@@ -1,7 +1,7 @@
 channels:
   - id: general-assistant
     name: General Assistant
-    description: Ask for help with everyday work.
+    description: Plan, write, research, and get everyday Descasio work done.
     permitted_agents: [general-assistant]
     allowed_groups: [all]
   - id: risk-and-compliance
@@ -10,7 +10,7 @@ channels:
     permitted_agents: [knowledge, risk-analyst]
     allowed_groups: [risk, compliance]
   - id: company-knowledge
-    name: Company Knowledge
-    description: Find authorized answers from company documents.
+    name: Descasio Knowledge
+    description: Find authorized answers from Descasio documents.
     permitted_agents: [knowledge]
     allowed_groups: [all]
