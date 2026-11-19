@@ -14,5 +14,9 @@ export interface UpdatePersonRequest {
    * @pattern ^[^\x00]*$
    */
   name?: string;
+  /**
+   * Deprecated. Change a member's role with updateOrganizationMember (PATCH /api/v2/organizations/{organizationId}/members/{personId}) instead.
+   * @deprecated
+   */
   role?: AssignableRole;
 }
