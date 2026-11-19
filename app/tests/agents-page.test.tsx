@@ -199,6 +199,30 @@ test("the list says where each agent runs and how many Bots use it, and a refuse
 
 const BOT = { id: "agent_sales" } as AgentProfile;
 
+/*
+ * Task threads are hidden for now (`TASK_THREADS_OFFERED`): a Bot that does the work itself has no
+ * way to start handing work to agents, and its Agents page is only the agent it runs on.
+ */
+test("a Bot's Agents page doesn't offer Hand work to agents while task threads are hidden", async () => {
+  delegation = {
+    botId: BOT.id,
+    mode: "self",
+    model: null,
+    effort: null,
+    instructions: "",
+    agents: [{ ...OPENBOT, available: true }],
+    canManage: true,
+  };
+  const view = draw(<BotDelegation agent={BOT} />);
+
+  await view.findByRole("button", { name: /Pipeline analyst/ });
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByText("Hand work to agents")).toBeNull();
+  expect(view.queryByRole("list", { name: "Agents it may use" })).toBeNull();
+  expect(view.getAllByText("Runs on").length).toBeGreaterThan(0);
+  expect(view.getByRole("button", { name: "Save" })).toBeTruthy();
+});
+
 test("the Hand work to agents switch saves on its own, keeping the agent the Bot ran on as its default, and the agents ticked after it save with Save", async () => {
   delegation = {
     botId: BOT.id,
@@ -210,7 +234,7 @@ test("the Hand work to agents switch saves on its own, keeping the agent the Bot
     canManage: true,
   };
   const user = userEvent.setup({ document });
-  const view = draw(<BotDelegation agent={BOT} />);
+  const view = draw(<BotDelegation agent={BOT} offerTaskThreads />);
   const puts = () => seen.filter((each) => each.line.startsWith("PUT"));
 
   const toggle = await view.findByRole("switch", {
@@ -270,6 +294,10 @@ test("an agent private to somebody else reads as such, and the Bot's manager can
   const view = draw(<BotDelegation agent={BOT} />);
 
   const list = await view.findByRole("list", { name: "Agents it may use" });
+  // A Bot that already hands work out keeps the switch, so its owner can turn it off.
+  expect(
+    view.getByRole("switch", { name: "Hand work to agents" }),
+  ).toBeTruthy();
   expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
   expect(within(list).getByText("Unavailable")).toBeTruthy();
   await user.click(
