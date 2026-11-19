@@ -14,6 +14,7 @@ import {
   type OnboardingStep,
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
+import { appConfig } from "@/lib/generated/application-config";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -209,7 +210,7 @@ test("a single step has no step list and no dashes, since there is nowhere else 
   expect(desktopBack(view)).toBeNull();
   // The product's name still heads the desktop's pane.
   expect(view.container.querySelector("header")?.textContent).toContain(
-    "OpenBot",
+    appConfig.brand.productName,
   );
 });
 

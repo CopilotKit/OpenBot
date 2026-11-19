@@ -25,11 +25,10 @@ concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# Unit tests hardcode CopilotKit/OpenBot download URLs. Forks that publish their own desktop
-# releases should set OPENBOT_DISTRIBUTION_ID / OPENBOT_RELEASE_REPOSITORY repo variables.
+# Match the source publisher's exact repository/distribution identity in official and fork builds.
 env:
-  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || 'CopilotKit/OpenBot' }}
-  OPENBOT_RELEASE_REPOSITORY: ${{ vars.OPENBOT_RELEASE_REPOSITORY || 'CopilotKit/OpenBot' }}
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_RELEASE_REPOSITORY: ${{ github.repository }}
   OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
 
 jobs:

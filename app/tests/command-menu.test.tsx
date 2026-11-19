@@ -222,6 +222,7 @@ test("Cmd/Ctrl+K opens it, and empty it lists pages, Bots and five recent conver
     "Memory",
     "Skills",
     "Connections",
+    "Product Engineer",
     "Teams",
     "Settings",
   ]);
