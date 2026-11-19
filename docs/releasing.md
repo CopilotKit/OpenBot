@@ -420,7 +420,7 @@ CI bundles the CLI only on a tree that has `desktop/src-tauri/tauri.bundled-cli.
 
 ## The disk space the app says
 
-OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: "About 31 GB
+OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: "About 34 GB
 free to install, 7 to 10 GB used". Its checks say the same numbers when a disk is short. They come
 from one file, `desktop/src/disk-needs.json`, in GB of 2^30 bytes:
 

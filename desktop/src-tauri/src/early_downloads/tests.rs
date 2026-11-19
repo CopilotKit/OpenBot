@@ -456,12 +456,12 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
         ..Plan::default()
     });
     // What the account step asks for on the drive, room for the installation and its first
-    // update once OpenBot's images are in, and the machine image.
+    // update once OpenBot's images are in, and the machine as it takes the drive, and ~/OpenBot.
     assert_eq!(
         needed,
         Needed {
             back_end: crate::local_eval::setup_free_on_drive(),
-            downloads: 937_318_069,
+            downloads: 1_974_636_138,
         }
     );
     assert_eq!(needed.back_end, 27_212_385_536);
@@ -492,7 +492,7 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
             state: State::Short,
             free: Some(12_000_000_000),
             needed: Some(needed.back_end),
-            download: Some(937_318_069),
+            download: Some(1_974_636_138),
             ..Summary::default()
         }
     );
@@ -527,7 +527,7 @@ fn on_windows_f_the_first_screen_says_the_account_steps_figure_and_the_download_
     });
     // F's log said "16096509952 bytes free, 44436190301 needed", with the back end's 40 GiB and
     // the images at their download.
-    assert_eq!(needed.total(), 32_718_902_877);
+    assert_eq!(needed.total(), 36_373_454_900);
     let looks = AtomicUsize::new(0);
     let said = Mutex::new(Vec::<Summary>::new());
     run(
@@ -555,9 +555,65 @@ fn on_windows_f_the_first_screen_says_the_account_steps_figure_and_the_download_
             state: State::Short,
             free: Some(16_096_509_952),
             needed: Some(crate::local_eval::setup_free_on_drive()),
-            download: Some(5_506_517_341),
+            download: Some(9_161_069_364),
             ..Summary::default()
         }
+    );
+}
+
+/**
+Windows G on 2026-11-19: the first screen's check passed at 33,792,327,680 bytes free and the
+downloads finished; Install turned on WSL and Windows restarted, and C: had 29,644,734,464 free. The
+app planned the same downloads again and held them for all of their 5.6 GB, so a computer the first
+screen let through waited on it for good. What was used since the check passed is counted as done:
+here the least the check lets through, and G's 4,147,593,216 bytes used across the restart.
+*/
+#[test]
+fn after_the_wsl_restart_what_was_used_since_the_check_passed_is_not_asked_for_again() {
+    let plan = Plan {
+        machine_image: machine_image_for("windows", "x86_64"),
+        podman: true,
+        compose: true,
+        deployment: true,
+        offline_images: true,
+        ..Plan::default()
+    };
+    let passed = needed_for(&plan).total();
+    let used = 33_792_327_680 - 29_644_734_464;
+    let now = passed - used;
+    let again = needed_since(&plan, Some(passed), now);
+    assert!(again.total() <= now, "{again:?} with {now} free");
+    // What the account step asks for is never taken off.
+    assert_eq!(again.back_end, crate::local_eval::setup_free_on_drive());
+    // A first look, with nothing used, asks for all of it.
+    assert_eq!(needed_since(&plan, None, now), needed_for(&plan));
+    // Space freed since is not counted as downloads to come.
+    assert_eq!(
+        needed_since(&plan, Some(passed), passed + 1),
+        needed_for(&plan)
+    );
+}
+
+/**
+mac3 on 2026-11-19, from 31.50 GiB free: OpenBot's Podman machine and images took the drive to
+24.81 GiB before the account step, 7.18 GB, where the first screen had counted 6.19 with the
+machine at its 0.94 GB download. Its disk once made is about twice that. A Mac the first screen
+lets through is let through at the account step.
+*/
+#[test]
+fn a_mac_the_first_screen_lets_through_is_let_through_at_the_account_step() {
+    let plan = Plan {
+        machine_image: machine_image_for("macos", "aarch64"),
+        compose: true,
+        deployment: true,
+        offline_images: true,
+        ..Plan::default()
+    };
+    let least = needed_for(&plan).total();
+    let landed = 33_821_175_808 - 26_639_646_310;
+    assert!(
+        least - landed >= crate::local_eval::setup_free_on_drive(),
+        "{least} let through, {landed} landed"
     );
 }
 

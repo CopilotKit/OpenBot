@@ -146,7 +146,27 @@ impl MachineImage {
     pub fn sha256(&self) -> &'static str {
         self.blob.trim_start_matches("sha256:")
     }
+
+    /**
+    What the machine takes of this computer's drive once it is made, which is more than its
+    compressed download: about twice it on a Mac, measured on mac3 on 2026-11-19 (OpenBot's
+    machine and images took 7.18 GB of the drive, the images 5.22 of it). On Windows, four times
+    the WSL root file system, and WSL itself, which took 2.8 GB of C: on Windows G with its restart
+    on 2026-11-19. Counting the download alone, a Mac the first screen let through was refused at
+    the account step.
+    */
+    pub fn on_disk(&self) -> u64 {
+        if self.file.contains(".wsl.") {
+            self.size * 4 + WSL_ON_DISK
+        } else {
+            self.size * 2
+        }
+    }
 }
+
+/// What turning on WSL and its restart took of C: on Windows G on 2026-11-19, beside OpenBot's
+/// downloads: 4.15 GB used across the restart, 1.35 GB of it the downloads.
+pub const WSL_ON_DISK: u64 = 2_800_000_000;
 
 /// Whether a Podman reporting `version` (`podman version 6.1.1`, `podman.exe version 6.1.1`) pulls
 /// the machine-os release the pins are from. Another Podman pulls its own, and is left to.
@@ -880,8 +900,10 @@ impl Plan {
     /// downloads took 4.75 GB in Docker on 2026-11-19.
     pub fn disk_bytes(&self) -> u64 {
         const MB: u64 = 1_000_000;
-        self.machine_image.map_or(0, |image| image.size)
+        self.machine_image.map_or(0, |image| image.on_disk())
             + if self.podman { 80 * MB } else { 0 }
+            // ~/OpenBot itself: 87 MB on mac3.
+            + if self.deployment { 100 * MB } else { 0 }
             + if self.compose { 35 * MB } else { 0 }
             + if self.images.is_some() || self.offline_images {
                 crate::update_ready::on_disk(IMAGES_DOWNLOAD_BYTES)
@@ -1031,10 +1053,24 @@ pub fn start(root: PathBuf, hooks: Hooks) {
             // A machine image that is no longer needed is not kept: it is most of a gigabyte.
             forget_machine_image_in(&cache);
         }
-        let needed = needed_for(&plan);
+        if plan.is_empty() {
+            let _ = std::fs::remove_file(passed_room_file(&root));
+        }
+        let passed = passed_room(&root);
+        let needed = needed_since(&plan, passed, free_space(&cache).unwrap_or(u64::MAX));
+        if passed.is_some() {
+            log::info!("[early downloads] the room check passed before at {passed:?} bytes free: {needed:?}");
+        }
         let jobs = jobs(&root, &plan, &cache, &hooks);
         let said = |summary| (hooks.said)(summary);
-        run(jobs, needed, || free_space(&cache), &said, DISK_RECHECK);
+        let free = || {
+            let free = free_space(&cache);
+            if let Some(free) = free.filter(|free| *free >= needed.total()) {
+                keep_passed_room(&root, free);
+            }
+            free
+        };
+        run(jobs, needed, free, &said, DISK_RECHECK);
     });
 }
 
@@ -1062,6 +1098,51 @@ pub fn needed_for(plan: &Plan) -> Needed {
     Needed {
         back_end: crate::local_eval::setup_free_on_drive(),
         downloads: plan.disk_bytes(),
+    }
+}
+
+/**
+What `plan` still needs free with `free` free now, when its room check passed before at `passed` free
+(`passed_room`): what was used since counts as the downloads' own, done. Windows G passed at 33.8 GB
+free, Install turned on WSL and restarted Windows with the downloads finished, and C: had 29.6 GB:
+asked for every download again, it waited for good. What the account step asks for is never taken
+off, and space freed since is not counted.
+*/
+pub fn needed_since(plan: &Plan, passed: Option<u64>, free: u64) -> Needed {
+    let needed = needed_for(plan);
+    let used = passed.map_or(0, |passed| passed.saturating_sub(free));
+    Needed {
+        downloads: needed.downloads.saturating_sub(used),
+        ..needed
+    }
+}
+
+/// Where the free disk the room check passed at is kept for the installation in `root`, so a
+/// start after Windows restarts for WSL counts what was used since (`needed_since`).
+fn passed_room_file(root: &Path) -> PathBuf {
+    root.join(".early-downloads-room")
+}
+
+/// The free disk the room check first passed at for `root`, if it has.
+fn passed_room(root: &Path) -> Option<u64> {
+    std::fs::read_to_string(passed_room_file(root))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Keep `free` as where the room check passed for `root`, unless it passed before: the first pass
+/// is what everything since is counted from.
+fn keep_passed_room(root: &Path, free: u64) {
+    let file = passed_room_file(root);
+    if file.exists() {
+        return;
+    }
+    if let Err(error) =
+        std::fs::create_dir_all(root).and_then(|()| std::fs::write(&file, free.to_string()))
+    {
+        log::warn!("[early downloads] could not keep the free disk the check passed at: {error}");
     }
 }
 

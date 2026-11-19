@@ -2,7 +2,7 @@
 /**
  * How much disk OpenBot Desktop needs and uses, and whether the numbers the window says still hold.
  *
- * The window says rough numbers (desktop/src/disk-needs.json): about 31 GB free to install, room
+ * The window says rough numbers (desktop/src/disk-needs.json): about 34 GB free to install, room
  * for the installation and its first update, and 7 to 10 GB once installed. They were measured on
  * one Mac on 2026-11-19,
  * and every release changes OpenBot's images. This reads a release's images and fails when one of

@@ -6018,15 +6018,26 @@ mod tests {
         );
     }
 
-    // "About 31 GB free to install": an installation and room for its first update, what the
+    // "About 34 GB free to install": an installation and room for its first update, what the
     // downloads hold to before anything starts.
+    // On a computer with nothing of OpenBot's: Podman, its machine, WSL on Windows, and the images.
     #[test]
     fn the_install_figure_the_window_says_is_what_the_downloads_hold_to() {
-        let plan = crate::early_downloads::Plan {
-            offline_images: true,
-            ..Default::default()
-        };
-        let needed = crate::early_downloads::needed_for(&plan).total();
+        let needed = [("macos", "aarch64"), ("windows", "x86_64")]
+            .into_iter()
+            .map(|(os, arch)| {
+                crate::early_downloads::needed_for(&crate::early_downloads::Plan {
+                    machine_image: crate::early_downloads::machine_image_for(os, arch),
+                    podman: true,
+                    compose: true,
+                    deployment: true,
+                    offline_images: true,
+                    ..Default::default()
+                })
+                .total()
+            })
+            .max()
+            .unwrap();
         let said = disk_number("installFreeGb") * GIB;
         assert!(
             needed <= said && said - needed < 2 * GIB,
