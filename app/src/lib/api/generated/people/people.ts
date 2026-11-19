@@ -507,7 +507,7 @@ export const getUpdatePersonUrl = (
 };
 
 /**
- * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing.
+ * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member's role with updateOrganizationMember instead.
  * @summary Change a person
  */
 export const updatePerson = async (

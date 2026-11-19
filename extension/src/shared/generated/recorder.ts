@@ -160,6 +160,8 @@ export interface RecorderConnectionGrant {
   token: string;
   connection: RecorderConnection;
   user: RecorderUser;
+  /** The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`. */
+  organizationId?: string;
 }
 
 export interface RecorderIdentity {

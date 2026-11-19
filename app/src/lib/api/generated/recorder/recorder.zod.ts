@@ -399,6 +399,12 @@ export const ExchangeRecorderConnectCodeResponse = zod.object({
       .describe("Their name, or their email where they have none."),
     email: zod.string(),
   }),
+  organizationId: zod
+    .string()
+    .optional()
+    .describe(
+      "The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`.",
+    ),
 });
 
 /**

@@ -26,6 +26,7 @@ import type {
   CreateOrganizationInvitationRequest,
   CreateOrganizationRequest,
   DeclineInvitationHeaders,
+  DeleteOrganizationHeaders,
   ForbiddenResponse,
   IdempotencyConflictResponse,
   InvalidOrganizationInvitationResponse,
@@ -47,10 +48,13 @@ import type {
   OrganizationMemberPage,
   OrganizationMemberResponse,
   OrganizationNotCreatedResponse,
+  OrganizationNotDeletedResponse,
   OrganizationNotFoundResponse,
   OrganizationOrInvitationNotFoundResponse,
   OrganizationPage,
   OrganizationResponse,
+  OrganizationStaysResponse,
+  OwnerOnlyResponse,
   OwnerStaysResponse,
   PersonNotFoundResponse,
   RemoveOrganizationMemberHeaders,
@@ -879,6 +883,150 @@ export const useUpdateOrganization = <
 > => {
   return useMutation(
     getUpdateOrganizationMutationOptions(options),
+    queryClient,
+  );
+};
+export const getDeleteOrganizationUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/profile`;
+};
+
+/**
+ * Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, an API key made for it alone stops working, and it leaves every member's list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person's own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Delete an organization
+ */
+export const deleteOrganization = async (
+  organizationId: string,
+  headers: DeleteOrganizationHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(getDeleteOrganizationUrl(organizationId), {
+    ...options,
+    method: "DELETE",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getDeleteOrganizationMutationKey = () =>
+  ["deleteOrganization"] as const;
+
+export const getDeleteOrganizationMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnerOnlyResponse
+    | OrganizationNotFoundResponse
+    | OrganizationStaysResponse
+    | ServerErrorResponse
+    | OrganizationNotDeletedResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteOrganization>>,
+    TError,
+    DeleteOrganizationMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteOrganization>>,
+  TError,
+  DeleteOrganizationMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteOrganizationMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteOrganization>>,
+    DeleteOrganizationMutationVariables
+  > = (props) => {
+    const { organizationId, headers } = props ?? {};
+
+    return deleteOrganization(organizationId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteOrganizationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteOrganization>>
+>;
+
+export type DeleteOrganizationMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnerOnlyResponse
+  | OrganizationNotFoundResponse
+  | OrganizationStaysResponse
+  | ServerErrorResponse
+  | OrganizationNotDeletedResponse
+  | UnexpectedErrorResponse;
+export type DeleteOrganizationMutationVariables = {
+  organizationId: string;
+  headers: DeleteOrganizationHeaders;
+};
+
+/**
+ * @summary Delete an organization
+ */
+export const useDeleteOrganization = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnerOnlyResponse
+    | OrganizationNotFoundResponse
+    | OrganizationStaysResponse
+    | ServerErrorResponse
+    | OrganizationNotDeletedResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteOrganization>>,
+      TError,
+      DeleteOrganizationMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteOrganization>>,
+  TError,
+  DeleteOrganizationMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDeleteOrganizationMutationOptions(options),
     queryClient,
   );
 };

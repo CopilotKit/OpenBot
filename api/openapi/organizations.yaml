@@ -184,6 +184,46 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Organizations]
+      operationId: deleteOrganization
+      summary: Delete an organization
+      description: >-
+        Delete the organization and what is in it. Nobody can work in it
+        again: its Bots stop, its computers are removed, an API key made for
+        it alone stops working, and it leaves every member's list of
+        organizations. Its members keep their accounts and their other
+        organizations. Only an owner of this organization can. A person's own
+        organization and `default` stay, and are refused. A repeated request
+        with the same Idempotency-Key returns the first result.
+      security:
+        - webSession: []
+        - appOAuth: [organizations:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The organization is deleted.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnerOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/OrganizationStays'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/OrganizationNotDeleted'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/members:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -1017,6 +1057,89 @@ components:
                 title: A service OpenBot depends on is unavailable.
                 status: 503
                 detail: The organization couldn't be set up, so it wasn't created. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    OwnerOnly:
+      description: >-
+        The caller is not an owner of the organization, or holds no role in
+        it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notOwner:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an owner can delete this organization.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationStays:
+      description: >-
+        The organization can't be deleted: it is a person's own organization,
+        or it is `default`. Or the Idempotency-Key was used for a different
+        request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            personal:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This is your own organization, so it stays. You can delete organizations you created.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            default:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This organization comes with OpenBot, so it stays.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotDeleted:
+      description: >-
+        This OpenBot could not finish deleting the organization, so it was
+        not deleted. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unfinished:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: The organization couldn't be deleted. Try again.
                 code: SERVICE_UNAVAILABLE
                 category: dependency
                 retryable: true

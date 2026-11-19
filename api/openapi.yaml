@@ -739,7 +739,7 @@ paths:
         - People
       operationId: updatePerson
       summary: Change a person
-      description: Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing.
+      description: 'Change what is sent and leave the rest. A person changes their own name, and nobody else''s. An administrator changes anybody''s role, but not their own away from administrator, and not the role of somebody the deployment''s configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member''s role with updateOrganizationMember instead.'
       security:
         - webSession: []
         - appOAuth:
@@ -1207,7 +1207,7 @@ paths:
         - API keys
       operationId: createApiKey
       summary: Make an API key
-      description: 'Make an API key that acts as the person, in every organization they are a member of, on the API. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app''s sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.'
+      description: 'Make an API key that acts as the person on the API: in this organization only when organizationOnly is true, otherwise in every organization they are a member of. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app''s sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.'
       security:
         - webSession: []
       parameters:
@@ -1223,6 +1223,7 @@ paths:
                 value:
                   name: Nightly report
                   expiresInDays: 90
+                  organizationOnly: true
       responses:
         '201':
           description: The key, shown this once.
@@ -7921,7 +7922,7 @@ paths:
         - Devices
       operationId: listDevices
       summary: List a person's devices
-      description: Return one page of the phones a person registered for push notifications, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
+      description: Return one page of the phones a person registered for push notifications in this organization, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth:
@@ -7965,7 +7966,7 @@ paths:
         - Devices
       operationId: registerDevice
       summary: Register a device for push notifications
-      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
+      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
       security:
         - webSession: []
         - appOAuth:
@@ -8017,7 +8018,7 @@ paths:
         - Devices
       operationId: deleteDevice
       summary: Stop push notifications to a device
-      description: Stop sending push notifications to one of the person's phones. The app does this when the person signs out on it, so another account can register the phone after them. Only the person themselves may remove their devices. A device already removed is not found, which a client can read as done.
+      description: Stop sending push notifications to one of the person's phones from this organization. Its registrations in the person's other organizations stay. The app does this in each organization when the person signs out on it, so another account can register the phone after them. Only the person themselves may remove their devices. A device already removed is not found, which a client can read as done.
       security:
         - webSession: []
         - appOAuth:
@@ -10465,6 +10466,41 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Organizations
+      operationId: deleteOrganization
+      summary: Delete an organization
+      description: 'Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, an API key made for it alone stops working, and it leaves every member''s list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person''s own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The organization is deleted.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnerOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/OrganizationStays'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/OrganizationNotDeleted'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/members/{personId}:
@@ -20215,7 +20251,7 @@ components:
 
         Endpoints. The authorization server's metadata (RFC 8414) is at `/.well-known/oauth-authorization-server/api/auth`. The person is sent to `/api/auth/oauth2/authorize`. The code is exchanged, and a token refreshed, at `/api/auth/oauth2/token`, with a form-encoded body (`application/x-www-form-urlencoded`) that carries `client_id` and no secret: the token and revocation endpoints take no client authentication (`none` in the metadata's `token_endpoint_auth_methods_supported`). A wrong `code_verifier` is answered 400 `invalid_grant`, and the code cannot be used again. A token is revoked (RFC 7009) at `/api/auth/oauth2/revoke`; revoking a token the server does not know, or one already revoked, answers 200.
 
-        Tokens. An access token starts `oba_` and lasts one hour. A refresh token starts `obr_`, is issued only when the `offline_access` scope is asked for, and rotates on every use: each refresh answers a new refresh token and ends the one it was given. Access tokens work on /api/v2, and on four addresses outside it that an app's screens need, each with the scope given: `GET /api/me`, who is signed in (people:read); the chat runtime at `/api/copilotkit` and everything under it (conversations:write); a file's download at `GET /api/attachments/{attachmentId}`, the address a sent message keeps (conversations:read); and the relayed realtime socket at `/api/intelligence/client/websocket` (conversations:read). They work nowhere else.
+        Tokens. An access token starts `oba_` and lasts one hour. A refresh token starts `obr_`, is issued only when the `offline_access` scope is asked for, and rotates on every use: each refresh answers a new refresh token and ends the one it was given. Access tokens work on /api/v2, and on four addresses outside it that an app's screens need, each with the scope given: `GET /api/me`, who is signed in (people:read); the chat runtime at `/api/copilotkit` and everything under it (conversations:write); a file's download at `GET /api/attachments/{attachmentId}`, the address a sent message keeps (conversations:read); and the relayed realtime socket at `/api/intelligence/client/websocket` (conversations:read), which is also on /api/v2 at `/api/v2/organizations/{organizationId}/realtime/websocket`. They work nowhere else.
 
         Organization. An access token carries no memory of which organization the person is working in. An address under `/api/v2/organizations/{organizationId}` names it. Where an address names none, such as the list of the person's own organizations, an app sends the header `OpenBot-Organization` with the organization's id. It is checked against the person's membership on every request, and an organization they are not in answers not found. With no header, the app works in the person's own organization.
 
@@ -20315,7 +20351,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: OpenBot API key
-      description: 'Automation. An API key acts as the person who created it, in every organization they are a member of, like a personal access token: the address of each request names the organization, and one the person is not in answers not found. A key starts `obk_` and is sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 and on the relayed realtime socket at `/api/intelligence/client/websocket`, where a join token the key made is spent (createConversationJoinToken). A person makes one in the web app, signed in, under Settings, then API keys (createApiKey).'
+      description: 'Automation. An API key acts as the person who created it, like a personal access token: in every organization they are a member of, or in one organization only when it was made for that one (organizationOnly). The address of each request names the organization, and one the key does not work in answers not found. A key starts `obk_` and is sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 (the relayed realtime socket at `/api/v2/organizations/{organizationId}/realtime/websocket` included) and on the relayed realtime socket at `/api/intelligence/client/websocket`, where a join token the key made is spent (createConversationJoinToken). A person makes one in the web app, signed in, under Settings, then API keys (createApiKey).'
     recorderConnection:
       type: http
       scheme: bearer
@@ -21811,6 +21847,10 @@ components:
           description: What OpenBot calls the person, 1 to 100 characters once trimmed. Only the person themselves may change it.
         role:
           $ref: '#/components/schemas/AssignableRole'
+          deprecated: true
+          x-deprecation-date: '2026-11-19'
+          x-sunset: '2028-05-19'
+          description: Deprecated. Change a member's role with updateOrganizationMember (PATCH /api/v2/organizations/{organizationId}/members/{personId}) instead.
     AdvanceOnboardingRequest:
       type: object
       additionalProperties: false
@@ -21968,6 +22008,11 @@ components:
             - 'null'
           format: date-time
           description: When it last signed a request. Null if never.
+        organizationId:
+          type:
+            - string
+            - 'null'
+          description: The organization the key works in, when it was made for that one only (organizationOnly). Null when it works in every organization the person is a member of. Absent from a server that makes every key for every organization.
     ApiKeyPage:
       type: object
       required:
@@ -22003,6 +22048,9 @@ components:
           minimum: 1
           maximum: 365
           description: Days until the key stops working. Absent, it never expires.
+        organizationOnly:
+          type: boolean
+          description: Whether the key works only in this organization, the one the address names. In any other organization it is refused as if the organization did not exist. Absent or false, the key works in every organization the person is a member of.
     CreatedApiKey:
       type: object
       required:
@@ -27638,7 +27686,7 @@ components:
       description: The phone's operating system.
     Device:
       type: object
-      description: A phone that gets push notifications for the person, from every one of their Bots. Never its push token.
+      description: A phone that gets push notifications for the person, from every one of their Bots in the organization it is registered in. Never its push token.
       required:
         - id
         - platform
@@ -34837,6 +34885,9 @@ components:
           $ref: '#/components/schemas/RecorderConnection'
         user:
           $ref: '#/components/schemas/RecorderUser'
+        organizationId:
+          type: string
+          description: The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`.
     RecorderProblem:
       description: 'A problem for the OpenBot Recorder: the shared problem details, with why its connection ended.'
       allOf:
@@ -39512,6 +39563,82 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+    OwnerOnly:
+      description: The caller is not an owner of the organization, or holds no role in it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notOwner:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an owner can delete this organization.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationStays:
+      description: 'The organization can''t be deleted: it is a person''s own organization, or it is `default`. Or the Idempotency-Key was used for a different request.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            personal:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This is your own organization, so it stays. You can delete organizations you created.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            default:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This organization comes with OpenBot, so it stays.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotDeleted:
+      description: This OpenBot could not finish deleting the organization, so it was not deleted. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unfinished:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: The organization couldn't be deleted. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
     OwnerStays:
       description: 'The person stays in the organization: they own it, or this OpenBot''s settings keep them as an admin of it. The members list says who, as removable.'
       content:
@@ -42261,6 +42388,7 @@ components:
             createdAt: '2026-11-14T09:00:00.000Z'
             expiresAt: '2027-02-12T09:00:00.000Z'
             lastUsedAt: '2026-11-14T09:05:12.000Z'
+            organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         nextCursor: null
     CreatedApiKeyExample:
       summary: A key, made.
@@ -42272,6 +42400,7 @@ components:
           createdAt: '2026-11-14T09:00:00.000Z'
           expiresAt: '2027-02-12T09:00:00.000Z'
           lastUsedAt: null
+          organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         key: obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg
     SessionPageLast:
       summary: Signed in on a laptop and a phone.
@@ -45621,6 +45750,7 @@ components:
           id: 9f8e7d6c-5b4a-4321-8fed-cba987654321
           name: Sam Ortiz
           email: sam@example.com
+        organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
     RecorderIdentityExample:
       summary: Who this Recorder acts as.
       value:

@@ -29,4 +29,9 @@ export interface ApiKey {
    * @nullable
    */
   lastUsedAt: string | null;
+  /**
+   * The organization the key works in, when it was made for that one only (organizationOnly). Null when it works in every organization the person is a member of. Absent from a server that makes every key for every organization.
+   * @nullable
+   */
+  organizationId?: string | null;
 }
