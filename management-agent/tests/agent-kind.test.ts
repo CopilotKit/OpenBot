@@ -59,6 +59,21 @@ function sh(command: string, args: string[], input?: string) {
   });
 }
 const kubectl = (...args: string[]) => sh("kubectl", args);
+async function shAsync(command: string, args: string[]) {
+  const child = Bun.spawn([command, ...args], {
+    env: { ...env, KUBECONFIG: kubeconfig },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (code !== 0)
+    throw new Error(`${command} ${args.join(" ")} failed: ${stderr}`);
+  return stdout;
+}
 const json = <T>(...args: string[]) =>
   JSON.parse(kubectl(...args, "-o", "json")) as T;
 
@@ -236,7 +251,9 @@ run("management agent on a real cluster", () => {
     };
     const file = join(pki.directory, "agent-values.json");
     writeFileSync(file, JSON.stringify(values));
-    sh("helm", [
+    // Asynchronously, so the management service in this process keeps answering the agent. No
+    // `--wait`: the support-bundle volume binds only when a bundle Job first uses it.
+    await shAsync("helm", [
       "upgrade",
       "--install",
       "openbot-agent",
@@ -245,9 +262,14 @@ run("management agent on a real cluster", () => {
       SYSTEM,
       "--values",
       file,
-      "--wait",
-      "--timeout",
-      "10m",
+    ]);
+    await shAsync("kubectl", [
+      "-n",
+      SYSTEM,
+      "rollout",
+      "status",
+      "deployment/openbot-agent",
+      "--timeout=5m",
     ]);
   });
 
