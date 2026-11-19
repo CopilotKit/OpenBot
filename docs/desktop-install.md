@@ -213,8 +213,8 @@ fill a gap. Three rules hold that boundary:
     else the machine home, else the user profile (`early_downloads::disk_place`).
   - **An existing machine moves only on a click.** The move runs `wsl --shutdown`, which stops
     every WSL distro on the computer, Docker Desktop included. If the install folder's drive has
-    room and this WSL supports `wsl --manage --move`, the space message offers **Move the engine
-    to F:** (`move_engine_here`, `[engine move]` in the log).
+    room and this WSL supports `wsl --manage --move`, the space message offers **Move OpenBot's
+    storage to F:** (`move_engine_here`, `[engine move]` in the log).
   - **The download cache stays in `~/OpenBot/openbot-engine`.** It holds Compose, which
     `podman compose` runs. If the cache moves, every existing install loses `podman compose` until
     Install runs again.

@@ -3510,7 +3510,7 @@ async fn early_downloads_measured() -> early_downloads::Summary {
 }
 
 /**
-The person clicked "Move the engine to F:" on the space message: the disk of OpenBot's Podman
+The person clicked "Move OpenBot's storage to F:" on the space message: the disk of OpenBot's Podman
 machine moves into the install folder (`engine::machine_home`), and the machine starts again.
 Windows only. Every WSL distribution on this computer stops for a moment (`win::move_distribution`).
 
@@ -3521,10 +3521,10 @@ machine's drive again every few seconds and send `setup:downloads`.
 async fn move_engine_here(app: tauri::AppHandle) -> Result<(), Problem> {
     desktop_connected::local_only(&app)?;
     if !cfg!(target_os = "windows") {
-        return Err(Problem::plain("OpenBot moves the engine only on Windows."));
+        return Err(Problem::plain("OpenBot moves its storage only on Windows."));
     }
     let home = engine::machine_home()
-        .ok_or_else(|| Problem::plain("OpenBot has no folder to move the engine to."))?;
+        .ok_or_else(|| Problem::plain("OpenBot has no folder to move its storage to."))?;
     let target = home
         .join("containers")
         .join("podman")
@@ -3615,16 +3615,16 @@ fn move_steps(
 fn move_engine_failed_line(to: Option<&str>, now_on: Option<&str>) -> String {
     match (to, now_on) {
         (Some(to), Some(now_on)) if to == now_on => {
-            format!("OpenBot moved the engine to {to}, but couldn't start it again.")
+            format!("OpenBot moved its storage to {to}, but couldn't start it again.")
         }
         (Some(to), Some(now_on)) => {
-            format!("OpenBot couldn't move the engine to {to}. It is still on {now_on}.")
+            format!("OpenBot couldn't move its storage to {to}. It is still on {now_on}.")
         }
-        (Some(to), None) => format!("OpenBot couldn't move the engine to {to}."),
+        (Some(to), None) => format!("OpenBot couldn't move its storage to {to}."),
         (None, Some(now_on)) => {
-            format!("OpenBot couldn't move the engine. It is still on {now_on}.")
+            format!("OpenBot couldn't move its storage. It is still on {now_on}.")
         }
-        (None, None) => "OpenBot couldn't move the engine.".to_string(),
+        (None, None) => "OpenBot couldn't move its storage.".to_string(),
     }
 }
 
@@ -6367,7 +6367,7 @@ fn machine_home_for(
     Ok(root.join("engine"))
 }
 
-/// The row's line when the disk stays in the user profile: "F: can't hold the engine's disk, so
+/// The row's line when the disk stays in the user profile: "F: can't hold OpenBot's storage, so
 /// it's on C:." `profile` is `%USERPROFILE%`. Without it, the profile is on C:.
 fn machine_home_fallback_line(root: &Path, profile: Option<&str>) -> String {
     let install =
@@ -6375,7 +6375,7 @@ fn machine_home_fallback_line(root: &Path, profile: Option<&str>) -> String {
     let profile = profile
         .and_then(win::drive_of)
         .unwrap_or_else(|| "C:".to_string());
-    format!("{install} can't hold the engine's disk, so it's on {profile}.")
+    format!("{install} can't hold OpenBot's storage, so it's on {profile}.")
 }
 
 /// On Windows, put the Podman machine's disk in the install folder `root`, or in the user profile
@@ -14901,7 +14901,7 @@ mod tests {
     fn machine_home_fallback_line_names_both_drives() {
         assert_eq!(
             machine_home_fallback_line(Path::new(r"\\?\F:\openbot"), Some(r"D:\Users\ada")),
-            "F: can't hold the engine's disk, so it's on D:."
+            "F: can't hold OpenBot's storage, so it's on D:."
         );
     }
 
@@ -14910,7 +14910,7 @@ mod tests {
     fn machine_home_fallback_line_without_drive_letters() {
         assert_eq!(
             machine_home_fallback_line(Path::new(r"\\fileserver\homes\openbot"), None),
-            "The install folder can't hold the engine's disk, so it's on C:."
+            "The install folder can't hold OpenBot's storage, so it's on C:."
         );
     }
 
@@ -15001,7 +15001,7 @@ mod tests {
     fn move_engine_failed_line_says_the_engine_is_still_on_its_drive() {
         assert_eq!(
             move_engine_failed_line(Some("F:"), Some("C:")),
-            "OpenBot couldn't move the engine to F:. It is still on C:."
+            "OpenBot couldn't move its storage to F:. It is still on C:."
         );
     }
 
@@ -15010,7 +15010,7 @@ mod tests {
     fn move_engine_failed_line_says_the_engine_moved_when_it_is_on_the_new_drive() {
         assert_eq!(
             move_engine_failed_line(Some("F:"), Some("F:")),
-            "OpenBot moved the engine to F:, but couldn't start it again."
+            "OpenBot moved its storage to F:, but couldn't start it again."
         );
     }
 
@@ -15018,7 +15018,7 @@ mod tests {
     fn move_engine_failed_line_without_known_drives() {
         assert_eq!(
             move_engine_failed_line(None, None),
-            "OpenBot couldn't move the engine."
+            "OpenBot couldn't move its storage."
         );
     }
 

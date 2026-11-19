@@ -191,12 +191,12 @@ function MoveEngine({ to }: { to: string }) {
   const [move, setMove] = useState<"offered" | "moving" | "moved">("offered");
   const [problem, setProblem] = useState<Problem | null>(null);
   if (move === "moving") {
-    return <StatusLine>Moving the engine to {to}…</StatusLine>;
+    return <StatusLine>Moving OpenBot's storage to {to}…</StatusLine>;
   }
   if (move === "moved") {
     return (
       <p className="caution">
-        The engine is on {to} now. OpenBot checks the free space again.
+        OpenBot's storage is on {to} now. OpenBot checks the free space again.
       </p>
     );
   }
@@ -218,12 +218,11 @@ function MoveEngine({ to }: { to: string }) {
             );
           }}
         >
-          Move the engine to {to}
+          Move OpenBot's storage to {to}
         </button>
       </div>
       <p className="caution">
-        Every WSL distro on this computer stops for a moment, Docker Desktop
-        included.
+        Docker Desktop and other Linux apps on this computer stop for a moment.
       </p>
     </>
   );

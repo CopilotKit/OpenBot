@@ -495,9 +495,9 @@ test("the background row carries the first screen's download as one bar, and kee
  * what the move stops.
  */
 const SHORT_ON_C: EarlyDownloads = { ...WINDOWS_F_SHORT, moveTo: "F:" };
-const MOVE_TO_F = "Move the engine to F:";
+const MOVE_TO_F = "Move OpenBot's storage to F:";
 const WSL_STOPS =
-  "Every WSL distro on this computer stops for a moment, Docker Desktop included.";
+  "Docker Desktop and other Linux apps on this computer stop for a moment.";
 
 /** The line on a screen behind the first one, after the native side says `payload`. */
 async function lineSaying(payload: EarlyDownloads) {
@@ -530,22 +530,22 @@ test("a click moves the engine once, and the button is gone while it moves", asy
     { command: "move_engine_here", args: undefined },
   ]);
   expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();
-  expect(view.getByText("Moving the engine to F:…")).toBeTruthy();
+  expect(view.getByText("Moving OpenBot's storage to F:…")).toBeTruthy();
 });
 
 test("a move that fails says why, and offers the move again", async () => {
   const failed: Problem = {
-    said: "OpenBot couldn't move the engine to F:. It is still on C:.",
+    said: "OpenBot couldn't move its storage to F:. It is still on C:.",
     detail: "wsl --manage failed",
   };
   moveEngine = async () => Promise.reject(failed);
   const view = await lineSaying(SHORT_ON_C);
   await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
   expect(view.getByRole("alert").textContent).toContain(
-    "OpenBot couldn't move the engine to F:. It is still on C:.",
+    "OpenBot couldn't move its storage to F:. It is still on C:.",
   );
   expect(view.getByRole("button", { name: MOVE_TO_F })).toBeTruthy();
-  expect(view.queryByText("Moving the engine to F:…")).toBeNull();
+  expect(view.queryByText("Moving OpenBot's storage to F:…")).toBeNull();
 });
 
 /*
@@ -558,7 +558,7 @@ test("after a move, the same summary offers no second move", async () => {
   await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
   expect(
     view.getByText(
-      "The engine is on F: now. OpenBot checks the free space again.",
+      "OpenBot's storage is on F: now. OpenBot checks the free space again.",
     ),
   ).toBeTruthy();
   expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();

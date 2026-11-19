@@ -246,8 +246,8 @@ or a script has to say.
   the engine's 40 GB disk goes on F: too, and the space check measures F:. A full C: no longer
   stops the install. A drive that cannot hold the disk (a network share, a removable drive, exFAT)
   keeps it on C:, and Install says so. An engine already on C: stays there. When C: is short and
-  F: has room, OpenBot offers **Move the engine to F:**, which stops every WSL distro for a
-  moment, Docker Desktop included.
+  F: has room, OpenBot offers **Move OpenBot's storage to F:**, which stops every WSL distro for
+  a moment, Docker Desktop included.
 - **Status window:** Restart applies changes made to `.env`, it offers Start after Stop, and it
   shows Updating with no buttons during an update.
 - **Launching OpenBot while it quits** opens it again once it has quit, where it stayed on Shutting
