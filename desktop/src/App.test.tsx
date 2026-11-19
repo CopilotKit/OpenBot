@@ -5128,7 +5128,7 @@ function previouslyHostedConfiguration(harness: string) {
   };
 }
 
-test("an installation an earlier app connected to hosted Intelligence starts at the first screen and keeps its install", async () => {
+test("an installation an earlier app connected to hosted Intelligence starts at the first screen, and Install checks it again", async () => {
   const root = "/tmp/previously-hosted";
   setupRootConfiguration(root, async () =>
     previouslyHostedConfiguration(DEFAULT_HARNESS),
@@ -5148,8 +5148,15 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   ).toBe(false);
   await installLocal(view);
   await view.findByRole("heading", { name: "Connect your AI" });
-  // The finished install of the same Bot is kept.
-  expect(installationCalls()).toEqual([]);
+  // Install still runs: the native side keeps the finished install of the same Bot, but only after
+  // it has the engine answering. On Windows a recorded install whose Podman was gone was skipped
+  // here, and the account step waited forever for OpenBot's own machine that nobody made.
+  expect(installationCalls()).toEqual([
+    {
+      command: "prepare_installation",
+      args: { root, harness: { id: DEFAULT_HARNESS } },
+    },
+  ]);
   await userEvent.click(view.getByRole("radio", { name: /OpenAI/ }));
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await expectHandover();
