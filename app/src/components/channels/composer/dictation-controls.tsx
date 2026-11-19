@@ -96,7 +96,7 @@ function LiveDictationButton({
       data-slot="composer-dictate-stop"
       data-state={state.phase}
       title="Stop dictation"
-      className="relative size-9 shrink-0 self-end rounded-full bg-muted text-foreground hover:bg-muted"
+      className="relative size-9 shrink-0 self-end rounded-full bg-composer-listening text-foreground hover:bg-composer-listening"
       disabled={stopping}
       onClick={session.stop}
       size="icon"

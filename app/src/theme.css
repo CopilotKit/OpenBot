@@ -168,6 +168,27 @@ body {
     0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
     0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
   /*
+   * Its states ("Chat input"): the placeholder the ink at 40%, at 60% under the pointer; a 4px
+   * #d8dee9 band round the box while the message is being written in it; the microphone a #cfd7e6
+   * circle while it listens; and disabled, the box the secondary fill with no shadow and its
+   * controls in gray. Send is the kit's Primary button, so it is ink even while it cannot send.
+   */
+  --color-composer-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 40%,
+    transparent
+  );
+  --color-composer-placeholder-hover: color-mix(
+    in oklab,
+    var(--foreground) 60%,
+    transparent
+  );
+  --composer-focus-ring: 4px;
+  --color-composer-listening: var(--input);
+  --color-composer-disabled: var(--secondary);
+  --color-composer-disabled-ink: var(--color-field-disabled);
+  --composer-disabled-shadow: 0 0 #0000;
+  /*
    * A button's hover, pressed and disabled colours (UI Kit "Button" and "Icon Button"). Mixed from
    * the shadcn tokens above rather than written out, so they follow the dark theme and a theme that
    * replaces these tokens; the mixes land on the kit's own colours in the light theme: the primary

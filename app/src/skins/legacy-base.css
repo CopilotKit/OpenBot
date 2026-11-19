@@ -35,7 +35,8 @@
  * pointer, the periwinkle focus ring outside it and a muted placeholder. A menu has the smaller
  * corners, a hairline and a short shadow, and tighter rows. A tickbox shows what is under it and
  * fades when disabled; tabs are shorter, squarer and medium weight; a table names its columns in
- * 14px medium; a count is a small 11px pill.
+ * 14px medium; a count is a small 11px pill. The message box keeps one look in every state but
+ * listening.
  */
 :root[data-skin] {
   --color-primary-hover: color-mix(in oklab, var(--primary) 85%, transparent);
@@ -149,6 +150,13 @@
   --color-table-head: var(--muted-foreground);
   --text-table-head-size: 0.875rem;
   --table-head-weight: 500;
+
+  --color-composer-placeholder-hover: var(--color-composer-placeholder);
+  --composer-focus-ring: 0px;
+  --color-composer-listening: var(--muted);
+  --color-composer-disabled: var(--card);
+  --color-composer-disabled-ink: currentColor;
+  --composer-disabled-shadow: var(--shadow-composer);
 
   --spacing-badge-count: auto;
   --spacing-badge-count-x: 0.375rem;

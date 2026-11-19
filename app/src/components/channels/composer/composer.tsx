@@ -1731,6 +1731,7 @@ export function Composer({
         <LiveDictationNotice dictation={dictation} />
         <form
           aria-busy={isBusy}
+          data-disabled={disabled || undefined}
           data-slot="composer"
           className={cn(
             /*
@@ -1742,9 +1743,11 @@ export function Composer({
              * the controls and the message box between them.
              *
              * Figma's "Chat input" in a conversation: white, 20px corners, no outline, the long
-             * soft shadow, 70px tall while it holds a line. Its placeholder is the ink at 40%.
+             * soft shadow, 70px tall while it holds a line. Its states are tokens (theme.css: the
+             * placeholder, the band while writing, the gray box when disabled), which the skins set
+             * back (skins/legacy-base.css).
              */
-            "flex flex-col rounded-card bg-card p-4 shadow-composer [--prompt-area-placeholder:color-mix(in_oklab,var(--foreground)_40%,transparent)]",
+            "flex flex-col rounded-card bg-card p-4 shadow-composer [--prompt-area-placeholder:var(--color-composer-placeholder)] not-data-disabled:hover:[--prompt-area-placeholder:var(--color-composer-placeholder-hover)] has-[.prompt-area-editor:focus]:ring-(length:--composer-focus-ring) has-[.prompt-area-editor:focus]:ring-field-focus data-disabled:bg-composer-disabled data-disabled:shadow-(--composer-disabled-shadow) data-disabled:[&_button:not([data-slot=composer-send]):disabled]:text-composer-disabled-ink",
             className,
           )}
           onSubmit={handleFormSubmit}
@@ -1839,12 +1842,14 @@ export function Composer({
       <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
+        data-disabled={disabled || undefined}
         /*
          * Figma's "Chat input" on the home page: white, 20px corners, no outline, lifted off the
          * page by a long soft shadow. Its placeholder is the ink at 40%, a step fainter than
          * secondary text, so "Ask anything" reads as the box's own hint and not as words in it.
+         * The states are the conversation's composer's, above.
          */
-        className="overflow-hidden rounded-card bg-card shadow-composer [--prompt-area-placeholder:color-mix(in_oklab,var(--foreground)_40%,transparent)]"
+        className="overflow-hidden rounded-card bg-card shadow-composer [--prompt-area-placeholder:var(--color-composer-placeholder)] not-data-disabled:hover:[--prompt-area-placeholder:var(--color-composer-placeholder-hover)] has-[.prompt-area-editor:focus]:ring-(length:--composer-focus-ring) has-[.prompt-area-editor:focus]:ring-field-focus data-disabled:bg-composer-disabled data-disabled:shadow-(--composer-disabled-shadow) data-disabled:[&_button:not([data-slot=composer-send]):disabled]:text-composer-disabled-ink"
         data-slot="composer"
         onSubmit={handleFormSubmit}
       >
