@@ -28,15 +28,17 @@ function packagesStartedBy(script: string, workspaces: string[]): string[] {
 }
 
 describe("OpenBot workspace", () => {
-  // The clients and what they share. The server and the worker run from the published OpenBot
-  // images (backend-images.env).
-  test("defines the app, shared, extension and management agent packages, and no back end", () => {
+  // The clients and what they share, plus the Product Engineer sidecar packages. The OpenBot
+  // server and worker still run from the published images (backend-images.env).
+  test("defines the app, shared, extension, management agent, and Product Engineer packages, and no back end", () => {
     const manifest = rootManifest();
     const names: Record<string, string> = {
       app: "app",
       shared: "@openbot/shared",
       extension: "@openbot/recorder-extension",
       "management-agent": "@openbot/management-agent",
+      "product-engineer-loop": "product-engineer-loop",
+      "product-engineer-sidecar": "product-engineer-sidecar",
     };
 
     expect(manifest.workspaces).toEqual(Object.keys(names));

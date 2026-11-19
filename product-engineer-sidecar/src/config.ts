@@ -75,7 +75,8 @@ export function loadSidecarConfig(): SidecarConfig | null {
   return {
     port,
     token: optional("PE_SIDECAR_TOKEN"),
-    runsDir: optional("PE_RUNS_DIR", join(root, ".runs")) ?? join(root, ".runs"),
+    runsDir:
+      optional("PE_RUNS_DIR", join(root, ".runs")) ?? join(root, ".runs"),
     productEngineer: {
       cursorApiKey,
       linearApiKey,

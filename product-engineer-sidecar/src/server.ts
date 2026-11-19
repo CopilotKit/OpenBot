@@ -39,10 +39,7 @@ app.use("/api/product-engineer/*", async (context, next) => {
   return next();
 });
 
-app.route(
-  "/api/product-engineer",
-  createProductEngineerRoutes(store, runner),
-);
+app.route("/api/product-engineer", createProductEngineerRoutes(store, runner));
 
 const bunGlobal = globalThis as typeof globalThis & {
   Bun?: {

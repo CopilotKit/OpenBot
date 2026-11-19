@@ -45,8 +45,7 @@ export function createProductEngineerRoutes(
     if (typeof ticketId !== "string" || !ticketId.trim()) {
       return context.json({ error: "ticketId is required." }, 400);
     }
-    const startedBy =
-      context.req.header("x-pe-user-id")?.trim() || "sidecar";
+    const startedBy = context.req.header("x-pe-user-id")?.trim() || "sidecar";
     try {
       const run = await runner.start(ticketId, startedBy);
       return context.json({ run: runDto(run) }, 202);

@@ -137,8 +137,11 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Checkout uses persist-credentials: false; private repos need the token to fetch base.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           if ! git cat-file -e FETCH_HEAD:api/openapi.yaml 2>/dev/null; then
             echo "::notice::$BASE_REF has no api/openapi.yaml yet, so this pull request cannot break it."
@@ -222,8 +225,10 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$BASE_REF"
           if ! git cat-file -e FETCH_HEAD:api/asyncapi.yaml 2>/dev/null; then
             echo "::notice::$BASE_REF has no api/asyncapi.yaml yet, so this pull request cannot break it."
