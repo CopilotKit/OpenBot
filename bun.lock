@@ -49,7 +49,7 @@
         "embla-carousel-react": "^8.6.0",
         "katex": "0.16.47",
         "motion": "^13.1.0",
-        "prompt-area": "^0.6.3",
+        "prompt-area": "^0.7.1",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
         "react-use-measure": "^2.1.7",
@@ -105,7 +105,7 @@
         "fflate": "0.8.3",
         "happy-dom": "^20.11.2",
         "phoenix": "1.8.15",
-        "prompt-area": "^0.6.3",
+        "prompt-area": "^0.7.1",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
         "rxjs": "7.8.1",
@@ -2016,7 +2016,7 @@
 
     "process-warning": ["process-warning@5.1.0", "", {}, "sha512-jQSaVHsPgtyw60e1rQ/A+/ArPEj/S8pS/vFnyGa/gYFXrKk/6RuDkoqVDQ5NI5MmS01698ltlAk0NoDBNLujRw=="],
 
-    "prompt-area": ["prompt-area@0.6.7", "", { "peerDependencies": { "clsx": ">=2", "react": ">=18", "react-dom": ">=18", "tailwind-merge": ">=2" } }, "sha512-y8rL0ezYWmuWS/5n4wQyvwvL7u5gU78R5psc6/9jrNzdu/I97k9s7jJzmqgHHay9gUxiqajOYa+nIQu88HNTZQ=="],
+    "prompt-area": ["prompt-area@0.7.1", "", { "peerDependencies": { "cn": ">=0.2", "react": ">=18", "react-dom": ">=18" } }, "sha512-MKxHtk9HAnlqtnu+KBcFQoJNCYr+Pp43jntTTJy7Kin41I4ThSijXLUfApzNIEAeSRWnkFKAHXlDpkZeR2MqSQ=="],
 
     "prompts": ["prompts@2.4.2", "", { "dependencies": { "kleur": "^3.0.3", "sisteransi": "^1.0.5" } }, "sha512-NxNv/kLguCA7p3jE8oL2aEBsrJWgAakBpgmgK6lpPWV+WuOmY6r2/zbAVnP+T8bQlA0nzHXSJSJW0Hq7ylaD2Q=="],
 
