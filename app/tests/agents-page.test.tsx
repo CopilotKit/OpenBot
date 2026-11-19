@@ -199,6 +199,113 @@ test("the list says where each agent runs and how many Bots use it, and a refuse
 
 const BOT = { id: "agent_sales" } as AgentProfile;
 
+/*
+ * Task threads are hidden for now (`TASK_THREADS_OFFERED`): a Bot that does the work itself has no
+ * way to start handing work to agents, and its Agents page is only the agent it runs on.
+ */
+test("a Bot's Agents page doesn't offer Hand work to agents while task threads are hidden", async () => {
+  delegation = {
+    botId: BOT.id,
+    mode: "self",
+    model: null,
+    effort: null,
+    instructions: "",
+    agents: [{ ...OPENBOT, available: true }],
+    canManage: true,
+  };
+  const view = draw(<BotDelegation agent={BOT} />);
+
+  await view.findByRole("button", { name: /Pipeline analyst/ });
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByText("Hand work to agents")).toBeNull();
+  expect(view.queryByRole("list", { name: "Agents it may use" })).toBeNull();
+  expect(view.getAllByText("Runs on").length).toBeGreaterThan(0);
+  expect(view.getByRole("button", { name: "Save" })).toBeTruthy();
+});
+
+/*
+ * OpenBot runs every Bot as one that does the work itself while task threads are hidden, whatever it
+ * was set to. A Bot set to hand work out draws the page of a Bot that does the work itself, on its
+ * default agent.
+ */
+test("a Bot set to hand work to agents shows the Agents page of a Bot that does the work itself", async () => {
+  delegation = {
+    botId: BOT.id,
+    mode: "orchestrate",
+    model: null,
+    effort: null,
+    instructions: "",
+    agents: [
+      { ...OPENBOT, available: true },
+      { ...ANALYST, available: true },
+    ],
+    canManage: true,
+  };
+  const view = draw(<BotDelegation agent={BOT} />);
+
+  const own = await view.findByRole("button", { name: /^OpenBot/ });
+  expect(own.getAttribute("aria-pressed")).toBe("true");
+  expect(view.getAllByText("Runs on").length).toBeGreaterThan(0);
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByText("Hand work to agents")).toBeNull();
+  expect(view.queryByText("Handing out work")).toBeNull();
+  expect(view.queryByRole("list", { name: "Agents it may use" })).toBeNull();
+  expect(view.queryByLabelText("Model")).toBeNull();
+});
+
+/*
+ * Turning task threads back on brings every Bot back as it was set. So while they are hidden, saving a
+ * Bot set to hand work out keeps what it is set to: the same mode, model, effort, words and agents.
+ * The agent chosen to run on becomes its default, the first of its agents, which is the one thing the
+ * Runs on card sets.
+ */
+test("saving a Bot set to hand work to agents while task threads are hidden keeps its mode and its agents", async () => {
+  const kept = {
+    model: "gpt-x",
+    effort: "high",
+    instructions: "Send anything about the pipeline to the analyst.",
+  };
+  delegation = {
+    botId: BOT.id,
+    mode: "orchestrate",
+    ...kept,
+    agents: [
+      { ...OPENBOT, available: true },
+      { ...ANALYST, available: true },
+    ],
+    canManage: true,
+  };
+  const user = userEvent.setup({ document });
+  const view = draw(<BotDelegation agent={BOT} />);
+  const puts = () => seen.filter((each) => each.line.startsWith("PUT"));
+
+  await user.click(await view.findByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts()).toHaveLength(1));
+  expect(puts()[0]?.body).toEqual({
+    mode: "orchestrate",
+    ...kept,
+    agentIds: ["bag_openbot", "bag_analyst"],
+  });
+  expect(delegation.mode).toBe("orchestrate");
+  expect(delegation.agents.map((each) => each.id)).toEqual([
+    "bag_openbot",
+    "bag_analyst",
+  ]);
+
+  // Running it on the analyst makes the analyst its default, and keeps the rest as they were.
+  await user.click(
+    await view.findByRole("button", { name: /Pipeline analyst/ }),
+  );
+  await user.click(view.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(puts()).toHaveLength(2));
+  expect(puts()[1]?.body).toEqual({
+    mode: "orchestrate",
+    ...kept,
+    agentIds: ["bag_analyst", "bag_openbot"],
+  });
+  expect(delegation.mode).toBe("orchestrate");
+});
+
 test("the Hand work to agents switch saves on its own, keeping the agent the Bot ran on as its default, and the agents ticked after it save with Save", async () => {
   delegation = {
     botId: BOT.id,
@@ -210,7 +317,7 @@ test("the Hand work to agents switch saves on its own, keeping the agent the Bot
     canManage: true,
   };
   const user = userEvent.setup({ document });
-  const view = draw(<BotDelegation agent={BOT} />);
+  const view = draw(<BotDelegation agent={BOT} offerTaskThreads />);
   const puts = () => seen.filter((each) => each.line.startsWith("PUT"));
 
   const toggle = await view.findByRole("switch", {
@@ -267,7 +374,7 @@ test("an agent private to somebody else reads as such, and the Bot's manager can
     canManage: true,
   };
   const user = userEvent.setup({ document });
-  const view = draw(<BotDelegation agent={BOT} />);
+  const view = draw(<BotDelegation agent={BOT} offerTaskThreads />);
 
   const list = await view.findByRole("list", { name: "Agents it may use" });
   expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
@@ -346,7 +453,7 @@ test("somebody who can't change the Bot doesn't see how it hands out work", asyn
     ],
     canManage: false,
   };
-  const view = draw(<BotDelegation agent={BOT} />);
+  const view = draw(<BotDelegation agent={BOT} offerTaskThreads />);
   const list = await view.findByRole("list", { name: "Agents it may use" });
   expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
   expect(view.queryAllByText(/How it hands out work/)).toHaveLength(0);

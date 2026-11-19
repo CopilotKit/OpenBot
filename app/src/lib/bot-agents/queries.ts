@@ -27,6 +27,27 @@ export type AgentRecord = BotAgent;
 /** How a Bot works, and the agents it may use, the first being its default. */
 export type Delegation = BotDelegation;
 
+/**
+ * Whether Bots may hand work to agents, which starts task threads.
+ * Off for now: OpenBot runs every Bot as one that does the work itself, whatever it is set to. So the
+ * app reads every Bot that way too (`workingMode`): no "Hand work to agents" switch, the Agents page
+ * is the agent a Bot runs on, and its Agents row and the model picker say what a Bot that does the
+ * work itself says. Task cards and threads already made still read as before. Set it back to true to
+ * offer task threads again.
+ */
+export const TASK_THREADS_OFFERED: boolean = false;
+
+/**
+ * How a Bot works, as OpenBot runs it: what it is set to while task threads are offered, otherwise
+ * doing the work itself. Every screen reads a Bot's mode through this.
+ */
+export function workingMode(
+  delegation: Pick<Delegation, "mode">,
+  offered: boolean = TASK_THREADS_OFFERED,
+): Delegation["mode"] {
+  return offered ? delegation.mode : "self";
+}
+
 export const botAgentKeys = {
   all: ["bot-agents"] as const,
   list: (scope: ListBotAgentsScope = "caller") =>
@@ -108,7 +129,7 @@ export function useBotTakesModelChoice(
   });
   if (!onOpenBotModel) return false;
   if (delegation.isError) return true;
-  return delegation.isSuccess && delegation.data.mode !== "orchestrate";
+  return delegation.isSuccess && workingMode(delegation.data) !== "orchestrate";
 }
 
 /**
@@ -125,7 +146,7 @@ export async function whyNoModelChoice(
     const delegation = await queryClient.fetchQuery(
       botDelegationQueryOptions(bot.id),
     );
-    return delegation.mode === "orchestrate" ? "hands-to-agents" : null;
+    return workingMode(delegation) === "orchestrate" ? "hands-to-agents" : null;
   } catch {
     // As the hook reads it: a Bot whose answer could not be read takes the pick.
     return null;
@@ -157,7 +178,7 @@ export function whereItRuns(agent: {
 
 /** A Bot's Agents row, in a line: "Does the work itself on OpenBot", "Hands work to 2 agents". */
 export function delegationSummary(delegation: Delegation): string {
-  if (delegation.mode === "orchestrate") {
+  if (workingMode(delegation) === "orchestrate") {
     const count = delegation.agents.length;
     return `Hands work to ${count} ${count === 1 ? "agent" : "agents"}`;
   }
