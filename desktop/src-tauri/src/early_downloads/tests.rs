@@ -455,7 +455,7 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
         deployment: true,
         ..Plan::default()
     });
-    // 40 GiB for the back end, the figure the account step's check asks for, and the machine image.
+    // 15 GiB for the back end, the figure the account step's check asks for, and the machine image.
     assert_eq!(
         needed,
         Needed {
@@ -463,7 +463,7 @@ fn with_too_little_free_disk_nothing_downloads_until_there_is_room() {
             downloads: 937_318_069,
         }
     );
-    assert_eq!(needed.back_end, 40 * 1024 * 1024 * 1024);
+    assert_eq!(needed.back_end, 15 * 1024 * 1024 * 1024);
     run(
         vec![Job::file(
             "machine-image",
@@ -508,9 +508,11 @@ Windows F, filled to 15.0 GB free. The first screen said OpenBot "needs about 44
 account step after Install said "It needs 40 GB free". Both were the back end's 40 GiB: the first
 screen added the downloads and counted in billions of bytes, the account step counted in GiB. The
 window is told the two figures apart now, the back end's being the account step's own constant.
+Since 2026-11-19 that constant is 15 GiB, and OpenBot's images count as they land on the disk,
+`update_ready::ON_DISK` times their download: F, with 15.0 GB free, is still short.
 */
 #[test]
-fn on_windows_f_the_first_screen_says_the_account_steps_40_and_the_download_apart() {
+fn on_windows_f_the_first_screen_says_the_account_steps_figure_and_the_download_apart() {
     let _table = table_to_myself();
     // F's plan, from its log: OpenBot's machine from the WSL image, Compose, and OpenBot's images
     // downloaded before an engine answers.
@@ -521,8 +523,9 @@ fn on_windows_f_the_first_screen_says_the_account_steps_40_and_the_download_apar
         offline_images: true,
         ..Plan::default()
     });
-    // "[early downloads] 16096509952 bytes free, 44436190301 needed: waiting for space"
-    assert_eq!(needed.total(), 44_436_190_301);
+    // F's log said "16096509952 bytes free, 44436190301 needed", with the back end's 40 GiB and
+    // the images at their download.
+    assert_eq!(needed.total(), 21_192_644_701);
     let looks = AtomicUsize::new(0);
     let said = Mutex::new(Vec::<Summary>::new());
     run(
@@ -550,7 +553,7 @@ fn on_windows_f_the_first_screen_says_the_account_steps_40_and_the_download_apar
             state: State::Short,
             free: Some(16_096_509_952),
             needed: Some(crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES),
-            download: Some(1_486_517_341),
+            download: Some(5_086_517_341),
             ..Summary::default()
         }
     );

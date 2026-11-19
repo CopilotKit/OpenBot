@@ -33,12 +33,12 @@ ONE DOWNLOAD PER FILE. Install and the early downloads ask for the same files. E
 so Install waits for a download already running rather than starting a second, and then finds the
 file verified.
 
-THE DISK IS CHECKED FIRST. The back end's CLI wants 40 GiB free (`local_eval::MIN_ENGINE_FREE_DISK_BYTES`),
+THE DISK IS CHECKED FIRST. The back end's CLI wants 15 GiB free (`local_eval::MIN_ENGINE_FREE_DISK_BYTES`),
 and on a Mac or Windows that space is taken from this computer's disk as the engine's virtual disk
 grows. k3s's own line (evicting under 5% free) is measured inside that virtual disk, not here. With
 less free than the back end needs and the downloads together, nothing starts, the window says so with
 the numbers, and the check runs again every few seconds until there is room. The window says the
-back end's 40 GiB and the downloads apart, in the same GB the account step's check says its 40 in,
+back end's 15 GiB and the downloads apart, in the same GB the account step's check says its 15 in,
 so the two screens never give two figures for one need: Windows F was told "about 44 GB" here and
 "40 GB" on the next screen. Install waits for room as well (`measured`).
 
@@ -572,7 +572,7 @@ pub struct Summary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_per_second: Option<u64>,
     /// When the disk is short: free on this computer's disk, what OpenBot needs free to run (the
-    /// back end's 40 GiB, the figure the account step's check says too), and what the downloads
+    /// back end's 15 GiB, the figure the account step's check says too), and what the downloads
     /// add to the disk on top of it (`Needed`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub free: Option<u64>,
@@ -747,7 +747,7 @@ pub fn held_for_room() -> bool {
 }
 
 /// While downloads hold, wait for room: the free disk the account step's check counts, against the
-/// same 40 GiB, looked at every few seconds. `on_hold` is called once when this waits at all, and
+/// same 15 GiB, looked at every few seconds. `on_hold` is called once when this waits at all, and
 /// it stops waiting once `wanted` says the download is no longer wanted. A disk that is not
 /// measured is not judged, as the account step does not judge it.
 pub fn wait_for_room(on_hold: &dyn Fn(), wanted: &dyn Fn() -> bool) {
@@ -874,19 +874,26 @@ impl Plan {
 
     /// About how much these downloads add to the disk, for the free-space check. The images and
     /// Podman's files are estimates measured on 2026-11-09: their sizes are known only once their
-    /// downloads answer.
+    /// downloads answer. OpenBot's images take `update_ready::ON_DISK` times their download once
+    /// the engine unpacks them, and that is what lands on this computer's disk: 1.2 GB of
+    /// downloads took 4.75 GB in Docker on 2026-11-19.
     pub fn disk_bytes(&self) -> u64 {
         const MB: u64 = 1_000_000;
         self.machine_image.map_or(0, |image| image.size)
             + if self.podman { 80 * MB } else { 0 }
             + if self.compose { 35 * MB } else { 0 }
             + if self.images.is_some() || self.offline_images {
-                1_200 * MB
+                IMAGES_DOWNLOAD_BYTES * crate::update_ready::ON_DISK
             } else {
                 0
             }
     }
 }
+
+/// What OpenBot's own images download, about: the server and computer image, the database and the
+/// Bot frameworks an installation runs (`imagesDownloadMb` in `desktop/src/disk-needs.json`, which
+/// `scripts/disk-needs.ts` checks against each release).
+pub const IMAGES_DOWNLOAD_BYTES: u64 = 1_200_000_000;
 
 /// What to download early on a computer with these `facts`.
 ///
@@ -1036,7 +1043,7 @@ const DISK_RECHECK: Duration = Duration::from_secs(10);
 /// The free disk OpenBot needs before the downloads start, as two figures the window says apart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Needed {
-    /// What the back end needs free to run: the 40 GiB the account step's check also asks for.
+    /// What the back end needs free to run: the 15 GiB the account step's check also asks for.
     pub back_end: u64,
     /// What the downloads add to the disk before that (`Plan::disk_bytes`).
     pub downloads: u64,
@@ -1048,7 +1055,7 @@ impl Needed {
     }
 }
 
-/// The free disk OpenBot needs for `plan`: the back end's 40 GiB, and the downloads themselves.
+/// The free disk OpenBot needs for `plan`: the back end's 15 GiB, and the downloads themselves.
 pub fn needed_for(plan: &Plan) -> Needed {
     Needed {
         back_end: crate::local_eval::MIN_ENGINE_FREE_DISK_BYTES,

@@ -1,0 +1,10 @@
+{
+  "about": "How much disk OpenBot Desktop needs and uses, as the window says it, in GB of 2^30 bytes. The window reads it (Welcome.tsx, localReadiness.ts), the Rust tests hold local_eval.rs and early_downloads.rs to it, and scripts/disk-needs.ts checks every release's images against it and fails when a number stops being true. Measured on 2026-11-19 with v1.1.0 and its back end, Intelligence 0.16.0-rc.13: 7.5 GB installed, up to 4.5 GB more while an update downloads beside the running release, logs under 1.3 GB, and images taking onDisk times their download.",
+  "installFreeGb": 20,
+  "installedGb": { "from": 7, "to": 10 },
+  "updateFreeGb": 20,
+  "backEndFreeGb": 15,
+  "imagesDownloadMb": 1200,
+  "mostAnUpdateDownloadsMb": 2000,
+  "onDisk": 4.35
+}

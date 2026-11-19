@@ -1989,7 +1989,7 @@ mod tests {
                 cpu_available_millis: Some(9800),
                 memory_needed_mib: 4096,
                 memory_available_mib: Some(19353),
-                disk_needed_mib: 40960,
+                disk_needed_mib: 15360,
                 disk_available_mib: Some(0),
             })
         );
@@ -2045,6 +2045,7 @@ mod tests {
                 wsl: false,
                 drive: None,
                 disk_gb: None,
+                needed_gb: None,
                 free_on_drive: false,
                 mac: false,
                 measured: local_eval::EngineMeasure {
@@ -2087,7 +2088,7 @@ mod tests {
                         cpu_available_millis: Some(4000),
                         memory_needed_mib: 4096,
                         memory_available_mib: Some(2048),
-                        disk_needed_mib: 40960,
+                        disk_needed_mib: 15360,
                         disk_available_mib: Some(102400),
                     }),
                 },

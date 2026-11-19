@@ -369,7 +369,7 @@ test("the install blurb names the parts of OpenBot it installs, in two sentences
 test("the background row says a setup paused for room calmly, with Try again", async () => {
   const { installingBehind } = await import("./SetupProgress");
   const said =
-    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.";
   let looked = 0;
   const row = installingBehind({
     steps: [],

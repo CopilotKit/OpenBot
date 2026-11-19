@@ -23,7 +23,7 @@ export type EarlyDownloads = {
   size?: number;
   bytesPerSecond?: number;
   /**
-   * When the disk is short: free on this computer's disk, what OpenBot needs free to run (the 40
+   * When the disk is short: free on this computer's disk, what OpenBot needs free to run (the 15
    * the account step's check asks for too), and what the downloads add on top of it.
    */
   free?: number;
@@ -66,7 +66,7 @@ export function earlyDownloadsMeasured(): Promise<EarlyDownloads | null> {
 }
 
 /**
- * A GB as Windows counts it on its drives, and as the account step's check says its "40 GB": 2^30
+ * A GB as Windows counts it on its drives, and as the account step's check says its "15 GB": 2^30
  * bytes. Windows F showed 15.0 GB free in File Explorer while this line said 16 GB.
  */
 const GB = 1024 ** 3;

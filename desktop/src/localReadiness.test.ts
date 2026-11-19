@@ -219,7 +219,7 @@ test("specific wording and actions", () => {
     );
   expect(short({ disk: true })).toEqual({
     state: "blocked",
-    said: "Docker Desktop doesn't have enough free disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    said: "Docker Desktop doesn't have enough free disk space. OpenBot needs 15 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
     action: "retry",
   });
   expect(short({ cpu: true }).said).toBe(
@@ -229,16 +229,34 @@ test("specific wording and actions", () => {
     "Docker Desktop doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ cpu: true, memory: true, disk: true }).said).toBe(
-    "Docker Desktop doesn't have enough CPUs, memory and free disk space. OpenBot needs 4 CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop doesn't have enough CPUs, memory and free disk space. OpenBot needs 4 CPUs, 4 GB of free memory and 15 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(short({ podman: true, disk: true }).said).toBe(
-    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+    "OpenBot doesn't have enough free disk space. It needs 15 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
   // With the CLI's own numbers, as `local_eval.rs` reads them from its error.
   expect(
-    short({ disk: true, cpus: "9.8", memoryGb: "18.9", diskGb: "0" }).said,
+    short({
+      disk: true,
+      cpus: "9.8",
+      memoryGb: "18.9",
+      diskGb: "0",
+      neededGb: "15",
+    }).said,
   ).toBe(
-    "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 0 GB of free disk space. OpenBot needs 15 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  // On a large disk the CLI requires the 5% k3s keeps free too, and says how much: that figure.
+  expect(
+    short({
+      disk: true,
+      cpus: "4",
+      memoryGb: "8",
+      diskGb: "60",
+      neededGb: "67",
+    }).said,
+  ).toBe(
+    "Docker Desktop has 60 GB of free disk space. OpenBot needs 67 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(
     short({ cpu: true, cpus: "2", memoryGb: "5.2", diskGb: "51" }).said,
@@ -249,13 +267,20 @@ test("specific wording and actions", () => {
     "Docker Desktop has 2.9 GB of free memory. OpenBot needs 4 GB. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(
-    short({ cpu: true, disk: true, cpus: "2", memoryGb: "6", diskGb: "12" })
-      .said,
+    short({
+      cpu: true,
+      disk: true,
+      cpus: "2",
+      memoryGb: "6",
+      diskGb: "12",
+      neededGb: "15",
+    }).said,
   ).toBe(
-    "Docker Desktop has 2 CPUs and 12 GB of free disk space. OpenBot needs 4 CPUs and 40 GB of free disk space. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 2 CPUs and 12 GB of free disk space. OpenBot needs 4 CPUs and 15 GB of free disk space. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   // OpenBot's own check after a start that failed (`local_eval::checked_call`), as it reports
-  // each case. A nearly full disk is said as k3s's, beside the 40 GB only when it is below it.
+  // each case. A nearly full disk is said as k3s's, beside what a first setup needs only when it is
+  // below that too, which is when the check gives that figure.
   expect(
     short({
       podman: true,
@@ -263,36 +288,44 @@ test("specific wording and actions", () => {
       diskGb: "30.5",
       nearlyFull: true,
       diskSizeGb: "1006.8",
+      neededGb: "66",
       wsl: true,
       drive: "C:",
     }).said,
   ).toBe(
-    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 40 GB. Free up space on drive C:, then Retry.",
+    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 66 GB. Free up space on drive C:, then Retry.",
   );
   // C: is what ran short, as `local_eval.rs` reports it after a start that failed on Windows.
   expect(
     short({
       podman: true,
       disk: true,
-      diskGb: "30",
+      diskGb: "12",
+      neededGb: "15",
       wsl: true,
       drive: "C:",
       freeOnDrive: true,
     }).said,
   ).toBe(
-    "This computer has 30 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Retry.",
+    "This computer has 12 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Retry.",
   );
   // OpenBot's machine's own disk is what ran short, and C: has room: never said as C:'s.
   expect(
-    short({ podman: true, disk: true, diskGb: "10", wsl: true, drive: "C:" })
-      .said,
+    short({
+      podman: true,
+      disk: true,
+      diskGb: "10",
+      neededGb: "66",
+      wsl: true,
+      drive: "C:",
+    }).said,
   ).toBe(
-    "OpenBot has 10 GB of free disk space. It needs 40 GB. Free up space on drive C:, then Retry.",
+    "OpenBot has 10 GB of free disk space. It needs 66 GB. Free up space on drive C:, then Retry.",
   );
   // On Windows, never `podman machine set --disk-size`: Podman refuses it for WSL machines, even
   // when WSL did not say which drive holds the disk.
   expect(short({ podman: true, disk: true, wsl: true }).said).toBe(
-    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Free up space on the drive OpenBot is installed on, then Retry.",
+    "OpenBot doesn't have enough free disk space. It needs 15 GB free. Free up space on the drive OpenBot is installed on, then Retry.",
   );
   expect(
     short({
@@ -311,9 +344,10 @@ test("specific wording and actions", () => {
       diskGb: "8",
       nearlyFull: true,
       diskSizeGb: "60",
+      neededGb: "18",
     }).said,
   ).toBe(
-    "OpenBot is nearly out of disk space. It has 8 GB free of 60 GB. It needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+    "OpenBot is nearly out of disk space. It has 8 GB free of 60 GB. It needs 18 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
   // Space was freed and k3s still says the disk is low: wait, rather than free more.
   expect(
@@ -353,11 +387,12 @@ test("specific wording and actions", () => {
       diskGb: "30.5",
       nearlyFull: true,
       diskSizeGb: "1006.8",
+      neededGb: "66",
       wsl: true,
       drive: "C:",
     }).said,
   ).toBe(
-    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 40 GB. Free up space on drive C:, then Retry.",
+    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 66 GB. Free up space on drive C:, then Retry.",
   );
   expect(degraded().said).toBe(
     "OpenBot is running but not working properly. Retry to start it again.",
@@ -377,7 +412,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }),
   ).toBe(
-    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.",
   );
   // Windows G on Docker Desktop: its disk is a sparse virtual disk on C:, and C: ran short. Said
   // as C:'s, never as Docker's disk limit, which had 938.3 GB free.
@@ -392,7 +427,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }),
   ).toBe(
-    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.",
   );
   // A disk that is short is never said as out of space, measured or not.
   expect(
@@ -405,7 +440,7 @@ test("specific wording and actions", () => {
       drive: "C:",
     }),
   ).toBe(
-    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Free up space on drive C:, then Try again.",
+    "OpenBot doesn't have enough free disk space. It needs 15 GB free. Free up space on drive C:, then Try again.",
   );
   // A report that does not say which is still about resources, never "partway through".
   expect(
@@ -821,7 +856,7 @@ test("an update with no room says what is free and what the update needs", () =>
   expect(resourcesShortSaid({ ...mac, memory: true })).toBe(
     "This Mac has 7.5 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry. Docker Desktop doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
-  // A first setup on that Mac: its own disk, said as the Mac's, with the setup's 40 GB.
+  // A first setup on that Mac: its own disk, said as the Mac's, with the setup's 15 GB.
   expect(
     engineTooSmallSaid({
       podman: false,
@@ -833,6 +868,6 @@ test("an update with no room says what is free and what the update needs", () =>
       mac: true,
     }),
   ).toBe(
-    "This Mac has 7.5 GB of free space, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This Mac has 7.5 GB of free space, and OpenBot needs 15 GB. Free up some space, then Try again.",
   );
 });

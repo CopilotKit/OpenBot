@@ -114,10 +114,14 @@ export type Shortfall = {
   /** That drive is this Mac's own disk, under Docker Desktop's or Podman's machine disk. */
   mac?: boolean;
   /**
-   * What is short is room for an update (`local_eval::update_room`): `neededGb` is what the
-   * update needs free where `diskGb` was measured.
+   * What is short is room for an update (`local_eval::update_room`), not for a first setup.
    */
   updating?: boolean;
+  /**
+   * With disk short: what is needed free where `diskGb` was measured, in whole GB. For an update,
+   * what the update writes; for a first setup, the back end's 15 GB, and inside Docker or OpenBot's
+   * machine the 5% of its disk k3s keeps free, or what the CLI said it requires.
+   */
   neededGb?: string;
 };
 

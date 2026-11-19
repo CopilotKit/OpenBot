@@ -45,7 +45,7 @@ app's own release is got ready the same way for an installation behind it (`behi
 its engine answers, whether OpenBot runs or not: during sign-in, the back end's setup, or the wait
 for an engine with room. It pulls OpenBot's images only; the back end's setup pulls its own.
 
-Its download never takes the engine below the 40 GiB free the back end's setup checks for
+Its download never takes the engine below the 15 GiB free the back end's setup checks for
 (`local_eval::MIN_ENGINE_FREE_DISK_BYTES`, `Ahead::keep_free`), counted with `ON_DISK` and against
 the computer's drive as well, so a setup that would pass its check without the download still does.
 While the engine has less than that, nothing downloads, and the update pulls the images as before.
@@ -300,7 +300,7 @@ pub struct Ahead<'a> {
     /// The computer's drive under it (`computer_free`).
     pub computer_free: &'a dyn Fn() -> Option<u64>,
     pub limits: Limits,
-    /// Bytes the download must leave free (`keeps_free`): the back end's 40 GiB for an
+    /// Bytes the download must leave free (`keeps_free`): the back end's 15 GiB for an
     /// installation behind the app, whose back end may be setting up meanwhile, and 0 otherwise.
     pub keep_free: u64,
 }

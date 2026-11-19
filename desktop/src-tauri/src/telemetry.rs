@@ -1696,7 +1696,7 @@ pub enum CliFailure {
 What the engine had against what local setup needs, for a setup that stopped on it. CPUs in
 thousandths of a CPU, memory and disk in MiB. `*_short` says which resource is below; an
 `available` that was not measured is absent. `disk_nearly_full` is the back end's own disk below
-k3s's lines rather than below the 40 GiB setup needs.
+k3s's lines rather than below the free disk setup needs.
 */
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

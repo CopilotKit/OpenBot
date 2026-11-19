@@ -1,0 +1,45 @@
+name: Disk needs
+
+# OpenBot Desktop says how much disk it needs and uses, in rough numbers (desktop/src/disk-needs.json),
+# and a release's images change that. For every release published, candidates included, this reads
+# the release's images from their registries and fails when one of those numbers no longer holds,
+# naming the number and what it should be (scripts/disk-needs.ts, docs/releasing.md).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to check, such as v1.1.0 or a candidate such as v1.1.1-rc.1. Empty checks the newest release.
+        type: string
+        default: ""
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: disk-needs-${{ github.event.release.tag_name || inputs.tag || 'newest' }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the disk numbers the app says
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # read the release's image lists
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DISK_NEEDS_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          # A run a release starts restores nothing from a cache a branch could have written.
+          no-cache: true
+      # Nothing to install: the script uses Bun and the registries' own API.
+      - run: bun scripts/disk-needs.ts --release "$DISK_NEEDS_TAG"

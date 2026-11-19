@@ -1168,6 +1168,15 @@ a.button-link:hover {
   line-height: 22px;
 }
 
+/* What OpenBot takes once it is installed, and what an update asks, under the needs. */
+.needs-note {
+  margin: 4px 0 0;
+  max-width: 34rem;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
 /* A disclosure: options almost nobody should open. */
 details {
   border-top: 1px solid var(--border);

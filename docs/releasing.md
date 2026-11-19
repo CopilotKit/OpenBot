@@ -418,6 +418,42 @@ to `desktop/src-tauri/cli-bundle`.
 CI bundles the CLI only on a tree that has `desktop/src-tauri/tauri.bundled-cli.conf.json`, as
 `main` does. On a tree without it, the installer carries no CLI.
 
+## The disk space the app says
+
+OpenBot Desktop's first screen says how much disk it needs and uses, in rough numbers: about 20 GB
+free to install, 7 to 10 GB once installed, and about 20 GB free so it can update. Its checks say
+the same numbers when a disk is short. They come from one file, `desktop/src/disk-needs.json`, in
+GB of 2^30 bytes:
+
+| Number | What it is |
+| --- | --- |
+| `installFreeGb` | Free disk to install: the back end's setup and OpenBot's images as they land on the disk. |
+| `installedGb` | What an installation takes, from the smallest Bot framework to the largest with both sign-in images. |
+| `updateFreeGb` | Free disk an update asks of the drive (`local_eval::update_needs`, twice, with the database unmeasured). |
+| `backEndFreeGb` | What the back end's first setup needs free, before the 5% of the engine's disk k3s keeps free. The CLI checks the same number (`REQUIRED_DISK_GIB` in the Intelligence CLI's `local-resources.ts`). |
+| `imagesDownloadMb` | What OpenBot's own images download, for the first screen's free-space check. |
+| `mostAnUpdateDownloadsMb` | The most an update downloads, every image changed. |
+| `onDisk` | How many times its download an image takes on disk: containerd keeps the download beside the unpacked layers. |
+
+They were measured on 2026-11-19, and every release changes OpenBot's images, so
+`.github/workflows/disk-needs.yml` checks each release when it is published, candidates included:
+`scripts/disk-needs.ts` reads the release's `desktop-images.json`, every image's download from its
+registry, and the releases before it for the largest update, and fails naming any number that no
+longer holds and what it should be. Run it by hand the same way:
+
+```sh
+bun run disk-needs -- --release v1.1.1-rc.1
+```
+
+To measure `onDisk` again, run it with `--measure` on a computer running OpenBot Desktop. It
+compares what OpenBot's images and the back end take there with what they download.
+
+When a number changes, the Rust tests in `local_eval.rs` name the constant that must change with
+it (`MIN_ENGINE_FREE_DISK_BYTES`, `MOST_AN_UPDATE_DOWNLOADS`, `early_downloads::IMAGES_DOWNLOAD_BYTES`).
+A change to `backEndFreeGb` is also a change to the Intelligence CLI's own check. Release that CLI
+first, then point `desktop/intelligence-cli.json` at it, so the window never says a number the CLI
+refuses.
+
 ## Internal builds
 
 For the step-by-step procedure, with what to check at each step, see the

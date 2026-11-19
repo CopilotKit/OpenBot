@@ -189,15 +189,18 @@ test("on the first screen, the line says how far the downloads are, with one bar
   expect(bar.getAttribute("aria-valuetext")).toBe("1.2 GB of 2.9 GB");
 });
 
-/** A GB as Windows counts it, and as the account step says its 40 GB. */
+/** A GB as Windows counts it, and as the account step says its 15 GB. */
 const GIB = 1024 ** 3;
-/** Windows F's figures, from its log: "16096509952 bytes free, 44436190301 needed". */
+/**
+ * Windows F's free space, from its log, and what OpenBot needs there now: the back end's 15 GiB and
+ * its downloads as they land on the disk (`early_downloads::needed_for`).
+ */
 const WINDOWS_F_SHORT: EarlyDownloads = {
   state: "short",
   bytes: 0,
   free: 16_096_509_952,
-  needed: 40 * GIB,
-  download: 1_486_517_341,
+  needed: 15 * GIB,
+  download: 5_086_517_341,
 };
 
 /**
@@ -221,9 +224,9 @@ test("a disk too full to download to says what is free and what is needed, and I
   expect(called("prepare_installation")).toEqual([]);
   const line = view.getByRole("status");
   // Each figure and its unit are kept on one line.
-  expect(line.textContent).toContain("2\u00a0GB for its download");
+  expect(line.textContent).toContain("5\u00a0GB for its download");
   expect(line.textContent?.replaceAll("\u00a0", " ")).toBe(
-    "This computer has 15 GB of free space, and OpenBot needs 40 GB plus about 2 GB for its download. Free up some space and the download starts by itself.",
+    "This computer has 15 GB of free space, and OpenBot needs 15 GB plus about 5 GB for its download. Free up some space and the download starts by itself.",
   );
   // Nothing is downloading, so nothing spins and there is no bar.
   expect(line.querySelector(".step-spinner")).toBeNull();

@@ -2734,7 +2734,7 @@ One try at getting this app's own release ready for the installation in the sele
 is behind the app (`update_ready::behind`): OpenBot's images for it, into the engine the
 installation was set up on, once that engine answers, so the Start that moves it finds them there.
 Never started by itself: an engine that does not answer is left alone. The download keeps the back
-end's 40 GiB free (`update_ready::keeps_free`). Said in the log once per change of outcome. When the
+end's 15 GiB free (`update_ready::keeps_free`). Said in the log once per change of outcome. When the
 release is due and not ready yet, how soon the next try comes.
 */
 fn try_getting_own_release_ready<R: tauri::Runtime>(
@@ -23939,7 +23939,7 @@ fn main() {
                     "cpu_short": false, "memory_short": false, "disk_short": true,
                     "cpu_needed_millis": 4000, "cpu_available_millis": 9800,
                     "memory_needed_mib": 4096, "memory_available_mib": 19353,
-                    "disk_needed_mib": 40960, "disk_available_mib": 0
+                    "disk_needed_mib": 15360, "disk_available_mib": 0
                 }
             })
         );

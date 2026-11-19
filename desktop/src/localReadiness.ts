@@ -9,6 +9,7 @@
  * readiness "ready" and licence "valid"; a CLI that reports neither leaves it unknown.
  */
 import { SECURITY_FLOOR_SENTENCE } from "../../shared/security-floor";
+import diskNeeds from "./disk-needs.json";
 import {
   type ChatGateInput,
   chatGate,
@@ -134,15 +135,33 @@ const podmanFlag: Record<Resource, string> = {
 };
 
 /**
- * Which resource is short and where to raise it. `needs` is what OpenBot needs of each: free, at
- * Start, as the CLI measures it, or in total, before it. A disk that is short is never "out of disk
- * space": Windows F was told so with 13 GB free.
+ * What a first setup needs free where the disk ran short, as the window says it: the figure the
+ * check gave (`neededGb`: the back end's 15 GB, and inside Docker or OpenBot's machine the 5% of its
+ * disk k3s keeps free), or the back end's own figure when it gave none.
+ */
+function diskNeeded(shortfall: Shortfall): string {
+  return `${shortfall.neededGb ?? diskNeeds.backEndFreeGb} GB`;
+}
+
+/**
+ * Which resource is short and where to raise it. `needs` is what OpenBot needs of CPUs and memory:
+ * free, at Start, as the CLI measures it, or in total, before it. Disk is what the check said it
+ * needs (`diskNeeded`). A disk that is short is never "out of disk space": Windows F was told so
+ * with 13 GB free.
  */
 function shortfallSaid(
   shortfall: Shortfall,
-  needs: Record<Resource, string>,
+  needs: Record<"cpu" | "memory", string>,
   then: string,
 ): string {
+  const needsOf = (resource: Resource) =>
+    resource === "disk" ? `${diskNeeded(shortfall)} free` : needs[resource];
+  const neededOf = (resource: Resource) =>
+    resource === "disk" ? diskNeeded(shortfall) : needed[resource];
+  const neededFullyOf = (resource: Resource) =>
+    resource === "disk"
+      ? `${diskNeeded(shortfall)} of free disk space`
+      : neededFully[resource];
   // Docker Desktop is where the person raises Docker's limits, so it is named. OpenBot's own Podman
   // machine is OpenBot to them, except in the command that raises its limits.
   const engine = shortfall.podman ? "OpenBot" : "Docker Desktop";
@@ -180,7 +199,7 @@ function shortfallSaid(
     shortfall.diskGb &&
     !shortfall.nearlyFull
   ) {
-    return `${onTheDrive(shortfall)}, and OpenBot needs ${needed.disk}. Free up some space, then ${then}.`;
+    return `${onTheDrive(shortfall)}, and OpenBot needs ${diskNeeded(shortfall)}. Free up some space, then ${then}.`;
   }
   const fix = shortfall.podman
     ? podmanFix(short, shortfall)
@@ -190,11 +209,12 @@ function shortfallSaid(
     const free = shortfall.diskGb
       ? ` ${shortfall.podman ? "It" : engine} has ${shortfall.diskGb} GB free${shortfall.diskSizeGb ? ` of ${shortfall.diskSizeGb} GB` : ""}.`
       : "";
-    const needs40 =
-      shortfall.diskGb && Number(shortfall.diskGb) < 40
-        ? ` ${needsWho} ${needed.disk}.`
-        : "";
-    return `OpenBot is nearly out of disk space.${free}${needs40} ${fix}, then ${then}.`;
+    // Said only when the disk is also below what a first setup needs, which is when the check
+    // gives that figure.
+    const needsMore = shortfall.neededGb
+      ? ` ${needsWho} ${diskNeeded(shortfall)}.`
+      : "";
+    return `OpenBot is nearly out of disk space.${free}${needsMore} ${fix}, then ${then}.`;
   }
   // The CLI's own numbers, when its error gave one for every resource that is short.
   const measured: Record<Resource, string | undefined> = {
@@ -209,10 +229,10 @@ function shortfallSaid(
   const said = has.every((said) => said !== undefined)
     ? `${who} has ${listed(has as string[])}. ${needsWho} ${
         short.length === 1
-          ? needed[short[0]]
-          : listed(short.map((resource) => neededFully[resource]))
+          ? neededOf(short[0])
+          : listed(short.map(neededFullyOf))
       }.`
-    : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. ${needsWho} ${listed(short.map((resource) => needs[resource]))}.`;
+    : `${engine} doesn't have enough ${listed(short.map((resource) => resourceName[resource]))}. ${needsWho} ${listed(short.map(needsOf))}.`;
   const full = shortfall.nearlyFull
     ? "OpenBot is nearly out of disk space. "
     : "";
@@ -270,21 +290,20 @@ function updateRoomSaid(
 }
 
 // What the CLI requires free, beside its own numbers: "Docker has 0 GB of free disk. OpenBot
-// needs 40 GB."
-const needed: Record<Resource, string> = {
+// needs 15 GB." Disk is what the check said it needs there (`diskNeeded`).
+const needed: Record<"cpu" | "memory", string> = {
   cpu: "4",
   memory: "4 GB",
-  disk: "40 GB",
 };
-const neededFully: Record<Resource, string> = {
+const neededFully: Record<"cpu" | "memory", string> = {
   cpu: "4 CPUs",
   memory: "4 GB of free memory",
-  disk: "40 GB of free disk space",
 };
 
 /**
- * The CLI's resource check at Start: 4 CPUs in all, and 4 GB of free memory and 40 GB of free disk
- * with OpenBot's own containers running.
+ * The CLI's resource check at Start: 4 CPUs in all, and 4 GB of free memory and the free disk it
+ * requires (15 GB, and the 5% of a large disk k3s keeps free) with OpenBot's own containers
+ * running.
  */
 export function resourcesShortSaid(shortfall: Shortfall): string {
   return shortfallSaid(
@@ -292,7 +311,6 @@ export function resourcesShortSaid(shortfall: Shortfall): string {
     {
       cpu: "4 CPUs",
       memory: "4 GB of free memory",
-      disk: "40 GB free",
     },
     "Retry",
   );
@@ -383,7 +401,7 @@ export function podmanResizeCommands(
 export function engineTooSmallSaid(shortfall: Shortfall): string {
   return shortfallSaid(
     shortfall,
-    { cpu: "4 CPUs", memory: "4 GB of memory", disk: "40 GB free" },
+    { cpu: "4 CPUs", memory: "4 GB of memory" },
     "Try again",
   );
 }

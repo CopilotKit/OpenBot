@@ -96,7 +96,7 @@ test("an engine short of disk says how to raise it, and Try again checks again",
     <CopilotKitAccount root="/tmp/account-engine" onDone={() => {}} />,
   );
   await screen.findByText(
-    "Docker Desktop doesn't have enough free disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
+    "Docker Desktop doesn't have enough free disk space. OpenBot needs 15 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
   );
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() =>
@@ -134,7 +134,7 @@ test("a disk too short for OpenBot says what is free and what it needs", async (
     <CopilotKitAccount root="/tmp/account-windows-f" onDone={() => {}} />,
   );
   await screen.findByText(
-    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.",
   );
   expect(screen.queryByText(/out of disk space/)).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));

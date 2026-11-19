@@ -27,6 +27,7 @@
     "pretest": "bun run generate:app-config",
     "test:smoke": "OPENBOT_SMOKE=1 bun test tests/smoke",
     "diagram": "bun scripts/architecture-diagram.ts",
+    "disk-needs": "bun scripts/disk-needs.ts",
     "setup:composio": "bun scripts/setup-composio.ts",
     "composio:smoke": "bash scripts/composio-smoke.sh",
     "mock:knowledge": "bun scripts/mock-knowledge-mcp.ts"

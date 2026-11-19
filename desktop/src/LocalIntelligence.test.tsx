@@ -1466,6 +1466,7 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
           cpus: "9.8",
           memoryGb: "18.9",
           diskGb: "0",
+          neededGb: "15",
         },
       }),
     ],
@@ -1476,7 +1477,7 @@ test("a setup refused for a full Docker disk says so, with Retry", async () => {
   await screen.findByRole("button", { name: "Retry" });
   const setup = row(screen, SETUP).textContent;
   expect(setup).toContain(
-    "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 0 GB of free disk space. OpenBot needs 15 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(setup).not.toContain("partway through");
 });
@@ -1709,7 +1710,7 @@ const notStartedOnC = report({
 });
 const shortOnC = notStartedOnC.shortfall;
 const ACCOUNT_STEP_SAYS =
-  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 15 GB. Free up some space, then Try again.";
 
 /**
  * On Windows G that setup was a red "Setup stopped" card with Retry and the troubleshooting logs,
@@ -2297,6 +2298,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
           diskGb: "30.5",
           nearlyFull: true,
           diskSizeGb: "1006.8",
+          neededGb: "66",
           wsl: true,
           drive: "C:",
         },
@@ -2309,7 +2311,7 @@ test("a relaunch whose start fails on a nearly full disk names the disk on its r
   await screen.findByRole("button", { name: "Retry" });
   const waiting = row(screen, WAIT).textContent;
   expect(waiting).toContain(
-    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 40 GB. Free up space on drive C:, then Retry.",
+    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 66 GB. Free up space on drive C:, then Retry.",
   );
   expect(waiting).not.toContain("partway through");
   expect(commands()).toEqual(["run_local_eval:status", "run_local_eval:start"]);
