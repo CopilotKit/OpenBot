@@ -173,6 +173,22 @@ def provider_environment(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+def _anthropic_version_header(model) -> str:
+    """The API version the installed Anthropic client puts on the wire.
+
+    langchain-anthropic chooses this header and the Anthropic SDK may replace
+    it with its own default. Those dates move independently, so a literal here
+    fails on the next release of either package. The request must carry the
+    version this client actually sends.
+    """
+    version = model._async_client.default_headers.get("anthropic-version")
+    if not isinstance(version, str) or not version.strip():
+        raise AssertionError(
+            "Anthropic client did not declare an anthropic-version header"
+        )
+    return version
+
+
 async def _run_answer_with_httpx2_capture(monkeypatch, response_json):
     captured = []
 
@@ -337,7 +353,9 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     assert "OPENAI_API_KEY" not in os.environ
     assert captured[0]["url"] == "http://127.0.0.1:4311/v1/messages"
     assert captured[0]["headers"]["authorization"] == "Bearer sk-ant-openbot-ci"
-    assert captured[0]["headers"]["anthropic-version"] == "2026-10-21"
+    assert captured[0]["headers"]["anthropic-version"] == _anthropic_version_header(
+        main._model()
+    )
     assert captured[0]["body"]["model"] == request_model
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}
