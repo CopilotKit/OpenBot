@@ -75,6 +75,17 @@ export function storedSidebarWidth(
   );
 }
 
+/**
+ * The narrowest a dragged sidebar may be: the panel's own floor (`SIDEBAR_MIN_WIDTH`) plus the
+ * strip beside it, or what the footer needs to show whole (`footerNeeds`), whichever is more.
+ */
+export function sidebarFloor(
+  stripWidth: number,
+  footerNeeds: number | null,
+): number {
+  return Math.max(SIDEBAR_MIN_WIDTH + stripWidth, footerNeeds ?? 0);
+}
+
 /** A dragged width, held between `min` (at least `SIDEBAR_MIN_WIDTH`) and `SIDEBAR_MAX_WIDTH`. */
 export function clampSidebarWidth(pixels: number, min: number): number {
   return Math.round(

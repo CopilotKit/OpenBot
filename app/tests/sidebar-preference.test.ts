@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   applySidebarOpen,
+  clampSidebarWidth,
   LEGACY_APP_SIDEBAR_WIDTH_KEY,
   parseStoredSidebarOpen,
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  sidebarFloor,
   storedSidebarWidth,
 } from "../src/lib/sidebar";
 
@@ -97,5 +99,28 @@ describe("sidebar width", () => {
     expect(
       storedSidebarWidth(storage({ [SIDEBAR_WIDTH_STORAGE_KEY]: "9000" })),
     ).toBe("340px");
+  });
+});
+
+/*
+ * Beside a strip, the sidebar's width is the strip and the panel together, so the floor a drag
+ * stops at is the panel's own floor plus the strip: the panel never gets narrower than it was
+ * allowed to be on its own.
+ */
+describe("the floor a drag stops at", () => {
+  test("is the panel's floor with no strip and no footer to fit", () => {
+    expect(sidebarFloor(0, null)).toBe(220);
+  });
+
+  test("adds the strip's width to the panel's floor", () => {
+    expect(sidebarFloor(64, null)).toBe(284);
+  });
+
+  test("is what a footer needs, where that is more", () => {
+    expect(sidebarFloor(64, 300)).toBe(300);
+  });
+
+  test("holds a drag narrower than the panel's floor at it", () => {
+    expect(clampSidebarWidth(200, sidebarFloor(64, null))).toBe(284);
   });
 });
