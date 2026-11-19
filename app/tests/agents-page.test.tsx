@@ -223,6 +223,31 @@ test("a Bot's Agents page doesn't offer Hand work to agents while task threads a
   expect(view.getByRole("button", { name: "Save" })).toBeTruthy();
 });
 
+/*
+ * No Bot is offered handing work out, whatever it was set to, so the switch would do nothing for a
+ * Bot that was already handing work out: it is hidden there too, and its agents still read.
+ */
+test("a Bot that already hands work to agents shows no switch while task threads are hidden", async () => {
+  delegation = {
+    botId: BOT.id,
+    mode: "orchestrate",
+    model: null,
+    effort: null,
+    instructions: "",
+    agents: [
+      { ...OPENBOT, available: true },
+      { ...ANALYST, available: true },
+    ],
+    canManage: true,
+  };
+  const view = draw(<BotDelegation agent={BOT} />);
+
+  const list = await view.findByRole("list", { name: "Agents it may use" });
+  expect(within(list).getByText("Pipeline analyst")).toBeTruthy();
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(view.queryByText("Hand work to agents")).toBeNull();
+});
+
 test("the Hand work to agents switch saves on its own, keeping the agent the Bot ran on as its default, and the agents ticked after it save with Save", async () => {
   delegation = {
     botId: BOT.id,
@@ -294,10 +319,6 @@ test("an agent private to somebody else reads as such, and the Bot's manager can
   const view = draw(<BotDelegation agent={BOT} />);
 
   const list = await view.findByRole("list", { name: "Agents it may use" });
-  // A Bot that already hands work out keeps the switch, so its owner can turn it off.
-  expect(
-    view.getByRole("switch", { name: "Hand work to agents" }),
-  ).toBeTruthy();
   expect(within(list).getByText("Somebody else's private agent.")).toBeTruthy();
   expect(within(list).getByText("Unavailable")).toBeTruthy();
   await user.click(

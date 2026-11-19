@@ -29,9 +29,9 @@ export type Delegation = BotDelegation;
 
 /**
  * Whether a Bot's Agents page offers "Hand work to agents", the switch that starts task threads.
- * Off for now: no Bot is offered handing work out, so the switch and the agents it picks are hidden.
- * A Bot that already hands work out still shows the switch, so its owner can turn it off, and its
- * task cards and threads still read as before. Set it back to true to offer task threads again.
+ * Off for now: no Bot is offered handing work out, whatever it is set to, so the switch is hidden for
+ * every Bot. A Bot that was already handing work out still lists its agents, and task cards and
+ * threads still read as before. Set it back to true to offer task threads again.
  */
 export const TASK_THREADS_OFFERED: boolean = false;
 

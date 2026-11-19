@@ -72,8 +72,7 @@ type Choice = Pick<
  * agents it may use while it answers quickly. One form, saved together, because the switch means
  * nothing without the agents it switches to.
  *
- * The switch is drawn only while task threads are offered (`TASK_THREADS_OFFERED`), or for a Bot
- * that already hands work out, so its owner can turn that off.
+ * The switch is drawn only while task threads are offered (`TASK_THREADS_OFFERED`), for every Bot.
  */
 export function BotDelegation({
   agent,
@@ -215,7 +214,7 @@ function DelegationForm({
 
   return (
     <>
-      {offerTaskThreads || orchestrate ? (
+      {offerTaskThreads ? (
         <PageSection>
           <PageRows>
             <Item size="sm">
