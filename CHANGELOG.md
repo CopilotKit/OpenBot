@@ -34,6 +34,10 @@ unless you rely on task threads.
 - **An API key acts in the organization it was made in.** A key made in one organization is refused
   in any other, as if that organization did not exist. A key in an answer carries `organizationId`.
   A key made before this release acts in `default`.
+- **An organization's own OAuth client for a server-to-server app.** `createCredential` takes
+  `kind: mcp_oauth_client` with the app's slug as `provider`, `keyId: server-to-server`, the
+  client's id as `metadata.clientId` and its secret as `secret`. The organization's app connects
+  with that client, and the app is offered to the organization once it is kept.
 - **The realtime socket at an address that names the organization.**
   `/api/v2/organizations/{organizationId}/realtime/websocket` relays the same socket as
   `/api/intelligence/client/websocket`, for a caller who is a member of that organization.
