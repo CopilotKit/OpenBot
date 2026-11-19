@@ -483,7 +483,11 @@ function EditTextDialog({
             <DialogDescription>{description}</DialogDescription>
           ) : null}
         </DialogHeader>
-        <DialogBody className="mt-4 grid gap-2">
+        {/*
+         * The body scrolls, so it clips what is drawn outside it: 4px of padding above and below keep
+         * the field's focus and error rings whole, and the margins are 4px less to keep the gaps.
+         */}
+        <DialogBody className="mt-3 grid gap-2 py-1">
           {multiline ? (
             <Textarea
               aria-label={label}
@@ -527,7 +531,7 @@ function EditTextDialog({
             </p>
           ) : null}
         </DialogBody>
-        <DialogFooter className="mt-4">
+        <DialogFooter className="mt-3">
           <Button
             disabled={saving}
             onClick={onClose}
