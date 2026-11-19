@@ -118,6 +118,7 @@
   --spacing-row: 1.25rem;
 
   --color-check-bg: transparent;
+  --color-check-border: var(--muted-foreground);
   --color-check-border-hover: var(--muted-foreground);
   --color-check-checked-hover: var(--primary);
   --color-check-focus-border: var(--ring);

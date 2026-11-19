@@ -7,11 +7,12 @@ import { cn } from "@/lib/utils";
  * The UI Kit's "Checkbox label" box: ticked, half ticked (`indeterminate`) and each state a colour
  * of its own (theme.css: `--color-check-*`), which the skins set back to theirs.
  *
- * The edge is `muted-foreground`, not the kit's ink at 20% nor `input`. An unticked tickbox is
- * nothing but its edge, and either is about 1.3–1.5:1 against the page, a card or a muted row: on a
- * Bot's Agents page in dark the agents not yet chosen showed no box at all. WCAG 2.2's 1.4.11 asks
- * for 3:1 between a control and what is beside it; `muted-foreground` is the app's secondary text,
- * at 4.5:1 or more on every surface in every skin. Ticked, focused and invalid keep their own edges.
+ * The edge is the kit's gray-blue taken darker (#798d9b for the kit's #b8c3ca), not `input`. An
+ * unticked tickbox is nothing but its edge, and the kit's, like `input`, is under 2:1 against the
+ * page, a card or a muted row: on a Bot's Agents page in dark the agents not yet chosen once showed
+ * no box at all. WCAG 2.2's 1.4.11 asks for 3:1 between a control and what is beside it; the darker
+ * one is the lightest of that hue that holds 3:1 on every surface, and the skins keep their
+ * `muted-foreground`. Ticked, focused and invalid keep their own edges.
  * app/tests/checkbox-contrast.test.tsx measures what the browser paints.
  */
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {

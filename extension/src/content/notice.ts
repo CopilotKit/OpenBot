@@ -19,7 +19,7 @@ export const NOTICE_TOKENS = {
     "--primary-foreground": "oklch(1 0 0)",
     "--secondary": "oklch(0.962 0.007 277.2)",
     "--muted-foreground": "oklch(0.172 0.007 258.4 / 60%)",
-    "--destructive": "oklch(0.504 0.178 22.9)",
+    "--destructive": "oklch(0.585 0.223 24)",
     "--ring": "oklch(0.644 0.167 276.1)",
   },
   dark: {

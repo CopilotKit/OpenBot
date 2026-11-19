@@ -33,8 +33,8 @@
   --muted-foreground: oklch(0.172 0.007 258.4 / 60%);
   --accent: oklch(0.962 0.007 277.2);
   --accent-foreground: oklch(0.172 0.007 258.4);
-  --destructive: oklch(0.504 0.178 22.9);
-  --success: oklch(0.514 0.1 167.2);
+  --destructive: oklch(0.585 0.223 24);
+  --success: oklch(0.741 0.145 169.4);
   --border: oklch(0.172 0.007 258.4 / 8%);
   --input: oklch(0.878 0.022 263.2);
   --ring: oklch(0.644 0.167 276.1);
@@ -340,19 +340,20 @@ body {
    * Checkbox ("Checkbox label"): 16px with 4px corners, white inside; ink when ticked or half
    * ticked, #31363a under the pointer; focused, a 2px #d8dee9 band round it in place of its edge;
    * disabled, the frame's gray with a faint edge and a gray tick; invalid, tinted red with a red
-   * edge, and red when ticked. Its edge at rest is not the kit's ink at 20%, which is about 1.5:1
-   * on white: an unticked box is nothing but its edge (checkbox.tsx).
+   * edge, and red when ticked. Its edge at rest is the kit's gray-blue taken darker, #798d9b for the
+   * kit's #b8c3ca: an unticked box is nothing but its edge, and that darker one is the lightest of
+   * the hue at WCAG's 3:1 on every surface (checkbox.tsx). The radio shares all of it.
    */
   --color-check-bg: var(--card);
-  --color-check-border: var(--muted-foreground);
-  --color-check-border-hover: var(--foreground);
+  --color-check-border: oklch(0.632 0.031 238.5);
+  --color-check-border-hover: var(--muted-foreground);
   --color-check-checked-hover: var(--color-primary-hover);
   --color-check-focus-border: transparent;
   --color-check-focus-ring: var(--color-field-focus);
   --check-focus-ring: 2px;
   --color-check-invalid-bg: color-mix(
     in oklab,
-    var(--destructive) 20%,
+    var(--destructive) 10%,
     transparent
   );
   --check-invalid-ring: 0px;
@@ -411,13 +412,35 @@ body {
   --color-search-focus-ring: var(--color-field-focus);
   --color-search-focus-border: transparent;
   /*
-   * Badges ("Badges"): Icon+Text is a 32px pill in its colour at 20%, the icon in that colour and
-   * the label in ink, 8px in beside the icon and 12px at the end. Numeric is a 24px ink circle with
-   * the count in 12px. The kit's own greens and oranges, until it settles on one of each.
+   * The status colours (Figma "OpenBot" variables, group "colors"): success #12c89c, warning
+   * #f26900, error #e21f32 and additional #0f62fe, each with a subtle fill at the kit's strength.
+   * Success and error are shadcn's `--success` and `--destructive` (above), which the skins set to
+   * their own; warning and additional are OpenBot's alone, the same in both themes until the dark
+   * theme is drawn.
    */
-  --color-badge-success: oklch(0.741 0.145 169.4);
-  --color-badge-warning: oklch(0.68 0.19 46.5);
-  --color-badge-destructive: var(--destructive);
+  --color-warning: oklch(0.68 0.19 46.5);
+  --color-additional: oklch(0.557 0.243 262);
+  --color-success-subtle: color-mix(in oklab, var(--success) 20%, transparent);
+  --color-warning-subtle: color-mix(
+    in oklab,
+    var(--color-warning) 10%,
+    transparent
+  );
+  --color-destructive-subtle: color-mix(
+    in oklab,
+    var(--destructive) 10%,
+    transparent
+  );
+  --color-additional-subtle: color-mix(
+    in oklab,
+    var(--color-additional) 20%,
+    transparent
+  );
+  /*
+   * Badges ("Badges"): Icon+Text is a 32px pill in its status's subtle fill, the icon in the status
+   * colour and the label in ink, 8px in beside the icon and 12px at the end. Numeric is a 24px ink
+   * circle with the count in 12px.
+   */
   --spacing-badge-count: 1.5rem;
   --spacing-badge-count-x: 0.25rem;
   --text-badge-count: 0.75rem;
