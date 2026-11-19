@@ -276,6 +276,8 @@ or a script has to say.
 - An admin's review list shows a person as soon as their own space is made, and a denied folder
   action lands in Activity after the attempt it denied.
 - Mastra's mark is its current one.
+- A command id repeated in one management-agent heartbeat now runs once, and a malformed command
+  no longer uses up its id, so a later valid command with that id is not dropped.
 
 ## 1.1.0
 
