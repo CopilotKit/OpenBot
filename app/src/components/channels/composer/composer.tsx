@@ -1,24 +1,3 @@
-  type KeyboardEvent,
-import { isComposing } from "@/lib/composing";
-          mimeType: stagedMimeType(attachment),
-  /**
-   * The Enter that confirms a character an input method is composing finishes a
-   * character, not a message — the same guard the New Bot sheet, the Bot name
-   * field and the boundary rule form already apply through `isComposing`.
-   * PromptArea calls the caller's `onKeyDown` first and skips its own submit
-   * when the event was already default-prevented, so stopping the key here is
-   * what keeps it from sending. Both PromptAreas below share this handler:
-   * the compact box and the centred one are the same composer.
-   */
-  const handlePromptAreaKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (isComposing(event)) event.preventDefault();
-    },
-    [],
-  );
-
-                onKeyDown={handlePromptAreaKeyDown}
-                onKeyDown={handlePromptAreaKeyDown}
 import {
   type Attachment,
   type AttachmentsConfig,
@@ -40,6 +19,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -59,6 +39,7 @@ import {
   mediaTypeOf,
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
+import { isComposing } from "@/lib/composing";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "@/lib/new-id";
 import { cn } from "@/lib/utils";
@@ -1239,6 +1220,7 @@ export function Composer({
           id: attachment.id,
           name: attachment.filename ?? "Attachment",
           size: attachment.size,
+          mimeType: stagedMimeType(attachment),
           loading: attachment.status === "uploading",
           /*
            * Warned, never refused. The server accepts the whole file and the
@@ -1300,6 +1282,22 @@ export function Composer({
    * removable by hand, and Send says no with a sentence naming the limit until it is.
    */
   const tooManyStaged = overCap(draft);
+
+  /**
+   * The Enter that confirms a character an input method is composing finishes a
+   * character, not a message — the same guard the New Bot sheet, the Bot name
+   * field and the boundary rule form already apply through `isComposing`.
+   * PromptArea calls the caller's `onKeyDown` first and skips its own submit
+   * when the event was already default-prevented, so stopping the key here is
+   * what keeps it from sending. Both PromptAreas below share this handler:
+   * the compact box and the centred one are the same composer.
+   */
+  const handlePromptAreaKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (isComposing(event)) event.preventDefault();
+    },
+    [],
+  );
 
   const handleChange = useCallback(
     (next: Segment[]) => {
@@ -1780,6 +1778,7 @@ export function Composer({
                 minHeight={COMPACT_MIN_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
+                onKeyDown={handlePromptAreaKeyDown}
                 onSubmit={submitDraft}
                 placeholder={placeholder}
                 ref={promptAreaRef}
@@ -1874,6 +1873,7 @@ export function Composer({
                 maxHeight={MAX_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
+                onKeyDown={handlePromptAreaKeyDown}
                 onSubmit={submitDraft}
                 placeholder={placeholder}
                 ref={promptAreaRef}
