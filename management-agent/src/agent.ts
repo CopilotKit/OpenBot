@@ -70,6 +70,21 @@ const WORKLOAD = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
 
 export type Log = (message: string, fields?: Record<string, unknown>) => void;
 
+interface StatefulSet {
+  metadata: { name: string; generation?: number };
+  spec: { selector?: { matchLabels?: Record<string, string> } };
+  status?: { observedGeneration?: number; updateRevision?: string };
+}
+interface Pod {
+  metadata: {
+    name: string;
+    labels?: Record<string, string>;
+    deletionTimestamp?: string;
+    ownerReferences?: { kind: string; name: string }[];
+  };
+  status?: { conditions?: { type: string; status: string }[] };
+}
+
 export class ManagementAgent {
   readonly store: StateStore;
   readonly flux: Flux;
@@ -303,6 +318,9 @@ export class ManagementAgent {
    * (or the backup the person restored for it), so returning to that release changes nothing in
    * it, and the failed promotion already left the server stopped. Quiescing would also record
    * those zero replicas as the ones to put back.
+   *
+   * Pods of a StatefulSet that the failed release left stuck are deleted while it goes back on
+   * (`forcedRollback`), as Kubernetes asks.
    */
   private async converge(accepted: AcceptedRelease, manifest: ReleaseManifest) {
     const pinned = await this.flux.pinnedDigest();
@@ -339,11 +357,97 @@ export class ManagementAgent {
           before: await serverDeployment(target, run),
           maintenance: false,
           backup: async () => {},
-          apply: () => this.applyRelease(accepted, manifest),
+          apply: async () => {
+            const done = new AbortController();
+            const unstuck = this.forcedRollback(done.signal);
+            try {
+              await this.applyRelease(accepted, manifest);
+            } finally {
+              done.abort();
+              await unstuck;
+            }
+          },
           declaredSuspension: async () => new Set(),
         });
       }),
     );
+  }
+
+  /**
+   * A StatefulSet stays stuck on a pod the failed release started that never became Ready, even
+   * once its template is put back: Kubernetes asks for those pods to be deleted
+   * (https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#forced-rollback).
+   * While the accepted release goes back on, the agent deletes exactly those pods: owned by one of
+   * the release's StatefulSets, not Ready, and not at the revision the StatefulSet now rolls out.
+   */
+  private async forcedRollback(signal: AbortSignal) {
+    const target = productTarget(this.config);
+    while (!signal.aborted) {
+      try {
+        const sets = await this.kube.list<StatefulSet>(
+          target.namespace,
+          "statefulset",
+          `app.kubernetes.io/instance=${target.release}`,
+        );
+        for (const set of sets) {
+          const revision = set.status?.updateRevision;
+          const labels = Object.entries(set.spec.selector?.matchLabels ?? {});
+          if (
+            !revision ||
+            !labels.length ||
+            set.status?.observedGeneration !== set.metadata.generation
+          )
+            continue;
+          const pods = await this.kube.list<Pod>(
+            target.namespace,
+            "pod",
+            labels.map(([key, value]) => `${key}=${value}`).join(","),
+          );
+          for (const pod of pods) {
+            const hash = pod.metadata.labels?.["controller-revision-hash"];
+            if (
+              !hash ||
+              hash === revision ||
+              pod.metadata.deletionTimestamp ||
+              pod.status?.conditions?.some(
+                (c) => c.type === "Ready" && c.status === "True",
+              ) ||
+              !pod.metadata.ownerReferences?.some(
+                (owner) =>
+                  owner.kind === "StatefulSet" &&
+                  owner.name === set.metadata.name,
+              )
+            )
+              continue;
+            this.log("deleting a pod the failed release left stuck", {
+              pod: pod.metadata.name,
+              revision: hash,
+            });
+            await this.kube.kubectl([
+              "--namespace",
+              target.namespace,
+              "delete",
+              "pod",
+              pod.metadata.name,
+              "--wait=false",
+            ]);
+          }
+        }
+      } catch (error) {
+        this.log("forced rollback check failed", { error: String(error) });
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 10_000);
+        signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    }
   }
 
   /** After an attempt at `release` was undone, says so and waits before the next one. */

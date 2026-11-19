@@ -743,6 +743,11 @@ run("management agent on a real cluster", () => {
         ?.image,
     ).toEndWith(`@${image.split("@")[1]}`);
     expect(server?.status.readyReplicas ?? 0).toBeGreaterThan(0);
+    // No pod is left on the missing image: the StatefulSet pod the failed release started was
+    // deleted so the StatefulSet could roll back (Kubernetes' forced rollback).
+    expect(kubectl("-n", PRODUCT, "get", "pods", "-o", "json")).not.toContain(
+      missing,
+    );
 
     await timeout("20m");
   });
