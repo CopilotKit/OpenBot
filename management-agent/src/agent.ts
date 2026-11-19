@@ -37,6 +37,7 @@ import {
   planUpgrade,
   type ReleaseManifest,
 } from "../../shared/release-manifest";
+import { BackupTargetRefused, confirmBackupTarget } from "./backup-target";
 import type { ManagementClient } from "./client";
 import type { Agent } from "./config";
 import { Flux } from "./flux";
@@ -661,15 +662,17 @@ export class ManagementAgent {
     const maintenance =
       needsMaintenance(candidate) ||
       current.compatibility.database.to !== candidate.compatibility.database.to;
+    const journal = this.newJournal(
+      current.version,
+      candidate.version,
+      maintenance ? `openbot-${operation}` : "none",
+    );
+    if (maintenance) await this.confirmBackupTarget(journal, operation);
     await runPromotion({
       target,
       run,
       candidate,
-      journal: this.newJournal(
-        current.version,
-        candidate.version,
-        maintenance ? `openbot-${operation}` : "none",
-      ),
+      journal,
       save: (journal) => this.saveJournal(journal),
       before,
       maintenance,
@@ -691,6 +694,38 @@ export class ManagementAgent {
         });
       },
     });
+  }
+
+  /**
+   * Before anything is quiesced or backed up: is the database the backup Job would back up the one
+   * the product's server uses? When it is not, or the agent cannot tell, nothing is touched and the
+   * upgrade stops in `recovery-required` with the reason, so a person corrects the backup target
+   * (or the server) and clears the journal before any migrating upgrade runs.
+   */
+  private async confirmBackupTarget(
+    journal: PromotionJournal,
+    operation: string,
+  ) {
+    this.liveJournal = { ...journal };
+    try {
+      const how = await confirmBackupTarget({
+        kube: this.kube,
+        kind: this.config.backup.kind,
+        template: this.agent.jobs.backupTarget,
+        operation,
+        timeoutSeconds: Math.min(this.config.backup.timeoutSeconds, 900),
+        identity: await readIdentity(this.config),
+      });
+      this.log("backup target confirmed", { to: journal.toVersion, how });
+    } catch (error) {
+      if (!(error instanceof BackupTargetRefused)) throw error;
+      journal.phase = "recovery-required";
+      journal.backupReference = "none";
+      journal.error = error.message;
+      journal.recovery = `Nothing was changed: the product was not quiesced, backed up or upgraded. ${error.mismatch ? "Point the agent's backup values at the database the product's server uses (helm upgrade openbot-agent with the right backup.<kind> values)" : "Make the backup target confirmable (the reason says what is missing)"}, then remove journal.json from the agent's state ConfigMap.`;
+      await this.saveJournal(journal);
+      throw error;
+    }
   }
 
   // --- commands ------------------------------------------------------------------------------

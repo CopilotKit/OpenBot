@@ -297,6 +297,13 @@ export interface ReleaseIdentity {
     | { name: string; hash?: string; createdAt?: string | number }
     | string
     | null;
+  /** The database the server is connected to, on servers that report it: its host name (or
+   * address), and the Cloud SQL instance connection name when it connects through a Cloud SQL
+   * socket. Never credentials or the connection URL. */
+  database?: {
+    host?: string | null;
+    instanceConnectionName?: string | null;
+  } | null;
 }
 /** The name of the last migration a server reports, whichever shape it reports it in. */
 export function lastMigrationName(identity: ReleaseIdentity | null) {
