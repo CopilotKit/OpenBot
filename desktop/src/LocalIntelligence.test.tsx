@@ -2054,6 +2054,122 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
   ]);
 });
 
+/**
+ * Found in a dogfooding report on a Mac, Podman: the server stopped mid-use and the window went
+ * back to setup. On Retry the back end said `degraded`, its checks failing, with six of eight
+ * services ready and the other two running but not ready yet. The window gave up on that first
+ * answer ("after 0.0s and 1 checks"), though the services were on their way up.
+ */
+const NOT_WORKING =
+  "OpenBot is running but not working properly. Retry to start it again.";
+function servicesComingUp(): LocalReport {
+  const base = report({
+    readiness: "degraded",
+    licence: "valid",
+    checksPassed: false,
+  });
+  return {
+    ...base,
+    stack: base.stack && {
+      ...base.stack,
+      observed: {
+        running: true,
+        services: [
+          { name: "cpki-app-api-6d9f", phase: "Running", ready: true },
+          { name: "cpki-gateway-7c4b", phase: "Running", ready: true },
+          { name: "cpki-learning-agent-756b", phase: "Running", ready: false },
+          {
+            name: "cpki-local-object-storage-0",
+            phase: "Running",
+            ready: false,
+          },
+        ],
+      },
+    },
+  };
+}
+
+test("Retry waits for a back end whose services are still coming up, and opens OpenBot once it is ready", async () => {
+  invokeHandler = answers({
+    run_local_eval: [servicesComingUp(), servicesComingUp(), ready],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(statusCalls()).toHaveLength(3);
+  expect(screen.queryByText(NOT_WORKING)).toBeNull();
+  expect(
+    invokeCalls.filter((call) => call.command === "back_end_wait_ended"),
+  ).toEqual([]);
+});
+
+test("a back end whose services never come up is waited on for the limit, then says Retry", async () => {
+  invokeHandler = answers({ run_local_eval: [servicesComingUp()] });
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0],
+  });
+  await screen.findByText(NOT_WORKING);
+  expect(statusCalls()).toHaveLength(3);
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  // The log says how long it waited and what the back end last said (`back_end_wait_ended`).
+  expect(
+    invokeCalls.filter((call) => call.command === "back_end_wait_ended"),
+  ).toEqual([{ command: "back_end_wait_ended", args: { why: NOT_WORKING } }]);
+});
+
+test("services coming up behind a short disk or an update on record still stop at the first answer", async () => {
+  const coming = servicesComingUp();
+  const shortDisk: LocalReport = {
+    ...coming,
+    shortfall: {
+      podman: true,
+      cpu: false,
+      memory: false,
+      disk: false,
+      recovering: true,
+      wsl: true,
+      drive: "C:",
+    },
+  };
+  const onRecord: LocalReport = {
+    ...coming,
+    stack: coming.stack && {
+      ...coming.stack,
+      updateInProgress: true,
+      unfinishedUpdate: {
+        to: "0.16.0-rc.13",
+        prepared: false,
+        stoppedDownloading: false,
+        failedStep: "dependencies-install",
+      },
+    },
+  };
+  for (const [answer, said] of [
+    [
+      shortDisk,
+      "OpenBot is recovering from low disk space. Wait a few minutes, then Retry.",
+    ],
+    [onRecord, NOT_WORKING],
+  ] as const) {
+    invokeHandler = answers({ run_local_eval: [answer] });
+    const screen = view({ stack: "local-abc123", connected: true });
+    await screen.findByRole("button", { name: "Retry" });
+    expect(row(screen, WAIT).textContent).toContain(said);
+    expect(statusCalls()).toHaveLength(1);
+    cleanup();
+    invokeCalls = [];
+  }
+});
+
 test("Cancel stops the running CLI call by its own attempt, and Retry resumes there", async () => {
   const pending = deferred<LocalReport>();
   invokeHandler = async (command) => {

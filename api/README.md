@@ -72,9 +72,13 @@ The `API spec` job in `.github/workflows/ci.yml` fails a pull request when:
 - the spec breaks a client of the base branch's spec (oasdiff). A change that takes nothing from a
   client goes through only when it is listed with its reason in
   [accepted-breaking-changes.md](accepted-breaking-changes.md);
-- the spec breaks a client of the last release's spec (oasdiff again), a deprecation names no
+- the spec breaks a client of any release whose apps the server still serves: each release of the
+  last 12 months and the last release, each against its own spec (oasdiff again), a deprecation names no
   `x-sunset` at least 365 days out, or a minimum app version cuts the 12-month support window
   (`scripts/support-window.ts`).
+
+What makes each of these fail, and how to fix it the right way:
+[docs/api-versioning.md](../docs/api-versioning.md#what-ci-enforces).
 
 The server ignores query parameters it does not know rather than refusing them, on purpose: a
 tolerant reader, so a client written against a newer spec still works against an older server.
@@ -123,6 +127,11 @@ those headers by hand. A deprecated response property is listed and dated the sa
 answer is marked for it and nothing counts it: a server can't see which fields a client reads. So a
 response property's removal waits on the 12-month window alone: it may go once its sunset has
 passed.
+
+To remove it, once both conditions hold, delete it from its area file and regenerate. oasdiff
+doesn't report a removal on or after its `x-sunset`, and fails one before it
+(`api-removed-before-sunset`). The policy behind these rules, and what each CI failure means, is in
+[docs/api-versioning.md](../docs/api-versioning.md).
 
 ## Enums that grow
 

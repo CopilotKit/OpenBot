@@ -61,6 +61,7 @@ function groupMessageOf(
     status: message.status,
     createdAt: message.createdAt ?? "",
     ...(message.reason === undefined ? {} : { reason: message.reason }),
+    ...(message.declined ? { declined: true } : {}),
     ...(message.answeredBy === undefined
       ? {}
       : { answeredBy: message.answeredBy }),
@@ -93,8 +94,10 @@ export type GroupMessage = {
    */
   status: string;
   createdAt: string;
-  /** Why a waiting Bot is waiting, when it is. */
+  /** Why a waiting Bot is waiting, when it is, in words for the person reading. */
   reason?: string;
+  /** A failed reply its person chose not to share: a choice, drawn as a notice and not an error. */
+  declined?: true;
   /** For an answer relayed from another Bot through `message_bot`: which Bot answered. */
   answeredBy?: string;
   /** A Team Bot asking the person whose turn it was to use their own account. */

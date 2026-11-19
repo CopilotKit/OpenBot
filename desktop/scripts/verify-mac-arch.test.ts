@@ -5,8 +5,14 @@
  *
  * Needs a Mac (`cc -arch`, `lipo`); elsewhere it skips. Desktop macOS signing runs it on macos-15.
  */
-import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, expect, test } from "bun:test";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -24,20 +30,41 @@ function temp() {
   return dir;
 }
 
+/**
+ * One compiled Mach-O for each set of architectures the tests use (two make a universal file),
+ * built while this file loads, before any test's clock starts. The first `cc` on a runner sets up
+ * its toolchain, and compiling inside a test ran past its five seconds on a loaded computer.
+ */
+const compiled = new Map<string, string>();
+const builds = onMac
+  ? mkdtempSync(join(tmpdir(), "verify-mac-arch-builds-"))
+  : "";
+afterAll(() => {
+  if (builds) rmSync(builds, { recursive: true, force: true });
+});
+if (onMac) {
+  const source = join(builds, "main.c");
+  writeFileSync(source, "int main(void) { return 0; }\n");
+  for (const archs of [["x86_64"], ["arm64"], ["x86_64", "arm64"]]) {
+    const out = join(builds, archs.join("+"));
+    const built = Bun.spawnSync([
+      "cc",
+      ...archs.flatMap((arch) => ["-arch", arch]),
+      "-o",
+      out,
+      source,
+    ]);
+    if (built.exitCode !== 0) throw new Error(built.stderr.toString());
+    compiled.set(archs.join("+"), out);
+  }
+}
+
 /** A Mach-O file at `path`, built for `archs` (two make a universal file). */
 function machO(path: string, ...archs: string[]) {
   mkdirSync(dirname(path), { recursive: true });
-  const source = join(dirname(path), ".main.c");
-  writeFileSync(source, "int main(void) { return 0; }\n");
-  const built = Bun.spawnSync([
-    "cc",
-    ...archs.flatMap((arch) => ["-arch", arch]),
-    "-o",
-    path,
-    source,
-  ]);
-  rmSync(source);
-  if (built.exitCode !== 0) throw new Error(built.stderr.toString());
+  const built = compiled.get(archs.join("+"));
+  if (!built) throw new Error(`no stand-in compiled for ${archs.join("+")}`);
+  copyFileSync(built, path);
 }
 
 /** An OpenBot.app whose executable and bundled Node are `arch`, with `extra` Mach-O files. */

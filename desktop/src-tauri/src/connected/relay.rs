@@ -20,10 +20,20 @@ What keeps it to that:
   window at `ENTER_PATH` with it; the relay answers with a cookie (`HttpOnly`, `SameSite=Strict`)
   and from then on refuses (403) anything that does not carry it. A page in the person's browser,
   or another program on this computer, has no way to learn it.
+- The cookie comes on a page of the relay's own (`ENTRY_PAGE`), which goes on to the app from the
+  relay's origin. Not a redirect: on the Mac the window arrives from its own `tauri://` page, and
+  WebKit keeps a `SameSite=Strict` cookie off every request of a navigation that began on another
+  site, the redirect's next request included, so the app's first page was refused. The hop from
+  the relay's own page is same-site, and carries it. That page has no script and no secret in it,
+  sends no referrer (the address it was opened at holds the secret), and replaces itself in the
+  window's history.
 - It forwards to the typed address and nowhere else: only origin-form request targets (no absolute
   URL, no CONNECT), and a redirect is handed back to the page, never followed.
 - On the way out it drops `Origin`, `Cookie`, `Referer`, `Forwarded` and `X-Forwarded-*`, and any
   `Authorization` the page sent. On the way back it drops `Set-Cookie`.
+
+It adds this app to the `OpenBot-Client` header the page sent, or sends this app's alone, so the
+OpenBot knows which apps a request came through (`client_version`).
 
 Bodies are passed on as they arrive, both ways, so a chat answer streams. A WebSocket upgrade is
 passed on and the two connections are joined.
@@ -58,6 +68,17 @@ pub const ENTER_PATH: &str = "/.openbot-relay/enter";
 const OWN_PREFIX: &str = "/.openbot-relay/";
 /// The cookie that carries the run's secret from the window.
 pub const COOKIE: &str = "openbot-relay";
+
+/// What the entry answers, with the cookie: a page that sends the window on to the app at once,
+/// from the relay's own origin, so the next request carries the `SameSite=Strict` cookie. A
+/// refresh rather than a script, and one that replaces the page in the window's history (HTML's
+/// declarative refresh navigates with "replace").
+const ENTRY_PAGE: &str = concat!(
+    "<!doctype html><html><head><meta charset=\"utf-8\">",
+    "<meta name=\"color-scheme\" content=\"light dark\">",
+    "<meta http-equiv=\"refresh\" content=\"0;url=/\">",
+    "<title>OpenBot</title></head><body></body></html>"
+);
 
 /// The request header that names the organisation the person is working in. A token carries no
 /// session, and a person can belong to several, so every request says which. Set by the shell
@@ -317,6 +338,8 @@ fn dropped_on_the_way_out(name: &HeaderName) -> bool {
         || name.starts_with("sec-fetch-")
         // The shell names the organisation, not the page.
         || name.eq_ignore_ascii_case(ORGANIZATION_HEADER)
+        // Passed on with this app added after it (`client_version::added_to`).
+        || name.eq_ignore_ascii_case(crate::client_version::HEADER)
 }
 
 /// Whether a request for `path` is one of OpenBot's own that takes the person's sign-in: its API,
@@ -367,9 +390,9 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
                 "This relay is for the OpenBot window.",
             );
         }
+        // A page, not a redirect: see the module's documentation.
         return Response::builder()
-            .status(StatusCode::SEE_OTHER)
-            .header(header::LOCATION, "/")
+            .status(StatusCode::OK)
             .header(
                 header::SET_COOKIE,
                 format!(
@@ -377,8 +400,19 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
                     shared.secret
                 ),
             )
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
             .header(header::CACHE_CONTROL, "no-store")
-            .body(Empty::new().map_err(|never| match never {}).boxed())
+            // The address this page was opened at holds the secret: the app is not told it.
+            .header(header::REFERRER_POLICY, "no-referrer")
+            .header(
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; frame-ancestors 'none'",
+            )
+            .body(
+                Full::new(Bytes::from_static(ENTRY_PAGE.as_bytes()))
+                    .map_err(|never| match never {})
+                    .boxed(),
+            )
             .expect("the entry response");
     }
 
@@ -430,6 +464,14 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
             continue;
         }
         headers.append(name.clone(), value.clone());
+    }
+    // Which apps the request came through: the page's own name, then this app's. On everything it
+    // passes on, so OpenBot knows this app is asking whatever the page is.
+    if let (Ok(name), Some(named)) = (
+        HeaderName::from_bytes(crate::client_version::HEADER.as_bytes()),
+        crate::client_version::added_to(request.headers()),
+    ) {
+        headers.insert(name, named);
     }
     // The person's sign-in and their organisation, for OpenBot's own API only.
     let signed_in = carries_the_sign_in(request.uri().path());
@@ -821,8 +863,7 @@ mod tests {
 
     fn enter(relay: &Relay) -> Window {
         let entered = http().get(relay.entry()).send().unwrap();
-        assert_eq!(entered.status(), 303);
-        assert_eq!(entered.headers()["location"], "/");
+        assert_eq!(entered.status(), 200);
         let cookie = entered.headers()["set-cookie"].to_str().unwrap().to_owned();
         assert!(
             cookie.ends_with("; HttpOnly; SameSite=Strict; Path=/"),
@@ -1002,6 +1043,32 @@ mod tests {
         assert_eq!(sent["body"], r#"{"message":"hello"}"#);
         // The token never comes back to the page.
         assert!(!sent.to_string().contains(&window.cookie));
+    }
+
+    /// OpenBot hears which apps a request came through: the name the window's page gave, then this
+    /// app's, on OpenBot's API and on its pages alike. A page that names none is this app alone.
+    #[test]
+    fn openbot_hears_the_pages_app_and_then_this_one() {
+        let rig = rig();
+        let window = rig.window();
+        let mine = format!("desktop/{}", crate::client_version::app_version());
+        let sent = window.echo(window.get(ECHO).header("openbot-client", "web/1.1.0"));
+        assert_eq!(
+            sent["headers"]["openbot-client"],
+            format!("web/1.1.0 {mine}")
+        );
+        let sent = window.echo(window.get(ECHO));
+        assert_eq!(sent["headers"]["openbot-client"], mine.as_str());
+        let page = window
+            .get("/landing")
+            .header("openbot-client", "web/1.1.0")
+            .send()
+            .unwrap();
+        assert_eq!(page.status(), 200);
+        assert_eq!(
+            rig.openbot.seen_at("/landing")[0].header("openbot-client"),
+            Some(format!("web/1.1.0 {mine}").as_str())
+        );
     }
 
     #[test]
@@ -1562,6 +1629,156 @@ mod tests {
         });
         assert_eq!(rig.openbot.closed_unanswered(), 3, "the upgrade, sent once");
         assert_eq!(rig.openbot.seen_at("/api/v2/socket").len(), 0);
+    }
+
+    /**
+    The window as WebKit runs it on the Mac, for the one thing that broke there: cookies and
+    navigation. It keeps the cookies it is given, and sends a `SameSite=Strict` one only on a
+    navigation that began on the same site. A redirect is part of the navigation that led to it,
+    so it keeps where that began; a page that sends the window on (a refresh) begins a new one, on
+    its own site. That is what a real WKWebView did, driven from a page on a custom scheme as the
+    OpenBot window's setup page is: the cookie from the entry's redirect was stored, and not sent.
+    */
+    struct WebKitWindow {
+        jar: Vec<(String, String, bool)>,
+    }
+
+    /// Where a navigation ended: its address, its status, and what the page said.
+    struct Arrived {
+        url: reqwest::Url,
+        status: u16,
+        body: String,
+        headers: reqwest::header::HeaderMap,
+    }
+
+    fn same_site(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+        a.scheme() == b.scheme() && a.host_str() == b.host_str()
+    }
+
+    /// The address a page's `<meta http-equiv="refresh">` sends the window on to, if it has one.
+    fn refreshes_to(body: &str) -> Option<String> {
+        let at = body.find("http-equiv=\"refresh\"")?;
+        let content = &body[at..];
+        let url = content.split("url=").nth(1)?;
+        Some(url.split('"').next()?.to_owned())
+    }
+
+    impl WebKitWindow {
+        fn new() -> Self {
+            Self { jar: Vec::new() }
+        }
+
+        /// The window told to go to `to` while it shows a page at `from`.
+        fn navigate(&mut self, from: &str, to: &str) -> Arrived {
+            let mut began_on = reqwest::Url::parse(from).unwrap();
+            let mut url = reqwest::Url::parse(to).unwrap();
+            for _ in 0..10 {
+                let cookies: Vec<String> = self
+                    .jar
+                    .iter()
+                    .filter(|(_, _, strict)| !strict || same_site(&began_on, &url))
+                    .map(|(name, value, _)| format!("{name}={value}"))
+                    .collect();
+                let mut request = http().get(url.clone());
+                if !cookies.is_empty() {
+                    request = request.header("cookie", cookies.join("; "));
+                }
+                let answered = request.send().unwrap();
+                for set in answered.headers().get_all("set-cookie") {
+                    let set = set.to_str().unwrap();
+                    let (name, value) = set.split(';').next().unwrap().split_once('=').unwrap();
+                    let strict = set.to_ascii_lowercase().contains("samesite=strict");
+                    self.jar.retain(|(kept, _, _)| kept != name);
+                    self.jar.push((name.to_owned(), value.to_owned(), strict));
+                }
+                let status = answered.status().as_u16();
+                let headers = answered.headers().clone();
+                if answered.status().is_redirection() {
+                    let location = headers["location"].to_str().unwrap();
+                    url = url.join(location).unwrap();
+                    continue;
+                }
+                let body = answered.text().unwrap();
+                if let Some(next) = refreshes_to(&body) {
+                    began_on = url.clone();
+                    url = url.join(&next).unwrap();
+                    continue;
+                }
+                return Arrived {
+                    url,
+                    status,
+                    body,
+                    headers,
+                };
+            }
+            panic!("the window went round in circles");
+        }
+    }
+
+    /// The window's setup page, where it is when the shell sends it to the relay.
+    const SETUP_PAGE: &str = "tauri://localhost/";
+
+    /// Connected, on the Mac: the window goes from its setup page to the entry address and must
+    /// end on the app's first page, not on the relay's refusal. A redirect with the cookie ended
+    /// there, because WebKit did not send the cookie on the redirect's next request.
+    #[test]
+    fn the_window_arriving_from_its_setup_page_reaches_the_app() {
+        let rig = rig();
+        let mut window = WebKitWindow::new();
+        let arrived = window.navigate(SETUP_PAGE, &rig.relay.entry());
+        assert_eq!(arrived.body, "<!doctype html><title>OpenBot</title>");
+        assert_eq!(arrived.status, 200);
+        assert_eq!(arrived.url.as_str(), format!("{}/", rig.relay.origin()));
+        let app = rig.openbot.seen_at("/");
+        assert_eq!(app.len(), 1);
+        // OpenBot never sees the run's secret, by cookie or by referrer.
+        assert_eq!(app[0].header("cookie"), None);
+        assert_eq!(app[0].header("referer"), None);
+
+        // From then on the app's own requests carry the cookie.
+        let origin = reqwest::Url::parse(&rig.relay.origin()).unwrap();
+        let again = window.navigate(origin.as_str(), &format!("{}{ECHO}", rig.relay.origin()));
+        assert_eq!(again.status, 200);
+        assert_eq!(rig.echoes(), 1);
+        assert!(again.headers.get("set-cookie").is_none());
+    }
+
+    /// The page that gives the cookie gives nothing else: no script, no secret, no referrer, no
+    /// frame and no copy kept. And the window without the entry is refused as before.
+    #[test]
+    fn the_entry_page_holds_no_secret_and_a_window_without_the_cookie_is_still_refused() {
+        let rig = rig();
+        let secret = rig.relay.entry().split_once("key=").unwrap().1.to_owned();
+
+        // Straight to the app, from the setup page or from the relay's own origin: refused.
+        let mut stranger = WebKitWindow::new();
+        for from in [SETUP_PAGE, rig.relay.origin().as_str()] {
+            let refused = stranger.navigate(from, &format!("{}/", rig.relay.origin()));
+            assert_eq!(refused.status, 403, "from {from}");
+            assert_eq!(refused.body, "This relay is for the OpenBot window.");
+        }
+        assert_eq!(rig.openbot.seen_at("/").len(), 0);
+
+        let entered = http().get(rig.relay.entry()).send().unwrap();
+        assert_eq!(entered.status(), 200);
+        let headers = entered.headers().clone();
+        let cookie = headers["set-cookie"].to_str().unwrap();
+        assert_eq!(
+            cookie,
+            format!("{COOKIE}={secret}; HttpOnly; SameSite=Strict; Path=/")
+        );
+        assert_eq!(headers["content-type"], "text/html; charset=utf-8");
+        assert_eq!(headers["cache-control"], "no-store");
+        assert_eq!(headers["referrer-policy"], "no-referrer");
+        assert_eq!(
+            headers["content-security-policy"],
+            "default-src 'none'; frame-ancestors 'none'"
+        );
+        let page = entered.text().unwrap();
+        assert!(!page.contains(&secret));
+        assert!(!page.contains("<script"));
+        assert_eq!(refreshes_to(&page).as_deref(), Some("/"));
+        assert_eq!(rig.openbot.seen_at(ENTER_PATH).len(), 0);
     }
 
     /// The entry address holds the run's secret, and the log's redaction covers it.
