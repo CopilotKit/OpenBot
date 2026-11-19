@@ -536,17 +536,28 @@ export class ManagementAgent {
       this.config.commandPublicKey,
       this.clock(),
     );
+    // `state` is the snapshot read once above. markHandled() persists through updateState() but
+    // does not change that snapshot, so a second copy of a command in this same reply would pass
+    // the old `includes` check and run again. Keep the ids we commit to in this reply here as well.
+    const seen = new Set(state.handledCommands);
     const fresh = (id: string | null): id is string =>
-      id !== null && !state.handledCommands.includes(id);
+      id !== null && !seen.has(id);
     for (const entry of ignored) {
       this.log("command ignored", { ...entry });
-      if (!fresh(entry.id) || entry.reason === "signature does not verify")
+      if (entry.reason === "signature does not verify" || !fresh(entry.id))
         continue;
-      await this.markHandled(entry.id);
+      // Only a verified command that has expired is refused for good. An unverified id must never
+      // be remembered (it could suppress a real signed command later), and one that is merely
+      // ahead of this clock must stay runnable once the clocks agree.
+      if (entry.reason === "expired") {
+        seen.add(entry.id);
+        await this.markHandled(entry.id);
+      }
       await this.report(entry.id, false, `ignored: ${entry.reason}`);
     }
     for (const command of accepted) {
       if (!fresh(command.id)) continue;
+      seen.add(command.id);
       await this.markHandled(command.id);
       this.log("command", { id: command.id, kind: command.kind });
       try {

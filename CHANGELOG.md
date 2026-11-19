@@ -276,6 +276,8 @@ or a script has to say.
 - An admin's review list shows a person as soon as their own space is made, and a denied folder
   action lands in Activity after the attempt it denied.
 - Mastra's mark is its current one.
+- A signed management command repeated in one heartbeat no longer runs twice, and a command that
+  is only ahead of the agent's clock stays runnable when the clocks agree.
 
 ## 1.1.0
 
