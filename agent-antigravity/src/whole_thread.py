@@ -274,7 +274,26 @@ def _joined(parts: List[Any]) -> Any:
     return parts
 
 
-def history_prompt(messages) -> Any:
+def _application_context(context, occupied_bytes: int) -> list[str]:
+    """Fit the current AG-UI context alongside the user request in the harness's text budget."""
+    if not context:
+        return []
+    prefix = "Application context for the current turn. Use this guide for the tools it describes.\n\n"
+    available = SEED_TEXT_BYTES - occupied_bytes - seed_cost([prefix])[0]
+    if available <= 0:
+        return []
+    guide = "\n\n".join(f"{entry.description}\n{entry.value}" for entry in context)
+    return [prefix + guide.encode()[:available].decode(errors="ignore")]
+
+
+def _with_application_context(prompt, context) -> Any:
+    if not context:
+        return prompt
+    parts = prompt if isinstance(prompt, list) else [prompt]
+    return _joined([*parts, *_application_context(context, seed_cost(parts)[0])])
+
+
+def history_prompt(messages, context=()) -> Any:
     """The conversation as one prompt, in the shape `conversation.send()` accepts.
 
     The harness takes a user message, not an assistant history, so earlier turns are replayed as
@@ -287,7 +306,7 @@ def history_prompt(messages) -> Any:
     """
     history = _history(messages)
     if len(history) == 1 and getattr(history[0], "role", None) == "user":
-        return _message_prompt(history[0].content)
+        return _with_application_context(_message_prompt(history[0].content), context)
 
     leading = 0
     while leading < len(history) and history[leading].role in _INSTRUCTION_ROLES:
@@ -297,11 +316,16 @@ def history_prompt(messages) -> Any:
     entries = [_entry_parts(message) for message in turns]
     # The preamble, the note and the leading rows are part of the same message, so they come out
     # of the budget too.
+    costs = [seed_cost(parts) for parts in entries]
     overhead = _total(
         [seed_cost([_HISTORY_PREAMBLE, _left_out(len(turns))]), *map(seed_cost, kept)]
     )
+    # Keep room for everything from the latest user message onward before fitting the UI guide.
+    latest = next((i for i in reversed(range(len(turns))) if turns[i].role == "user"), len(turns))
+    guide = _application_context(context, overhead[0] + sum(cost[0] for cost in costs[latest:]))
+    overhead = _total([overhead, seed_cost(guide)])
     budget = tuple(limit - spent for limit, spent in zip(SEED_BUDGET, overhead, strict=True))
-    start = replay_start(turns, [seed_cost(parts) for parts in entries], budget)
+    start = replay_start(turns, costs, budget)
     parts: List[Any] = [_HISTORY_PREAMBLE]
     for entry in kept:
         parts.extend(entry)
@@ -309,7 +333,7 @@ def history_prompt(messages) -> Any:
         parts.append(_left_out(start))
     for entry in entries[start:]:
         parts.extend(entry)
-    return _joined(parts)
+    return _joined([*parts, *guide])
 
 
 def added_prompt(rows, message) -> Any:
@@ -514,12 +538,12 @@ class OpenBotAntigravityAgent(AntigravityAgent):
             }
             held.seeded_users = {message.id for message in history if message.role == "user"}
             held.rows = {_row_key(row) for row in _rows(input_data.messages)}
-            return history_prompt(input_data.messages), prompt_id
+            return history_prompt(input_data.messages, input_data.context), prompt_id
         # A live session that already holds everything before `prompt`, except any system row
         # added since: a skill's instructions for this message, or a rewritten memory record.
         added = [row for row in _rows(input_data.messages) if _row_key(row) not in held.rows]
-        if not added:
-            return prompt, prompt_id
-        message = next(m for m in input_data.messages if getattr(m, "id", None) == prompt_id)
-        held.sending = (prompt_id, {_row_key(row) for row in added})
-        return added_prompt(added, message), prompt_id
+        if added:
+            message = next(m for m in input_data.messages if getattr(m, "id", None) == prompt_id)
+            held.sending = (prompt_id, {_row_key(row) for row in added})
+            prompt = added_prompt(added, message)
+        return _with_application_context(prompt, input_data.context), prompt_id

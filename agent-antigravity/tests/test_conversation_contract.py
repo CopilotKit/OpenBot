@@ -146,6 +146,45 @@ def _system_instruction(body: dict) -> str:
     return json.dumps(body.get("systemInstruction", {}))
 
 
+def test_canvas_planning_does_not_offer_harness_workspace_tools(monkeypatch, tmp_path):
+    draw = conversation()
+    draw["tools"].append({
+        "name": "render_ui",
+        "description": "Render A2UI.",
+        "parameters": {
+            "type": "object",
+            "properties": {"target": {"type": "string", "enum": ["chat", "canvas"]}},
+        },
+    })
+    draw["forwardedProps"]["openbotCanvasCatalog"] = {
+        "catalogId": "test/canvas",
+        "protocolVersion": "1.0",
+        "components": {
+            "Text": {
+                "type": "object",
+                "properties": {"component": {"const": "Text"}, "text": {"type": "string"}},
+            },
+        },
+    }
+    with fresh_bot(monkeypatch, tmp_path) as run:
+        canvas_body = run(draw)
+        chat = conversation()
+        chat["threadId"] = "plain-chat"
+        chat_body = run(chat)
+
+    def tool_names(body):
+        return {entry["name"] for tool in body.get("tools", [])
+                for entry in tool.get("functionDeclarations", [])}
+
+    canvas_names = tool_names(canvas_body)
+    assert "render_canvas" in canvas_names
+    assert not ({"run_command", "view_file", "list_directory"} & canvas_names)
+    assert {"run_command", "view_file"} <= tool_names(chat_body)
+    ask_for_canvas = "When the user asks for the canvas, call render_canvas"
+    assert ask_for_canvas in _system_instruction(canvas_body)
+    assert ask_for_canvas not in _system_instruction(chat_body)
+
+
 def _user_turn(body: dict) -> str:
     """The text of the newest user turn the model was sent."""
     turn = [content for content in body["contents"] if content.get("role") == "user"][-1]
@@ -187,6 +226,22 @@ def test_a_live_session_is_not_sent_the_history_twice(monkeypatch, tmp_path):
     assert NEXT_QUESTION in sent
     assert sent.count(EARLIER_QUESTION) == 1, sent
     assert sent.count(LATEST_QUESTION) == 1, sent
+
+
+def test_current_application_context_reaches_the_model_as_conversation_data(monkeypatch, tmp_path):
+    first = conversation()
+    first["context"] = [{"description": "UI guide", "value": "FIRST_CANVAS_GUIDE_7f3a"}]
+    with fresh_bot(monkeypatch, tmp_path) as run:
+        before = run(first)
+        following = _next_turn(first, _said(run.events[0]))
+        following["context"] = [{"description": "UI guide", "value": "NEXT_CANVAS_GUIDE_7f3a"}]
+        after = run(following)
+
+    for body, guide in ((before, "FIRST_CANVAS_GUIDE_7f3a"), (after, "NEXT_CANVAS_GUIDE_7f3a")):
+        assert "UI guide" in _user_turn(body)
+        assert guide in _user_turn(body)
+        assert guide not in _system_instruction(body)
+    assert "FIRST_CANVAS_GUIDE_7f3a" not in _user_turn(after)
 
 
 def test_a_changed_standing_role_reaches_the_next_run(monkeypatch, tmp_path):
