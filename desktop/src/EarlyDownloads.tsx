@@ -23,8 +23,8 @@ export type EarlyDownloads = {
   size?: number;
   bytesPerSecond?: number;
   /**
-   * When the disk is short: free on this computer's disk, what OpenBot needs free to run (the 15
-   * the account step's check asks for too), and what the downloads add on top of it.
+   * When the disk is short: free on this computer's disk, what OpenBot needs free to run (the
+   * figure the account step's check asks for too), and what the downloads add on top of it.
    */
   free?: number;
   needed?: number;
@@ -124,7 +124,8 @@ export function earlyDownloadsSaid(
     }
     case "short":
       return free != null && needed != null
-        ? `This computer has ${gigabytes(free)} of free space, and OpenBot needs ${gigabytes(needed)}${downloadSaid(download)}. Free up some space and the download starts by itself.`
+        ? // What OpenBot needs is rounded up, as the account step rounds the same figure.
+          `This computer has ${gigabytes(free)} of free space, and OpenBot needs ${gigabytes(needed, Math.ceil)}${downloadSaid(download)}. Free up some space and the download starts by itself.`
         : null;
     case "done":
       return null;

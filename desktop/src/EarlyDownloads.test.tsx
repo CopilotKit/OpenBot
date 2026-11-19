@@ -204,6 +204,28 @@ const WINDOWS_F_SHORT: EarlyDownloads = {
 };
 
 /**
+ * mac3 at 24 GB free: this line said OpenBot "needs 25 GB" where the account step said 26 for the
+ * same 25.34 GiB. What OpenBot needs is rounded up, as the account step rounds it, so the two screens
+ * say one figure and it is never less than what is needed.
+ */
+test("what OpenBot needs is said rounded up, the figure the account step says", () => {
+  expect(
+    earlyDownloadsSaid(
+      {
+        state: "short",
+        bytes: 0,
+        free: 25_768_476_672,
+        needed: 27_212_385_536,
+        download: 6_192_318_069,
+      },
+      true,
+    )?.replaceAll(" ", " "),
+  ).toBe(
+    "This computer has 24 GB of free space, and OpenBot needs 26 GB plus about 6 GB for its download. Free up some space and the download starts by itself.",
+  );
+});
+
+/**
  * Windows F, filled to 15.0 GB free: this line said "16 GB of free space, and OpenBot needs about
  * 44 GB", and the next screen "It needs 40 GB free". Both were the back end's 40 GiB: this one added
  * the download and counted billions of bytes. It says the 40 and the download apart now, in the GB
