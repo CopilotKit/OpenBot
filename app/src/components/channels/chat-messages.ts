@@ -56,6 +56,10 @@ export type SentAttachment = {
   url: string;
   filename?: string;
   modality: "image" | "document";
+  /** The file's size when the message carries it. A picture over the inline ceiling is not drawn. */
+  sizeBytes?: number;
+  /** The type the server found in the bytes, when the message carries it. */
+  mimeType?: string;
 };
 
 /**
@@ -145,12 +149,14 @@ function attachmentIdFromUrl(url: string): string {
 function readAttachmentMetadata(part: { type: string }): {
   attachmentId?: string;
   filename?: string;
+  sizeBytes?: number;
 } {
   const raw = (part as { metadata?: unknown }).metadata;
   if (typeof raw !== "object" || raw === null) return {};
-  const { attachmentId, filename } = raw as {
+  const { attachmentId, filename, sizeBytes } = raw as {
     attachmentId?: unknown;
     filename?: unknown;
+    sizeBytes?: unknown;
   };
 
   return {
@@ -158,6 +164,12 @@ function readAttachmentMetadata(part: { type: string }): {
       ? { attachmentId }
       : {}),
     ...(typeof filename === "string" && filename ? { filename } : {}),
+    // Narrowed like the two above: only a real size decides how a picture is drawn.
+    ...(typeof sizeBytes === "number" &&
+    Number.isFinite(sizeBytes) &&
+    sizeBytes >= 0
+      ? { sizeBytes }
+      : {}),
   };
 }
 
@@ -557,12 +569,16 @@ export function toVisibleChatItems(
         url,
         // Already narrowed to a non-empty string, or absent: see `readAttachmentMetadata`.
         ...(metadata.filename ? { filename: metadata.filename } : {}),
+        ...(metadata.sizeBytes !== undefined
+          ? { sizeBytes: metadata.sizeBytes }
+          : {}),
+        ...(source.mimeType ? { mimeType: source.mimeType } : {}),
         /*
-         * `source.mimeType` IS ALWAYS ABSENT HERE, AND THAT IS NO LONGER THE PROBLEM IT WAS.
+         * `source.mimeType` WAS ABSENT HERE ON EVERY MESSAGE SENT BEFORE PICTURES COULD BE 100MB.
          *
-         * A sent message's part is built by `toAttachmentPart` in `channel-chat.tsx`, which writes
-         * `source: { type: "url", value }` and carries no `mimeType` — so this call always falls
-         * through to `part.type`. What changed is what `part.type` MEANS: that function now derives
+         * A sent message's part is built by `toAttachmentPart` in `channel-chat.tsx`, which used to
+         * write `source: { type: "url", value }` with no `mimeType`, so this call fell through to
+         * `part.type`; it now writes the type the server found, so a newer message carries both. What changed is what `part.type` MEANS: that function now derives
          * it with this same `attachmentModality`, off the `mimeType` the server sniffed from the
          * bytes, instead of casting the browser's claim. The stored `type` is the corroborated
          * answer, so falling back to it is right rather than merely tolerable.

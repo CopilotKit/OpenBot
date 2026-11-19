@@ -17,7 +17,24 @@ fn main() {
         println!("1.4.3");
         return;
     }
-    if joined.starts_with("image inspect ") {
+    // An image the test says this engine does not have, until something pulls it. Every other
+    // image is here.
+    let missing = std::env::var("OPENBOT_TEST_ENGINE_MISSING_IMAGE").ok();
+    let pulled_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD")
+        .map(|record| std::path::PathBuf::from(format!("{}.pulled", record.to_string_lossy())));
+    let pulled = |image: &str| {
+        pulled_record.as_ref().is_some_and(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .any(|line| line == image)
+        })
+    };
+    if let Some(image) = joined.strip_prefix("image inspect ") {
+        if missing.as_deref() == Some(image) && !pulled(image) {
+            eprintln!("Error: No such image: {image}");
+            std::process::exit(1);
+        }
         return;
     }
     if SCENARIO == "installation-boundary" {
@@ -43,6 +60,36 @@ fn main() {
             .open(path)
             .unwrap();
         writeln!(log, "{}\t{}", cwd.display(), joined).unwrap();
+    }
+    // The `server` container's environment, as Compose gives it one. A container takes `.env` (the
+    // Compose file's `env_file`), and the host token and encryption key Compose was handed, when it
+    // is created, and keeps them until it is created again: `restart` changes none of it. `up`
+    // creates it when there is none, when `.env` changed since (a changed configuration), and always
+    // with `--force-recreate`. `server-env` in the installation holds what the running server has,
+    // the two credentials by their length only. Every other command succeeds and says nothing.
+    if SCENARIO == "server-env" {
+        if args.first().map(String::as_str) == Some("compose")
+            && args.iter().any(|arg| arg == "up")
+            && args.iter().any(|arg| arg == "server")
+        {
+            let env = std::fs::read_to_string(".env").unwrap_or_default();
+            let made_from = std::fs::read_to_string(".fixture-server-made-from").ok();
+            let recreate = args.iter().any(|arg| arg == "--force-recreate");
+            if recreate || made_from.as_deref() != Some(env.as_str()) {
+                let length = |name: &str| std::env::var(name).unwrap_or_default().len();
+                std::fs::write(".fixture-server-made-from", &env).unwrap();
+                std::fs::write(
+                    "server-env",
+                    format!(
+                        "{env}host-token-length={}\nencryption-key-length={}\n",
+                        length("OPENBOT_DESKTOP_HOST_TOKEN"),
+                        length("KEY_ENCRYPTION_KEY"),
+                    ),
+                )
+                .unwrap();
+            }
+        }
+        return;
     }
     if SCENARIO == "compose-provider" {
         println!("Docker Compose version disposable-provider");
@@ -118,6 +165,19 @@ fn main() {
     }
     match joined.as_str() {
         "compose version" => println!("Docker Compose synthetic"),
+        // A pull of the image this engine is missing puts it here.
+        value if missing.as_deref().is_some_and(|image| value == format!("pull {image}")) => {
+            let path = pulled_record.as_ref().expect("a pull is recorded");
+            let mut done = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .unwrap();
+            writeln!(done, "{}", missing.as_deref().unwrap()).unwrap();
+        }
+        // Read before a Start that remaps the Bot's host port. No COMPOSE_FILE is set, so Start
+        // finds the installation's own `docker-compose.yml`.
+        "compose config --environment" if SCENARIO == "harness" => {}
         // Start looks for a `migrate` or `worker` container an earlier release left. None here.
         value
             if value.starts_with(
@@ -125,13 +185,26 @@ fn main() {
             ) && value.contains(" --filter label=com.docker.compose.service=") => {}
         "compose ps --format {{.Ports}}" => {
             if SCENARIO == "harness" {
-                println!("127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp");
+                // The default Bot's port (4215) among them, so a Start in these tests keeps it as
+                // the stack's own rather than probing it while another test's Start probes it too.
+                println!(
+                    "127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp, 127.0.0.1:4215->4215/tcp"
+                );
             }
         }
+        // `up`, with the profiles of whatever it names: the picked Bot's, a plan engine's.
         value
-            if value.starts_with("compose up -d --no-build --pull never ")
-                || value
-                    .starts_with("compose --profile harness up -d --no-build --pull never ") =>
+            if {
+                let mut rest = value.strip_prefix("compose ").unwrap_or("");
+                // The overlay that remaps the Bot's host port, when one is named.
+                while let Some(after) = rest.strip_prefix("-f ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                while let Some(after) = rest.strip_prefix("--profile ") {
+                    rest = after.split_once(' ').map_or("", |(_, rest)| rest);
+                }
+                rest.starts_with("up -d --no-build --pull never ")
+            } =>
         {
             if SCENARIO == "up-fails" {
                 eprintln!("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");

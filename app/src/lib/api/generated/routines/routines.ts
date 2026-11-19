@@ -40,6 +40,8 @@ import type {
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
+  UpdateRoutineHeaders,
+  UpdateRoutineRequest,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -290,7 +292,7 @@ export const getCreateRoutineUrl = (organizationId: string) => {
 };
 
 /**
- * Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. There is no operation to change a routine: that is done by asking its Bot. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. updateRoutine changes one. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create a routine
  */
 export const createRoutine = async (
@@ -428,6 +430,164 @@ export const useCreateRoutine = <
   TContext
 > => {
   return useMutation(getCreateRoutineMutationOptions(options), queryClient);
+};
+export const getUpdateRoutineUrl = (
+  organizationId: string,
+  routineId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/routines/${encodeURIComponent(String(routineId))}`;
+};
+
+/**
+ * Change one of the caller's routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine's, and its next run is worked out from now. One that does not exist, or is somebody else's, is not found. A repeated request with the same Idempotency-Key and body returns the first result.
+ * @summary Change a routine
+ */
+export const updateRoutine = async (
+  organizationId: string,
+  routineId: string,
+  updateRoutineRequest: UpdateRoutineRequest,
+  headers: UpdateRoutineHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<RoutineResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<RoutineResponse>(
+    getUpdateRoutineUrl(organizationId, routineId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(updateRoutineRequest),
+    },
+  );
+};
+
+export const getUpdateRoutineMutationKey = () => ["updateRoutine"] as const;
+
+export const getUpdateRoutineMutationOptions = <
+  TError =
+    | InvalidRoutineResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | RoutineNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRoutine>>,
+    TError,
+    UpdateRoutineMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateRoutine>>,
+  TError,
+  UpdateRoutineMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateRoutineMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateRoutine>>,
+    UpdateRoutineMutationVariables
+  > = (props) => {
+    const { organizationId, routineId, data, headers } = props ?? {};
+
+    return updateRoutine(
+      organizationId,
+      routineId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateRoutineMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateRoutine>>
+>;
+export type UpdateRoutineMutationBody = UpdateRoutineRequest;
+export type UpdateRoutineMutationError =
+  | InvalidRoutineResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | RoutineNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type UpdateRoutineMutationVariables = {
+  organizationId: string;
+  routineId: string;
+  data: UpdateRoutineRequest;
+  headers: UpdateRoutineHeaders;
+};
+
+/**
+ * @summary Change a routine
+ */
+export const useUpdateRoutine = <
+  TError =
+    | InvalidRoutineResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | RoutineNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateRoutine>>,
+      TError,
+      UpdateRoutineMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateRoutine>>,
+  TError,
+  UpdateRoutineMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdateRoutineMutationOptions(options), queryClient);
 };
 export const getDeleteRoutineUrl = (
   organizationId: string,

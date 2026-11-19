@@ -441,7 +441,7 @@ describe("reviewing proposed skills", () => {
   }
 
   /** A review as approving or rejecting a proposal answers it. */
-  const reviewed = (proposalId: string, status: "approved" | "rejected") =>
+  const reviewed = (proposalId: string, status: string) =>
     served(learningContract.ApproveLearningProposalResponse, {
       proposalId,
       operation: "add",

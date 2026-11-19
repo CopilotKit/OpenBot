@@ -48,7 +48,10 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useAttachmentLimits,
+} from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
 import {
   type ConversationModel,
@@ -118,6 +121,7 @@ function RouteComponent() {
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const attachmentLimits = useAttachmentLimits();
   /*
    * The personal edition has nobody to share a Bot with. Its Explore lists the Bots included with
    * OpenBot, and when there are none it shows nothing: "Nobody has shared a Bot with you yet" was
@@ -316,6 +320,7 @@ function RouteComponent() {
             key={restores}
             // Files wait in the box until the message has a conversation to go to; see `start`.
             holdsFilesUntilSent
+            attachmentLimits={attachmentLimits}
             modelPicker={
               <ModelPicker
                 catalogue={models.data}

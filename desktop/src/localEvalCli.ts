@@ -32,6 +32,7 @@ export const localFailures = [
   "invalid-acceptance",
   "rootless-podman",
   "download-stalled",
+  "below-security-floor",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
 
@@ -110,7 +111,18 @@ export type Shortfall = {
   drive?: string;
   /** `diskGb` is what is free on `drive`, which ran short rather than the machine's own disk. */
   freeOnDrive?: boolean;
+  /** That drive is this Mac's own disk, under Docker Desktop's or Podman's machine disk. */
+  mac?: boolean;
+  /**
+   * What is short is room for an update (`local_eval::update_room`): `neededGb` is what the
+   * update needs free where `diskGb` was measured.
+   */
+  updating?: boolean;
+  neededGb?: string;
 };
+
+/** How far an unfinished update got, as the CLI recorded it (`local_eval::UpdateState`). */
+export type UpdateState = "prepared" | "migrating" | "migrated" | "other";
 
 export type LocalReport = {
   outcome: LocalOutcome;
@@ -131,6 +143,12 @@ export type LocalReport = {
       to: string;
       /** No migration started: the release that answers is `installedRelease`. */
       prepared: boolean;
+      /**
+       * How far it got (`local_eval::UpdateState`). `migrating`: part-way through updating the data.
+       * `migrated`: the data is on the new release, and its services had not finished starting.
+       * Absent from an older build's answer.
+       */
+      state?: UpdateState;
       stoppedDownloading: boolean;
       /** The CLI's name for the step that failed, such as `update-quiesce`, when it recorded one. */
       failedStep?: string;

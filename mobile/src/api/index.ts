@@ -33,7 +33,6 @@ export type {
   Memory,
   Routine,
   RoutineRun,
-  RoutineRunStatus,
   Task,
   TaskStatus,
 } from "./generated/model";

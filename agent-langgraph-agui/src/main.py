@@ -104,8 +104,10 @@ def _resolve_provider(provider: str):
 # `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, and the `-pro` and
 # `-codex` models are not served on Chat Completions at all. OpenAI's own words: "GPT-6 Astra,
 # GPT-6.1 Sol, and GPT-6.1 Terra support Chat Completions, but tool calling requires Responses."
+# `gpt-5.4*` and `gpt-5.5*` take tools on Chat Completions only without a reasoning effort: with one,
+# "Function tools with reasoning_effort are not supported for gpt-5.5 in /v1/chat/completions."
 _RESPONSES_API_MODEL = re.compile(
-    r"^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
+    r"^gpt-5\.[4-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
 )
 
 # The efforts each integration takes, as its own field declares them: `reasoning_effort` (alias

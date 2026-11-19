@@ -46,7 +46,7 @@ function operationLabel(proposal: LearningProposal): string {
   }
 }
 
-const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
+const RUN_STATUS: Partial<Record<string, string>> = {
   queued: "queued",
   freezing: "starting",
   batching: "analyzing",
@@ -55,6 +55,19 @@ const RUN_STATUS: Record<LearningRunSummary["status"], string> = {
   succeeded: "finished",
   failed: "failed",
 };
+
+/**
+ * What a group's row says about its latest run: where it stands, and why it failed when it did. A
+ * status a newer server sends that this app doesn't know is left out.
+ */
+export function latestRunLine(
+  run: Pick<LearningRunSummary, "status" | "failure">,
+): string {
+  const status = RUN_STATUS[run.status];
+  return [status ? `Latest run ${status}.` : null, run.failure]
+    .filter(Boolean)
+    .join(" ");
+}
 
 type StartState = {
   pending: boolean;
@@ -305,12 +318,7 @@ export function LearningReview() {
                   {canReview && (
                     <ItemDescription>
                       {group.latestRun
-                        ? [
-                            `Latest run ${RUN_STATUS[group.latestRun.status]}.`,
-                            group.latestRun.failure,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")
+                        ? latestRunLine(group.latestRun)
                         : "No run yet."}
                     </ItemDescription>
                   )}

@@ -76,17 +76,25 @@ import { queryClient } from "@/query-client";
 import { KIND_LABEL, Triggers } from "./triggers";
 import { useGoalRuns, useGoalTriggers } from "./use-goal-reads";
 
-type Status = ResponsibilityRecord["status"];
-
 /** A responsibility's state, as a word and as the mark its row leads with. */
-export const STATUS: Record<
-  Status,
-  { label: string; icon: typeof IconTarget }
+const STATUS: Partial<
+  Record<string, { label: string; icon: typeof IconTarget }>
 > = {
   active: { label: "Active", icon: IconTarget },
   paused: { label: "Paused", icon: IconPlayerPause },
   completed: { label: "Completed", icon: IconCircleCheck },
 };
+
+/**
+ * A responsibility's state as a word and a mark. A state a newer server sends that this app doesn't
+ * know has no word, and the plain goal mark.
+ */
+export function goalStatusOf(status: string): {
+  label: string | null;
+  icon: typeof IconTarget;
+} {
+  return STATUS[status] ?? { label: null, icon: IconTarget };
+}
 
 /**
  * What a responsibility's page says under its title: its state, and while it is active, what starts
@@ -106,7 +114,9 @@ export function summaryFor(
   triggers: TriggerRecord[] | undefined,
   routines: readonly RoutineRecord[] | undefined,
 ): string {
-  const status = STATUS[goal.status].label;
+  const status = goalStatusOf(goal.status).label;
+  // A state this app doesn't know: nothing it can say about it, or about what starts it.
+  if (status === null) return "";
   if (goal.status === "completed") return status;
   if (goal.status === "paused")
     return `${status} · Nothing starts it until you resume it`;
