@@ -120,10 +120,12 @@ export async function collectHeartbeat(options: {
               ready: condition?.status === "True",
               reason: clip(condition?.reason, 512),
               message: clip(condition?.message, 2048),
+              // The chart version and OCI digest of the last release Helm deployed. A history
+              // entry's own `digest` is the Helm release's, not the chart's, so it is not used.
               lastAppliedRevision: clip(
-                history?.chartVersion
-                  ? `${history.chartVersion}${history.digest ? `@${history.digest}` : ""}`
-                  : release.status?.lastAttemptedRevision,
+                history?.status === "deployed" && history.chartVersion
+                  ? `${history.chartVersion}${condition?.status === "True" && release.status?.lastAttemptedRevisionDigest ? `@${release.status.lastAttemptedRevisionDigest}` : ""}`
+                  : "",
                 512,
               ),
             },

@@ -41,6 +41,8 @@ FROM oven/bun@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52
 COPY --from=kubectl /kubectl /usr/local/bin/kubectl
 COPY --from=build /out/agent.js /app/agent.js
 # Not root, and no shell needed at run time.
+# kubectl keeps its discovery cache under $HOME; /tmp is the writable volume.
+ENV HOME=/tmp
 USER 65532:65532
 WORKDIR /tmp
 ENTRYPOINT ["bun", "/app/agent.js"]
