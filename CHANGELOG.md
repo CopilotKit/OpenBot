@@ -276,6 +276,9 @@ or a script has to say.
 - An admin's review list shows a person as soon as their own space is made, and a denied folder
   action lands in Activity after the attempt it denied.
 - Mastra's mark is its current one.
+- The management agent no longer loses a handled command or a promotion phase when a signed command
+  arrives while it is writing the upgrade journal, which could leave an install waiting for a person
+  to clear the journal by hand.
 
 ## 1.1.0
 
