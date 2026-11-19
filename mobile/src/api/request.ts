@@ -8,6 +8,7 @@
  * refusal of this app as too old (CLIENT_UPDATE_REQUIRED) is also told to the root layout, which shows Update OpenBot.
  */
 import * as Crypto from "expo-crypto";
+import * as auth from "../auth";
 import { authClient, serverUrl } from "../auth";
 import {
   CLIENT_UPDATE_REQUIRED,
@@ -15,12 +16,17 @@ import {
   reportUpdateRequired,
 } from "../client-version";
 import {
-  createOrganizationAddress,
+  createOrganizationChoice,
   type ListedOrganization,
   ORGANIZATION,
+  ORGANIZATION_HEADER,
+  type OrganizationChoices,
 } from "../organization";
 import { clientHeaders } from "../release";
-import { listOrganizations } from "./generated/organizations/organizations";
+import {
+  getListOrganizationsUrl,
+  listOrganizations,
+} from "./generated/organizations/organizations";
 
 /**
  * A refusal from the server, with its status and the API's problem code when it gave one, and whether a refusal of
@@ -46,16 +52,21 @@ export class ApiError extends Error {
 export const ORGANIZATION_ID = "{organizationId}";
 
 /**
- * The organization every install has. What the deployment itself offers (how people sign in) is asked of it, because
- * that is asked before anybody has signed in, when the organization a person works in is not known yet.
+ * The organization every install has. What the deployment itself offers (how people sign in) is asked of it before
+ * anybody has signed in, when the organization a person works in is not known yet. Once somebody is signed in it is
+ * asked of the organization they work in ({@link deploymentOrganization}), since `default` need not be one of theirs.
  */
 export const DEPLOYMENT_ORGANIZATION_ID = "default";
 
 /** {@link ORGANIZATION_ID} as a generated call writes it into an address: each parameter is encoded as one segment. */
 const WRITTEN = `/api/v2/organizations/${encodeURIComponent(ORGANIZATION_ID)}`;
 
-const addressed = createOrganizationAddress(async () => {
-  const organizations: ListedOrganization[] = [];
+/** Where the person's organizations are listed. It names no organization, and is what tells which ones there are. */
+const OWN_ORGANIZATIONS = getListOrganizationsUrl();
+
+/** Every organization the person is in, page by page. */
+async function everyOrganization(): Promise<ListedOrganization[]> {
+  const listed: ListedOrganization[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
   try {
@@ -64,7 +75,7 @@ const addressed = createOrganizationAddress(async () => {
         limit: 100,
         ...(cursor ? { cursor } : {}),
       });
-      organizations.push(...page.organizations);
+      listed.push(...page.organizations);
       if (cursor) seen.add(cursor);
       cursor =
         typeof page.nextCursor === "string" ? page.nextCursor : undefined;
@@ -75,12 +86,23 @@ const addressed = createOrganizationAddress(async () => {
       return [{ id: DEPLOYMENT_ORGANIZATION_ID, active: true }];
     throw error;
   }
-  return organizations;
-});
+  return listed;
+}
+
+const organizations = createOrganizationChoice(
+  everyOrganization,
+  // Read off the module when used, so a phone with nowhere to keep it (a test that stands in for sign-in) keeps nothing.
+  {
+    read: async () => (await auth.organizationStore?.read()) ?? null,
+    write: async (id) => {
+      await auth.organizationStore?.write(id);
+    },
+  },
+);
 
 /** An address with its organization filled in, for whoever holds `cookie`. Any other address is left as it is. */
 function inOrganization(url: string, cookie: string | null): Promise<string> {
-  return addressed(
+  return organizations.address(
     url.startsWith(WRITTEN)
       ? `${ORGANIZATION}${url.slice(WRITTEN.length)}`
       : url,
@@ -89,11 +111,47 @@ function inOrganization(url: string, cookie: string | null): Promise<string> {
 }
 
 /**
+ * The organization a request is for, for its OpenBot-Organization header: the one its address names, else the one the
+ * person works in. Nothing before sign-in, when nobody works anywhere yet, and nothing for the list of the person's
+ * organizations, which is how the one they work in is found.
+ */
+async function organizationFor(
+  address: string,
+  cookie: string | null,
+): Promise<string | undefined> {
+  if (!cookie || address.startsWith(OWN_ORGANIZATIONS)) return undefined;
+  const named = /^\/api\/v2\/organizations\/([^/?]+)/.exec(address)?.[1];
+  return named ? decodeURIComponent(named) : organizations.current(cookie);
+}
+
+/**
  * An address under the person's organization, for one that is opened and not fetched: a socket. `rest` is what follows
  * the organization, starting with a slash.
  */
 export async function organizationAddress(rest: string): Promise<string> {
   return inOrganization(`${ORGANIZATION}${rest}`, await authClient.getCookie());
+}
+
+/** The organization the deployment is asked about: `default` before sign-in, else the one the person works in. */
+export async function deploymentOrganization(): Promise<string> {
+  return (await authClient.getCookie())
+    ? ORGANIZATION_ID
+    : DEPLOYMENT_ORGANIZATION_ID;
+}
+
+/** The signed-in person's organizations, and the one they work in. */
+export async function organizationChoices(): Promise<OrganizationChoices> {
+  return organizations.choices((await authClient.getCookie()) ?? "");
+}
+
+/**
+ * Work in another of the person's organizations from now on: every request after this goes there, and the phone keeps
+ * the pick for the next time the app opens.
+ */
+export async function chooseOrganization(
+  id: string,
+): Promise<OrganizationChoices> {
+  return organizations.choose(id, (await authClient.getCookie()) ?? "");
 }
 
 /** The person asking, as the API addresses them in its `people/{personId}` operations. */
@@ -140,6 +198,8 @@ export async function apiRequest<T>(
   const cookie = await authClient.getCookie();
   if (cookie) headers.cookie = cookie;
   const address = await inOrganization(url, cookie);
+  const organization = await organizationFor(address, cookie);
+  if (organization) headers[ORGANIZATION_HEADER] = organization;
   const response = await fetch(`${serverUrl}${address}`, {
     ...init,
     method,

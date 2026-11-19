@@ -6,6 +6,7 @@ import {
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { nudgeMoment } from "@/lib/notices";
+import { currentOrganizationId } from "@/lib/organizations/current";
 import {
   isBotReply,
   noticeChannelEvent,
@@ -62,14 +63,35 @@ export function isChannelSocketMessage(
 }
 
 /**
+ * Whether an activity event is about the organization the person is working in.
+ *
+ * A person can be in several organizations, and the socket is theirs, not one organization's. An event that names
+ * another organization (`organizationId`) is about a conversation this screen does not hold, and patching it in would
+ * put that organization's preview in this one's sidebar, or refetch for a row that will never be here. An event that
+ * names none, from a server older than this, is taken as it always was.
+ */
+function inOrganization(
+  activity: { organizationId?: unknown },
+  organization: string | undefined,
+): boolean {
+  return (
+    typeof activity.organizationId !== "string" ||
+    organization === undefined ||
+    activity.organizationId === organization
+  );
+}
+
+/**
  * Parse one socket frame into something the roster can act on, or `null` to drop it.
  *
  * Pure and exported so the drop rules are provable without a socket: unparseable
- * text, non-object JSON (`null`, numbers, strings, arrays) and activity events with
- * no string channel id are all ignored rather than crashing or refetching the roster.
+ * text, non-object JSON (`null`, numbers, strings, arrays), activity events with
+ * no string channel id, and activity events about another organization than
+ * `organization` are all ignored rather than crashing or refetching the roster.
  */
 export function parseChannelSocketMessage(
   data: unknown,
+  organization: string | undefined = currentOrganizationId(),
 ): ChannelSocketMessage | null {
   if (typeof data !== "string") return null;
   let parsed: unknown;
@@ -81,11 +103,17 @@ export function parseChannelSocketMessage(
   if (!isChannelSocketMessage(parsed)) return null;
   if (isResync(parsed)) return parsed;
   if (typeof parsed.channelId !== "string") return null;
+  if (!inOrganization(parsed, organization)) return null;
   return parsed;
 }
 
 export type ChannelActivityEvent = {
   channelId: string;
+  /**
+   * The organization the conversation is in. Absent from a server older than this, and then the event is taken
+   * whatever organization the person is working in (`inOrganization`).
+   */
+  organizationId?: string;
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
