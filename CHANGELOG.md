@@ -66,6 +66,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
 
+### OpenBot Desktop
+
+- **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
+  moves to `copilotkit@3e64135`, so an install or update runs Intelligence 0.17.0-rc.4.
+
 ### Kubernetes
 
 - **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
