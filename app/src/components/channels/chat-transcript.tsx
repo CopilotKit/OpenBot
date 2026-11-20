@@ -200,6 +200,8 @@ type ChatTranscriptProps = {
   queued?: readonly QueuedMessage[];
   /** Take one back before it runs. Without it a queued line is shown but cannot be undone. */
   onRemoveQueued?: (id: string) => void;
+  /** Stop the turn and send this one next. Without it a queued line waits for the turn to end. */
+  onSendQueuedNow?: (id: string) => void;
   /** History has been asked for and has not arrived. Drawn only when there is nothing else to draw. */
   restoring?: boolean;
   /**
@@ -452,12 +454,17 @@ function describeParked(
  */
 function Queued({
   attachments,
+  next,
   text,
   onRemove,
+  onSendNow,
 }: {
   attachments: readonly Attachment[];
+  /** Send now was pressed: the turn is stopping, and this goes the moment it ends. */
+  next: boolean;
   text: string;
   onRemove?: (() => void) | undefined;
+  onSendNow?: (() => void) | undefined;
 }) {
   /*
    * THE FILES COME WITH IT, and until they did they were on NO SURFACE IN THE APP AT ALL. Parking
@@ -492,7 +499,23 @@ function Queued({
            * `status` rather than `alert`, matching the thinking line: a person who has just chosen
            * to queue something is not being interrupted by the news that it is queued.
            */}
-          <span role="status">Queued</span>
+          <span role="status">{next ? "Up next" : "Queued"}</span>
+          {/*
+           * SEND NOW, BESIDE REMOVE AND DRAWN THE SAME WAY: the two things a person can do with a
+           * message that is waiting. Named after the sentence it sends, as Remove is, so three of
+           * them in a row are told apart by a screen reader. Gone once pressed, while the turn
+           * stops: the status says what happens next.
+           */}
+          {onSendNow && !next ? (
+            <button
+              aria-label={`Send queued message now: ${describeParked(text, files)}`}
+              className="ml-2 underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              onClick={onSendNow}
+              type="button"
+            >
+              Send now
+            </button>
+          ) : null}
           {onRemove ? (
             <button
               /*
@@ -2006,6 +2029,7 @@ export function ChatTranscript({
   intro,
   messages,
   onRemoveQueued,
+  onSendQueuedNow,
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
@@ -2388,8 +2412,12 @@ export function ChatTranscript({
             <Queued
               attachments={message.attachments}
               key={message.id}
+              next={message.next === true}
               onRemove={
                 onRemoveQueued ? () => onRemoveQueued(message.id) : undefined
+              }
+              onSendNow={
+                onSendQueuedNow ? () => onSendQueuedNow(message.id) : undefined
               }
               text={message.text}
             />
@@ -2604,9 +2632,15 @@ export function ChatTranscript({
                       <Queued
                         attachments={message.attachments}
                         key={message.id}
+                        next={message.next === true}
                         onRemove={
                           onRemoveQueued
                             ? () => onRemoveQueued(message.id)
+                            : undefined
+                        }
+                        onSendNow={
+                          onSendQueuedNow
+                            ? () => onSendQueuedNow(message.id)
                             : undefined
                         }
                         text={message.text}
