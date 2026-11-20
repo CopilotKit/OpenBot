@@ -24,6 +24,7 @@ import {
   type OrganizationChoices,
 } from "../organization";
 import { reportOrganizationGone } from "../organization-gone";
+import { reportRenewalNeedsClick } from "../renewal";
 import { clientHeaders } from "../release";
 import { reportSessionRefused } from "../session-refused";
 import type { Deployment } from "./generated/model";
@@ -65,6 +66,16 @@ export const DEPLOYMENT_ORGANIZATION_ID = "default";
 
 /** The API's code for a hosted OpenBot's sign-in needing renewal: the session is still signed in. */
 const RENEWAL_REQUIRED = "HOSTED_SIGN_IN_RENEWAL_REQUIRED";
+
+/** The header that names where sign-in renews it. */
+const SIGN_IN_HEADER = "OpenBot-Sign-In";
+
+/** Where the hosted sign-in starts: the path the server named, when it is one of its own, else the usual one. */
+function signInAddress(named: string | null): string {
+  return named?.startsWith("/") && !named.startsWith("//")
+    ? named
+    : "/api/auth/hosted/sign-in";
+}
 
 /** The API's code for an organization that isn't there for the person asking: never theirs, left, or deleted. */
 const ORGANIZATION_NOT_FOUND = "ORGANIZATION_NOT_FOUND";
@@ -248,13 +259,17 @@ function refusal(body: unknown): {
  * What a generated call may add to its request. `anonymous` sends it as nobody: no session cookie and no organization,
  * for an address that answers anybody (`default`'s deployment) and would refuse the person's own session.
  */
-export type ApiRequestInit = RequestInit & { anonymous?: boolean };
+export type ApiRequestInit = RequestInit & {
+  anonymous?: boolean;
+  /** Sent again after the hosted sign-in was renewed: refused for renewal again, it isn't renewed again. */
+  renewed?: boolean;
+};
 
 export async function apiRequest<T>(
   url: string,
   options: ApiRequestInit = {},
 ): Promise<T> {
-  const { anonymous = false, ...init } = options;
+  const { anonymous = false, renewed = false, ...init } = options;
   if (!url.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
   const method = (init.method ?? "GET").toUpperCase();
   const headers: Record<string, string> = {};
@@ -284,6 +299,20 @@ export async function apiRequest<T>(
     // Except a hosted OpenBot's sign-in needing renewal, which is never being signed out: the session still works.
     if (response.status === 401 && cookie && code !== RENEWAL_REQUIRED)
       reportSessionRefused();
+    /*
+     * A hosted OpenBot's proof ran out: renewed through the hosted sign-in in the in-app browser, then the request is
+     * sent again, once, exactly as it was, its Idempotency-Key and all, so a write that did land is answered as a
+     * repeat and never done twice. Refused for renewal again, the person is offered "Sign in again".
+     */
+    if (code === RENEWAL_REQUIRED && cookie) {
+      const signIn = signInAddress(response.headers.get(SIGN_IN_HEADER));
+      if (!renewed && auth.renewHostedSignIn) {
+        const { cookie: _sent, ...again } = headers;
+        await auth.renewHostedSignIn(signIn);
+        return apiRequest<T>(url, { ...init, headers: again, renewed: true });
+      }
+      reportRenewalNeedsClick(signIn);
+    }
     // The organization the person works in isn't there for them any more: forgotten, so the next request reads their
     // organizations again and works in another of theirs, and Home is told.
     if (
