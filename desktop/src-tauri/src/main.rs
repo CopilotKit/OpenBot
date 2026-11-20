@@ -6283,9 +6283,13 @@ fn stop_local_eval(
     #[cfg(test)]
     INTELLIGENCE_TIMEOUT.with(|used| used.set(Some(limits.timeout)));
     let attempt = format!("openbot-shutdown-{:016x}", rand::random::<u64>());
-    stop_local_eval_with(root, by, local_eval::cancel_all, |stack| {
-        local_eval::stop_for_shutdown(&attempt, stack, by, limits)
-    })
+    stop_local_eval_checking(
+        root,
+        by,
+        local_eval::cancel_all,
+        |stack| local_eval::stop_for_shutdown(&attempt, stack, by, limits),
+        local_eval::cluster_gone,
+    )
 }
 
 #[cfg(test)]
@@ -6320,6 +6324,7 @@ Quit stops the stack itself. That is not a stop that failed, and the Stop does n
 Every way this can fail is said in fixed words. There is no CLI output to repeat, and none would
 be repeated if there were.
 */
+#[cfg(test)]
 fn stop_local_eval_with<A, S>(
     root: &Path,
     by: local_eval::ShutdownBy,
@@ -6330,6 +6335,29 @@ where
     A: FnOnce(),
     S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
 {
+    stop_local_eval_checking(root, by, cancel_all, stop, |_| None)
+}
+
+/**
+`stop_local_eval_with`, asking `gone` (`local_eval::cluster_gone`) about a stop the CLI could only
+fail with no stack, the answer it gives when the stack's cluster is gone. A cluster the engine the
+CLI runs on no longer has is not running, so there is nothing to stop and the stop has done its job.
+Before, Quit failed on it every time: a dogfooding Mac on Docker Desktop (Desktop 1.1.2), whose
+backend node `docker container prune` had removed, said "Local ownership-check failed" at every
+Quit.
+*/
+fn stop_local_eval_checking<A, S, G>(
+    root: &Path,
+    by: local_eval::ShutdownBy,
+    cancel_all: A,
+    stop: S,
+    gone: G,
+) -> Result<(), String>
+where
+    A: FnOnce(),
+    S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
+    G: FnOnce(&local_eval::StackId) -> Option<bool>,
+{
     cancel_all();
     let Some(state) = local_eval_state::read(root, None).filter(|state| state.tied_to_openbot())
     else {
@@ -6337,7 +6365,19 @@ where
     };
     let not_stopped =
         |why: String| format!("the backend's command-line tool did not stop the backend ({why})");
-    match stop(&state.stack_id()) {
+    let stack = state.stack_id();
+    match stop(&stack) {
+        Ok(report)
+            if report.outcome == local_eval::Outcome::Failed
+                && local_eval::failed_without_stack(&report)
+                && gone(&stack) == Some(true) =>
+        {
+            log::warn!(
+                "[local stop] {}'s cluster is gone from the engine the backend runs on; nothing to stop",
+                stack.as_str()
+            );
+            Ok(())
+        }
         Ok(report) => match report.outcome {
             local_eval::Outcome::Completed => Ok(()),
             outcome => Err(not_stopped(match report.reason {
@@ -11021,19 +11061,23 @@ fn local_eval_answer(
         );
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
-    if action == local_eval::Action::Status
-        && backend_lost(
-            &report,
-            local_eval_state::read(root, None).as_ref(),
-            stack,
-            || local_eval::cluster_gone(stack),
-        )
-    {
+    if matches!(
+        action,
+        local_eval::Action::Status | local_eval::Action::Start
+    ) && backend_lost(
+        &report,
+        local_eval_state::read(root, None).as_ref(),
+        stack,
+        || local_eval::cluster_gone(stack),
+    ) {
+        let kept = openbot_database_kept(root);
         log::warn!(
-            "[local eval] {}'s cluster is gone from OpenBot's engine; offering to start fresh",
-            stack.as_str()
+            "[local eval] {}'s cluster is gone from the engine the backend runs on, and OpenBot's \
+             own database {}; offering to set the backend up again",
+            stack.as_str(),
+            if kept { "is still there" } else { "is not" }
         );
-        report.reason = Some(local_eval::Reason::StackLost);
+        report.reason = Some(lost_reason(kept));
     }
     // An Intelligence an older app installed, behind the release this app's CLI installs, or one
     // whose update did not finish: the window updates it before it starts OpenBot on it.
@@ -11053,16 +11097,45 @@ fn local_eval_answer(
     Ok(report)
 }
 
+/// What the window is told about a backend that is gone (`backend_lost`): with OpenBot's own
+/// database still there, only the backend's data went (`BackendGone`); without it, everything did
+/// (`StackLost`).
+fn lost_reason(openbot_database_kept: bool) -> local_eval::Reason {
+    if openbot_database_kept {
+        local_eval::Reason::BackendGone
+    } else {
+        local_eval::Reason::StackLost
+    }
+}
+
+/// Whether this installation's own database volume is still in the engine OpenBot runs on. False
+/// when that can't be said, so the window never claims Bots are kept when they may not be.
+fn openbot_database_kept(root: &Path) -> bool {
+    let Some(address) = local_eval::engine_in_use() else {
+        return false;
+    };
+    let Ok(secrets) = openbot_desktop_lib::vault::already_given_no_ui(
+        root,
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    ) else {
+        return false;
+    };
+    stack::postgres_volume_exists(&address, root, &secrets).unwrap_or(false)
+}
+
 /**
-Whether the backend OpenBot created for this installation is gone, so the window offers to start
-fresh rather than Retry (`local_eval::Reason::StackLost`).
+Whether the backend OpenBot created for this installation is gone, so the window offers to set it
+up again rather than Retry (`local_eval::Reason::StackLost`, `local_eval::Reason::BackendGone`).
 
 Box I: OpenBot's Podman machine was removed and made again, and the backend's cluster, with
 OpenBot's database, went with the old one. The installation still recorded the stack, so every
 status the CLI ran failed at its ownership check ("status 404"), answered `local_command_failed`
 with no stack, and the window said "Setup stopped partway through with an error. Retry." forever.
-Only for a stack OpenBot created and recorded here, asked about by its own id, and only when the
-engine answers and lists none of its cluster's containers.
+The same on a dogfooding Mac with Docker Desktop (Desktop 1.1.2): `docker container prune` removed
+the backend's node container while it was stopped, and Retry, and Quit, failed the same way every
+time. Only for a stack OpenBot created and recorded here, asked about by its own id, and only when
+the engine the CLI runs on answers and lists none of its cluster's containers.
 */
 fn backend_lost(
     report: &local_eval::Report,
@@ -18803,6 +18876,76 @@ mod tests {
         assert!(!backend_lost(&unavailable, Some(&created), &asked, || {
             panic!("asked the engine")
         }));
+    }
+
+    /// With OpenBot's own database still there, only the backend went (a prune of stopped
+    /// containers on Docker Desktop), and the window says so (`backend-gone`). Without it, or when
+    /// that can't be said, everything went (`stack-lost`, box I).
+    #[test]
+    fn a_lost_backend_says_bots_stay_only_when_openbots_database_is_still_there() {
+        assert_eq!(lost_reason(true), local_eval::Reason::BackendGone);
+        assert_eq!(lost_reason(false), local_eval::Reason::StackLost);
+        assert_eq!(
+            serde_json::to_value(local_eval::Reason::BackendGone).unwrap(),
+            serde_json::json!("backend-gone")
+        );
+    }
+
+    /// A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's
+    /// stopped node, and every Quit failed at the CLI's ownership check ("local-command-failed, no
+    /// stack"). A cluster the engine no longer has is not running: Stop and Quit have nothing to
+    /// stop, and finish. Any other failed stop is still said.
+    #[test]
+    fn stop_and_quit_finish_when_the_backends_cluster_is_gone() {
+        let root = local_eval_root(
+            "openbot-local-eval-stop-gone",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let no_stack = || {
+            Ok(local_eval_report(
+                local_eval::Outcome::Failed,
+                Some(local_eval::Reason::LocalCommandFailed),
+            ))
+        };
+        for by in [local_eval::ShutdownBy::Stop, local_eval::ShutdownBy::Quit] {
+            let asked = std::cell::RefCell::new(Vec::new());
+            assert_eq!(
+                stop_local_eval_checking(
+                    &root,
+                    by,
+                    || {},
+                    |_| no_stack(),
+                    |stack| {
+                        asked.borrow_mut().push(stack.as_str().to_owned());
+                        Some(true)
+                    }
+                ),
+                Ok(()),
+                "{by:?}"
+            );
+            assert_eq!(asked.into_inner(), ["local-abc123"]);
+            // The cluster is there, or the engine couldn't say: the stop failed, and is said.
+            for gone in [Some(false), None] {
+                assert_eq!(
+                    stop_local_eval_checking(&root, by, || {}, |_| no_stack(), |_| gone),
+                    Err("the backend's command-line tool did not stop the backend (failed: local-command-failed)".into()),
+                    "{by:?} {gone:?}"
+                );
+            }
+        }
+        // A stop that failed some other way never asks the engine.
+        assert!(stop_local_eval_checking(
+            &root,
+            local_eval::ShutdownBy::Quit,
+            || {},
+            |_| Ok(local_eval_report(
+                local_eval::Outcome::Blocked,
+                Some(local_eval::Reason::LocalCommandBusy)
+            )),
+            |_| panic!("asked the engine")
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first

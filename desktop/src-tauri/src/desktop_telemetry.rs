@@ -795,6 +795,7 @@ pub fn cli_reason(reason: local_eval::Reason) -> telemetry::CliReason {
         R::Unrecognized => T::Unrecognized,
         // OpenBot's own reading of a failure the CLI reported as this.
         R::StackLost => T::LocalCommandFailed,
+        R::BackendGone => T::LocalCommandFailed,
     }
 }
 

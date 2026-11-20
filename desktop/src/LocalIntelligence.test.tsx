@@ -1349,6 +1349,49 @@ test("a lost backend offers Start fresh, which sets OpenBot up again and opens i
   ]);
 });
 
+/**
+ * A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's stopped
+ * node, every status failed "local-command-failed, no stack", and Retry failed the same way five
+ * times. The native side now says only the backend is gone (`backend-gone`: its cluster is gone,
+ * OpenBot's own database is not). The card says what went and what stays, offers Set up again in
+ * place of Retry, and Set up again sets the backend up, connects it, waits for it and opens OpenBot.
+ */
+test("a backend whose node was removed offers Set up again, which sets it up and opens OpenBot", async () => {
+  const gone = report({
+    outcome: "failed",
+    stack: null,
+    reason: "backend-gone",
+  });
+  invokeHandler = answers({
+    run_local_eval: [gone, ready],
+    set_up_local_eval: [report()],
+    connect_local_eval: [connection()],
+  });
+  const started: Startable[] = [];
+  const screen = view({
+    stack: "local-044466e209069a0812bc9764",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await screen.findByText(
+    "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
+  );
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Start fresh" })).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Set up again" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
 /** The same stop on a screen about something else: its card says what is gone and offers Start fresh. */
 test("a lost backend is said on the status card too, with Start fresh", async () => {
   invokeHandler = answers({

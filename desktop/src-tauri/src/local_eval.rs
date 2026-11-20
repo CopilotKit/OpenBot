@@ -214,6 +214,11 @@ pub enum Reason {
     /// in it, as when OpenBot's Podman machine was removed and made again (`stack_lost`). Waiting or
     /// Retry can't bring it back; setting it up again starts over.
     StackLost,
+    /// OpenBot's own finding, like `StackLost`, when OpenBot's own database is still there: only
+    /// the backend's cluster went, as when `docker container prune` removed its node while it was
+    /// stopped (a dogfooding Mac on Docker Desktop, Desktop 1.1.2). OpenBot's Bots and settings
+    /// stay; the conversations and memory the backend kept went with the node.
+    BackendGone,
 }
 
 impl Reason {
@@ -5214,8 +5219,9 @@ fn lost_stack(
                 ""
             }
         );
-        let gone = (files == PrivateFiles::Present && !shared)
-            .then(|| cluster_gone(&stack))
+        let had_cluster = had_a_cluster(saved.get("step").and_then(Value::as_str));
+        let gone = (files == PrivateFiles::Present && !shared && had_cluster)
+            .then(|| cluster_removed(&stack))
             .flatten();
         if gone == Some(true) {
             log::warn!(
@@ -5259,31 +5265,42 @@ pub fn failed_without_stack(report: &Report) -> bool {
     report.reason == Some(Reason::LocalCommandFailed) && report.stack.is_none()
 }
 
-/// Whether `stack`'s cluster is gone from the engine OpenBot runs on (`use_engine`): k3d names every
-/// container of a cluster `k3d-<cluster>-…`, and the CLI names the cluster after the stack. None
-/// when that can't be said (`cluster_gone_at`): then nothing is said to be gone.
+/**
+Whether `stack`'s cluster is gone from the engine the CLI runs on (`use_engine`): k3d names every
+container of a cluster `k3d-<cluster>-…`, and the CLI names the cluster after the stack. None when
+that can't be said (`cluster_gone_at`): then nothing is said to be gone.
+
+Asked with the very environment the CLI gets (`engine_command`), so it is the engine whose answer
+the CLI's own ownership check read as a 404: on Docker Desktop, a node container that
+`docker container prune` removed while it was stopped (a dogfooding Mac, Desktop 1.1.2), and on
+OpenBot's Podman machine, one that went with the machine (box I).
+*/
 pub fn cluster_gone(stack: &StackId) -> Option<bool> {
     cluster_gone_at(cli_engine().as_ref(), stack, |address| {
-        let listed = address
-            .command()
-            .args(["ps", "--all", "--format", "{{.Names}}"])
-            .output()
-            .ok()?;
-        listed
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&listed.stdout).into_owned())
+        names_listed(address, &["ps", "--all", "--format", "{{.Names}}"])
     })
+}
+
+/// What `arguments` lists on the CLI's engine, one name per line. None when the engine did not
+/// answer in time, or answered with an error.
+fn names_listed(address: &crate::engine::Address, arguments: &[&str]) -> Option<String> {
+    let mut command = engine_command(Some(&CliEngine::of(address)));
+    command.args(arguments);
+    let (succeeded, listed) = crate::local_images::run_within(
+        command,
+        std::time::Duration::from_secs(30),
+        4 * 1024 * 1024,
+    )?;
+    succeeded.then(|| String::from_utf8_lossy(&listed).into_owned())
 }
 
 /**
 `cluster_gone`, with the engine and its container listing passed in.
 
-Only in OpenBot's own Podman machine (`acquire::MACHINE`). Nothing but OpenBot runs a cluster there,
-and a cluster that isn't there went with the machine, as on box I. Anywhere else, Docker or a
-machine of the person's, the stack may live in an engine OpenBot isn't asking: a test's process on a
-Mac found the computer's own Docker, saw no cluster in it, and setup would have deleted a stack whose
-files were all there. So there it can't be said, and nothing is.
+Only when the app has named the engine the CLI runs on. Then the CLI and this check ask the same
+engine, and a cluster it doesn't list is one the CLI can never stop, start or resume again: its
+ownership check answers 404 every time. Without an engine named, the CLI picks one itself, and
+nothing is said.
 */
 pub fn cluster_gone_at(
     address: Option<&crate::engine::Address>,
@@ -5291,13 +5308,6 @@ pub fn cluster_gone_at(
     list: impl FnOnce(&crate::engine::Address) -> Option<String>,
 ) -> Option<bool> {
     let address = address?;
-    let ours = address.engine == crate::engine::Engine::Podman
-        && address.connection.as_deref().is_some_and(|connection| {
-            crate::acquire::machine_of(connection) == crate::acquire::MACHINE
-        });
-    if !ours {
-        return None;
-    }
     Some(cluster_gone_in(&list(address)?, stack))
 }
 
@@ -5305,6 +5315,56 @@ pub fn cluster_gone_at(
 pub fn cluster_gone_in(names: &str, stack: &StackId) -> bool {
     let prefix = format!("k3d-{}-", stack.as_str());
     !names.lines().any(|name| name.trim().starts_with(&prefix))
+}
+
+/**
+Whether `stack`'s cluster was removed from the engine the CLI runs on, so setup may forget the stack
+(`lost_stack`). Stricter than `cluster_gone`, which only offers to set the backend up again: this
+deletes the stack's record and private folder.
+
+Gone, and either in OpenBot's own Podman machine (`acquire::MACHINE`), where nothing but OpenBot runs
+a cluster and one that isn't there went with the machine (box I), or with what k3d leaves in an
+engine after the cluster's containers are removed: the cluster's network `k3d-<stack>` or its image
+volume `k3d-<stack>-images`. Neither goes with `docker container prune`. An engine with no trace of
+the stack at all may simply not be the one the stack lives in (another Docker context), and there a
+stack whose files are all there is never deleted.
+*/
+fn cluster_removed(stack: &StackId) -> Option<bool> {
+    let address = cli_engine()?;
+    let containers = names_listed(&address, &["ps", "--all", "--format", "{{.Names}}"])?;
+    if !cluster_gone_in(&containers, stack) {
+        return Some(false);
+    }
+    if own_machine(&address) {
+        return Some(true);
+    }
+    let networks = names_listed(&address, &["network", "ls", "--format", "{{.Name}}"])?;
+    let volumes = names_listed(&address, &["volume", "ls", "--format", "{{.Name}}"])?;
+    Some(cluster_traces_in(&networks, &volumes, stack))
+}
+
+/// OpenBot's own Podman machine, where nothing but OpenBot runs a cluster.
+fn own_machine(address: &crate::engine::Address) -> bool {
+    address.engine == crate::engine::Engine::Podman
+        && address.connection.as_deref().is_some_and(|connection| {
+            crate::acquire::machine_of(connection) == crate::acquire::MACHINE
+        })
+}
+
+/// Whether the engine still holds what k3d made for `stack`'s cluster beside its containers: its
+/// network, `k3d-<stack>`, or its image volume, `k3d-<stack>-images`. Names one per line.
+pub fn cluster_traces_in(networks: &str, volumes: &str, stack: &StackId) -> bool {
+    let network = format!("k3d-{}", stack.as_str());
+    let volume = format!("k3d-{}-images", stack.as_str());
+    networks.lines().any(|name| name.trim() == network)
+        || volumes.lines().any(|name| name.trim() == volume)
+}
+
+/// Whether a stack the CLI records at `step` ever had a cluster. `local setup` creates it after the
+/// `downloaded` step, so a stack recorded before that, or one whose step isn't said, never had one to
+/// lose: its cluster isn't there because it was never made.
+fn had_a_cluster(step: Option<&str>) -> bool {
+    step.is_some_and(|step| !matches!(step, "recorded" | "downloaded"))
 }
 
 /// Whether setup forgets `stack` and sets the backend up again: this folder's alone, and either its
@@ -5425,6 +5485,9 @@ fn write_private(
 /// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
 fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failure> {
     name_engine_of_lost(stack);
+    if let Some(private) = crate::local_update::stack_dir(stack.as_str()) {
+        keep_backups(&private, stack);
+    }
     let (code, bytes) = execute(
         cli,
         &forget_arguments(stack),
@@ -5441,10 +5504,57 @@ fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failu
         return Err(Failure::InvalidStatus);
     }
     log::info!(
-        "[local setup] forgot {}, whose private files were gone; setting the backend up again",
+        "[local setup] forgot {}, which can never be resumed; setting the backend up again",
         stack.as_str()
     );
     Ok(())
+}
+
+/**
+The database backups the CLI took before each update of `stack` (`backups/*.sql` in its private
+folder, `private`), moved out before `local delete` removes that folder with them. They go beside
+it, to `local-evaluation-recovery/<stack>/database-backups`, where the CLI keeps what it gives back
+on a delete. With the cluster gone they are the only copy of the backend's data there is. Nothing is
+moved when there are none, and a move that fails is logged and the stack is forgotten all the same.
+*/
+fn keep_backups(private: &std::path::Path, stack: &StackId) {
+    let backups = private.join("backups");
+    let any = std::fs::read_dir(&backups).is_ok_and(|mut entries| entries.next().is_some());
+    if !any {
+        return;
+    }
+    let Some(kept) = private
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(|config| {
+            config
+                .join("local-evaluation-recovery")
+                .join(stack.as_str())
+                .join(format!(
+                    "database-backups-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |since| since.as_secs())
+                ))
+        })
+    else {
+        return;
+    };
+    let moved = kept
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::rename(&backups, &kept));
+    match moved {
+        Ok(()) => log::info!(
+            "[local setup] kept {}'s database backups in {}",
+            stack.as_str(),
+            kept.display()
+        ),
+        Err(error) => log::warn!(
+            "[local setup] could not keep {}'s database backups: {error}",
+            stack.as_str()
+        ),
+    }
 }
 
 /// `configure_learning_model` against the installed CLI, in its turn like every other call.
@@ -6702,37 +6812,121 @@ mod tests {
         assert!(cluster_gone_in("local-1915a7aafba78d6207a561b0\n", &stack));
     }
 
-    /// Only OpenBot's own machine is ever asked, and only there can a cluster be found gone.
+    /// A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's
+    /// stopped node, `local-044466e209069a0812bc9764`, and the CLI's ownership check answered 404 at
+    /// every status, stop and Retry. Only OpenBot's own Podman machine was ever asked, so the
+    /// window said "Setup stopped partway through with an error. Retry." for good. The engine the
+    /// CLI runs on is asked now, whichever it is, and a node it doesn't list is gone.
     #[test]
-    fn a_cluster_is_found_gone_only_in_openbots_own_machine() {
+    fn a_cluster_pruned_from_any_engine_the_cli_runs_on_is_found_gone() {
         use crate::engine::{Address, Engine};
-        let stack = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
-        let ours = Address::new(Engine::Podman, Some("openbot-root".into()));
-        assert_eq!(
-            cluster_gone_at(Some(&ours), &stack, |_| Some(String::new())),
-            Some(true)
-        );
-        assert_eq!(
-            cluster_gone_at(Some(&ours), &stack, |_| Some(
-                "k3d-local-1915a7aafba78d6207a561b0-server-0\n".into()
-            )),
-            Some(false)
-        );
-        // The engine couldn't list its containers: nothing is said.
-        assert_eq!(cluster_gone_at(Some(&ours), &stack, |_| None), None);
-        // Docker, the person's machine, or no engine known: never even listed.
-        for elsewhere in [
-            Some(Address::new(Engine::Docker, None)),
-            Some(Address::new(Engine::Podman, Some("mine-root".into()))),
-            Some(Address::new(Engine::Podman, None)),
-            None,
+        let stack = StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        let node = "k3d-local-044466e209069a0812bc9764-server-0\n";
+        for engine in [
+            Address::new(Engine::Docker, None),
+            Address::new(Engine::Podman, Some("openbot-root".into())),
+            Address::new(Engine::Podman, Some("mine-root".into())),
+            Address::new(Engine::Podman, None),
         ] {
             assert_eq!(
-                cluster_gone_at(elsewhere.as_ref(), &stack, |_| panic!("listed")),
-                None,
-                "{elsewhere:?}"
+                cluster_gone_at(Some(&engine), &stack, |_| Some(
+                    "openbot-desktop-postgres-1\nopenbot-desktop-server-1\n".into()
+                )),
+                Some(true),
+                "{engine:?}"
             );
+            assert_eq!(
+                cluster_gone_at(Some(&engine), &stack, |_| Some(node.into())),
+                Some(false),
+                "{engine:?}"
+            );
+            // The engine couldn't list its containers: nothing is said.
+            assert_eq!(cluster_gone_at(Some(&engine), &stack, |_| None), None);
         }
+        // No engine named: the CLI picks its own, so it is never even listed.
+        assert_eq!(cluster_gone_at(None, &stack, |_| panic!("listed")), None);
+    }
+
+    /// What k3d leaves after a prune of stopped containers: the cluster's network and its image
+    /// volume. Either says the cluster was removed from this engine; another stack's do not.
+    #[test]
+    fn a_pruned_clusters_network_or_image_volume_is_its_trace() {
+        let stack = StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        assert!(cluster_traces_in(
+            "bridge\nk3d-local-044466e209069a0812bc9764\n",
+            "",
+            &stack
+        ));
+        assert!(cluster_traces_in(
+            "bridge\n",
+            "k3d-local-044466e209069a0812bc9764-images\n",
+            &stack
+        ));
+        assert!(!cluster_traces_in(
+            "bridge\nk3d-local-0000\n",
+            "k3d-local-0000-images\nk3d-local-044466e209069a0812bc9764-images-old\n",
+            &stack
+        ));
+        assert!(!cluster_traces_in("", "", &stack));
+    }
+
+    /// `local setup` makes the cluster after its `downloaded` step: a stack before that never had
+    /// one, so it is never forgotten for not having one.
+    #[test]
+    fn only_a_stack_past_its_download_ever_had_a_cluster() {
+        for step in ["cluster", "migrated", "bootstrapped", "ready"] {
+            assert!(had_a_cluster(Some(step)), "{step}");
+        }
+        for step in [Some("recorded"), Some("downloaded"), None] {
+            assert!(!had_a_cluster(step), "{step:?}");
+        }
+    }
+
+    /// Before `local delete` removes a forgotten stack's private folder, the database backups the
+    /// CLI took before its updates are moved beside it, and nothing else is.
+    #[test]
+    fn a_forgotten_stacks_database_backups_are_kept() {
+        let config = std::env::temp_dir().join(format!(
+            "openbot-kept-backups-{}-{}",
+            std::process::id(),
+            rand::random::<u32>()
+        ));
+        let stack = StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        let private = config.join("local-evaluation").join(stack.as_str());
+        std::fs::create_dir_all(private.join("backups")).unwrap();
+        std::fs::write(
+            private
+                .join("backups")
+                .join("2026-11-10T00-00-00-000Z-before-update-from-0.16.0.sql"),
+            "-- PostgreSQL database cluster dump complete\n",
+        )
+        .unwrap();
+        std::fs::write(private.join("secrets.json"), "{}").unwrap();
+
+        keep_backups(&private, &stack);
+
+        assert!(!private.join("backups").exists());
+        assert!(private.join("secrets.json").exists());
+        let recovery = config.join("local-evaluation-recovery").join(stack.as_str());
+        let kept: Vec<_> = std::fs::read_dir(&recovery)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(kept[0]
+            .join("2026-11-10T00-00-00-000Z-before-update-from-0.16.0.sql")
+            .is_file());
+
+        // A stack with no backups moves nothing.
+        let other = StackId::parse("local-0000").unwrap();
+        let empty = config.join("local-evaluation").join(other.as_str());
+        std::fs::create_dir_all(&empty).unwrap();
+        keep_backups(&empty, &other);
+        assert!(!config
+            .join("local-evaluation-recovery")
+            .join(other.as_str())
+            .exists());
+        let _ = std::fs::remove_dir_all(config);
     }
 
     /// Setup forgets a stack and sets it up again only when it is this folder's alone and its
@@ -12523,3 +12717,7 @@ fn main() {
         assert_eq!(checks_logged(), Vec::<String>::new());
     }
 }
+
+#[cfg(test)]
+#[path = "stack_lost_live_tests.rs"]
+mod stack_lost_live;

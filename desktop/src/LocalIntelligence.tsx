@@ -1131,6 +1131,10 @@ export function useLocalSequence({
    * itself when its cluster is gone (`lost_stack` in local_eval.rs) and sets up a new one, and
    * connect, wait and start follow as on a first setup: one journey forward. The sign-in and the AI
    * connection are kept: neither was in what went.
+   *
+   * The same for a backend whose cluster alone is gone (`backend-gone`), as after
+   * `docker container prune` removed its stopped node: setup makes the cluster again for the same
+   * stack, with its saved licence and keys, so OpenBot's own data and its link to the backend stay.
    */
   async function startFresh() {
     if (now.current.running) return;
@@ -1497,10 +1501,11 @@ export function LocalNeeds({
   const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
-  if (reason === "stack-lost")
+  if (reason === "stack-lost" || reason === "backend-gone")
     return (
       <StartFresh
         said={explain ? (sequence.blocked?.said ?? null) : null}
+        label={reason === "backend-gone" ? "Set up again" : "Start fresh"}
         onStartFresh={sequence.startFresh}
       />
     );
@@ -1520,21 +1525,27 @@ function needsPerson(sequence: LocalSequence): boolean {
   return (
     reason === "authentication-required" ||
     reason === "eula-acceptance-required" ||
-    reason === "stack-lost"
+    reason === "stack-lost" ||
+    reason === "backend-gone"
   );
 }
 
-/** The backend is gone: Retry would only ask again about it, so Start fresh is the one way on. */
+/** The backend is gone: Retry would only ask again about it, so setting up again is the one way on. */
 function backendLost(sequence: LocalSequence): boolean {
-  return sequence.stopped && sequence.blocked?.reason === "stack-lost";
+  const reason = sequence.blocked?.reason;
+  return (
+    sequence.stopped && (reason === "stack-lost" || reason === "backend-gone")
+  );
 }
 
 /** The one way on once the backend is gone: set OpenBot up again. What is gone is said with it. */
 function StartFresh({
   said,
+  label,
   onStartFresh,
 }: {
   said: string | null;
+  label: string;
   onStartFresh: () => void;
 }) {
   return (
@@ -1542,7 +1553,7 @@ function StartFresh({
       {said && <p>{said}</p>}
       <div className="row">
         <button type="button" onClick={onStartFresh}>
-          Start fresh
+          {label}
         </button>
       </div>
     </div>
