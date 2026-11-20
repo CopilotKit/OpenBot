@@ -117,11 +117,20 @@ paths:
       description: >-
         Stop a connection that is waiting for approval or for the agent, and
         forget its code and its one-time token, so the agent can no longer
-        collect it. Nothing is changed in the cluster. Not connected answers
-        204 too. Connected answers 409: disconnecting is uninstalling the
-        management agent with Helm. Only an administrator of the organization
-        `default` may stop it, and only where getManagementEnrollment
-        applies.
+        collect it. CopilotKit's management service is told: a code nobody
+        approved yet is withdrawn, so its approval page refuses it, and an
+        install it already made is retired. Nothing is changed in the
+        cluster. Not connected answers 204 too. Connected, it finishes
+        disconnecting after the management agent is uninstalled with Helm:
+        while the service still hears from the agent it answers 409, and once
+        the agent hasn't reported in for more than five minutes it retires the
+        install at the service, forgets the connection and answers 204, so
+        OpenBot can be connected again later. Telling the service is best
+        effort: out of reach, OpenBot stops anyway and lastError says the
+        service wasn't told. Connected with the service out of reach, the last
+        heartbeat OpenBot saw decides, and a recent one answers 502. Only an
+        administrator of the organization `default` may stop it, and only
+        where getManagementEnrollment applies.
       security:
         - webSession: []
         - appOAuth: [settings:write]
@@ -143,6 +152,8 @@ paths:
           $ref: '#/components/responses/ManagementConflict'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ManagementServiceFailed'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
@@ -214,8 +225,10 @@ components:
           description: >-
             What went wrong with the last attempt, in a sentence a person
             reads, with what to do next: for example a code that expired
-            before anybody approved it, an approval that was refused, or the
-            management service out of reach. Absent when nothing did.
+            before anybody approved it, an approval that was refused, the
+            management service out of reach, a connected agent that has
+            stopped reporting in, or a Stop the service couldn't be told
+            about. Absent when nothing did.
   responses:
     ManagementUnavailable:
       description: >-
