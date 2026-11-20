@@ -54,6 +54,8 @@ import {
   roleName,
   sentInvitationLine,
 } from "@/lib/organizations/words";
+import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
+import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -182,6 +184,8 @@ const received = (
 /** The server: what it keeps, and how it answers. Reset before each test. */
 let server: {
   edition: "team" | "personal";
+  /** A hosted OpenBot (`hostedSignIn`): invitations are emailed by OpenBot by CopilotKit. */
+  hosted: boolean;
   /** Dana's organizations, the one she joined first at the top. */
   organizations: Listed[];
   /** The one her session works in. */
@@ -253,13 +257,18 @@ async function answer(
     active: one.id === server.active,
   });
 
+  // Answered as the API answers it, checked against the schema generated from the spec.
   if (path === DEPLOYMENT)
-    return Response.json({
-      generativeUi: true,
-      selfHostBanner: false,
-      localEvaluation: server.edition === "personal",
-      edition: server.edition,
-    });
+    return Response.json(
+      GetDeploymentResponse.parse({
+        ...getGetDeploymentResponseMock(),
+        generativeUi: true,
+        selfHostBanner: false,
+        localEvaluation: server.edition === "personal",
+        edition: server.edition,
+        hostedSignIn: server.hosted,
+      }),
+    );
 
   if (
     server.ownRefusal &&
@@ -433,6 +442,7 @@ beforeAll(() => {
 beforeEach(() => {
   server = {
     edition: "team",
+    hosted: false,
     organizations: [{ ...OWN }, { ...ACME, role: "owner", personal: false }],
     active: ACME.id,
     members: [
@@ -1199,6 +1209,49 @@ describe("organization settings, for its owner", () => {
     );
     expect(within(emailed).queryByRole("button", { name: "Copy link" })).toBe(
       null,
+    );
+  });
+});
+
+describe("invitations on a hosted OpenBot", () => {
+  /** Opens the Invite dialog and answers what it says the person will see. */
+  async function inviteDialogSays(app: Awaited<ReturnType<typeof open>>) {
+    const page = within(await app.view.findByRole("main"));
+    await app.person.click(await page.findByRole("button", { name: "Invite" }));
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Invite to Acme",
+    });
+    return within(dialog).getByText(/It lasts 7 days\./).textContent;
+  }
+
+  test("self-hosted, the invitation is seen in OpenBot, and a waiting one's link can be copied", async () => {
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("ana@example.com");
+    expect(
+      page.getAllByRole("button", { name: /^Copy link for/ }),
+    ).toHaveLength(1);
+    expect(await inviteDialogSays(app)).toBe(
+      "They see the invitation in OpenBot when they sign in with this address. It lasts 7 days.",
+    );
+  });
+
+  test("hosted, the invitation is an email from OpenBot by CopilotKit, accepted there, and there's no link to copy", async () => {
+    server.hosted = true;
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("ana@example.com");
+    // Every invitation can still be taken back; none has a link to pass on.
+    await waitFor(() =>
+      expect(page.queryAllByRole("button", { name: /^Copy link for/ })).toEqual(
+        [],
+      ),
+    );
+    expect(
+      page.getAllByRole("button", { name: /^Cancel invitation for/ }),
+    ).toHaveLength(3);
+    expect(await inviteDialogSays(app)).toBe(
+      "OpenBot by CopilotKit emails them the invitation, and they accept it from that email. It lasts 7 days.",
     );
   });
 });
