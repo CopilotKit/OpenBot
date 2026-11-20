@@ -89,15 +89,26 @@ function json(status: number, body: unknown) {
 
 /** What a write answers next, when a test wants it refused. */
 let writeAnswer: { status: number; body: unknown } | null;
+/** The edition getDeployment says: the team edition unless a test says otherwise. */
+let edition: "team" | "personal" = "team";
+/** Every getManagementEnrollment the app made. */
+let reads = 0;
+const DEPLOYMENT = "/api/v2/organizations/default/deployment";
 
 function serving() {
   writes.length = 0;
   writeAnswer = null;
+  edition = "team";
+  reads = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? "GET";
-    if (path === MANAGEMENT && method === "GET")
+    if (path === DEPLOYMENT && method === "GET")
+      return json(200, { edition });
+    if (path === MANAGEMENT && method === "GET") {
+      reads += 1;
       return json(answer.status, answer.body);
+    }
     if (path === ENROLLMENT && (method === "POST" || method === "DELETE")) {
       writes.push({
         method,
@@ -641,4 +652,32 @@ test("not connected with the chart's agent says OpenBot connects by itself, with
   ).toContain("tries again every hour");
   expect(view.queryByText(/approve a code/)).toBeNull();
   expect(view.getByRole("button", { name: "Connect" })).toBeTruthy();
+});
+
+test("on the personal edition Admin never asks for managed updates, so no request of it fails", async () => {
+  edition = "personal";
+  answer = problem(
+    404,
+    "MANAGEMENT_UNAVAILABLE",
+    "Managed updates aren't available for this OpenBot.",
+  );
+  const rail = await draw(Rail);
+  expect(await rail.findByText("Identity providers")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      queryClient.getQueryState(["deployment", "capabilities"])?.status,
+    ).toBe("success"),
+  );
+  expect(rail.queryByText("Managed updates")).toBeNull();
+  cleanup();
+  const page = await draw(ManagementPage);
+  expect(await page.findByText("Not available here")).toBeTruthy();
+  expect(reads).toBe(0);
+});
+
+test("on the team edition Admin asks, and lists it where it applies", async () => {
+  edition = "team";
+  const view = await draw(Rail);
+  expect(await view.findByText("Managed updates")).toBeTruthy();
+  expect(reads).toBeGreaterThan(0);
 });

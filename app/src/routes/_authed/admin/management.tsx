@@ -41,6 +41,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   helmLines,
   MANAGEMENT_SENTENCE,
@@ -52,6 +53,7 @@ import {
   startManagementMutationOptions,
 } from "@/lib/management/mutations";
 import {
+  asksForManagement,
   type ManagementStatus,
   managementQueryOptions,
 } from "@/lib/management/queries";
@@ -108,21 +110,26 @@ type Confirming = "disconnect" | "stop-approved" | "stop-connecting";
  * server answers 404 and the page says so, with nothing to press; the rail doesn't list it there.
  */
 export function ManagementPage() {
-  const management = useQuery(managementQueryOptions());
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const asks = asksForManagement(capabilities);
+  const management = useQuery({ ...managementQueryOptions(), enabled: asks });
   const start = useMutation(startManagementMutationOptions(queryClient));
   const cancel = useMutation(cancelManagementMutationOptions(queryClient));
   const failure = start.error ?? cancel.error;
   // Disconnect, and Stop once the code is approved or while connecting by itself, all ask first.
   const [confirming, setConfirming] = useState<Confirming | null>(null);
 
-  if (management.isPending) return <PageShell title={TITLE}>{null}</PageShell>;
-  if (management.error)
+  // The personal edition has nothing to manage: said without asking the server.
+  const personal = !capabilities.isPending && !asks;
+  if (!personal && management.isPending)
+    return <PageShell title={TITLE}>{null}</PageShell>;
+  if (!personal && management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
         <Notice>Couldn't load managed updates. Try again in a moment.</Notice>
       </PageShell>
     );
-  if (!management.data.applies)
+  if (personal || !management.data?.applies)
     return (
       <PageShell title={TITLE}>
         <PageEmpty icon={IconCloudCog} title="Not available here">

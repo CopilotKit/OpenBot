@@ -87,6 +87,18 @@ export function managementWaiting(state: ManagementState | undefined) {
   );
 }
 
+/**
+ * Whether to ask at all: never on the personal edition, which has no management to answer for, so
+ * Admin there makes no request that fails. Asked once the deployment's edition is known, and also
+ * when it couldn't be read: then the server's 404 says the same.
+ */
+export function asksForManagement(capabilities: {
+  isPending: boolean;
+  data?: { edition: "team" | "personal" };
+}): boolean {
+  return !capabilities.isPending && capabilities.data?.edition !== "personal";
+}
+
 export function managementQueryOptions() {
   return queryOptions({
     queryKey: managementKeys.status(),
