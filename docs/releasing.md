@@ -1106,7 +1106,8 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 | `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
 | `app (real browser)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark |
 | `tests` | a decision made wrongly, in isolation |
-| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses, or a Compose file an older Compose cannot read |
+| `python harness (agent-crewai)` and one per harness | a provider-boundary regression in that Python Bot harness |
+| `compose config` | a Compose file an older Compose cannot read |
 | `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
 | `component dockerfiles` | a Dockerfile a release would publish that no longer builds, or one the publish list has stopped covering |
