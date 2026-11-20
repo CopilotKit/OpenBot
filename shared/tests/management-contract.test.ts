@@ -247,6 +247,27 @@ function opensslPems() {
 }
 
 describe("enrollment contract", () => {
+  test("a heartbeat and an install status may say whether upgrades are on, and only with the known values", () => {
+    const status = {
+      enrolled: true,
+      agentConnected: true,
+      lastHeartbeatAt: "2026-11-20T10:00:00.000Z",
+      agentVersion: "1.2.0",
+    };
+    expect(InstallStatus.parse(status)).toEqual(status);
+    for (const upgrades of ["on", "not-set-up"] as const)
+      expect(InstallStatus.parse({ ...status, upgrades })).toEqual({
+        ...status,
+        upgrades,
+      });
+    expect(
+      InstallStatus.safeParse({ ...status, upgrades: "maybe" }).success,
+    ).toBe(false);
+    expect(Heartbeat.shape.upgrades.safeParse("not-set-up").success).toBe(true);
+    expect(Heartbeat.shape.upgrades.safeParse(undefined).success).toBe(true);
+    expect(Heartbeat.shape.upgrades.safeParse("off").success).toBe(false);
+  });
+
   test("a refusal names one of the codes a server reports, and a repeat start names the install", () => {
     expect(ENROLLMENT_REFUSAL_CODES).toEqual([
       "invalid-licence",

@@ -61,6 +61,10 @@ export type CommandKind = (typeof COMMAND_KINDS)[number];
 /** What the agent says when a rollback is asked of a release whose policy needs a restore. */
 export const ROLLBACK_REFUSED_REASON = "policy: restore-backup needs a person";
 
+/** Whether an install's agent can upgrade it: what the heartbeat and the install status report. */
+export const UPGRADES = ["on", "not-set-up"] as const;
+export type Upgrades = (typeof UPGRADES)[number];
+
 export const Heartbeat = z.strictObject({
   /** The install's id; the service holds it equal to the client certificate's CN. */
   installId: z.uuid(),
@@ -103,6 +107,11 @@ export const Heartbeat = z.strictObject({
     /** One line on the current or last operation, never a log line. */
     journal: z.string().max(2048).nullable(),
   }),
+  /**
+   * Whether the agent can upgrade the install: `on`, or `not-set-up` when it is connected but its
+   * upgrade machinery isn't (for example no backup target yet). Optional: older agents leave it out.
+   */
+  upgrades: z.enum(UPGRADES).optional(),
   sentAt: isoTime,
 });
 export type Heartbeat = z.infer<typeof Heartbeat>;
@@ -517,6 +526,8 @@ export const InstallStatus = z.strictObject({
    * The service always sends it; optional so a server reads a service from before it was added.
    */
   window: MaintenanceWindow.optional(),
+  /** The last heartbeat's `upgrades`, when the agent sends it. */
+  upgrades: z.enum(UPGRADES).optional(),
 });
 export type InstallStatus = z.infer<typeof InstallStatus>;
 
