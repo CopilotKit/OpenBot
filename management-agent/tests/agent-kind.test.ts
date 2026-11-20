@@ -777,6 +777,14 @@ run("management agent on a real cluster", () => {
     const journal = agentJournal;
     const backups = backupJobs;
     const backupsBefore = backups().length;
+    const history = () =>
+      JSON.parse(
+        sh("helm", ["history", "openbot", "-n", PRODUCT, "-o", "json"]),
+      ) as { revision: number; chart: string }[];
+    // The failed first install left broken revisions of its own; only this upgrade's count here.
+    const revisionBefore = Math.max(
+      ...history().map((entry) => entry.revision),
+    );
 
     await desire(broken);
     const failed = await until(
@@ -804,11 +812,10 @@ run("management agent on a real cluster", () => {
     // more heartbeats first, so a second attempt has had the time to start before it is counted.
     await moreHeartbeats(3);
     const brokenAttempts = () =>
-      (
-        JSON.parse(
-          sh("helm", ["history", "openbot", "-n", PRODUCT, "-o", "json"]),
-        ) as { chart: string }[]
-      ).filter((revision) => revision.chart.includes("-broken"));
+      history().filter(
+        (entry) =>
+          entry.revision > revisionBefore && entry.chart.includes("-broken"),
+      );
     expect(brokenAttempts()).toHaveLength(1);
     // Left as it failed: Flux on the failed chart, the pins naming the missing image.
     expect(pinned()).toBe(broken.digest);
