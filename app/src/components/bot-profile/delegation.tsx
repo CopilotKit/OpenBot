@@ -44,7 +44,9 @@ import {
   botAgentListQueryOptions,
   botDelegationQueryOptions,
   type Delegation,
+  TASK_THREADS_OFFERED,
   whereItRuns,
+  workingMode,
 } from "@/lib/bot-agents/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
@@ -70,8 +72,17 @@ type Choice = Pick<
  * How a Bot works: on its one agent, doing the work itself with its apps, or handing the work to the
  * agents it may use while it answers quickly. One form, saved together, because the switch means
  * nothing without the agents it switches to.
+ *
+ * While task threads are not offered (`TASK_THREADS_OFFERED`), there is no switch and every Bot is
+ * drawn as one that does the work itself, on the agent it runs on.
  */
-export function BotDelegation({ agent }: { agent: AgentProfile }) {
+export function BotDelegation({
+  agent,
+  offerTaskThreads = TASK_THREADS_OFFERED,
+}: {
+  agent: AgentProfile;
+  offerTaskThreads?: boolean;
+}) {
   const delegation = useQuery(botDelegationQueryOptions(agent.id));
   /*
    * Kept out here: the save's own refetch remounts the form below (it is keyed by what was saved), and
@@ -91,6 +102,7 @@ export function BotDelegation({ agent }: { agent: AgentProfile }) {
       botId={agent.id}
       done={saved}
       key={JSON.stringify(delegation.data)}
+      offerTaskThreads={offerTaskThreads}
       onDone={setSaved}
       saved={delegation.data}
     />
@@ -101,10 +113,12 @@ function DelegationForm({
   botId,
   saved,
   done,
+  offerTaskThreads,
   onDone: setDone,
 }: {
   botId: string;
   saved: Delegation;
+  offerTaskThreads: boolean;
   /** Whether the last save went through. */
   done: boolean;
   onDone: (done: boolean) => void;
@@ -114,11 +128,12 @@ function DelegationForm({
   const save = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const editable = saved.canManage;
 
-  const orchestrate = saved.mode === "orchestrate";
+  // A Bot set to hand work out reads as doing the work itself, on its default, while that is hidden.
+  const orchestrate = workingMode(saved, offerTaskThreads) === "orchestrate";
   const toggle = useMutation(replaceBotDelegationMutationOptions(queryClient));
   const [runsOn, setRunsOn] = useState(saved.agents[0]?.id ?? "");
   const [chosen, setChosen] = useState<string[]>(
-    saved.mode === "orchestrate" ? saved.agents.map((each) => each.id) : [],
+    orchestrate ? saved.agents.map((each) => each.id) : [],
   );
   const [model, setModel] = useState(saved.model ?? DEFAULT_MODEL);
   const [instructions, setInstructions] = useState(saved.instructions);
@@ -165,15 +180,35 @@ function DelegationForm({
       );
       return;
     }
+    /*
+     * A Bot set to hand work out, drawn as doing the work itself while task threads are hidden, keeps
+     * what it is set to, so turning them back on brings it back as it was. The API replaces the whole
+     * answer and names the default by putting it first, so the Bot's own mode, model, effort, words and
+     * agents go back unchanged, with the agent chosen here moved to the front.
+     */
+    const keepsHandingOut = !orchestrate && saved.mode === "orchestrate";
     await save.mutateAsync({
       botId,
-      input: {
-        mode: orchestrate ? "orchestrate" : "self",
-        model: model === DEFAULT_MODEL ? null : model,
-        effort: saved.effort,
-        instructions,
-        agentIds,
-      },
+      input: keepsHandingOut
+        ? {
+            mode: saved.mode,
+            model: saved.model,
+            effort: saved.effort,
+            instructions: saved.instructions,
+            agentIds: [
+              runsOn,
+              ...saved.agents
+                .map((each) => each.id)
+                .filter((id) => id !== runsOn),
+            ],
+          }
+        : {
+            mode: orchestrate ? "orchestrate" : "self",
+            model: model === DEFAULT_MODEL ? null : model,
+            effort: saved.effort,
+            instructions,
+            agentIds,
+          },
     });
     setDone(true);
   };
@@ -202,38 +237,40 @@ function DelegationForm({
 
   return (
     <>
-      <PageSection>
-        <PageRows>
-          <Item size="sm">
-            <ItemMedia variant="icon">
-              <IconSitemap />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle id={`hand-work-${botId}`}>
-                Hand work to agents
-              </ItemTitle>
-              <ItemDescription className="line-clamp-none">
-                {orchestrate
-                  ? "This Bot answers quickly and hands the work to the agents below. They act with this Bot's apps, as the person who asked."
-                  : "This Bot does the work itself, with its apps."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-labelledby={`hand-work-${botId}`}
-                checked={toggle.isPending ? !orchestrate : orchestrate}
-                disabled={!editable || toggle.isPending}
-                onCheckedChange={flip}
-              />
-            </ItemActions>
-          </Item>
-        </PageRows>
-        {toggle.error ? (
-          <p className="mt-3 text-destructive text-sm" role="alert">
-            {toggle.error.message}
-          </p>
-        ) : null}
-      </PageSection>
+      {offerTaskThreads ? (
+        <PageSection>
+          <PageRows>
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconSitemap />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle id={`hand-work-${botId}`}>
+                  Hand work to agents
+                </ItemTitle>
+                <ItemDescription className="line-clamp-none">
+                  {orchestrate
+                    ? "This Bot answers quickly and hands the work to the agents below. They act with this Bot's apps, as the person who asked."
+                    : "This Bot does the work itself, with its apps."}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  aria-labelledby={`hand-work-${botId}`}
+                  checked={toggle.isPending ? !orchestrate : orchestrate}
+                  disabled={!editable || toggle.isPending}
+                  onCheckedChange={flip}
+                />
+              </ItemActions>
+            </Item>
+          </PageRows>
+          {toggle.error ? (
+            <p className="mt-3 text-destructive text-sm" role="alert">
+              {toggle.error.message}
+            </p>
+          ) : null}
+        </PageSection>
+      ) : null}
       <PageSection title={orchestrate ? "Handing out work" : "Runs on"}>
         <form
           noValidate

@@ -56,6 +56,9 @@ export interface PromotionJournal {
    * suspended by this operation, and only those are put back. */
   pausedCronJobs?: { name: string; wasSuspended: boolean }[];
   error?: string;
+  /** What the operation went ahead despite, for a person to read (the agent's backup target check
+   * skipped for a server that predates it, say). */
+  warnings?: string[];
   recovery: string;
 }
 
@@ -297,6 +300,13 @@ export interface ReleaseIdentity {
     | { name: string; hash?: string; createdAt?: string | number }
     | string
     | null;
+  /** The database the server is connected to, on servers that report it: its host name (or
+   * address), and the Cloud SQL instance connection name when it connects through a Cloud SQL
+   * socket. Never credentials or the connection URL. */
+  database?: {
+    host?: string | null;
+    instanceConnectionName?: string | null;
+  } | null;
 }
 /** The name of the last migration a server reports, whichever shape it reports it in. */
 export function lastMigrationName(identity: ReleaseIdentity | null) {

@@ -11,10 +11,14 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { EarlyDownloads } from "./EarlyDownloads";
+import type { Problem } from "./Problem";
+import type { Progress } from "./SetupProgress";
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
 /** What the early downloads say once they have looked at the disk, when Install asks. */
 let measured: () => Promise<unknown> = async () => null;
+/** How the move of the engine to another drive ends, when the person asks for it. */
+let moveEngine: () => Promise<unknown> = () => new Promise(() => {});
 const downloadListeners = new Set<
   (event: { payload: EarlyDownloads }) => void
 >();
@@ -41,6 +45,8 @@ async function answer(command: string): Promise<unknown> {
       return { state: "idle", bytes: 0 };
     case "early_downloads_measured":
       return measured();
+    case "move_engine_here":
+      return moveEngine();
     // Install and the sign-in stay in progress: the account step is where the person is.
     case "prepare_installation":
     case "sign_in_to_copilotkit":
@@ -74,7 +80,10 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
-const { earlyDownloadsSaid } = await import("./EarlyDownloads");
+const { EarlyDownloadsLine, earlyDownload, earlyDownloadsSaid } = await import(
+  "./EarlyDownloads"
+);
+const { installingBehind, SetupProgress } = await import("./SetupProgress");
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
@@ -83,6 +92,7 @@ afterEach(() => {
   invokeCalls = [];
   downloadListeners.clear();
   measured = async () => null;
+  moveEngine = () => new Promise(() => {});
 });
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -276,8 +286,7 @@ test("an Install pressed before the disk is looked at builds nothing on a disk t
  * Behind the account step the downloads pause while it asks the person to free space: the line says
  * so, and the background row gets no bar that stopped.
  */
-test("a download paused for space says so, with no bar and no time running on", async () => {
-  const { earlyDownload } = await import("./EarlyDownloads");
+test("a download paused for space says so, with no bar and no time running on", () => {
   const paused = {
     state: "downloading" as const,
     bytes: 0.6 * GB,
@@ -292,7 +301,6 @@ test("a download paused for space says so, with no bar and no time running on", 
 
   // Install's own pulls hold too: its images row is paused (`report_holding_for_room`). The
   // background row says so in its badge, where it said "Step 2 of 4 · 0s elapsed".
-  const { installingBehind, SetupProgress } = await import("./SetupProgress");
   const row = installingBehind({
     steps: [
       { step: "engine", ok: true, detail: "", running: false },
@@ -377,8 +385,7 @@ test("the line says what is known, and nothing once it is all downloaded", () =>
   }
 });
 
-test("the background row carries the first screen's download as one bar, and keeps what the person has to see", async () => {
-  const { installingBehind } = await import("./SetupProgress");
+test("the background row carries the first screen's download as one bar, and keeps what the person has to see", () => {
   const backEnd = {
     at: null,
     running: false,
@@ -397,14 +404,11 @@ test("the background row carries the first screen's download as one bar, and kee
     bytesPerSecond: 20_000_000,
   };
   const behind = (
-    step: Record<string, unknown>,
+    step: Progress,
     first: { bytes: number; size?: number } | null = early,
   ) =>
     installingBehind({
-      steps: [
-        { step: "engine", ok: true, detail: "", running: false },
-        step as never,
-      ],
+      steps: [{ step: "engine", ok: true, detail: "", running: false }, step],
       installing: true,
       installed: false,
       backEnd,
@@ -483,4 +487,83 @@ test("the background row carries the first screen's download as one bar, and kee
   );
   expect(plain?.detail).toBe("Preparing this computer to run OpenBot.");
   expect(plain?.downloads).toBeUndefined();
+});
+
+/*
+ * The disk is short on C:, and the install folder's drive has room: the space message offers to
+ * move the engine there. Only the person's click moves it, and the line under the button says
+ * what the move stops.
+ */
+const SHORT_ON_C: EarlyDownloads = { ...WINDOWS_F_SHORT, moveTo: "F:" };
+const MOVE_TO_F = "Move OpenBot's storage to F:";
+const WSL_STOPS =
+  "Docker Desktop and other Linux apps on this computer stop for a moment.";
+
+/** The line on a screen behind the first one, after the native side says `payload`. */
+async function lineSaying(payload: EarlyDownloads) {
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<EarlyDownloadsLine />);
+  });
+  await said(payload);
+  return view;
+}
+
+test("the space message offers no move when moving would not help", async () => {
+  const view = await lineSaying(WINDOWS_F_SHORT);
+  expect(view.getByRole("status").textContent).toContain("Free up some space");
+  expect(view.queryByRole("button")).toBeNull();
+  expect(view.queryByText(WSL_STOPS)).toBeNull();
+});
+
+test("the space message offers to move the engine, and says what the move stops", async () => {
+  const view = await lineSaying(SHORT_ON_C);
+  expect(view.getByRole("button", { name: MOVE_TO_F })).toBeTruthy();
+  expect(view.getByText(WSL_STOPS)).toBeTruthy();
+  expect(called("move_engine_here")).toEqual([]);
+});
+
+test("a click moves the engine once, and the button is gone while it moves", async () => {
+  const view = await lineSaying(SHORT_ON_C);
+  await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
+  expect(called("move_engine_here")).toEqual([
+    { command: "move_engine_here", args: undefined },
+  ]);
+  expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();
+  expect(view.getByText("Moving OpenBot's storage to F:…")).toBeTruthy();
+});
+
+test("a move that fails says why, and offers the move again", async () => {
+  const failed: Problem = {
+    said: "OpenBot couldn't move its storage to F:. It is still on C:.",
+    detail: "wsl --manage failed",
+  };
+  moveEngine = async () => Promise.reject(failed);
+  const view = await lineSaying(SHORT_ON_C);
+  await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
+  expect(view.getByRole("alert").textContent).toContain(
+    "OpenBot couldn't move its storage to F:. It is still on C:.",
+  );
+  expect(view.getByRole("button", { name: MOVE_TO_F })).toBeTruthy();
+  expect(view.queryByText("Moving OpenBot's storage to F:…")).toBeNull();
+});
+
+/*
+ * The native side measures the disk again within about 10 seconds of a move. Until it does, the
+ * window still holds the old summary with its offer: the button must not offer a second move.
+ */
+test("after a move, the same summary offers no second move", async () => {
+  moveEngine = async () => null;
+  const view = await lineSaying(SHORT_ON_C);
+  await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
+  expect(
+    view.getByText(
+      "OpenBot's storage is on F: now. OpenBot checks the free space again.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();
+  // The old summary again, as it comes twice a second until the disk is measured again.
+  await said({ ...SHORT_ON_C });
+  expect(view.queryByRole("button", { name: MOVE_TO_F })).toBeNull();
+  expect(called("move_engine_here")).toHaveLength(1);
 });

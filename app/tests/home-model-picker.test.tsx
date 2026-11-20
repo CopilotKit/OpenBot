@@ -365,7 +365,11 @@ test("a model picked on the home composer is saved with the routed Bot's convers
   expect(saved).toEqual({ model: "gpt-6.1-terra", effort: "xhigh" });
 });
 
-test("a routed Bot that hands work to agents keeps its own model, and says where it is set", async () => {
+/*
+ * Task threads are hidden for now (`TASK_THREADS_OFFERED`), and OpenBot runs every Bot as one that
+ * does the work itself, so a Bot set to hand work out takes the pick like any Bot on OpenBot's model.
+ */
+test("a routed Bot set to hand work to agents takes the pick, as a Bot that does the work itself", async () => {
   mode = "orchestrate";
   const view = renderHome();
   const user = userEvent.setup({ document });
@@ -375,16 +379,12 @@ test("a routed Bot that hands work to agents keeps its own model, and says where
   await user.keyboard("Plan the launch.{Enter}");
 
   await waitFor(() => expect(trail).toContain("run"), { timeout: 5000 });
-  expect(trail.slice(0, 3)).toEqual(["route", "create", "run"]);
-  expect(saved).toEqual({ model: null, effort: null });
-
-  expect(
-    await view.findByText(
-      "Terra Bot hands work to agents, so it uses the model set on its Agents page.",
-    ),
-  ).toBeTruthy();
-  await user.click(await view.findByRole("button", { name: "Open Agents" }));
-  await waitFor(() =>
-    expect(view.router.state.location.pathname).toBe(`/bots/${BOT}/agents`),
-  );
+  expect(trail.slice(0, 4)).toEqual([
+    "route",
+    "create",
+    "save gpt-6.1-terra xhigh",
+    "run",
+  ]);
+  expect(saved).toEqual({ model: "gpt-6.1-terra", effort: "xhigh" });
+  expect(view.queryByText(/hands work to agents/)).toBeNull();
 });

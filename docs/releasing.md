@@ -1104,9 +1104,10 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 | `format, lint, types` | the ordinary things, across every workspace, and a desktop version that has left the release version |
 | `API spec` | a bundled spec that is not what its sources bundle to, a broken API convention, a generated client that is not the committed one, or, on a pull request, a breaking change to the API or the live channels |
 | `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
-| `app (real browser)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark |
+| `app (real browser)`, `app (real browser, WebKit)`, `app (real browser, desktop setup window)` | the app and desktop setup window behavior only a real Chromium shows, such as layout, and following the system's light or dark, and dictation's languages in WebKit, the engine the Mac window draws with |
 | `tests` | a decision made wrongly, in isolation |
-| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses, or a Compose file an older Compose cannot read |
+| `python harness (agent-crewai)` and one per harness | a provider-boundary regression in that Python Bot harness |
+| `compose config` | a Compose file an older Compose cannot read |
 | `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
 | `component dockerfiles` | a Dockerfile a release would publish that no longer builds, or one the publish list has stopped covering |
@@ -1140,6 +1141,14 @@ seen as the source file it removed. Every commit on `main` keeps its own CI run 
 `concurrency` group in `ci.yml` is per commit on `main`), so a commit pushed while another's run was
 in progress still gets a result. A final's parent is its candidate on `release/X.Y`, which main's CI
 never ran on, so a final always runs the full suite.
+
+The release PR's own CI run is as small, for the same reason
+([`scripts/ci-changes.ts`](../scripts/ci-changes.ts)). A PR labelled `release`, from this repository's
+`release/publish/v*` branch, whose diff from main is the release files alone, each version file
+changed only by its version, runs `format, lint, types` and the tests that name `CHANGELOG.md` or
+`release-policy.json`, and builds no Desktop app. Everything else is skipped, and `verify` reads a
+skipped check as a pass. Main's CI on the merge commit still runs every check, which is the run the
+publish gate waits for.
 
 **No secrets are required to release.** CI and **Create release PR** use only the built-in
 `GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass

@@ -252,6 +252,38 @@ describe("how a Bot that holds delegate is told to work", () => {
     );
   });
 
+  test("an answer to what a task reported goes to that task, never a reaction", () => {
+    // Found on the Desktop: a task reported a repository as probably private, the person said "it's
+    // private", and the Bot reacted 👍. That was the one fact the task needed.
+    const paragraphs = DELEGATING_GUIDANCE.split("\n\n");
+    const react =
+      paragraphs.find((paragraph) => paragraph.startsWith("- React with")) ??
+      "";
+    expect(react).toContain(
+      "or to one that answers what a task reported, such as that something it could not find is private",
+    );
+    expect(react).toContain(
+      "that is more for the task, and goes to it with follow_up",
+    );
+    const pointed =
+      paragraphs.find((paragraph) =>
+        paragraph.includes("pass it on with follow_up, naming that task"),
+      ) ?? "";
+    expect(pointed).toContain("or answers what it reported");
+    expect(pointed).toContain('"it\'s private"');
+  });
+
+  test("a brief asks for all the person asked for, never only what seems reachable", () => {
+    // Found on the Desktop: holding no GitHub tools, a Bot briefed its tasks to read a company's
+    // "public repositories", so neither task asked for GitHub and both missed the private one.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Brief all of what they asked for, never narrowed to what you guess can be reached, such as only what is public",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "the task asks the person for an app it needs",
+    );
+  });
+
   test("a started task ends the reply, and a thread's link is only for when the person asks", () => {
     // It then looked up the thread it had just started and wrote a second line under the card.
     expect(DELEGATING_GUIDANCE).toContain(

@@ -493,6 +493,29 @@ export const BROUGHT_BOT_ASKING_GUIDANCE = asParagraphs(
  * the Bot gave up after one search. So both are said on their own, before the work starts: what goes
  * in a call comes from a result or a lookup, and nothing found is not nothing there.
  *
+ * WHAT IS PRIVATE IN AN APP STARTS WITH THAT APP'S CARD. A Bot made to follow a company's
+ * repositories held no GitHub tools, so it searched the web, and one repository came back as
+ * GitHub's 404, which is what a private repository looks like to anyone not signed in. The Bot told
+ * the person it was probably private or did not exist, and stopped there. The card that connects
+ * GitHub was one call away the whole time: the task doing the work held `show_app_access`, as every
+ * Bot doing work does, and its description says to call it when a question needs an app the Bot
+ * holds no tools for. A Bot that can read an app's public pages does not read that as needing the
+ * app. So it is said here, before the work starts: what is private to the person or their team in
+ * an app the Bot holds nothing for begins with that app's card, not with the web, which shows only
+ * what is public; a not-found on the web that could be theirs and private gets the same card, never
+ * "it may not exist"; and so does the person saying something is private. A not-found from the
+ * app's own tools is left alone: that is the app answering for the person's own account.
+ *
+ * ONLY WHAT IS PRIVATE. Worded first as "what is kept in an app", the rule also took in a public
+ * repository's latest release, a public document and a dead public link, each of which would have
+ * waited on a card the person never needed. So it names private content, and says that anything
+ * public still goes to the web first, and that a public link that is not found is just not found.
+ *
+ * NOT WHEN NOBODY IS WATCHING. These rules reach a routine too, which holds the card tool as every
+ * Bot doing work does (only a check-in's tools are narrowed to what it may read), and a card there waits for a person who is not there. So a run nobody is watching says which app
+ * needs connecting instead, in the same words as a Bot without the tool. "Nobody is watching this
+ * run" is the routine's own first sentence (`ROUTINE_RUN_LINES` below), so the two read as one cue.
+ *
  * CLAIMS NEED A RESULT. A Bot said a sheet's formulas were right, then that they were wrong, then
  * rebuilt them. The claim came before any read. Anthropic's own rule for agents handling records is
  * "say a check was done only if a tool result in this session showed it", and Claude in Slack keeps
@@ -519,6 +542,20 @@ const HOW_TO_WORK_LINES = [
   "it up first. Search for a person by the name you were given, not an address you guessed. A search",
   "that finds nothing has not shown there is nothing: try it another way, with fewer or different",
   "words, before you say something does not exist.",
+  "",
+  "Some of what people ask about is private to them or their team: their own repositories, mail, files,",
+  "documents and workspace data, kept in an app beyond its public part. The web shows only the public",
+  "part. So when a request needs that private content from an app you hold no tools for, call",
+  `${SHOW_APP_ACCESS_TOOL} with that app's name before you look on the web: it puts a card in front of`,
+  "the person with the step that gives you the app. Call it the same way when something of theirs you",
+  "looked for on the web comes back not found, or with no access, and could be private to them (their",
+  "team's repository that answers 404, a document nobody shared with you): that has not shown it is",
+  "missing, so never say it does not exist, and never leave the person only a guess that it is private.",
+  "Call it too when the person tells you something is private. Call it once for each app. Anything",
+  "public still goes to the web first, with no card: an open-source project, a public page or document,",
+  "a link anyone can open. A public link that comes back not found is just not found: say so. When",
+  "nobody is watching this run, or you do not hold that tool, call no card: say which app would need",
+  "connecting.",
   "",
   "Do what was asked, at the scope it was asked. Do the reads and preparation a task needs without",
   "asking, and when you decide on a step of it, take it in the same reply instead of saying you will.",

@@ -211,12 +211,19 @@ test("the merge-back keeps main's own image tag and CLI", () => {
 // v0.3.1's checks waited five minutes for a run of main's CI they shared a group with, and cancelled
 // the pending run of the commit the release sat on, so that commit never got the result the gate
 // now needs.
+// Pull requests from forks share one group of their own (contributor CI, one run at a time); every
+// other event keeps the group it always had.
 test("CI keeps a run for every commit on main, and the release's own checks out of main's group", () => {
   const ci = workflow("ci.yml");
+  const fork =
+    "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository";
   expect(ci.concurrency).toEqual({
-    group:
-      `ci-${expression("github.workflow")}-` +
-      expression("github.ref == 'refs/heads/main' && github.sha || github.ref"),
-    "cancel-in-progress": expression("github.ref != 'refs/heads/main'"),
+    group: expression(
+      `${fork} && format('ci-{0}-forks', github.workflow) || ` +
+        "format('ci-{0}-{1}', github.workflow, github.ref == 'refs/heads/main' && github.sha || github.ref)",
+    ),
+    "cancel-in-progress": expression(
+      `github.ref != 'refs/heads/main' && !(${fork})`,
+    ),
   });
 });

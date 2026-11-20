@@ -22,15 +22,71 @@ permissions:
 # workflow sees its caller's context, so without it Publish release's checks shared
 # `ci-refs/heads/main` with main's push runs: they queued behind whichever was in progress (the
 # five-minute wait before the checks of v0.3.1) and cancelled the one that was pending.
+#
+# Pull requests from forks share one group, so contributors' CI runs one at a time and cannot fill
+# the shared standard runners, and one contributor's push never cancels another's run. A fork run
+# GitHub drops from the group's one pending slot is re-run later by Contributor CI
+# (scripts/contributor-ci.ts), which also pauses fork runs while CopilotKit's are waiting.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && format('ci-{0}-forks', github.workflow) || format('ci-{0}-{1}', github.workflow, github.ref == 'refs/heads/main' && github.sha || github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}
 
+# Runners. Every job runs on the 16-core larger runners (org runner group openbot-larger, billed per
+# minute) for main, releases and pull requests from this repository: the standard runners are shared
+# across the organization, and a job used to wait longer for one than it took to run. Pull requests
+# from forks stay on the free standard runners.
 jobs:
+  # What this push has to run (scripts/ci-changes.ts). On a pull request, a job whose inputs are
+  # unchanged since a commit where it passed is skipped, and `verify` reads the skip as a pass: test
+  # files alone run just those tests, docs alone run only the tests that name them, and a release PR
+  # of only the release files runs the checks publishing re-runs on it. Main, the release's own call
+  # of these checks and a pull request labelled `full-ci` run everything.
+  changes:
+    name: changes
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    permissions:
+      contents: read
+      # To read which jobs passed on the commits this one sits on.
+      actions: read
+    outputs:
+      static: ${{ steps.decide.outputs.static }}
+      api: ${{ steps.decide.outputs.api }}
+      mobile: ${{ steps.decide.outputs.mobile }}
+      app_browser: ${{ steps.decide.outputs.app_browser }}
+      startup: ${{ steps.decide.outputs.startup }}
+      langgraph_ts: ${{ steps.decide.outputs.langgraph_ts }}
+      python_harness: ${{ steps.decide.outputs.python_harness }}
+      build: ${{ steps.decide.outputs.build }}
+      suite: ${{ steps.decide.outputs.suite }}
+      partial: ${{ steps.decide.outputs.partial }}
+      tests: ${{ steps.decide.outputs.tests }}
+      browser_tests: ${{ steps.decide.outputs.browser_tests }}
+      webkit_tests: ${{ steps.decide.outputs.webkit_tests }}
+      desktop_browser_tests: ${{ steps.decide.outputs.desktop_browser_tests }}
+    steps:
+      # A pull request's history, without file contents (a diff of names needs only the trees); any
+      # other event needs none.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Strings, since 0 is falsy and `&& 0 || 1` would always give 1.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          filter: ${{ github.event_name == 'pull_request' && 'blob:none' || '' }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - id: decide
+        name: Decide what runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ci-changes.ts ci
+
   # Formatting, linting, typing and tests are independent checks, so each reports its own result.
   static:
     name: format, lint, types
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.static == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,7 +137,9 @@ jobs:
   #   release that first served it deprecated.
   api:
     name: API spec
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     env:
       # Pinned with its checksum, from https://github.com/oasdiff/oasdiff/releases. The spec never
       # leaves the runner: the binary runs here, rather than the action, which uploads by default.
@@ -233,7 +291,9 @@ jobs:
 
   mobile:
     name: native types
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -250,11 +310,31 @@ jobs:
 
   # The app's and the desktop window's tests that need a real Chromium, asked for by name because a
   # machine running `bun test` is not required to have a browser. The browser is the one the root's
-  # playwright-core pins, installed by that same package: a bare `bunx playwright` fetches the newest
-  # Playwright, whose Chromium is a different build from the one playwright-core launches.
+  # playwright-core pins: a different Playwright's Chromium is a different build from the one
+  # playwright-core launches.
+  #
+  # Three jobs, side by side: this list in Chromium, the dictation test in WebKit, and the desktop
+  # setup window. One after another they took 11 to 20 minutes, the longest job of a run. The list's
+  # files run in parallel worker processes, one browser each (`bun test --parallel`, a worker per
+  # core by default).
+  #
+  # Each runs its tests in Playwright's own image for the playwright-core the root pins
+  # (PLAYWRIGHT_IMAGE), which has the browsers and every system package they need. Installing
+  # those packages on the runner came from the Ubuntu mirror, half a minute on a good day and three
+  # to nine on a bad one. Caching the browsers instead would not help: Playwright advises against
+  # it, as restoring them takes about as long as their download (4 seconds here), and a cache does
+  # not hold the system packages (https://playwright.dev/docs/ci#caching-browsers). The checkout,
+  # its installs and Bun are the runner's, handed to the image, so the tests run the same Bun as
+  # every other job. The tag and digest move with playwright-core (scripts/ci-changes.test.ts holds
+  # them together). `--ipc=host` gives Chromium the shared memory Playwright's Docker guidance asks
+  # for.
   app-browser:
     name: app (real browser)
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.app_browser == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    env:
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -263,7 +343,6 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
-      - run: bunx playwright-core install --with-deps --no-shell chromium
       # The app's real-browser tests: a running step's words
       # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, the name
       # step's orb drawn whole under the step dashes, a conversation's rail of turns clear of the
@@ -289,28 +368,72 @@ jobs:
       # only when it is opened, counted on the wire. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
+      - run: bun run generate:app-config
       - run: |
-          bun run generate:app-config
-          bun test app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx
-        env:
-          OPENBOT_APP_BROWSER: '1'
-      # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
-      # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
-      # next language the recognizer has, or says which language to add and where. The page's
-      # language and its names for languages are the engine's own.
-      - run: bunx playwright-core install --with-deps webkit
-      - run: bun test app/tests/composer-dictation-language.test.tsx
-        env:
-          OPENBOT_APP_BROWSER: '1'
-          OPENBOT_APP_ENGINES: chromium,webkit
-      # The desktop setup window's, for the same reason: the AI step's form holding still while the
-      # install behind it comes and goes. It bundles the window from the desktop's own dependencies.
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx
+
+  # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
+  # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
+  # next language the recognizer has, or says which language to add and where. The page's
+  # language and its names for languages are the engine's own. In the image, as above: WebKit's
+  # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
+  app-browser-webkit:
+    name: app (real browser, WebKit)
+    needs: changes
+    if: needs.changes.outputs.app_browser == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    env:
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run generate:app-config
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test app/tests/composer-dictation-language.test.tsx
+
+  # The desktop setup window's, for the same reason as the list above: the AI step's form holding
+  # still while the install behind it comes and goes. It bundles the window from the desktop's own
+  # dependencies. One file, so it is its own job rather than one of the list's workers. In the
+  # image, as above.
+  app-browser-desktop:
+    name: app (real browser, desktop setup window)
+    needs: changes
+    if: needs.changes.outputs.app_browser == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    env:
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: desktop
-      - run: bun test src/setupLayout.browser.test.ts
-        working-directory: desktop
-        env:
-          OPENBOT_APP_BROWSER: '1'
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test src/setupLayout.browser.test.ts
 
   # The suite in shards, one runner each, so the run takes as long as its slowest shard rather than
   # as long as every file one after another. `bun test --shard` does the split, cut by the per-file
@@ -323,7 +446,9 @@ jobs:
   # .github/actions/test-shard, which says why.
   test:
     name: tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.suite == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     strategy:
       # Every shard runs to the end, so one red run names every failing test, not just the first
       # shard's.
@@ -368,11 +493,11 @@ jobs:
   # add up to less than the floor (scripts/test-floor.ts).
   test-total:
     name: tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # Also when a shard failed, so this reports the failure rather than being skipped, which a
-    # required check would read as a pass.
-    if: always()
-    needs: [test]
+    # required check would read as a pass. Not when the suite was not needed: then no shard ran.
+    if: always() && needs.changes.outputs.suite == 'true'
+    needs: [changes, test]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -398,9 +523,48 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The test files `changes` picked when the suite itself was not needed: the ones changed since the
+  # suite last passed and every test that names a changed file, or for a release PR the tests that
+  # read the release files. A browser test runs in a real browser, as `app (real browser)` runs it.
+  # Not a shard, so passing here never stands in for the suite: the next push is still compared with
+  # the commit where every shard last passed.
+  changed-tests:
+    name: tests (changed files)
+    needs: changes
+    if: needs.changes.outputs.partial == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      # The same installs as a shard, since a picked file can be anywhere the suite looks.
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: agent-mastra
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Install Chromium
+        if: needs.changes.outputs.browser_tests != '[]' || needs.changes.outputs.desktop_browser_tests != '[]'
+        run: bunx playwright-core install --with-deps --no-shell chromium
+      - name: Install WebKit
+        if: needs.changes.outputs.webkit_tests != '[]'
+        run: bunx playwright-core install --with-deps webkit
+      - name: Run the changed tests
+        env:
+          TESTS: ${{ needs.changes.outputs.tests }}
+          BROWSER_TESTS: ${{ needs.changes.outputs.browser_tests }}
+          WEBKIT_TESTS: ${{ needs.changes.outputs.webkit_tests }}
+          DESKTOP_BROWSER_TESTS: ${{ needs.changes.outputs.desktop_browser_tests }}
+        run: bun scripts/ci-run-tests.ts
+
   startup:
     name: startup (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.startup == 'true'
+    runs-on: ${{ matrix.os == 'windows-latest' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-latest' || 'openbot-windows-16core') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -424,7 +588,9 @@ jobs:
   # Node it ships on, from its own lockfile, as each Python harness below runs its own.
   langgraph-ts:
     name: typescript langgraph engine
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.langgraph_ts == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -439,12 +605,34 @@ jobs:
       - run: npm test
         working-directory: agent-langgraph-ts
 
+  # One job per harness, side by side: each is a fresh venv, its own requirements and its own tests,
+  # so nothing is shared between them and run in a row they took ten minutes. The list is
+  # PYTHON_HARNESSES in scripts/ci-changes.ts, which waits on each of these jobs by name.
+  #
+  # pip, not uv: the images install with pip from the same unpinned files, so the tests resolve what
+  # ships. The pip cache holds downloads and wheels only, keyed per harness on its requirement
+  # files; the resolve still runs every time, so a new release upstream is still picked up.
   python-harness:
-    name: python harness regressions
-    # CPU-bound: runs on a 16-core larger runner (org runner group openbot-larger, billed per
-    # minute) for main, releases and pull requests from this repository. Pull requests from forks
-    # stay on the free standard runner.
+    name: python harness (${{ matrix.harness }})
+    needs: changes
+    if: needs.changes.outputs.python_harness == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - agent-crewai
+          - agent-claude-sdk
+          - agent-langgraph-agui
+          - agent-llamaindex
+          - agent-agno
+          - agent-strands
+          - agent-pydantic-ai
+          - agent-adk
+          - agent-antigravity
+          - agent-langroid
+          - agent-ag2
+          - agent-microsoft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -452,93 +640,31 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ${{ matrix.harness }}/requirements*.txt
+      - name: Regressions
+        env:
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --requirement "$HARNESS/requirements.txt" --requirement "$HARNESS/requirements-test.txt"
+          python -m pytest "$HARNESS/tests" -q
+
+  # The Compose file the harnesses are picked through, checked once rather than per harness.
+  python-harness-compose:
+    name: compose config
+    needs: changes
+    if: needs.changes.outputs.python_harness == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - name: CrewAI provider-boundary regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-crewai
-          . .venv-crewai/bin/activate
-          python -m pip install --requirement agent-crewai/requirements.txt --requirement agent-crewai/requirements-test.txt
-          python -m pytest agent-crewai/tests -q
-      - name: Claude client-tool continuation regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-claude-sdk
-          . .venv-claude-sdk/bin/activate
-          python -m pip install --requirement agent-claude-sdk/requirements.txt --requirement agent-claude-sdk/requirements-test.txt
-          python -m pytest agent-claude-sdk/tests -q
-      - name: LangGraph AG-UI provider-boundary regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-langgraph-agui
-          . .venv-langgraph-agui/bin/activate
-          python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
-          python -m pytest agent-langgraph-agui/tests -q
-      - name: LlamaIndex model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-llamaindex
-          . .venv-llamaindex/bin/activate
-          python -m pip install --requirement agent-llamaindex/requirements.txt --requirement agent-llamaindex/requirements-test.txt
-          python -m pytest agent-llamaindex/tests -q
-      - name: Agno model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-agno
-          . .venv-agno/bin/activate
-          python -m pip install --requirement agent-agno/requirements.txt --requirement agent-agno/requirements-test.txt
-          python -m pytest agent-agno/tests -q
-      - name: Strands model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-strands
-          . .venv-strands/bin/activate
-          python -m pip install --requirement agent-strands/requirements.txt --requirement agent-strands/requirements-test.txt
-          python -m pytest agent-strands/tests -q
-      - name: Pydantic AI model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-pydantic-ai
-          . .venv-pydantic-ai/bin/activate
-          python -m pip install --requirement agent-pydantic-ai/requirements.txt --requirement agent-pydantic-ai/requirements-test.txt
-          python -m pytest agent-pydantic-ai/tests -q
-      - name: Google ADK tool-call regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-adk
-          . .venv-adk/bin/activate
-          python -m pip install --requirement agent-adk/requirements.txt --requirement agent-adk/requirements-test.txt
-          python -m pytest agent-adk/tests -q
-      - name: Antigravity provider pin and token gate
-        run: |
-          set -euo pipefail
-          python -m venv .venv-antigravity
-          . .venv-antigravity/bin/activate
-          python -m pip install --requirement agent-antigravity/requirements.txt --requirement agent-antigravity/requirements-test.txt
-          python -m pytest agent-antigravity/tests -q
-      - name: Langroid model-choice and tool-call regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-langroid
-          . .venv-langroid/bin/activate
-          python -m pip install --requirement agent-langroid/requirements.txt --requirement agent-langroid/requirements-test.txt
-          python -m pytest agent-langroid/tests -q
-      - name: AG2 model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-ag2
-          . .venv-ag2/bin/activate
-          python -m pip install --requirement agent-ag2/requirements.txt --requirement agent-ag2/requirements-test.txt
-          python -m pytest agent-ag2/tests -q
-      - name: Microsoft Agent Framework model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-microsoft
-          . .venv-microsoft/bin/activate
-          python -m pip install --requirement agent-microsoft/requirements.txt --requirement agent-microsoft/requirements-test.txt
-          python -m pytest agent-microsoft/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
@@ -566,7 +692,9 @@ jobs:
 
   build:
     name: build
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -590,7 +718,7 @@ jobs:
   # price of a dependency in the one workflow whose inputs are a security boundary.
   component-dockerfiles:
     name: component dockerfiles
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # Minutes rather than seconds, so on a pull request it runs only when an admin adds the
     # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
     # the release's workflow_call it always runs. `verify` treats a skipped job as passing.
@@ -629,18 +757,25 @@ jobs:
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
+  # A job `changes` found nothing to do for is skipped and passes; `changes` itself must succeed, so
+  # a decision that failed skips nothing.
   verify:
     name: verify
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     if: always()
-    needs: [static, api, mobile, app-browser, test, test-total, startup, langgraph-ts, python-harness, build, component-dockerfiles]
+    needs: [changes, static, api, mobile, app-browser, app-browser-webkit, app-browser-desktop, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-dockerfiles]
     steps:
       - name: Require every check
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          CHANGES: ${{ needs.changes.result }}
         run: |
           set -euo pipefail
           echo "$RESULTS"
+          if [ "$CHANGES" != success ]; then
+            echo "::error::Deciding what runs reported $CHANGES, so the skipped checks are not passes."
+            exit 1
+          fi
           for result in $RESULTS; do
             case "$result" in
               success|skipped) ;;
