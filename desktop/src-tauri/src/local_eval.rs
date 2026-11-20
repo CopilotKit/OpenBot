@@ -4993,15 +4993,10 @@ pub fn setup_installed(
             )
         };
         let report = set_up()?;
-        let report = match lost_stack(&cli, &report, installation, &attempt.0)? {
-            None => report,
-            Some(Lost::Said(problem)) => return Ok(Err(problem)),
-            // A delete that did not finish leaves the setup failed, as it was.
-            Some(Lost::Forgettable(stack)) => match forget(&cli, &stack, &attempt.0) {
-                Ok(()) => set_up()?,
-                Err(Failure::Cancelled) => return Err(Failure::Cancelled),
-                Err(_) => report,
-            },
+        let report = match recover_lost_stack(&cli, &report, installation, &attempt.0)? {
+            Recovered::Nothing => report,
+            Recovered::Said(problem) => return Ok(Err(problem)),
+            Recovered::Forgotten => set_up()?,
         };
         Ok(Ok((report, cli.sha256().to_owned())))
     })
@@ -5014,6 +5009,37 @@ pub fn setup_installed(
 pub enum SetupStopped {
     Failure(Failure),
     Said(crate::problem::Problem),
+}
+
+/// What `recover_lost_stack` did after a failed `local setup`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Recovered {
+    /// Nothing to recover, or a delete that did not finish: the setup stays as it was.
+    Nothing,
+    /// This folder's stack could not be resumed and is forgotten: set up again.
+    Forgotten,
+    /// Kept as it is, with what the person can do about it.
+    Said(crate::problem::Problem),
+}
+
+/// After a failed `local setup`: forget this folder's stack when it can never be resumed
+/// (`lost_stack`), so setup can run again. A delete that did not finish leaves the setup failed,
+/// as it was.
+pub fn recover_lost_stack(
+    cli: &PinnedCli,
+    report: &Report,
+    installation: &std::path::Path,
+    cancel: &Cancel,
+) -> Result<Recovered, Failure> {
+    match lost_stack(cli, report, installation, cancel)? {
+        None => Ok(Recovered::Nothing),
+        Some(Lost::Said(problem)) => Ok(Recovered::Said(problem)),
+        Some(Lost::Forgettable(stack)) => match forget(cli, &stack, cancel) {
+            Ok(()) => Ok(Recovered::Forgotten),
+            Err(Failure::Cancelled) => Err(Failure::Cancelled),
+            Err(_) => Ok(Recovered::Nothing),
+        },
+    }
 }
 
 /// What setup does about a stack that lost the files it resumes from.
@@ -5076,6 +5102,14 @@ The stack is the one the CLI records for this folder (`appPaths`, by real path).
 files missing and no other app using it, nothing can ever resume it, so it is forgotten and set up
 again. With them damaged, or with another app on it, it is kept and the person is told what to do.
 None for every other failure, and for a stack whose files are there.
+
+On Podman the same stack is refused sooner, as `unsupported_engine`: the engine that made a stack is
+recorded in its private folder (`engine.json`), and with the folder gone the CLI takes the stack for
+a Docker one, which the Podman OpenBot names (`COPILOTKIT_LOCAL_ENGINE`) may not manage. Found on a
+Mac after the stack's folder was deleted and OpenBot set up again: "Setup stopped / OpenBot can't
+run on this computer as it's set up." until the record was removed by hand. So that refusal is a
+lost stack too, but only for this folder's stack whose private files, its engine file among them,
+are all gone. Any other `unsupported_engine` is the engine's own, and is said as the CLI said it.
 */
 fn lost_stack(
     cli: &PinnedCli,
@@ -5283,6 +5317,74 @@ pub fn delete_installed(stack: &StackId) -> Result<(), Failure> {
         return Err(Failure::InvalidStatus);
     }
     Ok(())
+}
+
+/// The file in a stack's private folder that names the engine that made it (Intelligence
+/// `apps/cli/src/services/local-stack-engine.ts`).
+const STACK_ENGINE_FILE: &str = "engine.json";
+
+/// The CLI's name for the engine OpenBot runs on, as a stack's engine file holds it. None when the
+/// app has not said which engine that is.
+fn stack_engine_name() -> Option<&'static str> {
+    use crate::engine::Engine;
+    Some(match cli_engine()?.engine {
+        Engine::Podman => "podman",
+        Engine::Docker if cfg!(target_os = "linux") => "docker-engine",
+        Engine::Docker => "docker-desktop",
+    })
+}
+
+/**
+Before forgetting a stack whose private folder is gone, its engine file is put back, naming the engine
+OpenBot runs on, the engine the CLI is told to use. Without it the CLI takes the stack for a Docker
+one, and on Podman refuses `local delete` as it refused `local setup` (`lost_stack`). The CLI's own
+answer for a missing engine file is to restore it naming the engine, and this is that. A file that
+is there is left as it is.
+*/
+fn name_engine_of_lost(stack: &StackId) {
+    let Some(engine) = stack_engine_name() else {
+        return;
+    };
+    let Some(private) = crate::local_update::stack_dir(stack.as_str()) else {
+        return;
+    };
+    let file = private.join(STACK_ENGINE_FILE);
+    if file.exists() {
+        return;
+    }
+    let body = serde_json::json!({ "version": 1, "engine": engine }).to_string();
+    match write_private(&private, &file, &body) {
+        Ok(()) => log::info!(
+            "[local setup] {}'s private folder is gone; named {engine} as its engine so the CLI \
+             can forget it",
+            stack.as_str()
+        ),
+        Err(error) => log::warn!(
+            "[local setup] could not name {}'s engine before forgetting it: {error}",
+            stack.as_str()
+        ),
+    }
+}
+
+/// `body` as a new `file` in `folder`, private as the CLI keeps them: the folder 0700, the file 0600.
+fn write_private(
+    folder: &std::path::Path,
+    file: &std::path::Path,
+    body: &str,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        builder.mode(0o700);
+        options.mode(0o600);
+    }
+    builder.create(folder)?;
+    options.open(file)?.write_all(body.as_bytes())
 }
 
 /// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
