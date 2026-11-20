@@ -156,6 +156,7 @@ describe("the agent without upgrades set up", () => {
     const last = fleet.heartbeats.at(-1);
     expect(last?.installId).toBe(installId);
     expect(last?.flux.helmReleases).toEqual([]);
+    expect(last?.upgrades).toBe("not-set-up");
     expect(last?.upgrade.state).toBe("idle");
     expect(last?.upgrade.journal).toContain("upgrades are not set up");
     expect(last?.upgrade.journal).toContain(UPGRADES_NOT_SET_UP);
@@ -203,5 +204,6 @@ describe("the agent without upgrades set up", () => {
     );
     await management.tick();
     expect(fluxCommands(commands).length).toBeGreaterThan(0);
+    expect(fleet.heartbeats.at(-1)?.upgrades).toBe("on");
   });
 });

@@ -154,6 +154,9 @@ export async function collectHeartbeat(options: {
       desired: workload.spec?.replicas ?? 0,
     })),
     upgrade: options.upgrade,
+    // Whether this agent runs upgrades, so CopilotKit's service and OpenBot's screen can tell a
+    // connected install with upgrades set up from one without.
+    upgrades: upgradesOn(config) ? "on" : "not-set-up",
     sentAt: new Date().toISOString(),
   };
 }
