@@ -568,16 +568,17 @@ test("every write carries an Idempotency-Key of its own, and a retry's own key i
 });
 
 test("Link your company account asks for a ticket where the person works, a new one with a key of its own on every tap, and opens each in the system browser", async () => {
-  const { createCompanySignInTicket } = await import(
-    "../src/api/generated/people/people"
+  const { companySignInTicket } = await import("../src/company-sign-in-ticket");
+  const { linkCompanyAccount, RETURN_ADDRESS } = await import(
+    "../src/link-company"
   );
-  const { linkCompanyAccount } = await import("../src/link-company");
   const opened: string[] = [];
   const steps = {
-    ticket: (providerId: string) =>
-      createCompanySignInTicket(ORGANIZATION_ID, "me", { providerId }),
-    open: async (url: string) => {
+    // The ticket call Home makes.
+    ticket: companySignInTicket,
+    open: async (url: string, returnTo: string) => {
       opened.push(url);
+      expect(returnTo).toBe(RETURN_ADDRESS);
     },
   };
   expect(await linkCompanyAccount("harbor-okta", steps)).toBe("opened");
@@ -591,7 +592,8 @@ test("Link your company account asks for a ticket where the person works, a new 
       method: "POST",
       cookie: COOKIE,
       contentType: "application/json",
-      body: { providerId: "harbor-okta" },
+      // returnTo app: once linked, OpenBot's page sends the browser back to the app.
+      body: { providerId: "harbor-okta", returnTo: "app" },
     });
   // Never sent again with the same key: a replay is refused, so each tap is a request of its own.
   expect(tickets[0]?.key).toMatch(/^[0-9a-f-]{36}$/);

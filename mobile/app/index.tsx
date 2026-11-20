@@ -16,10 +16,7 @@ import {
   readDeployment,
 } from "../src/api";
 import { listConversations } from "../src/api/generated/conversations/conversations";
-import {
-  createCompanySignInTicket,
-  getCompanySignIn,
-} from "../src/api/generated/people/people";
+import { getCompanySignIn } from "../src/api/generated/people/people";
 import {
   authClient,
   openInSystemBrowser,
@@ -29,6 +26,7 @@ import {
   signInEnterprise,
 } from "../src/auth";
 import { HELD_OUT, linkButtons } from "../src/company-sign-in";
+import { companySignInTicket } from "../src/company-sign-in-ticket";
 import { homeView } from "../src/home-view";
 import { linkCompanyAccount, onCompanyLinked } from "../src/link-company";
 import { registerPush, unregisterPush } from "../src/notifications";
@@ -253,10 +251,7 @@ export default function Home() {
                    * says whether it took. A provider that no longer counts reads the list again instead.
                    */
                   await linkCompanyAccount(link.providerId, {
-                    ticket: (providerId) =>
-                      createCompanySignInTicket(ORGANIZATION_ID, "me", {
-                        providerId,
-                      }),
+                    ticket: companySignInTicket,
                     open: openInSystemBrowser,
                   });
                   await refreshOrganizations();
