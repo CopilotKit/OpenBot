@@ -50,10 +50,14 @@ const FACTS = {
   ssoRequired: false,
 };
 
+/** The identity providers the server lists in Harbor. */
+let providers: unknown[] = [];
+
 const originalFetch = globalThis.fetch;
 beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
 beforeEach(() => {
   setCurrentOrganization(HARBOR.id);
+  providers = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = new URL(
@@ -62,7 +66,7 @@ beforeEach(() => {
       );
       return url.pathname ===
         `/api/v2/organizations/${HARBOR.id}/identity-providers`
-        ? Response.json({ identityProviders: [], nextCursor: null })
+        ? Response.json({ identityProviders: providers, nextCursor: null })
         : Response.json({ detail: "not served" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -174,6 +178,40 @@ test("on a company's own OpenBot, Identity providers reads as before", async () 
   expect(
     within(signIn).getByText(
       "Off. Set SCIM_BEARER_TOKEN to accept provisioning from Okta, Entra or another directory.",
+    ),
+  ).toBeTruthy();
+});
+
+/*
+ * Found on a hosted OpenBot's end-to-end run: sentences on these screens told an organization admin
+ * to ask "whoever runs OpenBot". There that is OpenBot by CopilotKit, whom they have no way to ask.
+ */
+test("on a hosted OpenBot, the providers set up for all of OpenBot send nobody to ask whoever runs it", async () => {
+  providers = [
+    {
+      id: "company-entra",
+      issuer: "https://login.microsoftonline.com/tenant/v2.0",
+      domain: "example.com",
+      protocol: "oidc",
+      registeredBy: null,
+      deployment: true,
+    },
+  ];
+  const hosted = identityProviders(true);
+  await hosted.findByText("company-entra");
+  expect(
+    within(section(hosted, "For all of OpenBot")).getByText(
+      "Set up for everyone who signs in to OpenBot. They count for this organization too.",
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/whoever runs|Ask them/);
+  cleanup();
+
+  const own = identityProviders(false);
+  await own.findByText("company-entra");
+  expect(
+    within(section(own, "For all of OpenBot")).getByText(
+      "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one.",
     ),
   ).toBeTruthy();
 });
