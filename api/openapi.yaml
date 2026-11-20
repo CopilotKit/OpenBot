@@ -34942,6 +34942,9 @@ components:
         organizationId:
           type: string
           description: The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`.
+        organizationName:
+          type: string
+          description: What people call that organization, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.
     RecorderProblem:
       description: 'A problem for the OpenBot Recorder: the shared problem details, with why its connection ended.'
       allOf:
@@ -34965,6 +34968,19 @@ components:
           $ref: '#/components/schemas/RecorderUser'
         connectionId:
           type: string
+        organization:
+          type: object
+          description: The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              description: The organization's id. Opaque.
+            name:
+              type: string
+              description: What people call it.
     RecorderLearning:
       type: object
       required:
@@ -45805,6 +45821,7 @@ components:
           name: Sam Ortiz
           email: sam@example.com
         organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
+        organizationName: Acme Research
     RecorderIdentityExample:
       summary: Who this Recorder acts as.
       value:
@@ -45813,6 +45830,9 @@ components:
           name: Sam Ortiz
           email: sam@example.com
         connectionId: 4a6f2d1c-9b8e-4c7a-a5d3-1e2f3a4b5c6d
+        organization:
+          id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+          name: Acme Research
     RecorderLearningExample:
       summary: A person whose recordings are learned from.
       value:
