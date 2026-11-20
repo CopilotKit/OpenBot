@@ -5,11 +5,16 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  BackupTargetRefused,
   backupTargetFrom,
   compareTarget,
+  confirmBackupTarget,
+  DATABASE_IDENTITY_SINCE,
+  predatesDatabaseIdentity,
   productDatabase,
   type Resolve,
 } from "../src/backup-target";
+import type { Kube } from "../src/kube";
 
 /** A resolver with fixed answers, as the cluster's DNS would give them. */
 const dns =
@@ -292,5 +297,61 @@ describe("backup target guard", () => {
         "An error occurred (DBInstanceNotFound) when calling the DescribeDBInstances operation",
       ),
     ).toThrow("not the expected JSON");
+  });
+
+  test("a server that predates the check is let through with a warning; one at or after it that reports nothing is refused", async () => {
+    // Neither case reaches the cloud: nothing here may touch the cluster.
+    const kube = new Proxy({} as Kube, {
+      get: () => {
+        throw new Error("the cluster was asked");
+      },
+    });
+    const confirm = (version: string | undefined) =>
+      confirmBackupTarget({
+        kube,
+        kind: "rds-snapshot",
+        template: "kind: Job",
+        operation: "261119233220-f498d1",
+        timeoutSeconds: 600,
+        // What /release says on a server from before the field: no `database` at all.
+        identity: {
+          version,
+          commit: "e373655cc7d506d11bc99e4165935bf6f8f98fd7",
+          distributionId: "CopilotKit/OpenBot",
+          repository: "CopilotKit/OpenBot",
+          channel: "stable",
+          lastAppliedMigration: "0137_ai_connections",
+        },
+      });
+
+    expect(DATABASE_IDENTITY_SINCE).toBe("v1.1.3");
+    for (const version of [
+      "v1.1.0",
+      "v1.1.1",
+      "v1.1.2",
+      "v1.1.3-rc.1",
+      "1.0.4",
+    ]) {
+      expect(predatesDatabaseIdentity(version)).toBe(true);
+      const skipped = await confirm(version);
+      expect(skipped.verified).toBe(false);
+      expect(skipped.message).toStartWith(
+        "backup target not verified: server predates the check",
+      );
+      expect(skipped.message).toContain(version);
+    }
+    for (const version of [
+      "v1.1.3",
+      "v1.2.0-rc.1",
+      "v2.0.0",
+      undefined,
+      "main",
+    ]) {
+      expect(predatesDatabaseIdentity(version)).toBe(false);
+      const refused = await confirm(version).catch((error) => error);
+      expect(refused).toBeInstanceOf(BackupTargetRefused);
+      expect(refused.mismatch).toBe(false);
+      expect(refused.message).toContain("does not report its database");
+    }
   });
 });

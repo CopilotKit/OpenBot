@@ -156,7 +156,7 @@ export class ManagementAgent {
     const line =
       upgradeState === "recovery-required"
         ? `recovery-required: ${journal?.error ?? "a promotion stopped"}`
-        : this.message;
+        : (this.message ?? live?.warnings?.at(-1) ?? null);
     return {
       state: upgradeState,
       targetVersion:
@@ -717,7 +717,7 @@ export class ManagementAgent {
   ) {
     this.liveJournal = { ...journal };
     try {
-      const how = await confirmBackupTarget({
+      const confirmation = await confirmBackupTarget({
         kube: this.kube,
         kind: this.config.backup.kind,
         template: this.agent.jobs.backupTarget,
@@ -725,7 +725,21 @@ export class ManagementAgent {
         timeoutSeconds: Math.min(this.config.backup.timeoutSeconds, 900),
         identity: await readIdentity(this.config),
       });
-      this.log("backup target confirmed", { to: journal.toVersion, how });
+      if (confirmation.verified)
+        this.log("backup target confirmed", {
+          to: journal.toVersion,
+          how: confirmation.message,
+        });
+      else {
+        // Journaled with the promotion (runPromotion saves this object), and the heartbeat says
+        // it until the next promotion.
+        journal.warnings = [...(journal.warnings ?? []), confirmation.message];
+        this.liveJournal = { ...journal };
+        this.log("backup target not verified", {
+          to: journal.toVersion,
+          warning: confirmation.message,
+        });
+      }
     } catch (error) {
       if (!(error instanceof BackupTargetRefused)) throw error;
       journal.phase = "recovery-required";

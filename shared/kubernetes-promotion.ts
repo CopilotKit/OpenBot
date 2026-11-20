@@ -56,6 +56,9 @@ export interface PromotionJournal {
    * suspended by this operation, and only those are put back. */
   pausedCronJobs?: { name: string; wasSuspended: boolean }[];
   error?: string;
+  /** What the operation went ahead despite, for a person to read (the agent's backup target check
+   * skipped for a server that predates it, say). */
+  warnings?: string[];
   recovery: string;
 }
 

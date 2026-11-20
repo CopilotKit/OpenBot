@@ -342,6 +342,38 @@ async function terminationMessage(kube: Kube, namespace: string, job: string) {
  * Runs the chart's backup-target Job and compares what the cloud says with what the server says.
  * Resolves with how they matched; throws BackupTargetRefused otherwise. Never skips a cloud kind.
  */
+/**
+ * The first OpenBot release whose server reports its database on /release. 1.1.2 was cut from main
+ * before the field existed, so the first release that can carry it is the next one after 1.1.2.
+ * A server older than this cannot say which database it uses: the check is skipped for it, with a
+ * warning, so installs on those releases can still upgrade to one that reports it. A server at or
+ * after this release that reports nothing is refused like any other unknown.
+ */
+export const DATABASE_IDENTITY_SINCE = "v1.1.3";
+
+const VERSION =
+  /^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:-([0-9A-Za-z.-]{1,64}))?$/;
+
+/** Whether `version` is a release before DATABASE_IDENTITY_SINCE, by semantic versioning's order
+ * (a pre-release, `1.1.3-rc.1`, comes before its release). False for anything that is not a
+ * release number: an unknown version is never let through. */
+export function predatesDatabaseIdentity(version: string | undefined) {
+  const running = VERSION.exec(version ?? "");
+  const since = VERSION.exec(DATABASE_IDENTITY_SINCE);
+  if (!running || !since) return false;
+  for (const index of [1, 2, 3]) {
+    const difference = Number(running[index]) - Number(since[index]);
+    if (difference !== 0) return difference < 0;
+  }
+  return running[4] !== undefined && since[4] === undefined;
+}
+
+export interface Confirmation {
+  /** False only when the check was skipped for a server that predates it. */
+  verified: boolean;
+  message: string;
+}
+
 export async function confirmBackupTarget(options: {
   kube: Kube;
   kind: BackupKind;
@@ -351,10 +383,16 @@ export async function confirmBackupTarget(options: {
   timeoutSeconds: number;
   identity: ReleaseIdentity | null;
   resolve?: Resolve;
-}): Promise<string> {
+}): Promise<Confirmation> {
   const { kube, kind, template } = options;
-  if (kind === "command") return "backup.kind=command is not checked";
+  if (kind === "command")
+    return { verified: true, message: "backup.kind=command is not checked" };
   const product = productDatabase(options.identity);
+  if (!product && predatesDatabaseIdentity(options.identity?.version))
+    return {
+      verified: false,
+      message: `backup target not verified: server predates the check (${options.identity?.version} is older than ${DATABASE_IDENTITY_SINCE}, the first release that reports its database); the backup is of ${VALUES_KEY[kind]} as configured`,
+    };
   if (!product)
     throw new BackupTargetRefused(
       `the running server (${options.identity?.version ?? "unknown version"}) does not report its database on /release, so ${VALUES_KEY[kind]} cannot be confirmed as the database it uses`,
@@ -391,5 +429,8 @@ export async function confirmBackupTarget(options: {
   const verdict = await compareTarget(product, target, options.resolve);
   if (!verdict.ok)
     throw new BackupTargetRefused(verdict.reason, verdict.mismatch);
-  return `${target.label} is the product's database (${verdict.how})`;
+  return {
+    verified: true,
+    message: `${target.label} is the product's database (${verdict.how})`,
+  };
 }
