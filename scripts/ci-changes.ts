@@ -92,6 +92,7 @@ const ciInputs = matcher(
 const desktopInputs = matcher(
   ".github/workflows/desktop.yml",
   ".github/workflows/desktop-build.yml",
+  "desktop/scripts/install-linux-build-deps.sh",
   "scripts/ci-changes.ts",
 );
 
@@ -212,7 +213,14 @@ export const DESKTOP_RULES: Rule[] = [
   },
   {
     output: "app",
-    checks: ["app / app (macos)", "app / app (windows)", "app / app (linux)"],
+    // The builds, and the Docker regression tests desktop.yml runs beside them on the same gate.
+    checks: [
+      "app / app (macos)",
+      "app / app (windows)",
+      "app / app (linux)",
+      "live (images)",
+      "live (engines)",
+    ],
     // desktop.yml's own path filter, less the docs and the tests the suite runs.
     reads: (path) =>
       (!isDocs(path) &&
