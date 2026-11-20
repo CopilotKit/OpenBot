@@ -417,7 +417,7 @@ export const getCancelManagementEnrollmentUrl = (organizationId: string) => {
 };
 
 /**
- * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. Nothing is changed in the cluster. Not connected answers 204 too. Connected answers 409: disconnecting is uninstalling the management agent with Helm. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
+ * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. Nothing is changed in the cluster. Not connected answers 204 too. Connected, it finishes disconnecting after the management agent is uninstalled with Helm: while CopilotKit's management service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it forgets the connection and answers 204, so OpenBot can be connected again later. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
  * @summary Stop connecting this OpenBot to CopilotKit management
  */
 export const cancelManagementEnrollment = async (
@@ -464,6 +464,7 @@ export const getCancelManagementEnrollmentMutationOptions = <
     | ManagementUnavailableResponse
     | ManagementConflictResponse
     | ServerErrorResponse
+    | ManagementServiceFailedResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -512,6 +513,7 @@ export type CancelManagementEnrollmentMutationError =
   | ManagementUnavailableResponse
   | ManagementConflictResponse
   | ServerErrorResponse
+  | ManagementServiceFailedResponse
   | UnexpectedErrorResponse;
 export type CancelManagementEnrollmentMutationVariables = {
   organizationId: string;
@@ -529,6 +531,7 @@ export const useCancelManagementEnrollment = <
     | ManagementUnavailableResponse
     | ManagementConflictResponse
     | ServerErrorResponse
+    | ManagementServiceFailedResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(

@@ -37,7 +37,7 @@ export interface ManagementEnrollment {
    */
   agentVersion?: string;
   /**
-   * What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, or the management service out of reach. Absent when nothing did.
+   * What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, or a connected agent that has stopped reporting in. Absent when nothing did.
    * @minLength 1
    */
   lastError?: string;

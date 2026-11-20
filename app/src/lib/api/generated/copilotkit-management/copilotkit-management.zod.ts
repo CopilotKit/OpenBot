@@ -79,7 +79,7 @@ export const GetManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, or the management service out of reach. Absent when nothing did.",
+        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, or a connected agent that has stopped reporting in. Absent when nothing did.",
       ),
   })
   .describe(
@@ -174,7 +174,7 @@ export const StartManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, or the management service out of reach. Absent when nothing did.",
+        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, or a connected agent that has stopped reporting in. Absent when nothing did.",
       ),
   })
   .describe(
@@ -182,7 +182,7 @@ export const StartManagementEnrollmentResponse = zod
   );
 
 /**
- * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. Nothing is changed in the cluster. Not connected answers 204 too. Connected answers 409: disconnecting is uninstalling the management agent with Helm. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
+ * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. Nothing is changed in the cluster. Not connected answers 204 too. Connected, it finishes disconnecting after the management agent is uninstalled with Helm: while CopilotKit's management service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it forgets the connection and answers 204, so OpenBot can be connected again later. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
  * @summary Stop connecting this OpenBot to CopilotKit management
  */
 
