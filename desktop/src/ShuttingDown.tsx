@@ -131,11 +131,19 @@ export function quitTick(
     ? { ...clock, started: { ...clock.started } }
     : { began: now, started: {}, shown: null, best: 0 };
   const legs: Leg[] = [];
-  for (const { step, plan } of QUIT_PARTS) {
+  // The last part the Quit has reached. A part before it with no row was passed over (no services
+  // OpenBot created to stop), so it is not still to come.
+  const reached = QUIT_PARTS.reduce(
+    (last, { step }, at) =>
+      steps.some((known) => known.step === step) ? at : last,
+    -1,
+  );
+  for (const [at, { step, plan }] of QUIT_PARTS.entries()) {
     const row = steps.find((known) => known.step === step);
     if (
       !row &&
-      (step === "finish-update" ||
+      (at < reached ||
+        step === "finish-update" ||
         step === "stop-engine" ||
         step === "start-your-podman")
     )

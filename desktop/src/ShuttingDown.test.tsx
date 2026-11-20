@@ -143,4 +143,20 @@ test("Quit says it is starting the person's Podman again only when OpenBot pause
   expect(view.container.querySelector(".journey-said")?.textContent).toBe(
     "Stopping the software OpenBot runs on",
   );
+  // With no services OpenBot created, their part never runs, and is not what Quit says it is
+  // doing once a later part has begun (a Windows box, before sign-in).
+  view.rerender(
+    <ShuttingDown
+      status={{
+        seq: 6,
+        steps: [
+          done("stop-openbot"),
+          { step: "stop-engine", ok: true, running: true, detail: "" },
+        ],
+      }}
+    />,
+  );
+  expect(view.container.querySelector(".journey-said")?.textContent).toBe(
+    "Stopping the software OpenBot runs on",
+  );
 });
