@@ -528,6 +528,27 @@ test("a conversation whose server dropped its run says the turn was cut off afte
   within(restored).getByRole("button", { name: "Carry on" });
 });
 
+/*
+ * A Bot on a Claude plan whose engine went away part way through a reply: the server ends the turn
+ * "The connection to Claude dropped. Ask the Bot to carry on." It asks for the Bot to carry on, so
+ * the turn offers Carry on, live and in a conversation opened again, as a turn cut off here does.
+ */
+test("a turn the server says to carry on offers Carry on, live and after a reload", async () => {
+  const DROPPED = "The connection to Claude dropped. Ask the Bot to carry on.";
+  plans = [{ kind: "fails", message: DROPPED }];
+  const live = open();
+  await send(live, "Write the tide note for the harbour board");
+  const shown = await live.findByTestId("transcript-stopped");
+  expect(within(shown).getByRole("alert").textContent).toBe(DROPPED);
+  within(shown).getByRole("button", { name: "Carry on" });
+  live.unmount();
+  const back = open();
+  await settled(back, "Write the tide note for the harbour board");
+  const restored = await back.findByTestId("transcript-stopped");
+  expect(within(restored).getByRole("alert").textContent).toBe(DROPPED);
+  within(restored).getByRole("button", { name: "Carry on" });
+});
+
 test("a failure that a later run answered is not shown after a reload", async () => {
   plans = [
     { kind: "fails", message: REJECTED },
@@ -655,9 +676,10 @@ test("a turn that failed after it had done some work keeps its message sent, and
   ];
   const live = open();
   await send(live, "Find all HubSpot deals at S1 and later");
-  expect((await live.findByTestId("transcript-stopped")).textContent).toBe(
-    FAILED,
-  );
+  const stopped = await live.findByTestId("transcript-stopped");
+  expect(within(stopped).getByRole("alert").textContent).toBe(FAILED);
+  // It asks for the Bot to carry on, so the turn offers that with one press.
+  within(stopped).getByRole("button", { name: "Carry on" });
   await waitFor(() =>
     expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
   );

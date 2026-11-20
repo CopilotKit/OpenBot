@@ -38,6 +38,16 @@ export function stoppedReason(reported: unknown): string {
   return said.trim() || "The Bot stopped without saying why.";
 }
 
+/**
+ * Whether the server ended the turn asking the person to have the Bot carry on: a reply that came
+ * back incomplete, or the connection to the Bot's model dropping part way ("The connection to Claude
+ * dropped. Ask the Bot to carry on."). Those turns did work that stands, like a turn cut off here,
+ * so they get the same Carry on.
+ */
+export function asksToCarryOn(said: string): boolean {
+  return /\bAsk (?:it|the Bot) to carry on\.$/.test(said.trim());
+}
+
 /** Said under a turn cut off part way because OpenBot's backend stopped answering. Its work stands. */
 export const TURN_CUT_OFF =
   "The Bot stopped before it finished because OpenBot's backend stopped answering. What it saved is shown here.";
