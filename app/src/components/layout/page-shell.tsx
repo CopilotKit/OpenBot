@@ -68,7 +68,7 @@ export function PageShell({
   );
 
   const barRow = bar ? (
-    <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
+    <div className="flex h-14 w-full max-w-7xl shrink-0 items-center gap-1 px-3">
       {showToggle ? <SidebarToggle /> : null}
       {!backButton ? null : backButton.disabled ? (
         <Button disabled variant="ghost">
@@ -106,13 +106,20 @@ export function PageShell({
   }
 
   return (
-    <>
+    /*
+     * Same shell as `full`: one flex column that fills the inset and never grows past it. The bar
+     * stays put; `PageColumn` is the scroller. A fragment here left bar + column as siblings of the
+     * route outlet — fine when the parent is already that column, but skins and nested outlets are
+     * not always, and then the list (Agents, Bots, …) grows past the pane and is clipped with no
+     * scrollbar.
+     */
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {barRow}
       <PageColumn bar={bar} className={className}>
         {header}
         {children}
       </PageColumn>
-    </>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { isThreadLocked, THREAD_LOCKED } from "@/lib/copilot/thread-lock";
 
 /**
  * Why the last turn ended without an answer, for a surface that has to say so itself.
@@ -32,6 +33,11 @@ export function stoppedReason(reported: unknown): string {
         : "";
   const refused = refusalForPerson(said);
   if (refused) return refused;
+  /*
+   * Before "couldn't reach its backend": a 409 lock often arrives as `REST run request failed: …`,
+   * and that prefix would otherwise be rewritten as an unreachable backend.
+   */
+  if (isThreadLocked(reported) || isThreadLocked(said)) return THREAD_LOCKED;
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
   return said.trim() || "The Bot stopped without saying why.";

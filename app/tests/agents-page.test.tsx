@@ -8,6 +8,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { AgentList } from "@/components/bot-agents/agent-list";
 import { BotDelegation } from "@/components/bot-profile/delegation";
+import { PageShell } from "@/components/layout/page-shell";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type {
   BotAgent,
@@ -195,6 +196,28 @@ test("the list says where each agent runs and how many Bots use it, and a refuse
     `GET ${ORG}/bot-agents`,
     `DELETE ${ORG}/bot-agents/bag_analyst`,
   ]);
+});
+
+test("the Agents page list scrolls inside the page shell, not past a clipped pane", async () => {
+  const view = draw(
+    <div className="flex h-[240px] flex-col overflow-hidden">
+      <PageShell
+        description="Your Bots hand work to these agents."
+        title="Agents"
+      >
+        <AgentList onAdd={() => {}} onEdit={() => {}} />
+      </PageShell>
+    </div>,
+  );
+  const row = await view.findByText("Pipeline analyst");
+  const scroller = row.closest(".overflow-y-auto");
+  expect(scroller).not.toBeNull();
+  expect(scroller?.className).toContain("min-h-0");
+  expect(scroller?.className).toContain("flex-1");
+  // Shell fills the pane; the list is inside the scroller, not a sibling that can grow past it.
+  expect(
+    view.container.querySelector(".overflow-hidden.flex-1"),
+  ).not.toBeNull();
 });
 
 const BOT = { id: "agent_sales" } as AgentProfile;

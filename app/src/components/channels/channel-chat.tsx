@@ -101,6 +101,11 @@ import {
   stoppedReason,
 } from "@/lib/copilot/stopped-turn";
 import {
+  isThreadLocked,
+  THREAD_LOCK_TRIES,
+  threadLockWaitMs,
+} from "@/lib/copilot/thread-lock";
+import {
   readThreadMessages,
   withCurrentA2uiVersions,
 } from "@/lib/copilot/thread-messages";
@@ -1444,49 +1449,75 @@ export function ChannelChat({
          * stall, and a run the server gave up then looked like one still thinking: "Running" and
          * Stop, for good. A browser step taken between this turn's runs is quiet of its own, so the
          * watch covers one run at a time.
+         *
+         * A FOLLOW-UP THAT HITS A STILL-LOCKED THREAD is tried again a few times. Intelligence can
+         * keep the lock briefly after the previous reply is already on screen; without this the
+         * person sees a raw "Thread <id> is locked" for a send the UI had already allowed.
          */
-        const quiet = watchQuietRun({
-          ask: () => askRunLiveness(channel.id),
-        });
-        const hearing = target.subscribe({
-          onEvent: ({ event }) => {
-            // Between the server's runs the turn is this browser's (a step it takes, a card the
-            // person answers), and quiet there is not a run gone missing.
-            if (
-              event.type === EventType.RUN_FINISHED ||
-              event.type === EventType.RUN_ERROR
-            )
-              quiet.rest();
-            else quiet.heard();
-          },
-        });
-        const run = withVoiceContext(
-          copilotkit,
-          target.agentId,
-          voiceHistory,
-          () =>
-            whileObserved(target, () => copilotkit.runAgent({ agent: target })),
-        );
-        const ended = await Promise.race([
-          run.then(() => "ran" as const),
-          quiet.over,
-        ]).finally(() => {
-          quiet.stop();
-          hearing.unsubscribe();
-        });
-        if (ended !== "ran") {
-          // The run is let go of here; whatever it does later is not this turn's any more.
-          run.catch(() => undefined);
-          void target.detachActiveRun().catch(() => undefined);
-          awaitingReply.current = false;
-          // What the thread holds is what was saved: read back when the runtime can be asked.
-          if (ended === "over") {
-            const whole = await readBackFromThread(target, existingMessageIds);
-            if (whole) reportReadBack(target);
+        let ended: "ran" | "over" | "unreachable" = "ran";
+        for (let lockTry = 0; ; lockTry += 1) {
+          const quiet = watchQuietRun({
+            ask: () => askRunLiveness(channel.id),
+          });
+          const hearing = target.subscribe({
+            onEvent: ({ event }) => {
+              // Between the server's runs the turn is this browser's (a step it takes, a card the
+              // person answers), and quiet there is not a run gone missing.
+              if (
+                event.type === EventType.RUN_FINISHED ||
+                event.type === EventType.RUN_ERROR
+              )
+                quiet.rest();
+              else quiet.heard();
+            },
+          });
+          const run = withVoiceContext(
+            copilotkit,
+            target.agentId,
+            voiceHistory,
+            () =>
+              whileObserved(target, () =>
+                copilotkit.runAgent({ agent: target }),
+              ),
+          );
+          ended = await Promise.race([
+            run.then(() => "ran" as const),
+            quiet.over,
+          ]).finally(() => {
+            quiet.stop();
+            hearing.unsubscribe();
+          });
+          if (ended !== "ran") {
+            // The run is let go of here; whatever it does later is not this turn's any more.
+            run.catch(() => undefined);
+            void target.detachActiveRun().catch(() => undefined);
+            awaitingReply.current = false;
+            // What the thread holds is what was saved: read back when the runtime can be asked.
+            if (ended === "over") {
+              const whole = await readBackFromThread(target, existingMessageIds);
+              if (whole) reportReadBack(target);
+            }
+            setRunError(ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
+            break;
           }
-          setRunError(ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
+          /*
+           * Only retries a lock that refused the run before it started. Once `started` is true the
+           * hosted run owns the thread for real; waiting and calling again would pile on.
+           */
+          if (
+            !started &&
+            isThreadLocked(turnFailure.current) &&
+            lockTry + 1 < THREAD_LOCK_TRIES
+          ) {
+            turnFailure.current = null;
+            setRunError(null);
+            awaitingReply.current = true;
+            await afterMs(threadLockWaitMs(lockTry));
+            continue;
+          }
           break;
         }
+        if (ended !== "ran") break;
         if (!streamBroke.current || turnFailure.current !== null) break;
         streamBroke.current = false;
         awaitingReply.current = false;
