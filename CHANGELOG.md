@@ -96,6 +96,14 @@ unless you rely on task threads.
     OpenBot installed for a plain `helm upgrade`.
   - Its image is the release's own, `ghcr.io/copilotkit/openbot-management-agent:v<release>`. The
     chart published with 1.1.1 named a tag that was never published.
+  - Or connect without copying a secret: with `enrollment.serverUrl` set to OpenBot's internal status
+    port and no install id, the agent proves itself to the OpenBot server with a short-lived
+    service account token, collects the one-time enrollment token the server holds once an admin
+    connected the install, makes its own key, trades a certificate request for its certificate and
+    writes both to its own Secret, which it reuses after a restart. The key never leaves the
+    cluster, and nothing secret is logged. Until you choose how the database is backed up
+    (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
+    anything.
 - **`bun scripts/update.ts kubernetes apply` accepts a published release.** It compared the commit
   the running server reports with the one the release names, which never match for a published
   release, so an upgrade that had worked ended in recovery-required with "Running server release

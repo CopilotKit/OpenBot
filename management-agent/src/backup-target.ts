@@ -59,7 +59,7 @@ export class BackupTargetRefused extends Error {
   }
 }
 
-const VALUES_KEY: Record<Exclude<BackupKind, "command">, string> = {
+const VALUES_KEY: Record<Exclude<BackupKind, "command" | "none">, string> = {
   "rds-snapshot": "backup.rdsSnapshot.instance",
   "aurora-snapshot": "backup.auroraSnapshot.cluster",
   "azure-pg-backup": "backup.azurePgBackup.server",
@@ -124,8 +124,8 @@ function split(values: string[]) {
  * backup-target-job.yaml for the exact command per kind).
  */
 export function backupTargetFrom(kind: BackupKind, message: string) {
-  if (kind === "command")
-    throw new Error("backup.kind=command has no target to read");
+  if (kind === "command" || kind === "none")
+    throw new Error(`backup.kind=${kind} has no target to read`);
   let parsed: z.infer<typeof Message>;
   try {
     parsed = Message.parse(JSON.parse(message));
@@ -385,6 +385,11 @@ export async function confirmBackupTarget(options: {
   resolve?: Resolve;
 }): Promise<Confirmation> {
   const { kube, kind, template } = options;
+  if (kind === "none")
+    throw new BackupTargetRefused(
+      "no backup is configured (backup.kind is empty), and an upgrade that migrates the database needs one; set backup.kind and its values with helm upgrade openbot-agent",
+      false,
+    );
   if (kind === "command")
     return { verified: true, message: "backup.kind=command is not checked" };
   const product = productDatabase(options.identity);
