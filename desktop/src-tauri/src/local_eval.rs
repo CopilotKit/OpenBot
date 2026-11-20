@@ -5010,6 +5010,12 @@ pub fn setup_installed(
         // Its turn: the CLI's log from here on is this setup's (`Trail`).
         let _trail = Trail::begin(id, TrailKind::Setup);
         let cli = installed()?;
+        // A node that is gone leaves k3d's other containers in the way of the one setup makes.
+        if let Some(state) = crate::local_eval_state::read(installation, None)
+            .filter(crate::local_eval_state::State::tied_to_openbot)
+        {
+            clear_leftovers_of_gone(&state.stack_id());
+        }
         let set_up = || {
             setup_with(
                 &cli,
@@ -5351,6 +5357,58 @@ pub fn cluster_gone_at(
 pub fn cluster_gone_in(names: &str, stack: &StackId) -> bool {
     let node = format!("k3d-{}-server-0", stack.as_str());
     !names.lines().any(|name| name.trim() == node)
+}
+
+/**
+k3d's own containers for `stack` that outlived its node, removed so setup can make the cluster again.
+
+The cloud Mac on Docker Desktop: after Quit stopped the node and a prune of stopped containers
+removed it, k3d's tools container, `k3d-<stack>-tools`, was still running. k3d finds a cluster by
+any container labelled with its name, so `k3d cluster create` refused with "a cluster with that name
+already exists", while `k3d cluster list`, which the CLI asks, listed none. Setup failed at
+`cluster-create` in 31 ms, and Retry the same way. Only when the node is gone from the engine the CLI
+runs on (`cluster_gone`), and only containers k3d labelled for this stack: nothing of the cluster is
+left running in them, and nothing else is touched.
+*/
+fn clear_leftovers_of_gone(stack: &StackId) {
+    if cluster_gone(stack) != Some(true) {
+        return;
+    }
+    let Some(address) = cli_engine() else {
+        return;
+    };
+    let label = format!("label=k3d.cluster={}", stack.as_str());
+    let Some(listed) = names_listed(
+        &address,
+        &["ps", "--all", "--filter", &label, "--format", "{{.Names}}"],
+    ) else {
+        return;
+    };
+    for name in leftovers_in(&listed, stack) {
+        let mut command = engine_command(Some(&CliEngine::of(&address)));
+        command.args(["rm", "--force", "--volumes", &name]);
+        match crate::local_images::run_within(command, std::time::Duration::from_secs(60), 64 * 1024)
+        {
+            Some((true, _)) => log::warn!(
+                "[local setup] removed {name}, which k3d left after {}'s node was gone",
+                stack.as_str()
+            ),
+            _ => log::warn!("[local setup] could not remove {name}"),
+        }
+    }
+}
+
+/// The containers to clear for `stack` from a listing of those k3d labelled for it, one name per
+/// line: its own, named `k3d-<stack>-…`, and never its node.
+pub fn leftovers_in(names: &str, stack: &StackId) -> Vec<String> {
+    let prefix = format!("k3d-{}-", stack.as_str());
+    let node = format!("k3d-{}-server-0", stack.as_str());
+    names
+        .lines()
+        .map(str::trim)
+        .filter(|name| name.starts_with(&prefix) && *name != node)
+        .map(str::to_owned)
+        .collect()
 }
 
 /**
@@ -6851,6 +6909,25 @@ mod tests {
             "k3d-local-1915a7aafba78d6207a561b0-tools\n",
             &stack
         ));
+    }
+
+    /// The cloud Mac: k3d's tools container outlived the pruned node and made `k3d cluster create`
+    /// refuse ("a cluster with that name already exists"). It is cleared before setup; the node
+    /// and anything not named for this stack never are.
+    #[test]
+    fn only_this_stacks_k3d_leftovers_are_cleared() {
+        let stack = StackId::parse("local-7f93dd21b8553c18d27b9564").unwrap();
+        assert_eq!(
+            leftovers_in(
+                "k3d-local-7f93dd21b8553c18d27b9564-tools\n\
+                 k3d-local-7f93dd21b8553c18d27b9564-server-0\n\
+                 k3d-local-0000-tools\n\
+                 my-web\n",
+                &stack
+            ),
+            ["k3d-local-7f93dd21b8553c18d27b9564-tools"]
+        );
+        assert!(leftovers_in("", &stack).is_empty());
     }
 
     /// A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's

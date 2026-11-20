@@ -145,6 +145,14 @@ fn engine_a_node_pruned_while_stopped_is_found_gone() {
     assert_eq!(cluster_gone(&stack), Some(true));
     assert_eq!(cluster_removed(&stack), Some(true));
 
+    // k3d's tools container, still running, would make `k3d cluster create` refuse: it is cleared,
+    // and the network and image volume, which setup reuses, stay.
+    let tools = format!("k3d-{}-tools", stack.as_str());
+    assert!(docker(&["container", "inspect", &tools]).0);
+    clear_leftovers_of_gone(&stack);
+    assert!(!docker(&["container", "inspect", &tools]).0);
+    assert_eq!(cluster_removed(&stack), Some(true));
+
     // An engine with no trace of the stack at all may not be the one it lives in: the offer still
     // stands, but setup never deletes the stack on that alone.
     drop(node);
