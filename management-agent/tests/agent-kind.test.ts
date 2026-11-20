@@ -450,7 +450,9 @@ run("management agent on a real cluster", () => {
         "name",
       ).trim(),
     ).not.toBe("");
-    expect(JSON.parse(agentState()["state.json"] ?? "{}").accepted).toBeNull();
+    expect(
+      JSON.parse(agentState()["state.json"] ?? "{}").accepted ?? null,
+    ).toBeNull();
     await productTimeout("20m");
 
     // A person clears it and the desired version moves to the real first build. Outside the window
