@@ -292,9 +292,6 @@ or a script has to say.
 
 ### API
 
-- **Search an organization's members.** `listOrganizationMembers` takes `search`, which narrows the
-  list to the members whose name or address starts with it or holds it, ignoring case, best
-  matches first. Only that organization's current members are ever listed.
 - **The API refuses NUL in text.** Every text field the spec holds to a pattern refuses a NUL
   character anywhere in it, with 400 `VALIDATION_ERROR` and "That text has a character OpenBot
   can't keep. Type it again." Before, one NUL could pass where the pattern asked for a character.
