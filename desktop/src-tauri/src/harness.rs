@@ -354,15 +354,15 @@ pub fn the_release_includes(
     // The folder's own Bot is what its release was installed with, so it is never second-guessed
     // here: its finished install is kept as it is (`preparation::require`).
     let instead = kept.or_else(|| {
-            catalogue()
-                .into_iter()
-                .filter(|row| row.image.is_some())
-                .map(|row| HarnessChoice {
-                    id: row.id,
-                    agent_url: None,
-                })
-                .find(|row| picked(Some(row), root).is_ok())
-        });
+        catalogue()
+            .into_iter()
+            .filter(|row| row.image.is_some())
+            .map(|row| HarnessChoice {
+                id: row.id,
+                agent_url: None,
+            })
+            .find(|row| picked(Some(row), root).is_ok())
+    });
     match instead {
         Some(instead) => {
             log::warn!(

@@ -5300,7 +5300,7 @@ pub fn stack_recorded(stack: &StackId) -> Option<bool> {
     )
     .ok()?;
     let (outcome, wire) = parse_envelope("local list", code, &bytes).ok()?;
-    (outcome == Outcome::Completed).then(|| stack_listed_in(&wire, stack))?
+    (outcome == Outcome::Completed).then(|| stack_listed_in(&Value::Object(wire), stack))?
 }
 
 /// Whether `local list`'s answer names `stack`. None when the answer holds no list of stacks, which

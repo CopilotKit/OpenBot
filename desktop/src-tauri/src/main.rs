@@ -11077,7 +11077,11 @@ fn local_eval_answer(
         &report,
         local_eval_state::read(root, None).as_ref(),
         stack,
-        || backend_gone(local_eval::stack_recorded(stack), || local_eval::cluster_gone(stack)),
+        || {
+            backend_gone(local_eval::stack_recorded(stack), || {
+                local_eval::cluster_gone(stack)
+            })
+        },
     ) {
         let kept = openbot_database_kept(root);
         log::warn!(
@@ -18963,7 +18967,10 @@ mod tests {
             LOCAL_EVAL_PIN,
         )
         .unwrap();
-        assert_eq!(local_eval_state::read(&root, None).unwrap().stack_id(), fresh);
+        assert_eq!(
+            local_eval_state::read(&root, None).unwrap().stack_id(),
+            fresh
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
