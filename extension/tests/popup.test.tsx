@@ -11,7 +11,7 @@ import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { handleConnectionMessage } from "../src/background/connection";
-import { PASS_HINTS } from "../src/offscreen/grant";
+import { classifyGrantError, PASS_HINTS } from "../src/offscreen/grant";
 import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
@@ -1651,6 +1651,42 @@ test("held out until they sign in through their company, the popup says so in th
       url: "https://openbot.example.test/",
     }),
   );
+});
+
+test("held out while recording, Learning capture says it is paused for company sign-in and points at the way in below, never an unknown answer", async () => {
+  // The phone and Recorder end-to-end run: the capture pass refused with 403 SSO_REQUIRED, and the card said "an answer
+  // the Recorder does not know (403)" above the company sign-in block.
+  const verdict = classifyGrantError(403, {
+    code: "SSO_REQUIRED",
+    message:
+      "This organization requires signing in through your company's identity provider.",
+  });
+  expect(verdict.kind).toBe("hold");
+  const view = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        intelligence: "held",
+        intelligenceReason:
+          verdict.kind === "hold" ? verdict.hint : "not a hold",
+      },
+    }),
+    {
+      answers: {
+        "page.learning": { ok: false, error: COMPANY_SIGN_IN_REQUIRED },
+      },
+    },
+  );
+  await view.findByText("Learning capture is paused");
+  expect(
+    view.getByText(
+      "Your organization requires signing in through your company. Use Sign in with your company below, and capture goes on once you have.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/does not know/)).toBeNull();
+  expect(
+    await view.findByRole("button", { name: "Sign in with your company" }),
+  ).toBeTruthy();
 });
 
 test("any other refusal offers no company sign-in", async () => {
