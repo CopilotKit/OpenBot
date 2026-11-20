@@ -16443,6 +16443,47 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Found on the Windows pass of this fix: after the engine's machine had been stalled, a
+    /// `podman compose ps` the watcher made never returned, and the watcher stopped for good. It
+    /// never said OpenBot was answering again, and would not have noticed it stop. Every engine call
+    /// the watcher makes now gives up at its limit.
+    #[test]
+    fn an_engine_that_never_answers_does_not_hold_the_watcher() {
+        if test_support::isolated_process(
+            "tests::an_engine_that_never_answers_does_not_hold_the_watcher",
+        ) {
+            return;
+        }
+        let root = temp_root("engine-never-answers");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = SerializedPath::set_only_with("docker", "engine-hung");
+        path.write_binary("podman", "machine-hung");
+        let docker = engine::Address::new(engine::Engine::Docker, None);
+        let podman = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+        let limit = std::time::Duration::from_secs(1);
+        let asked = std::time::Instant::now();
+
+        // What `owned_app` asks: whether the server publishes the ports.
+        assert!(stack::server_publishes_within(&docker, &root, &[3001, 3010], limit).is_err());
+        // What the watcher asks: the server container's state.
+        assert_eq!(
+            stack::server_container(&docker, &root, limit),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        // And, when that fails, whether the machine still says it runs.
+        assert!(matches!(
+            stack::server_container(&podman, &root, limit),
+            Err(stack::ServerContainerUnknown::Unreachable(_))
+        ));
+        assert!(
+            asked.elapsed() < std::time::Duration::from_secs(30),
+            "the engine calls took {:?}",
+            asked.elapsed()
+        );
+        drop(path);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn stop_retains_completed_installation_and_disables_only_automatic_start() {
         let root = local_eval_root(

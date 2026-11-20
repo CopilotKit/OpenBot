@@ -193,6 +193,25 @@ fn main() {
             return;
         }
     }
+    // An engine that took a call and never answered it, as Podman's did on Windows after its machine
+    // had been stalled: `compose ps` and `machine inspect` never return.
+    if SCENARIO == "engine-hung" {
+        if joined.starts_with("compose ps") {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+        if joined == "machine inspect openbot" {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+    if SCENARIO == "machine-hung" {
+        if joined == "compose ps -a --format json server" {
+            eprintln!("Error: unable to connect to Podman socket: failed to connect: ssh: handshake failed: read: connection reset by peer");
+            std::process::exit(125);
+        }
+        if joined == "machine inspect openbot" {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
     if args.first().map(String::as_str) == Some("version") {
         println!("1.44");
         return;

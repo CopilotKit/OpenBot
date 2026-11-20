@@ -3872,7 +3872,7 @@ pub fn server_container(
         // stopped), `compose ps` gives up after about 14 seconds with "ssh: handshake failed:
         // connection reset by peer" rather than running out of time. The machine still says it
         // is running, which a stopped one does not, so that is a slow engine and not a gone one.
-        if machine_still_running(engine) {
+        if machine_still_running(engine, limit) {
             return Err(ServerContainerUnknown::Slow);
         }
         return Err(ServerContainerUnknown::Unreachable(said));
@@ -3900,16 +3900,24 @@ pub fn server_container(
 /// Whether the Podman machine behind `engine` still says it is running, from the machine's own
 /// record on this computer, which answers whether or not the machine does. False for Docker, and
 /// for a Podman with no machine (Linux).
-fn machine_still_running(engine: &Address) -> bool {
-    match (&engine.engine, engine.connection.as_deref()) {
-        (crate::engine::Engine::Podman, Some(connection)) => {
-            crate::acquire::machine_state_named(crate::acquire::machine_of(connection))
-                .ok()
-                .flatten()
-                .is_some_and(|state| state == "running")
-        }
-        _ => false,
-    }
+fn machine_still_running(engine: &Address, limit: std::time::Duration) -> bool {
+    let (crate::engine::Engine::Podman, Some(connection)) =
+        (&engine.engine, engine.connection.as_deref())
+    else {
+        return false;
+    };
+    let machine = crate::acquire::machine_of(connection);
+    // Within a limit, as every engine call the watcher makes is: one that never returns would stop
+    // the watcher for good.
+    let mut inspect = crate::engine::podman_command(&["machine", "inspect", machine]);
+    crate::quiet::output_within(&mut inspect, limit)
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            crate::acquire::machine_state(&String::from_utf8_lossy(&output.stdout), machine).ok()
+        })
+        .flatten()
+        .is_some_and(|state| state == "running")
 }
 
 /// The `server` container's state and id, from `compose ps -a --format json server`: one object a
@@ -4090,16 +4098,28 @@ Every service rather than `server` alone, read row by row: naming a service on `
 resolve it, and `server` sits behind a profile this command would otherwise have to repeat.
 */
 pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<bool, Problem> {
+    server_publishes_within(engine, root, ports, SERVER_PUBLISHES_WITHIN)
+}
+
+/// [`server_publishes`], waiting `limit` for the engine.
+pub fn server_publishes_within(
+    engine: &Address,
+    root: &Path,
+    ports: &[u16],
+    limit: std::time::Duration,
+) -> Result<bool, Problem> {
     let operation = format!("{} compose ps", engine.engine.binary());
-    let output = compose_command(engine, root, &Secrets::new())
-        .args(["ps", "--format", "{{.Service}}\t{{.Ports}}"])
-        .output()
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot couldn't check on its own services. Try again.",
-                format!("could not run {operation}: {error}"),
-            )
-        })?;
+    let mut listing = compose_command(engine, root, &Secrets::new());
+    listing.args(["ps", "--format", "{{.Service}}\t{{.Ports}}"]);
+    // MEASURED on Windows under Podman: after the engine's machine had been stalled, this call
+    // never returned, and the connection watcher that made it stopped for good. An engine that
+    // does not say within the limit is not taken to publish anything.
+    let output = crate::quiet::output_within(&mut listing, limit).map_err(|error| {
+        Problem::with(
+            "OpenBot couldn't check on its own services. Try again.",
+            format!("could not run {operation}: {error}"),
+        )
+    })?;
     if !output.status.success() {
         return Err(Problem::with(
             "OpenBot couldn't check on its own services. Try again.",
@@ -4111,6 +4131,9 @@ pub fn server_publishes(engine: &Address, root: &Path, ports: &[u16]) -> Result<
         ports,
     ))
 }
+
+/// How long `server_publishes` waits for the engine's listing.
+pub const SERVER_PUBLISHES_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// `server_publishes` over a `{{.Service}}\t{{.Ports}}` listing. Pure, for the reason
 /// `published_in` is.
