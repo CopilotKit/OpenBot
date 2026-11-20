@@ -79,7 +79,7 @@ export const GetDeploymentResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in.",
+        "Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false.",
       ),
     builtInBots: zod
       .boolean()
@@ -277,7 +277,7 @@ export const GetOrganizationSettingsResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -351,7 +351,7 @@ export const GetOrganizationSettingsResponse = zod
   .and(zod.unknown());
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
+ * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization's own rule: its members sign in through an identity provider, and saving it signs out only this organization's members who signed in another way. Where it keeps only one organization, that organization's rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
  * @summary Change the organization's settings
  */
 
@@ -449,7 +449,7 @@ export const UpdateOrganizationSettingsBody = zod
       .boolean()
       .optional()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -602,7 +602,7 @@ export const UpdateOrganizationSettingsResponse = zod
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()

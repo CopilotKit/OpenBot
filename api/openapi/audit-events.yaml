@@ -263,6 +263,67 @@ paths:
           $ref: './common.yaml#/components/responses/ModelNotConfigured'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/deployment/audit-events:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Audit events]
+      operationId: listDeploymentAuditEvents
+      summary: List this OpenBot's own audit events
+      description: >-
+        Return one page of this OpenBot's own trail, newest first: what
+        happened to the installation and to no organization. That includes
+        what the server found when it started, a Recorder connect code nobody
+        knows, identity providers registered or removed, and the
+        configuration making somebody the admin who runs this OpenBot. Where
+        this OpenBot keeps one organization, those events are on that
+        organization's trail, and this list is empty. Only the admin who runs
+        this OpenBot may read it. Where it keeps one organization, that is
+        the organization's admins. Where it may hold several, it is the
+        people its configuration names (INITIAL_ADMIN_EMAILS), asking in an
+        organization they administer, and any other admin is refused.
+        eventType, from and to narrow the events as they do on an
+        organization's trail. A missing cursor starts at the newest event,
+        and nextCursor null ends the list. A cursor belongs to the filters
+        that made it, so changing a filter starts again without one; limit
+        may change from page to page. Events older than the audit retention
+        window are removed, as they are from every organization's trail.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [audit-events:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/AuditEventTypes'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+      responses:
+        '200':
+          description: One page of this OpenBot's own audit events.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+              examples:
+                firstPage:
+                  $ref: '#/components/examples/AuditEventPageFirst'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/AdminOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
   parameters:
     AuditEventTypes:

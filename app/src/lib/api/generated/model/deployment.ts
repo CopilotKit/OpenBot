@@ -28,7 +28,7 @@ export interface Deployment {
   authProviders: DeploymentAuthProvidersItem[];
   /** Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. */
   ssoConfigured: boolean;
-  /** Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in. */
+  /** Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. */
   ssoRequired: boolean;
   /** Whether a Bot can run inside OpenBot, with no address of its own. */
   builtInBots: boolean;
