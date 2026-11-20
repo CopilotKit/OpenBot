@@ -297,8 +297,21 @@ async function publishedMinimums(root: string): Promise<
     : undefined;
 }
 
-/** A release's spec, fetched by its tag when this checkout lacks it. Undefined if it has none. */
+/**
+ * A release's spec, fetched by its tag when this checkout lacks it. Undefined if it has none.
+ *
+ * With `SUPPORT_WINDOW_RELEASE_SPECS` set to a directory, each release's spec is read from
+ * `<directory>/<tag>.yaml` instead, and a release with no file there has none: the tests hold this
+ * tree to a fixed set of releases without reaching the network.
+ */
 function releaseSpec(root: string, tag: string): unknown | undefined {
+  const specs = process.env.SUPPORT_WINDOW_RELEASE_SPECS;
+  if (specs) {
+    const file = join(specs, `${tag}.yaml`);
+    return existsSync(file)
+      ? parse(readFileSync(file, "utf8"), { maxAliasCount: -1 })
+      : undefined;
+  }
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", root, ...args], {
       encoding: "utf8",

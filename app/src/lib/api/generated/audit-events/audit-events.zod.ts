@@ -622,3 +622,132 @@ export const AskAuditEventsResponse = zod
   .describe(
     "A question about the trail, as filters. The events the filters list are the answer.",
   );
+
+/**
+ * Return one page of this OpenBot's own trail, newest first: what happened to the installation and to no organization. That includes what the server found when it started, a Recorder connect code nobody knows, identity providers registered or removed, and the configuration making somebody the admin who runs this OpenBot. Where this OpenBot keeps one organization, those events are on that organization's trail, and this list is empty. Only the admin who runs this OpenBot may read it. Where it keeps one organization, that is the organization's admins. Where it may hold several, it is the people its configuration names (INITIAL_ADMIN_EMAILS), asking in an organization they administer, and any other admin is refused. eventType, from and to narrow the events as they do on an organization's trail. A missing cursor starts at the newest event, and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Events older than the audit retention window are removed, as they are from every organization's trail.
+ * @summary List this OpenBot's own audit events
+ */
+
+export const ListDeploymentAuditEventsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const listDeploymentAuditEventsQueryLimitDefault = 50;
+export const listDeploymentAuditEventsQueryLimitMax = 100;
+
+export const listDeploymentAuditEventsQueryCursorMax = 4096;
+
+export const listDeploymentAuditEventsQueryCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+export const listDeploymentAuditEventsQueryEventTypeMax = 4096;
+
+export const listDeploymentAuditEventsQueryEventTypeRegExp = new RegExp(
+  "^[^\\x00]*$",
+);
+
+export const ListDeploymentAuditEventsQueryParams = zod.object({
+  limit: zod
+    .int()
+    .min(1)
+    .max(listDeploymentAuditEventsQueryLimitMax)
+    .default(listDeploymentAuditEventsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listDeploymentAuditEventsQueryCursorMax)
+    .regex(listDeploymentAuditEventsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+  eventType: zod
+    .string()
+    .max(listDeploymentAuditEventsQueryEventTypeMax)
+    .regex(listDeploymentAuditEventsQueryEventTypeRegExp)
+    .optional()
+    .describe(
+      "Events of any of these types, separated by commas, such as computer.action_refused,mcp.call_rejected or organization.member_invited,organization.member_removed.",
+    ),
+  from: zod.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe("Events after this moment."),
+  to: zod.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe("Events before this moment."),
+});
+
+export const listDeploymentAuditEventsResponseNextCursorMax = 4096;
+
+export const listDeploymentAuditEventsResponseNextCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListDeploymentAuditEventsResponse = zod.object({
+  auditEvents: zod
+    .array(
+      zod
+        .object({
+          id: zod.string().describe("The event's id."),
+          actorUserId: zod
+            .string()
+            .nullable()
+            .describe(
+              "The person whose authority it ran on, by user id. Null when it ran on nobody's, such as the deployment acting at start-up.",
+            ),
+          initiatorKind: zod
+            .string()
+            .describe(
+              "What started it: person, deployment, routine, responsibility, memory or handoff. Read back as it was written, so an event from a later release may name another.",
+            ),
+          initiatorId: zod
+            .string()
+            .nullable()
+            .describe(
+              "Which routine, responsibility, memory or Bot started it. Null when a person or the deployment did.",
+            ),
+          eventType: zod
+            .string()
+            .describe("What happened, such as computer.action_refused."),
+          targetType: zod
+            .string()
+            .describe(
+              "The kind of thing it happened to, such as agent or computer.",
+            ),
+          targetId: zod
+            .string()
+            .nullable()
+            .describe(
+              "The thing it happened to, by id. Null when it names none.",
+            ),
+          payload: zod
+            .record(zod.string(), zod.unknown())
+            .describe(
+              "What the event recorded. Its fields depend on eventType.",
+            ),
+          createdAt: zod.iso
+            .datetime({ offset: true })
+            .describe("When it happened."),
+        })
+        .describe(
+          "One thing that happened, as the trail recorded it. Secrets are redacted from the payload before it is written.",
+        ),
+    )
+    .describe("Newest first."),
+  nextCursor: zod
+    .string()
+    .max(listDeploymentAuditEventsResponseNextCursorMax)
+    .regex(listDeploymentAuditEventsResponseNextCursorRegExp)
+    .nullable()
+    .describe(
+      "Pass as cursor for the next, older page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
+    ),
+});
