@@ -1,0 +1,15 @@
+{
+  "name": "openbot",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "forwardPorts": [3010, 3001],
+  "portsAttributes": {
+    "3010": { "label": "OpenBot app", "onAutoForward": "openBrowser" },
+    "3001": { "label": "OpenBot server" }
+  },
+  "postCreateCommand": "curl -fsSL https://bun.sh/install | bash && export PATH=\"$HOME/.bun/bin:$PATH\" && bun install && cp -n .env.example .env",
+  "remoteUser": "vscode"
+}
