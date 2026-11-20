@@ -304,7 +304,7 @@ function SearchResults({
  * a search over the whole history and New conversation at the top. Today's roster, moved beside the
  * strip and otherwise unchanged.
  */
-export function ConversationsPanel() {
+export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
   const emphasis = useMessageListEmphasis();
   const [view] = useConversationView();
   const channels = useInfiniteQuery(channelListQueryOptions());
@@ -341,6 +341,7 @@ export function ConversationsPanel() {
     <SectionPanel
       // Folded away with the panel, so a keyboard never tabs into rows nobody can see.
       className="group-data-[collapsible=icon]:hidden"
+      hidden={hidden}
       title="Conversations"
       actions={
         // The sidebar's hover rather than `muted`, which is nearly the sidebar's own colour.

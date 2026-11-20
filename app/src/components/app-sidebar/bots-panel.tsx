@@ -74,7 +74,7 @@ function BotConversations({ botId }: { botId: string }) {
   if (conversations.data.length === 0)
     return (
       <p className="py-1.5 pl-3 text-muted-foreground text-xs">
-        No conversations yet
+        No conversations with this Bot yet.
       </p>
     );
   return (
@@ -184,7 +184,7 @@ function BotRow({
  * The Bots section's panel: every Bot, newest conversation first (`orderBots`), the top three open
  * with their latest conversations. The search narrows the Bots by name; New Bot is in the header.
  */
-export function BotsPanel() {
+export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
   const bots = useQuery(agentListQueryOptions());
   const roster = useInfiniteQuery(channelListQueryOptions());
   const attention = useQuery(botAttentionQueryOptions());
@@ -222,6 +222,7 @@ export function BotsPanel() {
         </Button>
       }
       className="group-data-[collapsible=icon]:hidden"
+      hidden={hidden}
       title="Bots"
     >
       <SidebarContent className="scroll-fade-b px-2 pb-2">
@@ -260,7 +261,9 @@ export function BotsPanel() {
           </div>
         ) : shown.length === 0 ? (
           <p className="px-2.5 py-2 text-muted-foreground text-xs">
-            {term ? `No Bots match “${search.trim()}”` : "No Bots yet"}
+            {term
+              ? `No Bots match “${search.trim()}”.`
+              : "No Bots yet. Make one with New Bot."}
           </p>
         ) : (
           <ul className="flex flex-col gap-px">

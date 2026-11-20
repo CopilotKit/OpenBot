@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { useConversationView } from "@/lib/settings/conversation-view";
 import {
   saveUserPreferencesMutationOptions,
@@ -44,8 +45,8 @@ export function MessageListPreference() {
         <ItemContent>
           <ItemTitle>Conversation list</ItemTitle>
           <ItemDescription>
-            One line per conversation, or the Bot's name over the title. Kept on
-            this device.
+            Show each conversation on one line, or with its Bot's name above the
+            title. This browser remembers your choice.
           </ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -68,6 +69,7 @@ export function MessageListPreference() {
         </ItemActions>
       </Item>
       {/* Which of the two lines stands out: a compact row has one, so only Detailed asks. */}
+      {view === "detailed" ? <Separator /> : null}
       {view === "detailed" ? (
         <Item size="sm">
           <ItemMedia variant="icon">

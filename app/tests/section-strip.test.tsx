@@ -196,9 +196,62 @@ test("a page no section owns keeps the section that was open", async () => {
   const { view, router } = renderApp("/routines");
   await view.findByRole("link", { name: "Routines" });
   await act(() => router.navigate({ to: "/teams" }));
+  const routines = view.getByRole("link", { name: "Routines" });
+  expect(routines.hasAttribute("data-active")).toBe(true);
+  // Shown open, but Teams is the page: a screen reader is not told Routines is.
+  expect(routines.getAttribute("aria-current")).toBeNull();
+  await act(() => router.navigate({ to: "/routines" }));
   expect(
     view.getByRole("link", { name: "Routines" }).getAttribute("aria-current"),
   ).toBe("page");
+});
+
+/*
+ * Found in review: the section kept for such a page was the last one a page belonged to, so a panel
+ * opened from the strip was taken back. On a Bot's page, Conversations opened, then Teams from the
+ * account menu: the Bots panel came back.
+ */
+test("a page no section owns keeps a panel opened from the strip", async () => {
+  const { view, router, user } = renderApp("/bots");
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await view.findByRole("heading", { level: 2, name: "Conversations" });
+  await act(() => router.navigate({ to: "/teams" }));
+  expect(
+    view
+      .getByRole("button", { name: "Conversations" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(
+    view.getByRole("heading", { level: 2, name: "Conversations" }),
+  ).toBeTruthy();
+});
+
+/*
+ * Found in review: switching panels unmounted the one left, so going back lost what was typed in its
+ * search and where it was scrolled, and the Bots panel took its top three again on every visit.
+ */
+test("going to the Bots panel and back finds the Conversations panel as it was left", async () => {
+  const { view, user } = renderApp("/");
+  const search = await view.findByRole("textbox", {
+    name: "Search conversations",
+  });
+  await user.type(search, "Lisbon");
+  await user.click(view.getByRole("button", { name: "Bots" }));
+  await view.findByRole("heading", { level: 2, name: "Bots" });
+  expect(
+    view.queryByRole("heading", { level: 2, name: "Conversations" }),
+  ).toBeNull();
+  await user.click(view.getByRole("button", { name: "Conversations" }));
+  await view.findByRole("heading", { level: 2, name: "Conversations" });
+  expect(view.queryByRole("heading", { level: 2, name: "Bots" })).toBeNull();
+  expect(
+    (
+      view.getByRole("textbox", {
+        name: "Search conversations",
+      }) as HTMLInputElement
+    ).value,
+  ).toBe("Lisbon");
 });
 
 test("a panel the person closed stays closed, in storage too, after a page with no panel", async () => {

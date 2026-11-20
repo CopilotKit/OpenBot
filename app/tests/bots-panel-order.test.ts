@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient } from "@tanstack/react-query";
+import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import {
   EXPANDED_BOTS_STORAGE_KEY,
@@ -262,4 +262,129 @@ test("reading a conversation marks it read under its Bots as well, and a rename 
       true,
     );
   }
+});
+
+/*
+ * Only something said in a conversation can bring it onto a Bot's list or up it. Found in review:
+ * busy, work and naming events on a conversation past a Bot's loaded rows read that Bot's list
+ * again every time, and a task thread's events read every open Bot's list, each read cancelling the
+ * one before (Show more's among them), and none of them ever bringing the row in.
+ */
+const pageOf = (
+  channels: ChannelSummary[],
+  nextCursor: string | null = null,
+) => ({
+  pages: [{ channels, nextCursor }],
+  pageParams: [""],
+});
+
+test("busy, work, a name and a pin on a conversation a Bot's list has not loaded read nothing again", () => {
+  const client = new QueryClient();
+  client.setQueryData(
+    channelKeys.list(),
+    pageOf([conversation("old", ["a"], "2026-10-01T10:00:00.000Z")]),
+  );
+  client.setQueryData(
+    channelKeys.byBot("a"),
+    pageOf([conversation("recent", ["a"], "2026-11-05T10:00:00.000Z")], "next"),
+  );
+  const quiet = {
+    channelId: "old",
+    lastMessage: null,
+    lastMessageAt: null,
+    lastMessageAgentId: null,
+  };
+  for (const event of [
+    { ...quiet, busy: true },
+    { ...quiet, work: [] },
+    { ...quiet, summary: "Quarterly report" },
+    { ...quiet, opening: "Can you draft the report?" },
+    { ...quiet, pinned: true },
+  ]) {
+    applyToBotLists(client, event);
+    expect(client.getQueryState(channelKeys.byBot("a"))?.isInvalidated).toBe(
+      false,
+    );
+  }
+});
+
+test("a busy event on a row past a Bot's first page patches it there, and reads nothing again", () => {
+  const client = new QueryClient();
+  const firstPage = [1, 2, 3, 4, 5].map((n) =>
+    conversation(`p${n}`, ["a"], `2026-11-0${n}T10:00:00.000Z`),
+  );
+  client.setQueryData(channelKeys.byBot("a"), {
+    pages: [
+      { channels: firstPage, nextCursor: "next" },
+      {
+        channels: [conversation("late", ["a"], "2026-10-01T10:00:00.000Z")],
+        nextCursor: null,
+      },
+    ],
+    pageParams: ["", "next"],
+  });
+  applyToBotLists(client, {
+    channelId: "late",
+    lastMessage: null,
+    lastMessageAt: null,
+    lastMessageAgentId: null,
+    busy: true,
+  });
+  expect(client.getQueryState(channelKeys.byBot("a"))?.isInvalidated).toBe(
+    false,
+  );
+  const late = client
+    .getQueryData<{ pages: { channels: ChannelSummary[] }[] }>(
+      channelKeys.byBot("a"),
+    )
+    ?.pages[1]?.channels.find((channel) => channel.id === "late");
+  expect(late?.busy).toBe(true);
+});
+
+test("a line in a conversation the roster is reading again for rereads only its Bots' lists once that read lands, and none for a task's thread", async () => {
+  const client = new QueryClient();
+  // The roster on screen, read from a server this test answers.
+  let answer: ChannelSummary[] = [];
+  const roster = new InfiniteQueryObserver(client, {
+    queryKey: channelKeys.list(),
+    initialPageParam: "",
+    queryFn: async () => ({ channels: answer, nextCursor: null }),
+    getNextPageParam: () => undefined,
+  });
+  const stop = roster.subscribe(() => {});
+  await roster.refetch();
+  client.setQueryData(channelKeys.byBot("a"), pageOf([]));
+  client.setQueryData(channelKeys.byBot("b"), pageOf([]));
+  const line = {
+    lastMessage: "Done: the summary is in the doc.",
+    lastMessageAt: "2026-11-09T10:00:00.000Z",
+    lastMessageAgentId: "a",
+  };
+
+  // A task's thread: the roster, read again, still does not hold it, so no Bot's list does either.
+  void client.invalidateQueries({ queryKey: channelKeys.list() });
+  applyToBotLists(client, { ...line, channelId: "task-thread" });
+  await roster.refetch({ cancelRefetch: false });
+  await settleReactWork();
+  expect(client.getQueryState(channelKeys.byBot("a"))?.isInvalidated).toBe(
+    false,
+  );
+  expect(client.getQueryState(channelKeys.byBot("b"))?.isInvalidated).toBe(
+    false,
+  );
+
+  // A new conversation with A: once the roster's read lands holding it, A's list is read again, and
+  // B's is left alone.
+  answer = [conversation("fresh", ["a"], line.lastMessageAt)];
+  void client.invalidateQueries({ queryKey: channelKeys.list() });
+  applyToBotLists(client, { ...line, channelId: "fresh" });
+  await roster.refetch({ cancelRefetch: false });
+  await settleReactWork();
+  expect(client.getQueryState(channelKeys.byBot("a"))?.isInvalidated).toBe(
+    true,
+  );
+  expect(client.getQueryState(channelKeys.byBot("b"))?.isInvalidated).toBe(
+    false,
+  );
+  stop();
 });

@@ -70,6 +70,8 @@ export function useSectionRoutes(): SectionRoute[] {
 type OpenSection = {
   /** The section the strip shows as open. */
   section: SectionId;
+  /** The section this page belongs to; null on a page no section owns, which keeps `section`. */
+  page: SectionId | null;
   /** Open a section without leaving the page: Conversations' icon, ⌘B on a page with no panel. */
   show: (id: SectionId) => void;
 };
@@ -105,19 +107,21 @@ export function SectionProvider({ children }: { children: ReactNode }) {
     id: SectionId;
     pathname: string;
   } | null>(null);
-  // The last section a page belonged to, for pages that belong to none.
+  // The section open on the last page, for pages that belong to none: the page's own, or the one
+  // `show` opened on it.
   const [last, setLast] = useState<SectionId>(routed ?? CONVERSATIONS);
-  if (routed !== null && routed !== last) setLast(routed);
   const section =
     shown && shown.pathname === pathname ? shown.id : (routed ?? last);
+  if (section !== last) setLast(section);
   // What is on screen now, opened by the page or by `show`, is what the next conversation keeps.
   lastRef.current = section;
   const value = useMemo<OpenSection>(
     () => ({
       section,
+      page: routed,
       show: (id) => setShown({ id, pathname }),
     }),
-    [section, pathname],
+    [section, routed, pathname],
   );
   return (
     <OpenSectionContext.Provider value={value}>
@@ -131,6 +135,7 @@ export function useOpenSection(): OpenSection {
   return (
     useContext(OpenSectionContext) ?? {
       section: CONVERSATIONS,
+      page: null,
       show: () => {},
     }
   );

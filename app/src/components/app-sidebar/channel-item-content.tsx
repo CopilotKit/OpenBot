@@ -8,7 +8,8 @@ import type { MessageListEmphasis } from "@/lib/settings/message-list";
  *
  * `view` picks the row's shape. Detailed (the default here) is two lines: the Bot's name, its time
  * and marks, then the title. Compact is one line, as Claude's sidebar lists chats: a small avatar
- * and the title, then the time, the unread dot and the pin at the right. It names no Bot.
+ * and the title, then the time, the unread dot and the pin at the right. It draws no Bot name, and
+ * says it to a screen reader.
  */
 export function ChannelItemContent({
   participantIds,
@@ -79,6 +80,13 @@ export function ChannelItemContent({
               typing={busy}
             />
           </div>
+        ) : null}
+        {/*
+         * Not drawn, but read out: the orb is hidden from a screen reader, so without this every row
+         * is a title and a time with no Bot. Under its Bot (no avatar) the Bot is said already.
+         */}
+        {avatar ? (
+          <span className="sr-only" data-slot="bot-name">{`${name}, `}</span>
         ) : null}
         <span
           className={`min-w-0 flex-1 truncate text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-normal"}`}

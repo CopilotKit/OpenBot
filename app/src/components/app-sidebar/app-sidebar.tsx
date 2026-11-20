@@ -1,4 +1,5 @@
 import type * as React from "react";
+import { useState } from "react";
 import { useBeforeCommandNavigate } from "@/components/navigation/command-menu";
 import { Sidebar, SidebarRail, useSidebar } from "@/components/ui/sidebar";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
@@ -28,6 +29,14 @@ export {
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { setOpenMobile } = useSidebar();
   const { section } = useOpenSection();
+  /*
+   * Both panels stay mounted once shown, the one not open out of sight: going back to a panel finds
+   * it as it was left (its search, its scroll, which Bots are open), and the Bots panel's top three
+   * are taken once a page, not again on every visit. The Bots panel waits to be first opened.
+   */
+  const bots = section === "bots";
+  const [botsShown, setBotsShown] = useState(bots);
+  if (bots && !botsShown) setBotsShown(true);
   // Opened with Cmd/Ctrl+K over the phone sidebar, the menu closes it before it navigates.
   useBeforeCommandNavigate(() => setOpenMobile(false));
   // One socket for the app, opened here because the sidebar is always there: it keeps the
@@ -43,7 +52,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     >
       <div className="flex h-full min-h-0 flex-row">
         <SectionStrip />
-        {section === "bots" ? <BotsPanel /> : <ConversationsPanel />}
+        <ConversationsPanel hidden={bots} />
+        {botsShown ? <BotsPanel hidden={!bots} /> : null}
       </div>
       <SidebarRail />
     </Sidebar>

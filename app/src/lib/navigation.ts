@@ -107,7 +107,7 @@ export const NAVIGATION: readonly NavigationItem[] = [
   {
     // The agents Bots hand work to: the organization's, and a person's own private ones.
     // Hidden for now: most people never hand work out, and "Agents" beside "Bots" reads as another
-    // name for a Bot. A Bot's own Agents page, where handing work out is switched on, stays.
+    // name for a Bot. A Bot's own Agents page is hidden with it (routes/_authed/_app/bots.$agentId.agents.tsx).
     id: "agents",
     label: "Agents",
     to: "/agents",

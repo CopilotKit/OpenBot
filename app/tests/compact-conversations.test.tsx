@@ -108,11 +108,19 @@ function compactRow(
   );
 }
 
-test("a compact row is the title and its time: no Bot name", () => {
+test("a compact row is the title and its time: no Bot name drawn", () => {
   const view = compactRow();
   expect(view.getByText("Trip budget for Lisbon")).toBeTruthy();
   expect(view.getByText("2m")).toBeTruthy();
-  expect(view.queryByText("Personal Assistant")).toBeNull();
+  // Said to a screen reader only: the orb is hidden from it.
+  const said = view.container.querySelector("[data-slot=bot-name]");
+  expect(said?.textContent).toBe("Personal Assistant, ");
+  expect(said?.className).toBe("sr-only");
+});
+
+test("under its Bot in the Bots panel, a compact row does not say the Bot again", () => {
+  const view = compactRow({ avatar: false });
+  expect(view.container.querySelector("[data-slot=bot-name]")).toBeNull();
 });
 
 test("while its Bot works, a compact row says Working where its time goes", () => {
@@ -216,10 +224,15 @@ function renderPanel() {
   return { view, user: userEvent.setup({ document }) };
 }
 
-test("the panel lists conversations compact by default, without the Bot's name or the last message", async () => {
+test("the panel lists conversations compact by default, without the Bot's name drawn or the last message", async () => {
   const { view } = renderPanel();
-  const row = await view.findByRole("link", { name: /Trip budget for Lisbon/ });
-  expect(within(row).queryByText("Personal Assistant")).toBeNull();
+  // Found in review: the compact row read only its title and time, with no Bot, to a screen reader.
+  const row = await view.findByRole("link", {
+    name: /^Personal Assistant, Trip budget for Lisbon/,
+  });
+  expect(
+    row.querySelector("[data-slot=bot-name]")?.classList.contains("sr-only"),
+  ).toBe(true);
   expect(view.queryByText("Here is the breakdown by day.")).toBeNull();
 });
 

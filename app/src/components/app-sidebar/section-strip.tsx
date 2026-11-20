@@ -104,13 +104,15 @@ function PanelItem({
 
 /** One of the main menu's destinations with no panel, as a section whose pages it opens. */
 function PageItem({ item }: { item: NavigationLink }) {
-  const { section } = useOpenSection();
+  const { section, page } = useOpenSection();
   const recording = useLiveRecording();
   // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
   const recordingHere = item.id === "skills" ? recording : null;
   return (
     <StripItem
       active={section === item.id}
+      // Kept open for a page no section owns, it is not that page: shown open, not said current.
+      aria-current={page === item.id ? "page" : undefined}
       end={recordingHere ? <RecordingDot {...recordingHere} /> : null}
       icon={item.icon}
       label={item.label}

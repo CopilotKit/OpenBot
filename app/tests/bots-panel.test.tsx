@@ -306,7 +306,9 @@ test("a Bot's conversations that fail to load say so, with Retry, never as none"
     .getByRole("button", { name: "Hide Invoice Review's conversations" })
     .closest("li");
   expect(invoice?.contains(retry)).toBe(true);
-  expect(invoice?.textContent).not.toContain("No conversations yet");
+  expect(invoice?.textContent).not.toContain(
+    "No conversations with this Bot yet.",
+  );
   fail = false;
   await user.click(retry);
   expect(await view.findByText("Back again")).toBeTruthy();
@@ -379,8 +381,12 @@ test("a Bot's pinned conversations stay first under it, whatever moved since", a
     );
   const { view } = renderPanel();
   await view.findByText("Just now");
+  // The Bots panel's own rows: the Conversations panel stays mounted beside it, out of sight.
+  const panel = view
+    .getByRole("heading", { level: 2, name: "Bots" })
+    .closest("[data-slot=section-panel]");
   const titles = [
-    ...view.container.querySelectorAll<HTMLElement>("a[href^='/channel/']"),
+    ...(panel?.querySelectorAll<HTMLElement>("a[href^='/channel/']") ?? []),
   ].map((link) => link.textContent);
   expect(titles[0]).toContain("Pinned one");
   expect(titles[1]).toContain("Just now");
