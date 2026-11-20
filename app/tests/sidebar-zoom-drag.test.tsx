@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
+import { personBody } from "./accounts-api";
 
 /**
  * The sidebar's edge narrows the sidebar well past where it used to stop, and the sidebar never
@@ -16,8 +17,10 @@ import { compile } from "tailwindcss";
  * footer's widest button measured into it raised it further. And zooming a window in makes it fewer
  * of the page's pixels wide while the sidebar kept its count of them: a width dragged out to 480px
  * at 100% was 480px of a window zoomed to 175% (about 820 of the page's pixels), well over half of
- * it. The floor is now 160px a panel, and the sidebar is held to two-fifths of the window, the
- * remembered width coming back whole once the window is wide again.
+ * it. The floor is now 180px a panel, and the sidebar is held to two-fifths of the window, the
+ * remembered width coming back whole once the window is wide again. Not 160px, which it was for a
+ * day: there the panel's own heading read "Conversat…" and "No conversations yet" took three lines,
+ * a word a line. At the floor every heading is read whole, in the real panels and sidebars.
  *
  * Rendered in a real browser, because the width is the browser's to resolve (a CSS `clamp` against
  * the window's width) and the drag is real pointer events on the edge. The sidebars are the shells'
@@ -48,10 +51,138 @@ const ZOOMED_MOST = Math.floor(ZOOMED.width * 0.4);
  * where a drag stopped before (`was`), which it now goes well past.
  */
 const SHAPES = [
-  { name: "app", strip: true, floor: 160 + 48, was: 220 + 48 },
-  { name: "admin-settings", strip: false, floor: 160, was: 220 },
+  { name: "app", strip: true, floor: 180 + 48, was: 220 + 48 },
+  { name: "admin-settings", strip: false, floor: 180, was: 220 },
 ] as const;
 type Shape = (typeof SHAPES)[number];
+
+/**
+ * The real sidebars, each in its shape: the app's Conversations and Bots panels beside the strip,
+ * and Settings' and Admin's own. `names` are their headings, so a test that finds nothing cut short
+ * knows it looked at every one of them.
+ */
+const SCREENS = [
+  { screen: "conversations", shape: SHAPES[0], names: ["Conversations"] },
+  { screen: "bots", shape: SHAPES[0], names: ["Bots"] },
+  {
+    screen: "settings",
+    shape: SHAPES[1],
+    names: ["You", "Every Bot", "OpenBot"],
+  },
+  {
+    screen: "admin",
+    shape: SHAPES[1],
+    names: [
+      "Routines",
+      "Skills",
+      "Apps",
+      "Computer",
+      "Approvals",
+      "Activity",
+      "Vault",
+      "Organization",
+    ],
+  },
+] as const;
+type Screen = (typeof SCREENS)[number]["screen"];
+
+const ORGANIZATION = "/api/v2/organizations/default";
+
+/** What the server answers these sidebars: an admin of a company's own OpenBot, no conversations. */
+function answer(path: string): unknown {
+  switch (path) {
+    case `${ORGANIZATION}/conversations`:
+      return { conversations: [], nextCursor: null };
+    case `${ORGANIZATION}/bots`:
+      return {
+        bots: ["Research", "Invoice Review"].map((name) => ({
+          id: name.toLowerCase().replace(" ", "-"),
+          name,
+          title: "",
+          roleDescription: "",
+          avatarSeed: name,
+          lastConversationAt: null,
+        })),
+        nextCursor: null,
+      };
+    case `${ORGANIZATION}/people/me/bot-attention`:
+      return { attention: [], lastPingId: null, nextCursor: null };
+    case `${ORGANIZATION}/people/me`:
+      return {
+        person: personBody({
+          id: "dana",
+          name: "Dana Whitfield",
+          email: "dana@example.com",
+          role: "admin",
+        }),
+        openbotVersion: "v1.1.0",
+      };
+    case `${ORGANIZATION}/deployment`:
+      return {
+        generativeUi: true,
+        selfHostBanner: false,
+        localEvaluation: false,
+        edition: "team",
+        authProviders: [],
+        ssoConfigured: false,
+        ssoRequired: false,
+      };
+    case "/api/v2/people/me/organizations":
+      return {
+        organizations: [
+          {
+            id: "default",
+            slug: "default",
+            name: "Acme Freight",
+            role: "admin",
+            personal: false,
+            active: true,
+          },
+        ],
+        canCreate: true,
+        nextCursor: null,
+      };
+    case `${ORGANIZATION}/management`:
+      return { state: "not-connected", agentInstalledByChart: true };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Every heading the sidebar draws, the open panel's title and each group's label, with what it
+ * needs and what it has: cut short is wider than the box it is drawn in.
+ */
+async function headings(page: Page) {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        '[data-slot="section-panel"]:not([hidden]) h2, [data-sidebar="group-label"]',
+      ),
+    ]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => ({
+        text: element.textContent?.trim() ?? "",
+        needs: element.scrollWidth,
+        has: element.clientWidth,
+      })),
+  );
+}
+
+/** How many lines the element reading exactly `text` is drawn on. */
+async function lines(page: Page, text: string) {
+  return page.evaluate((text) => {
+    const element = [...document.querySelectorAll("*")].find(
+      (one) => one.childElementCount === 0 && one.textContent === text,
+    );
+    if (!element) return 0;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return new Set(
+      [...range.getClientRects()].map((rect) => Math.round(rect.top)),
+    ).size;
+  }, text);
+}
 
 async function bundle(): Promise<string> {
   const built = await Bun.build({
@@ -118,10 +249,14 @@ beforeAll(async () => {
   script = await bundle();
   // Every class the sidebar and its shells can draw, read from their source.
   const sources = [
-    "components/ui/sidebar.tsx",
-    "components/layout/sidebar-shell.tsx",
-    "components/layout/strip.tsx",
-    "components/layout/section-panel.tsx",
+    ...["ui", "layout", "app-sidebar"].flatMap((dir) =>
+      readdirSync(join(APP, "src", "components", dir))
+        .filter((file) => file.endsWith(".tsx"))
+        .map((file) => `components/${dir}/${file}`),
+    ),
+    "components/admin/admin-sidebar.tsx",
+    "components/settings/settings-sidebar.tsx",
+    "components/agents/bot-orb.tsx",
     "../tests/sidebar-zoom-drag.fixture.tsx",
   ].flatMap((file) =>
     readFileSync(join(APP, "src", file), "utf8").split(/[\s"'`]+/),
@@ -143,9 +278,11 @@ async function open(
   browser: Browser,
   shape: Shape,
   size: { width: number; height: number },
+  screen?: Screen,
 ): Promise<Page> {
   const page = await browser.newPage({ viewport: size, deviceScaleFactor: 2 });
   page.on("pageerror", (error) => console.error(error));
+  const inter = join(packageDir("@fontsource-variable/inter"), "files");
   await page.route(`${ORIGIN}/**`, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/")
@@ -155,10 +292,24 @@ async function open(
       });
     if (path === "/shell.js")
       return route.fulfill({ contentType: "text/javascript", body: script });
+    // The app's own typeface, so a heading is as wide here as it is in the app.
+    const font = join(inter, path.split("/").pop() ?? "");
+    if (path.startsWith("/files/") && existsSync(font))
+      return route.fulfill({ path: font });
+    if (path.startsWith("/api/")) {
+      const json = answer(path);
+      return json === undefined
+        ? route.fulfill({ status: 404, json: { detail: "Not found." } })
+        : route.fulfill({ json });
+    }
     return route.fulfill({ status: 404 });
   });
-  await page.goto(`${ORIGIN}/${shape.strip ? "?strip=1" : ""}`);
+  const search = new URLSearchParams();
+  if (shape.strip) search.set("strip", "1");
+  if (screen) search.set("screen", screen);
+  await page.goto(`${ORIGIN}/${search.size ? `?${search}` : ""}`);
   await page.locator('[data-slot="sidebar-rail"]').waitFor();
+  await page.evaluate(() => document.fonts.ready);
   return page;
 }
 
@@ -223,7 +374,7 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
           });
           // Well under half the zoomed window, and past where the drag used to stop.
           expect(narrowed.width / narrowed.window).toBeLessThan(0.3);
-          expect(narrowed.width).toBeLessThan(shape.was - 40);
+          expect(narrowed.width).toBeLessThanOrEqual(shape.was - 40);
           await shot(page, `${engine}-${shape.name}-zoomed-narrowed`);
 
           // Out again as far as it goes: two-fifths of the window, not the 480px of a wide one.
@@ -315,6 +466,34 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
           expect(await measured(page)).toMatchObject({ width: 307 });
           await drag(page, -400);
           expect(await measured(page)).toMatchObject({ width: shape.floor });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 120_000);
+  }
+
+  /*
+   * As narrow as it goes, the sidebar is still read: Conversations and Bots over their panels, and
+   * every group and entry in Settings and Admin, whole, never "Conversat…".
+   */
+  for (const { screen, shape, names } of SCREENS) {
+    test(`${screen}: at its floor, every heading in the sidebar is whole`, async () => {
+      for (const [engine, browser] of engines) {
+        const page = await open(browser, shape, ZOOMED, screen);
+        try {
+          await page.getByText(names[0], { exact: true }).first().waitFor();
+          await drag(page, -400);
+          expect(await measured(page)).toMatchObject({ width: shape.floor });
+          const drawn = await headings(page);
+          expect(drawn.map((heading) => heading.text)).toEqual([...names]);
+          expect(
+            drawn.filter((heading) => heading.needs > heading.has),
+          ).toEqual([]);
+          // A roster nobody has used yet says so on one line, not "No / conversations / yet".
+          if (screen === "conversations")
+            expect(await lines(page, "No conversations yet")).toBe(1);
+          await shot(page, `${engine}-${screen}-floor`);
         } finally {
           await page.close();
         }
