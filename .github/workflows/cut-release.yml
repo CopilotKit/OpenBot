@@ -145,27 +145,10 @@ jobs:
           TIP: ${{ steps.preflight.outputs.tip }}
           PIN: ${{ steps.preflight.outputs.pin }}
         run: bun scripts/release-run.ts server
+      # Create release PR, then its merge while the branch is still where the PR was cut from. If
+      # the branch moved, the PR is closed and cut again on the new tip.
       - id: release-pr
-        name: Create release PR
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
-          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
-          RELEASE_REF: ${{ github.ref_name }}
-          BUMP: ${{ inputs.bump }}
-          KIND: ${{ inputs.kind }}
-          DRY_RUN: ${{ inputs.dry_run }}
-          CUT_KIND: ${{ steps.preflight.outputs.cut_kind }}
-          VERSION: ${{ steps.preflight.outputs.version }}
-          PREVIOUS: ${{ steps.preflight.outputs.previous }}
-          PRERELEASE: ${{ steps.preflight.outputs.prerelease }}
-          LATEST: ${{ steps.preflight.outputs.latest }}
-          TIP: ${{ steps.preflight.outputs.tip }}
-          PIN: ${{ steps.preflight.outputs.pin }}
-        run: bun scripts/release-run.ts release-pr
-      - id: merge
-        name: Merge the release PR
-        if: ${{ !inputs.dry_run }}
+        name: Create release PR and merge it
         env:
           GITHUB_TOKEN: ${{ github.token }}
           MERGE_TOKEN: ${{ steps.merge-token.outputs.token }}
@@ -182,10 +165,7 @@ jobs:
           LATEST: ${{ steps.preflight.outputs.latest }}
           TIP: ${{ steps.preflight.outputs.tip }}
           PIN: ${{ steps.preflight.outputs.pin }}
-          PR: ${{ steps.release-pr.outputs.pr }}
-          HEAD: ${{ steps.release-pr.outputs.head }}
-          BASE: ${{ steps.release-pr.outputs.base }}
-        run: bun scripts/release-run.ts merge
+        run: bun scripts/release-run.ts release-pr
       - name: Publish release
         if: ${{ !inputs.dry_run }}
         env:
@@ -203,7 +183,7 @@ jobs:
           LATEST: ${{ steps.preflight.outputs.latest }}
           TIP: ${{ steps.preflight.outputs.tip }}
           PIN: ${{ steps.preflight.outputs.pin }}
-          MERGED: ${{ steps.merge.outputs.merged }}
+          MERGED: ${{ steps.release-pr.outputs.merged }}
         run: bun scripts/release-run.ts publish
 
   # Once both signing runs have finished, and the release is Latest unless RELEASE_HOLD_LATEST holds

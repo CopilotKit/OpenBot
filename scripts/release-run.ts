@@ -4,11 +4,13 @@
  *
  *   preflight    every check that can fail fast, before anything is built (scripts/release-preflight.ts)
  *   server       the server images' release: their version commit, their release checks, the images
- *                and the release files at this version, dispatched there and waited on
- *   release-pr   Create release PR, on the branch's tip once its CI is green, waited on; a dry run
- *                prints the version, the notes and the diff it would propose
- *   merge        merges that PR, only while the branch is still where the PR was cut from, which is
- *                what publishes (Publish release starts on the push)
+ *                and the release files at this version, dispatched there and waited on; a release
+ *                of this version that already succeeded there is not built again
+ *   release-pr   Create release PR, on the branch's tip once its CI is green, waited on, then its
+ *                merge, only while the branch is still where the PR was cut from (if it moved, the
+ *                PR is closed and cut again, up to three times). The merge is what publishes:
+ *                Publish release starts on its push. A dry run prints the version, the notes and
+ *                the diff it would propose, and opens nothing
  *   publish      waits for Publish release, then names the signing runs it started, which wait for
  *                their environments' reviewers as they always have
  *   follow-up    once both signing runs have finished (and the release is Latest, unless held):
@@ -21,7 +23,7 @@
  *
  * Env:
  *   GITHUB_REPOSITORY, GITHUB_TOKEN   this repository, and a token that can dispatch and read its runs
- *   MERGE_TOKEN                       a token whose merge starts workflows (not GITHUB_TOKEN); merge only
+ *   MERGE_TOKEN                       a token whose merge starts workflows (not GITHUB_TOKEN)
  *   SERVER_REPOSITORY, SERVER_TOKEN   where the server images are released, and a token that can read
  *                                     it and dispatch its Release workflow
  *   RELEASE_REF                       the branch being released: main, or release/X.Y
@@ -57,6 +59,8 @@ const SERVER_RELEASE = "release.yml";
 const SIGNING = ["desktop-macos-signing.yml", "desktop-signing.yml"];
 
 class Problem extends Error {}
+/** The branch moved while the release PR was open. */
+class Moved extends Problem {}
 
 /** A repository on the API. `label` is what an error calls it, so the server's name never shows. */
 export class Repo {
@@ -537,6 +541,24 @@ export async function serverRelease(
     latest: String(plan.latest),
     dry_run: String(ctx.dryRun),
   };
+  // A run started again after a later step failed: the images of this version were built and
+  // published already, and building them again would move the version's tags to new digests.
+  if (!attach && !ctx.dryRun) {
+    const { workflow_runs } = await ctx.server.get<{
+      workflow_runs: (Run & { display_title?: string })[];
+    }>(
+      `actions/workflows/${SERVER_RELEASE}/runs?event=workflow_dispatch&status=success&per_page=50`,
+    );
+    const done = workflow_runs.find(
+      (run) => run.display_title === `Release v${plan.version}`,
+    );
+    if (done) {
+      ctx.log(
+        `The server images of v${plan.version} were released already (run ${done.id}); they are not built again.`,
+      );
+      return done.id;
+    }
+  }
   const id =
     attach ?? (await dispatch(ctx.server, SERVER_RELEASE, "main", inputs));
   ctx.log(
@@ -633,9 +655,8 @@ export async function merge(
       "DELETE",
       `git/refs/heads/release/publish/v${plan.version}`,
     );
-    throw new Problem(
-      `${ctx.ref} moved from ${short(pr.base)} to ${short(tip)} while release PR #${pr.number} was open, so its notes could land in the wrong section. ` +
-        "The PR is closed. Re-run the failed jobs to cut it again on the new tip.",
+    throw new Moved(
+      `${ctx.ref} moved from ${short(pr.base)} to ${short(tip)} while release PR #${pr.number} was open, so its notes could land in the wrong section. The PR is closed.`,
     );
   }
   const merged = await merger.json<{ sha: string }>(
@@ -659,6 +680,26 @@ export async function merge(
     `Merged release PR #${pr.number} as ${short(merged.sha)}. Publish release starts on the push.`,
   );
   return merged.sha;
+}
+
+/**
+ * Create release PR and its merge, cut again on the new tip when the branch moves in between, up
+ * to three times. Undefined for a dry run, which opens nothing.
+ */
+export async function cutAndMerge(
+  ctx: Context,
+  plan: Plan,
+): Promise<{ pr: ReleasePr; merged: string } | undefined> {
+  for (let attempt = 1; ; attempt++) {
+    const pr = await releasePr(ctx, plan);
+    if (!pr) return undefined;
+    try {
+      return { pr, merged: await merge(ctx, plan, pr) };
+    } catch (error) {
+      if (!(error instanceof Moved) || attempt >= 3) throw error;
+      ctx.log(`${error.message} Cutting it again on the new tip.`);
+    }
+  }
 }
 
 /** Waits for Publish release on the merge, then names the signing runs it started. */
@@ -1147,15 +1188,8 @@ if (import.meta.main) {
     } else if (step === "server") {
       output({ server_run: await serverRelease(ctx, planFromEnv(), attach) });
     } else if (step === "release-pr") {
-      const pr = await releasePr(ctx, planFromEnv());
-      if (pr) output({ pr: pr.number, head: pr.head, base: pr.base });
-    } else if (step === "merge") {
-      const pr = {
-        number: Number(required("PR")),
-        head: required("HEAD"),
-        base: required("BASE"),
-      };
-      output({ merged: await merge(ctx, planFromEnv(), pr) });
+      const cut = await cutAndMerge(ctx, planFromEnv());
+      if (cut) output({ pr: cut.pr.number, merged: cut.merged });
     } else if (step === "publish") {
       await publish(ctx, planFromEnv(), required("MERGED"));
     } else if (step === "follow-up") {
@@ -1164,9 +1198,8 @@ if (import.meta.main) {
       const plan = await preflight(ctx);
       planOutputs(plan);
       await serverRelease(ctx, plan, attach);
-      const pr = await releasePr(ctx, plan);
-      if (pr && !ctx.dryRun)
-        await publish(ctx, plan, await merge(ctx, plan, pr));
+      const cut = await cutAndMerge(ctx, plan);
+      if (cut) await publish(ctx, plan, cut.merged);
       await followUp(ctx, plan);
       if (ctx.dryRun)
         ctx.log(
@@ -1174,7 +1207,7 @@ if (import.meta.main) {
         );
     } else {
       throw new Error(
-        "Usage: bun scripts/release-run.ts preflight|server|release-pr|merge|publish|follow-up|all",
+        "Usage: bun scripts/release-run.ts preflight|server|release-pr|publish|follow-up|all",
       );
     }
   } catch (error) {

@@ -105,7 +105,9 @@ In order:
 4. **The merge** of that PR, which publishes. It merges only while the branch is still the commit
    the PR was cut from: merged onto a branch that has moved, the changelog's promotion is applied to
    a different `## Unreleased`, and notes land under the wrong heading. If the branch moved, the PR
-   is closed and the run says so; re-run the failed jobs to cut it again on the new tip.
+   is closed and cut again on the new tip, up to three times. A run started again after a later
+   step failed finds the server images of the version already released and does not build them
+   again, so their version's tags never move.
 5. **Publish release**, waited on. The step ends by naming the two signing runs it started.
 6. **Merge back** (a job of its own), once both signing runs have finished and the release is
    Latest, or as soon as they have finished when `RELEASE_HOLD_LATEST` holds it. In turn, it merges
