@@ -153,7 +153,11 @@ export const CI_RULES: Rule[] = [
   },
   {
     output: "app_browser",
-    checks: ["app (real browser)"],
+    checks: [
+      "app (real browser)",
+      "app (real browser, WebKit)",
+      "app (real browser, desktop setup window)",
+    ],
     reads: isCode,
   },
   {
