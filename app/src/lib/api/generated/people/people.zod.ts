@@ -1151,3 +1151,58 @@ export const UpdatePreferencesResponse = zod
   .describe(
     "How a person set OpenBot up for themselves, on every device they sign in from.",
   );
+
+/**
+ * Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId).
+ * @summary Read whether a person must use their company sign-in here
+ */
+
+export const getCompanySignInPathPersonIdMax = 200;
+
+export const getCompanySignInPathPersonIdRegExp = new RegExp("\\S");
+
+export const GetCompanySignInParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(getCompanySignInPathPersonIdMax)
+    .regex(getCompanySignInPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const GetCompanySignInResponse = zod
+  .object({
+    required: zod
+      .boolean()
+      .describe(
+        "Whether this organization requires its members to sign in through an identity provider.",
+      ),
+    met: zod
+      .boolean()
+      .describe(
+        "Whether the person has: they signed in through one of providers, or with the same identity at the same issuer another way, or they are the admin who runs this OpenBot. While required is true and met is false, the organization holds them out.",
+      ),
+    providers: zod
+      .array(
+        zod.object({
+          id: zod
+            .string()
+            .describe("The provider's id, which signing in through it takes."),
+          domain: zod.string().describe("The email domain it signs in."),
+        }),
+      )
+      .describe(
+        "The identity providers that count for this organization: its own, and where this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.",
+      ),
+  })
+  .describe(
+    "Whether a person must sign in through their company's identity provider to work in this organization, and how they can.",
+  );

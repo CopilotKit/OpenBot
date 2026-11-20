@@ -57,6 +57,14 @@ info:
     SIGN_IN_UNAVAILABLE.
 
 
+    An organization can require its members to sign in through their
+    company's identity provider. A member who hasn't is held out of it:
+    every operation under its address answers 403 with the code
+    SSO_REQUIRED (category permission, not retryable), whose detail tells
+    them to sign in with their work email. getCompanySignIn alone still
+    answers, and says which providers they can use.
+
+
     OpenBot's own apps name themselves on every request in the header
     `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop,
     mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header
@@ -156,6 +164,7 @@ paths:
   /api/v2/organizations/{organizationId}/linked-account-providers: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1linked-account-providers' }
   /api/v2/organizations/{organizationId}/identity-providers: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1identity-providers' }
   /api/v2/organizations/{organizationId}/identity-providers/{identityProviderId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1identity-providers~1{identityProviderId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1company-sign-in' }
   /api/v2/organizations/{organizationId}/deployment: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment' }
   /api/v2/organizations/{organizationId}/settings: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings' }
   /api/v2/organizations/{organizationId}/settings/stop-inactive-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1stop-inactive-computers' }
@@ -1083,7 +1092,10 @@ components:
                 requestId: req_example
                 traceId: trace_example
     Forbidden:
-      description: The caller holds no role in this organization.
+      description: >-
+        The caller holds no role in this organization, or the organization
+        requires signing in through the company's identity provider and the
+        caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -1100,11 +1112,23 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     BotForbidden: { $ref: './bots.yaml#/components/responses/BotForbidden' }
     AdminOnly:
       description: >-
         The caller is not an administrator of the organization, or holds no
-        role in it.
+        role in it. Or the organization requires signing in through the
+        company's identity provider and the caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -1117,6 +1141,17 @@ components:
                 status: 403
                 detail: Only an admin can do this.
                 code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example

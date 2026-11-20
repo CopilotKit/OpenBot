@@ -49,6 +49,12 @@ unless you rely on task threads.
 - **Require SSO per organization.** Where OpenBot may keep more than one organization, each one's
   admins require single sign-on of its own members, and saving it signs out only that
   organization's members. Where it keeps one, the rule still holds for everybody.
+- **Signing in through the company, per organization.** A member of an organization that requires
+  its company sign-in, who hasn't used it, is refused there with 403 `SSO_REQUIRED`.
+  `GET /api/v2/organizations/{organizationId}/people/me/company-sign-in` (`getCompanySignIn`) still
+  answers them: whether it is required, whether they meet it, and the identity providers they can
+  use. In an organization other than `default`, the identity providers list also holds the ones
+  registered for the whole OpenBot, marked `deployment`, which can't be removed there (403).
 - **Members who haven't opened OpenBot yet.** On a hosted OpenBot, an organization's members list
   includes people who are members at OpenBot by CopilotKit and haven't opened OpenBot yet, marked
   `notOpenedYet`. An owner or an admin can remove them; they can't be given another role until they
