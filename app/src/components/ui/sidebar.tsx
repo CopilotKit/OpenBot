@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
-import { clampSidebarWidth, SIDEBAR_MIN_WIDTH } from "@/lib/sidebar";
+import { clampSidebarWidth, sidebarFloor } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
 const SIDEBAR_WIDTH = "16rem";
@@ -338,15 +338,18 @@ const SidebarResizeContext = React.createContext<SidebarResize | null>(null);
 const SidebarResizeProvider = SidebarResizeContext.Provider;
 
 /**
- * The narrowest the sidebar can be and still show its footer whole: its widest footer button's own
- * content, plus the paddings around it. Measured from what is drawn, never from a rem constant, and
- * never under `SIDEBAR_MIN_WIDTH`. A sidebar with no footer has only that floor.
+ * The narrowest the sidebar can be: what its widest footer button's own content needs, plus the
+ * paddings around it, and never under `SIDEBAR_MIN_WIDTH`. Beside a strip (`data-slot="strip"`) the
+ * strip's width is added to that floor, and the strip's own footer is not the one measured: the
+ * panel is what the floor is for. Measured from what is drawn, never from a rem constant.
  */
 function footerWidth(panel: HTMLElement): number {
-  const footer = panel.querySelector<HTMLElement>(
-    '[data-slot="sidebar-footer"]',
-  );
-  if (!footer) return SIDEBAR_MIN_WIDTH;
+  const strip = panel.querySelector<HTMLElement>('[data-slot="strip"]');
+  const stripWidth = strip ? strip.getBoundingClientRect().width : 0;
+  const footer = Array.from(
+    panel.querySelectorAll<HTMLElement>('[data-slot="sidebar-footer"]'),
+  ).find((one) => !strip?.contains(one));
+  if (!footer) return sidebarFloor(stripWidth, null);
   const around =
     panel.getBoundingClientRect().width - footer.getBoundingClientRect().width;
   const footerStyle = getComputedStyle(footer);
@@ -371,10 +374,7 @@ function footerWidth(panel: HTMLElement): number {
         Number.parseFloat(style.paddingRight),
     );
   }
-  return Math.max(
-    SIDEBAR_MIN_WIDTH,
-    Math.ceil(widest + footerPadding + around),
-  );
+  return sidebarFloor(stripWidth, Math.ceil(widest + footerPadding + around));
 }
 
 /**

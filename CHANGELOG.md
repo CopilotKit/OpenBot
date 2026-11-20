@@ -34,6 +34,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     extension, so the role that owns OpenBot's database creates it without a superuser.
   - `0148_recorder_capture_passes` keeps the passes that let a Recorder's socket through the
     gateway relay.
+- **`OPENBOT_MULTIPLE_ORGANIZATIONS` is no longer read: `OPENBOT_ORGANIZATION_AUTHORITY` says
+  how many organizations an OpenBot holds.** A self-hosted OpenBot that held more than one with
+  `OPENBOT_MULTIPLE_ORGANIZATIONS=true` sets `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`
+  and `INTELLIGENCE_PLATFORM_TOKEN` (or `INTELLIGENCE_PLATFORM_TOKEN_FILE`), the platform service
+  token its Intelligence was given, before upgrading. At the first start each organization it held
+  other than `default` is given an Intelligence organization of its own and starts fresh there:
+  its earlier conversation history, Learning and memory stay with `default` and aren't moved,
+  while its members, Bots and settings are kept. Left as it was, or with the old setting removed
+  and no authority named, it refuses to start before migrating, naming the organizations and what
+  to set: on `local` their Bots could not answer. An OpenBot that only ever held one organization
+  changes nothing, and keeps it. See [configuration](docs/configuration.md#general-variables).
 - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
   removed no earlier than its sunset, and only once nothing uses it.
   - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.
@@ -86,6 +97,27 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
+
+- **One Bot's conversations.** `listConversations` takes `botId` and lists the conversations that
+  Bot takes part in, one-Bot and group alike, in the same order and pages. It can't be combined
+  with `q`: both together are a 400.
+- **When a Bot's latest conversation was.** A Bot from `listBots` carries `lastConversationAt`: the
+  caller's latest conversation with it, by its last message or its start, or null when there is
+  none.
+
+### The sidebar
+
+- **A strip of sections beside a panel.** Each icon on the strip opens a section; the account is
+  the avatar at its foot. Conversations and Bots have a panel beside the strip, and any other
+  section folds the panel away so its page takes the width. ⌘B, or the Conversations icon, brings
+  the panel back without leaving the page.
+- **Compact conversations by default.** Each conversation is one line: a small avatar, the title
+  and the time, with the unread and pin marks. Settings, Appearance, Conversation list switches
+  back to Detailed, in this browser. Message list emphasis applies to Detailed only.
+- **A Bots panel.** Every Bot, ordered by its latest conversation. The top three open with their
+  five latest conversations, and Show more lists the next five.
+- **Agents are hidden for now.** The Agents page is out of the menu and `/agents` goes home. A
+  Bot's page has no Agents row, and `/bots/<id>/agents` goes to the Bot's page.
 
 ### Organizations in the app
 
