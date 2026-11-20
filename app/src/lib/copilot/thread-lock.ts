@@ -26,10 +26,7 @@ export function threadLockWaitMs(attempt: number): number {
  * `THREAD_LOCK_FAILED` body, and the same text wrapped in a REST run failure.
  */
 export function isThreadLocked(reported: unknown): boolean {
-  if (
-    reported instanceof Error &&
-    reported.name === "AgentThreadLockedError"
-  ) {
+  if (reported instanceof Error && reported.name === "AgentThreadLockedError") {
     return true;
   }
   const said = textOf(reported);
@@ -67,7 +64,10 @@ function bodyLooksLocked(body: unknown): boolean {
   for (const part of [record, nested]) {
     if (!part) continue;
     const code = part.code ?? part.error;
-    if (typeof code === "string" && /THREAD_LOCK_FAILED|agent_thread_locked/i.test(code))
+    if (
+      typeof code === "string" &&
+      /THREAD_LOCK_FAILED|agent_thread_locked/i.test(code)
+    )
       return true;
     const message = part.message ?? part.detail;
     if (typeof message === "string" && isThreadLocked(message)) return true;

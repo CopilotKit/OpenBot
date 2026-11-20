@@ -1494,7 +1494,10 @@ export function ChannelChat({
             awaitingReply.current = false;
             // What the thread holds is what was saved: read back when the runtime can be asked.
             if (ended === "over") {
-              const whole = await readBackFromThread(target, existingMessageIds);
+              const whole = await readBackFromThread(
+                target,
+                existingMessageIds,
+              );
               if (whole) reportReadBack(target);
             }
             setRunError(ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);

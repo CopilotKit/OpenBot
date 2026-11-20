@@ -9,7 +9,9 @@ import {
 
 describe("a thread Intelligence still holds", () => {
   test("recognizes CopilotKit's AgentThreadLockedError and its sentence", () => {
-    const locked = new Error("Thread 09c796b7-25f0-8c9d-b03a-221e8f37d729 is locked");
+    const locked = new Error(
+      "Thread 09c796b7-25f0-8c9d-b03a-221e8f37d729 is locked",
+    );
     locked.name = "AgentThreadLockedError";
     expect(isThreadLocked(locked)).toBe(true);
     expect(isThreadLocked("Thread is locked")).toBe(true);
