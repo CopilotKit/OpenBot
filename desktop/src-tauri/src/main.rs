@@ -16470,11 +16470,13 @@ mod tests {
             stack::server_container(&docker, &root, limit),
             Err(stack::ServerContainerUnknown::Slow)
         );
-        // And, when that fails, whether the machine still says it runs.
-        assert!(matches!(
+        // And, when that fails, whether the machine still says it runs. Measured on a Mac with the
+        // machine's VM process stopped: `machine inspect` waits on it too. Not saying in time is
+        // the slow machine it looks like, and the window stays on OpenBot.
+        assert_eq!(
             stack::server_container(&podman, &root, limit),
-            Err(stack::ServerContainerUnknown::Unreachable(_))
-        ));
+            Err(stack::ServerContainerUnknown::Slow)
+        );
         assert!(
             asked.elapsed() < std::time::Duration::from_secs(30),
             "the engine calls took {:?}",

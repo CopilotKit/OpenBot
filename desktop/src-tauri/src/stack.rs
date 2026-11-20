@@ -3870,9 +3870,11 @@ pub fn server_container(
         );
         // MEASURED on a Mac under Podman: with the engine's machine stalled (its VM process
         // stopped), `compose ps` gives up after about 14 seconds with "ssh: handshake failed:
-        // connection reset by peer" rather than running out of time. The machine still says it
-        // is running, which a stopped one does not, so that is a slow engine and not a gone one.
-        if machine_still_running(engine, limit) {
+        // connection reset by peer" rather than running out of time. Asked then, the machine
+        // says it is running, or takes too long to say anything, as `machine inspect` asks the
+        // stalled VM process too. A stopped machine says so at once. So that is a slow engine,
+        // not a gone one.
+        if machine_running_or_slow(engine, limit) {
             return Err(ServerContainerUnknown::Slow);
         }
         return Err(ServerContainerUnknown::Unreachable(said));
@@ -3897,27 +3899,33 @@ pub fn server_container(
     })
 }
 
-/// Whether the Podman machine behind `engine` still says it is running, from the machine's own
-/// record on this computer, which answers whether or not the machine does. False for Docker, and
-/// for a Podman with no machine (Linux).
-fn machine_still_running(engine: &Address, limit: std::time::Duration) -> bool {
+/// Whether the Podman machine behind `engine` says it is running, or does not say within `limit`.
+/// False when it says anything else, or cannot be asked; for Docker; and for a Podman with no
+/// machine (Linux).
+///
+/// MEASURED on a Mac: with the machine's VM process stopped, `podman machine inspect` waits on it
+/// too and does not return. On Windows it went on not returning after the machine came back. So
+/// it is asked within a limit, as every engine call the watcher makes is, and running out of time
+/// is the slow machine it looks like.
+fn machine_running_or_slow(engine: &Address, limit: std::time::Duration) -> bool {
     let (crate::engine::Engine::Podman, Some(connection)) =
         (&engine.engine, engine.connection.as_deref())
     else {
         return false;
     };
     let machine = crate::acquire::machine_of(connection);
-    // Within a limit, as every engine call the watcher makes is: one that never returns would stop
-    // the watcher for good.
     let mut inspect = crate::engine::podman_command(&["machine", "inspect", machine]);
-    crate::quiet::output_within(&mut inspect, limit)
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            crate::acquire::machine_state(&String::from_utf8_lossy(&output.stdout), machine).ok()
-        })
-        .flatten()
-        .is_some_and(|state| state == "running")
+    match crate::quiet::output_within(&mut inspect, limit) {
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => true,
+        Err(_) => false,
+        Ok(output) => {
+            output.status.success()
+                && crate::acquire::machine_state(&String::from_utf8_lossy(&output.stdout), machine)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|state| state == "running")
+        }
+    }
 }
 
 /// The `server` container's state and id, from `compose ps -a --format json server`: one object a
