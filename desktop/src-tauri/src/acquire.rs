@@ -242,8 +242,8 @@ pub(crate) fn podman(args: &[&str]) -> Result<String, String> {
 pub(crate) fn podman_as_is(args: &[&str]) -> Result<String, String> {
     podman_as_is_with(
         args,
-        |limit| crate::quiet::output_within(crate::engine::tool(Engine::Podman).args(args), limit),
-        || crate::engine::tool(Engine::Podman).args(args).output(),
+        |limit| crate::quiet::output_within(&mut crate::engine::podman_command(args), limit),
+        || crate::engine::podman_command(args).output(),
         key_shared,
     )
 }
@@ -468,6 +468,15 @@ pub fn machine_exists() -> Result<bool, String> {
 /// On Windows, `machine init` registers a WSL distribution, and the first one a person registers
 /// opens WSL's own welcome window. `before_init` turns that window off first: see
 /// `windows::skip_wsl_welcome`.
+///
+/// On Windows, user-mode networking is turned on by `machine set` right after init, not by init's
+/// own flag. Init runs with the machine home as Podman's data folder (`engine::podman_command`), so
+/// the new machine's disk lands in the install folder. Init with the flag would also make Podman's
+/// user-mode networking distribution, `podman-net-usermode`, there when it does not exist yet
+/// (`installUserModeDist` in Podman 6.1.1's `pkg/machine/wsl/usermodenet.go`). That distribution is
+/// shared with every user-mode machine of the person's own, so it belongs in Podman's default data
+/// folder, where `machine set` makes it. A `set` that fails leaves the machine without user-mode
+/// networking, and the next start turns it on (`prepare_user_mode_networking_before_start`).
 pub fn create_machine(
     cpus: u32,
     memory_mib: u32,
@@ -492,6 +501,30 @@ pub(crate) fn create_machine_with(
     image: Option<&Path>,
     exists: impl FnOnce() -> Result<bool, String>,
     before_init: impl FnOnce(),
+    run: impl FnMut(&[&str]) -> Result<String, String>,
+) -> StepOutcome {
+    create_machine_on(
+        cfg!(target_os = "windows"),
+        cpus,
+        memory_mib,
+        disk_gib,
+        image,
+        exists,
+        before_init,
+        run,
+    )
+}
+
+/// `create_machine_with` for a target that is Windows or not.
+#[allow(clippy::too_many_arguments)]
+fn create_machine_on(
+    target_is_windows: bool,
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    image: Option<&Path>,
+    exists: impl FnOnce() -> Result<bool, String>,
+    before_init: impl FnOnce(),
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
 ) -> StepOutcome {
     match exists() {
@@ -501,25 +534,28 @@ pub(crate) fn create_machine_with(
         Ok(false) => {}
         Err(error) => return StepOutcome::stopped(Step::CreateMachine, &error),
     }
-    let mut args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    let mut args = create_machine_args(cpus, memory_mib, disk_gib);
     if let Some(image) = image {
         args.extend(["--image".to_string(), image.to_string_lossy().into_owned()]);
     }
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     before_init();
-    match run(&refs) {
-        Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
-        Err(error) => StepOutcome::stopped(Step::CreateMachine, &error),
+    if let Err(error) = run(&refs) {
+        return StepOutcome::stopped(Step::CreateMachine, &error);
     }
+    if target_is_windows {
+        if let Err(error) = run(&USER_MODE_NETWORKING_ON) {
+            return StepOutcome::stopped(Step::CreateMachine, &error);
+        }
+    }
+    StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created."))
 }
 
-fn create_machine_args(
-    cpus: u32,
-    memory_mib: u32,
-    disk_gib: u32,
-    target_is_windows: bool,
-) -> Vec<String> {
-    let mut args = vec![
+/// Turns user-mode networking on for the stopped machine, on Windows.
+const USER_MODE_NETWORKING_ON: [&str; 4] = ["machine", "set", USER_MODE_NETWORKING_FLAG, MACHINE];
+
+fn create_machine_args(cpus: u32, memory_mib: u32, disk_gib: u32) -> Vec<String> {
+    vec![
         "machine".to_string(),
         "init".to_string(),
         MACHINE.to_string(),
@@ -530,11 +566,7 @@ fn create_machine_args(
         "--disk-size".to_string(),
         disk_gib.to_string(),
         ROOTFUL_FLAG.to_string(),
-    ];
-    if target_is_windows {
-        args.push(USER_MODE_NETWORKING_FLAG.to_string());
-    }
-    args
+    ]
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -564,7 +596,7 @@ fn prepare_user_mode_networking_before_start(
         ));
     }
     if networking.state.eq_ignore_ascii_case("stopped") && !networking.user_mode {
-        run(&["machine", "set", USER_MODE_NETWORKING_FLAG, MACHINE])?;
+        run(&USER_MODE_NETWORKING_ON)?;
     }
     Ok(Some(networking))
 }
@@ -2188,16 +2220,17 @@ mod tests {
             || Ok(false),
             || {},
             |args| {
-                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                captured.push(
+                    args.iter()
+                        .map(|arg| (*arg).to_string())
+                        .collect::<Vec<_>>(),
+                );
                 Ok(String::new())
             },
         );
 
         assert!(result.ok, "{result:?}");
-        assert_eq!(
-            captured,
-            create_machine_args(4, 8192, 64, cfg!(target_os = "windows"))
-        );
+        assert_eq!(captured[0], create_machine_args(4, 8192, 64));
     }
 
     /// The machine image the first screen downloaded is what the machine is built from: Podman is
@@ -2214,7 +2247,9 @@ mod tests {
             || Ok(false),
             || {},
             |args| {
-                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                if captured.is_empty() {
+                    captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                }
                 Ok(String::new())
             },
         );
@@ -2232,7 +2267,8 @@ mod tests {
     #[test]
     fn wsl_welcome_window_is_turned_off_before_the_machine_is_made() {
         let calls = std::cell::RefCell::new(Vec::<String>::new());
-        let result = create_machine_with(
+        let result = create_machine_on(
+            true,
             4,
             6144,
             60,
@@ -2245,10 +2281,14 @@ mod tests {
             },
         );
         assert!(result.ok, "{result:?}");
-        assert_eq!(*calls.borrow(), ["wsl welcome off", "machine init"]);
+        assert_eq!(
+            *calls.borrow(),
+            ["wsl welcome off", "machine init", "machine set"]
+        );
 
         calls.borrow_mut().clear();
-        let existing = create_machine_with(
+        let existing = create_machine_on(
+            true,
             4,
             6144,
             60,
@@ -2261,36 +2301,102 @@ mod tests {
         assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
     }
 
+    /// The machine's commands on Windows, in order, when `set` answers `set_answers`.
+    fn windows_create(set_answers: Result<String, String>) -> (StepOutcome, Vec<Vec<String>>) {
+        let mut ran = Vec::new();
+        let mut set_answers = Some(set_answers);
+        let result = create_machine_on(
+            true,
+            4,
+            8192,
+            64,
+            None,
+            || Ok(false),
+            || {},
+            |args| {
+                ran.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "set", ..] => set_answers.take().unwrap(),
+                    _ => Ok(String::new()),
+                }
+            },
+        );
+        (result, ran)
+    }
+
+    /// Init runs with the machine home as Podman's data folder, and with user-mode networking on
+    /// it would make Podman's shared `podman-net-usermode` distribution there, inside OpenBot's
+    /// install folder. So init runs without it, and `machine set` turns it on after, in Podman's
+    /// default data folder.
     #[test]
-    fn windows_machine_init_enables_user_mode_networking() {
+    fn windows_turns_user_mode_networking_on_after_init_not_during_it() {
+        let (result, ran) = windows_create(Ok(String::new()));
+        assert!(result.ok, "{result:?}");
         assert_eq!(
-            create_machine_args(4, 8192, 64, true),
+            ran,
             [
-                "machine",
-                "init",
-                "openbot",
-                "--cpus",
-                "4",
-                "--memory",
-                "8192",
-                "--disk-size",
-                "64",
-                "--rootful",
-                "--user-mode-networking=true"
+                vec![
+                    "machine",
+                    "init",
+                    "openbot",
+                    "--cpus",
+                    "4",
+                    "--memory",
+                    "8192",
+                    "--disk-size",
+                    "64",
+                    "--rootful"
+                ],
+                vec!["machine", "set", "--user-mode-networking=true", "openbot"]
             ]
         );
+    }
+
+    /// A `set` that fails stops the step with Podman's answer. The machine is there, so the retry
+    /// skips init, and the start turns user-mode networking on.
+    #[test]
+    fn windows_create_stops_when_user_mode_networking_cannot_be_turned_on() {
+        let (result, _) = windows_create(Err("podman machine set exited with status 125".into()));
+        assert!(!result.ok, "{result:?}");
+        assert_eq!(result.step, Step::CreateMachine);
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("podman machine set exited with status 125")),
+            "{result:?}"
+        );
+    }
+
+    /// Off Windows, init is the only command.
+    #[test]
+    fn other_systems_create_the_machine_with_init_alone() {
+        let mut ran = Vec::new();
+        let result = create_machine_on(
+            false,
+            4,
+            8192,
+            64,
+            None,
+            || Ok(false),
+            || {},
+            |args| {
+                ran.push(args[..2].join(" "));
+                Ok(String::new())
+            },
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(ran, ["machine init"]);
     }
 
     /// Local Intelligence's k3d needs a rootful engine, on macOS as on Windows.
     #[test]
     fn the_machine_is_created_rootful_on_every_platform() {
-        for windows in [false, true] {
-            let args = create_machine_args(4, 6144, 60, windows);
-            assert!(args.iter().any(|arg| arg == "--rootful"), "{args:?}");
-            assert_eq!(&args[..3], ["machine", "init", "openbot"]);
-        }
+        let args = create_machine_args(4, 6144, 60);
+        assert!(args.iter().any(|arg| arg == "--rootful"), "{args:?}");
+        assert_eq!(&args[..3], ["machine", "init", "openbot"]);
         assert_eq!(
-            create_machine_args(4, 6144, 60, false),
+            create_machine_args(4, 6144, 60),
             [
                 "machine",
                 "init",
