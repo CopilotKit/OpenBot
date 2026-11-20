@@ -22502,6 +22502,9 @@ components:
               - google
               - microsoft
               - okta
+        hostedSignIn:
+          type: boolean
+          description: Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.
         ssoConfigured:
           type: boolean
           description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.
