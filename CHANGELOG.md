@@ -200,6 +200,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   says so, offers Sign in with your company, and pauses Learning capture with the events kept, where
   it said it got an answer it didn't know.
 
+### OpenBot runs on CopilotKit 2.0.0-rc.68
+
+`@copilotkit/runtime` and `@copilotkit/shared` in OpenBot's server move from 1.88.0 to 2.0.0-rc.68,
+a release candidate of CopilotKit 2.0, and the server's AG-UI from 1.0.2 to 1.0.5.
+`@copilotkit/react-core` in the app stays 1.88.0, on AG-UI 1.0.2. The built-in Bots call their
+models through TanStack AI, where they used the AI SDK. `COPILOTKIT_OPENAI_API=responses` or `chat`
+still chooses the OpenAI API for every model.
+
 ## 1.1.2
 
 **Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
