@@ -27,13 +27,12 @@ export function companySignInLine(
 
 /**
  * Settings, General: the person's company account, where their organization has identity providers. Linked, it says
- * so. Not linked, it offers Link your company account: one button for one provider, a button each, under the row, for
+ * so. Not linked, it offers Link your company account under the row: one button for one provider, a button each for
  * several. Nothing where the organization has none, or where the server has no answer for it.
  */
 export function CompanySignInSection() {
   const signIn = useQuery(companySignInQueryOptions()).data;
   if (!signIn || signIn.providers.length === 0) return null;
-  const several = signIn.providers.length > 1;
   return (
     <PageSection title="Company sign-in">
       <PageRows>
@@ -51,18 +50,17 @@ export function CompanySignInSection() {
             <ItemActions>
               <span className="text-muted-foreground text-sm">Linked</span>
             </ItemActions>
-          ) : several ? (
-            <ItemFooter>
+          ) : (
+            // On a line of its own under the row: the button's words are long, and beside them the row's own
+            // sentence was squeezed to a word a line in a narrow window.
+            // In line with the row's words, past the icon's tile and the gap after it.
+            <ItemFooter className="pl-11">
               <LinkCompanyAccount
                 className="flex-row flex-wrap"
                 providers={signIn.providers}
                 size="sm"
               />
             </ItemFooter>
-          ) : (
-            <ItemActions>
-              <LinkCompanyAccount providers={signIn.providers} size="sm" />
-            </ItemActions>
           )}
         </Item>
       </PageRows>
