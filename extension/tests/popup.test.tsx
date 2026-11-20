@@ -1632,3 +1632,25 @@ test("signed out, a Start-over drain that is not kept shows only the kept row: n
   expect(queryByText("Learning capture")).toBeNull();
   expect(queryByText("Sending to OpenBot's backend")).toBeNull();
 });
+
+test("connected, the popup says which organization it records into, and only the OpenBot's address when none is named", async () => {
+  const named = setup(
+    stateResponse({
+      connection: {
+        openbotUrl: "https://openbot.example.test",
+        user: { name: "Ada Lovelace", email: "ada@example.test" },
+        via: "web",
+        organizationName: "Harbor Research",
+      },
+    }),
+  );
+  await named.findByText(
+    "Records into Harbor Research on openbot.example.test",
+  );
+  named.unmount();
+
+  const plain = setup(stateResponse());
+  await plain.findByText("Ada Lovelace");
+  expect(plain.queryByText(/Records into/)).toBeNull();
+  await plain.findByText("openbot.example.test");
+});

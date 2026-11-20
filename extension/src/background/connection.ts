@@ -88,8 +88,13 @@ type ConnectionDeps = {
  */
 function grantOrganization(
   grant: RecorderConnectionGrant,
-): Pick<ConnectionRecord, "organizationId"> {
-  return grant.organizationId ? { organizationId: grant.organizationId } : {};
+): Pick<ConnectionRecord, "organizationId" | "organizationName"> {
+  return {
+    ...(grant.organizationId ? { organizationId: grant.organizationId } : {}),
+    ...(grant.organizationName
+      ? { organizationName: grant.organizationName }
+      : {}),
+  };
 }
 
 const PENDING_MAX_AGE_MS = 5 * 60 * 1000;
@@ -415,7 +420,10 @@ async function approve(
   await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
-  return { ok: true };
+  // The Connect page says where this browser now records.
+  return connection.organizationName
+    ? { ok: true, organizationName: connection.organizationName }
+    : { ok: true };
 }
 
 /**
