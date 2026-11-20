@@ -1,21 +1,7 @@
-import {
-  IconBuildingBank,
-  IconChevronRight,
-  IconCode,
-  IconDeviceDesktop,
-  IconFileText,
-  IconKey,
-  IconLayoutGrid,
-  IconListDetails,
-  IconPuzzle,
-  IconShieldCheck,
-  IconUsers,
-} from "@tabler/icons-react";
-import {
-  createFileRoute,
-  Link,
-  type LinkOptions,
-} from "@tanstack/react-router";
+import { IconChevronRight } from "@tabler/icons-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
+import { SharedComputersNotice } from "@/components/admin/shared-computers-notice";
 import {
   PageRows,
   PageSection,
@@ -36,123 +22,19 @@ export const Route = createFileRoute("/_authed/admin/")({
 });
 
 /**
- * Grouped by what the decision is about rather than by how the code is organised.
- *
- * "What Bots can reach" is the group an administrator arrives worrying about, so it goes first.
- * Everything in it either grants a capability or fences one in.
+ * Admin's overview: every Admin page, grouped by the thing a Bot has that it sets for everybody, in
+ * the order the sidebar lists them (`ADMIN_SECTIONS`). Above them, on an OpenBot whose Bots share one
+ * computer, the notice that says so: the first page an admin opens is where they learn it.
  */
-const SECTIONS: {
-  title: string;
-  description: string;
-  items: {
-    description: string;
-    icon: React.ComponentType<{ className?: string }>;
-    linkOptions: LinkOptions;
-    title: string;
-  }[];
-}[] = [
-  {
-    title: "What Bots can reach",
-    description:
-      "Everything a Bot can touch outside this app, and the limits on it.",
-    items: [
-      {
-        title: "Credentials",
-        description: "Keys and tokens held for this deployment.",
-        icon: IconKey,
-        linkOptions: { to: "/admin/credentials" },
-      },
-      {
-        title: "Boundaries",
-        description: "Rules that decide what a Bot may never do.",
-        icon: IconShieldCheck,
-        linkOptions: { to: "/admin/boundaries" },
-      },
-      {
-        title: "Computers",
-        description: "The machines Bots run their tools on.",
-        icon: IconDeviceDesktop,
-        linkOptions: { to: "/admin/computers" },
-      },
-    ],
-  },
-  {
-    title: "What Bots can do",
-    description: "Capabilities and interface pieces available across Bots.",
-    items: [
-      {
-        title: "Plugins",
-        description:
-          "The services this deployment can reach, and which Bots may.",
-        icon: IconPuzzle,
-        linkOptions: { to: "/admin/plugins" },
-      },
-      {
-        title: "Skills",
-        description: "Named instructions anybody can invoke with a slash.",
-        icon: IconFileText,
-        linkOptions: { to: "/admin/skills" },
-      },
-      {
-        title: "UI Components",
-        description: "Custom pieces a Bot can draw in a conversation.",
-        icon: IconLayoutGrid,
-        linkOptions: { to: "/admin/components" },
-      },
-      {
-        title: "Playground",
-        description: "Write a component and watch it render as you type.",
-        icon: IconCode,
-        linkOptions: { to: "/admin/playground" },
-      },
-    ],
-  },
-  {
-    title: "Who can get in",
-    description: "",
-    items: [
-      {
-        title: "People",
-        description:
-          "Everybody who has signed in, who administers this deployment, and whose access has been removed.",
-        icon: IconUsers,
-        linkOptions: { to: "/admin/people" },
-      },
-      {
-        title: "Identity providers",
-        description:
-          "A company's own SAML or OpenID Connect provider, routed by email domain.",
-        icon: IconBuildingBank,
-        linkOptions: { to: "/admin/identity-providers" },
-      },
-    ],
-  },
-  {
-    title: "What happened",
-    description: "",
-    items: [
-      {
-        title: "Audit",
-        description: "Every action taken in this deployment, and by whom.",
-        icon: IconListDetails,
-        linkOptions: { to: "/admin/audit" },
-      },
-    ],
-  },
-];
-
 function RouteComponent() {
   return (
     <PageShell
-      description="Settings that apply to everybody in this deployment. Anything here affects every person and every Bot, which is what separates it from your own preferences."
+      description="Manage settings that apply to everyone and every Bot in this organization."
       title="Admin"
     >
-      {SECTIONS.map((section) => (
-        <PageSection
-          description={section.description || undefined}
-          key={section.title}
-          title={section.title}
-        >
+      <SharedComputersNotice />
+      {ADMIN_SECTIONS.map((section) => (
+        <PageSection key={section.title} title={section.title}>
           <PageRows>
             {section.items.map((item, index) => (
               <StaggerItem index={index} key={item.title}>
@@ -164,8 +46,8 @@ function RouteComponent() {
                   render={(props) => <Link {...item.linkOptions} {...props} />}
                   size="sm"
                 >
-                  <ItemMedia>
-                    <item.icon className="size-4 text-muted-foreground" />
+                  <ItemMedia variant="icon">
+                    <item.icon />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{item.title}</ItemTitle>

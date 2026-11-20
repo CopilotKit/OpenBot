@@ -1,13 +1,13 @@
 //! Exercise the production emitter against an explicit local receiver, without starting OpenBot.
 use openbot_desktop_lib::telemetry::{
-    Architecture, Config, Context, Distribution, Engine, EventData, NumericVersion, Platform,
-    RuntimeEnv, Step, Telemetry,
+    AppVersion, Architecture, Config, Context, CredentialPath, Distribution, Engine, EventData,
+    Platform, Provider, RuntimeEnv, Step, Telemetry,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 4 {
-        return Err("usage: telemetry_probe DATA_DIR http://127.0.0.1:PORT/ingest record|flush|quit|activate|env".into());
+        return Err("usage: telemetry_probe DATA_DIR http://127.0.0.1:PORT/ingest record|flush|quit|activate|env|provider-canary".into());
     }
     let url = reqwest::Url::parse(&args[2])?;
     if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") {
@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args[1],
         Context {
             distribution: Distribution::Desktop,
-            app_version: NumericVersion::parse("0.0.9")?,
+            app_version: AppVersion::parse("0.0.9")?,
             platform: if cfg!(target_os = "windows") {
                 Platform::Windows
             } else if cfg!(target_os = "macos") {
@@ -56,6 +56,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             telemetry.record(EventData::Activated)?;
             telemetry.record(EventData::Activated)?;
             telemetry.shutdown()?;
+        }
+        "provider-canary" => {
+            for (provider, credential_path, custom_base_url) in [
+                (Provider::Google, CredentialPath::Oauth, false),
+                (Provider::Xai, CredentialPath::Oauth, false),
+                (Provider::Compatible, CredentialPath::None, true),
+            ] {
+                telemetry.record(EventData::ModelChosen {
+                    provider,
+                    credential_path,
+                    custom_base_url,
+                })?;
+            }
+            telemetry.flush()?;
         }
         "env" => {}
         _ => return Err("unknown probe action".into()),

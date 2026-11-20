@@ -1,4 +1,11 @@
-import { tryClient } from "@/lib/client";
+import {
+  getComputerPageFrame,
+  getComputerScreenshot,
+  wakeComputer,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
+import type { ComputerState } from "./queries";
 
 /**
  * One frame of a Bot's screen.
@@ -17,6 +24,26 @@ export type Screenshot = {
 };
 
 /**
+ * What a screenshot request can come back with.
+ *
+ * `notReady` is not an error. The server answers it for a computer that is asleep or starting, and
+ * does so without waking it; a computer in either state is behaving normally, so the caller draws it
+ * calmly and keeps polling. `error` is a screenshot that was attempted and failed.
+ */
+export type ScreenshotRead = {
+  frame?: Screenshot;
+  error?: string;
+  notReady?: { state: ComputerState; reason?: string };
+};
+
+const COMPUTER_STATES: readonly ComputerState[] = [
+  "absent",
+  "starting",
+  "ready",
+  "unreachable",
+];
+
+/**
  * Read the current frame.
  *
  * Fails closed, and says why: the screen going unavailable is something the person watching needs
@@ -25,20 +52,67 @@ export type Screenshot = {
  */
 export async function readScreenshot(
   computerId: string,
-): Promise<{ frame?: Screenshot; error?: string }> {
+): Promise<ScreenshotRead> {
   const unavailable = "The screen is not available right now.";
   try {
-    const response = await tryClient(`/api/computers/${computerId}/screenshot`);
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      return { error: body?.error ?? unavailable };
-    }
-    return parseScreenshot(await response.json().catch(() => null));
-  } catch {
-    return { error: unavailable };
+    const body: unknown = await getComputerScreenshot(
+      organizationId(),
+      computerId,
+      { fallback: unavailable },
+    );
+    const notReady = notReadyOf(body);
+    if (notReady) return { notReady };
+    return parseScreenshot(body);
+  } catch (error) {
+    // The server's own sentence when it said why; otherwise the screen is simply not there.
+    return {
+      error: error instanceof ClientError ? error.message : unavailable,
+    };
   }
+}
+
+/**
+ * Say the Bot's screen was opened, which starts a computer that is off.
+ *
+ * The reads above never start one: a conversation makes them too, and a computer that started for
+ * every look would never stay off. Opening the screen is a person asking to see the computer, so
+ * that is said on its own. The server answers at once with the computer's state (`starting` for one
+ * it has just started) and does not wait for it to come up.
+ *
+ * Fails closed: nothing when the server could not be asked or has no such route, and the screen then
+ * says the computer is off, which it is.
+ */
+export async function startComputer(
+  computerId: string,
+): Promise<ComputerState | null> {
+  try {
+    const body: { state?: unknown } = await wakeComputer(
+      organizationId(),
+      computerId,
+      { "Idempotency-Key": idempotencyKey() },
+    );
+    return COMPUTER_STATES.includes(body?.state as ComputerState)
+      ? (body?.state as ComputerState)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The server's "not ready yet" answer, or nothing when the body is something else. */
+function notReadyOf(body: unknown): ScreenshotRead["notReady"] {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return;
+  const { ready, state, reason } = body as {
+    ready?: unknown;
+    state?: unknown;
+    reason?: unknown;
+  };
+  if (ready !== false) return;
+  if (!COMPUTER_STATES.includes(state as ComputerState)) return;
+  return {
+    state: state as ComputerState,
+    ...(typeof reason === "string" ? { reason } : {}),
+  };
 }
 
 function parseScreenshot(body: unknown): {
@@ -90,11 +164,11 @@ export async function readPageFrame(
   toolCallId: string,
 ): Promise<PageFrame | null> {
   try {
-    const response = await tryClient(
-      `/api/computers/${computerId}/page-frame/${encodeURIComponent(toolCallId)}`,
+    const body: unknown = await getComputerPageFrame(
+      organizationId(),
+      computerId,
+      toolCallId,
     );
-    if (!response.ok) return null;
-    const body = (await response.json().catch(() => null)) as unknown;
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const frame = (body as { frame?: unknown }).frame;
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) {

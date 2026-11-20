@@ -3,8 +3,9 @@
 @import "shadcn/tailwind.css";
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
-@import "@fontsource-variable/dm-sans";
-@import "@fontsource/instrument-serif";
+@import "@fontsource-variable/inter";
+@import "./theme.css";
+@import "./skins/skins.css";
 
 /*
  * Streamdown draws a Bot's prose, and Tailwind only ships classes it can see used. Its markup lives
@@ -12,249 +13,93 @@
  * of the spacing that makes it readable. The path is relative to this file.
  */
 @source "../node_modules/streamdown/dist/*.js";
+/* Its code plugin, which Streamdown's docs say to scan the same way. */
+@source "../node_modules/@streamdown/code/dist/*.js";
+/* And its maths plugin, likewise. */
+@source "../node_modules/@streamdown/math/dist/*.js";
 
-@custom-variant dark (&:is(.dark *));
-
-html {
-  font-size: 15px;
+/*
+ * Maths a Bot writes, drawn by KaTeX (lib/math-plugin.ts). KaTeX's own fonts set the formula, as
+ * maths is set everywhere, and it takes the colour of the words around it, so it follows the theme
+ * with them. KaTeX draws a formula at 1.21 times the text round it; at the chat's size that stood a
+ * line taller than the prose beside it, so it is drawn at 1.1, which keeps a fraction readable
+ * without loosening the line.
+ *
+ * A formula set apart is centred on a block of its own, as KaTeX sets it, and scrolls sideways from
+ * its start when it is wider than the column, on a phone or in a card, and never the page. The scroll leaves a little room above
+ * and below so a fraction's top and a subscript's foot are not clipped by it.
+ */
+.katex {
+  font-size: 1.1em;
 }
 
-:root {
-  color-scheme: light;
-  --background: #f7f8fa;
-  --foreground: #0c1b2e;
-  --card: #ffffff;
-  --card-foreground: #0c1b2e;
-  --popover: #ffffff;
-  --popover-foreground: #0c1b2e;
-  --primary: #0c1b2e;
-  --primary-foreground: #ffffff;
-  --secondary: #eef1f4;
-  --secondary-foreground: #0c1b2e;
-  --muted: #eef1f4;
-  --muted-foreground: #667085;
-  --accent: #f6ead2;
-  --accent-foreground: #6b4e16;
-  --destructive: oklch(0.577 0.245 27.325);
-  --success: oklch(0.6 0.118 184.704);
-  --border: #dfe4ea;
-  --input: #dfe4ea;
-  --ring: #d4a853;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.75rem;
-  --sidebar: #0c1b2e;
-  --sidebar-foreground: #f8fafc;
-  --sidebar-primary: #d4a853;
-  --sidebar-primary-foreground: #0c1b2e;
-  --sidebar-accent: #172a43;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #26384f;
-  --sidebar-ring: #d4a853;
-}
-
-.dark {
-  color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --success: oklch(0.704 0.14 182.503);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  position: relative;
-  min-width: 20rem;
-  min-height: 100vh;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
+.katex-display {
+  margin-block: 0.75rem;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+  scrollbar-width: thin;
 }
 
 /*
- * THERE IS DELIBERATELY NO `button, input, textarea, select { font: inherit }` HERE.
- *
- * Form controls do need it — Chrome otherwise draws them in its own ~13.3px system font — and
- * Tailwind's Preflight already does exactly that, inside `@layer base`, where a utility can still
- * override it. A second copy written here would sit in NO layer, and an unlayered rule outranks
- * every layered one no matter how specific: a bare `input` selector beats `.text-sm`. That is not a
- * specificity fight anybody wins, because layers are resolved before specificity is even consulted.
- *
- * One was here, and it silently disabled every `text-*` on every button, input, textarea and select
- * in the app. Nothing looked broken; the sizes were simply never applied, and the labels — which are
- * not in that selector list — rendered a size smaller than the fields they belonged to.
+ * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
+ * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
+ * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle.
+ * It draws the buttons 20px in, on the middle of the header's row (`TRAFFIC_LIGHTS` in the
+ * desktop's main.rs), so here the row starts to their right: OpenBot's name and + share
+ * one line with them. With the sidebar collapsed the buttons are over the main column instead, so
+ * that moves down below them. The main column is the shell's own `<main>`; the primitive's
+ * `SidebarInset`, which an earlier rule aimed at, is used by no shell. Outside the desktop nothing
+ * changes.
  */
-
-@theme inline {
-  --font-heading: "Instrument Serif", Georgia, serif;
-  --font-sans: "DM Sans Variable", sans-serif;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-success: var(--success);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+:root[data-desktop-titlebar="overlay"] [data-slot="sidebar-header"] {
+  padding-left: 80px;
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
-  }
+:root[data-desktop-titlebar="overlay"]
+  [data-slot="sidebar-wrapper"]:has(
+    > [data-slot="sidebar"][data-state="collapsed"]
+  )
+  > main {
+  padding-top: 40px;
+}
 
-  ::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 5px;
-  }
-
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
+/* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */
+[data-slot="sidebar-wrapper"][data-resizing] [data-slot="sidebar-container"],
+[data-slot="sidebar-wrapper"][data-resizing] [data-slot="sidebar-gap"] {
+  transition: none;
 }
 
 /*
  * A tool line that is still running.
  *
- * A light band sweeps left to right across the words. `background-clip: text` with a transparent
- * colour is what confines the gradient to the glyphs, and the band is built from the line's own
- * colour so it reads the same in either theme. Only `background-position` animates, which the
- * compositor handles without laying the text out again on every frame.
+ * The words breathe: they ease down to a little over half strength and back once every 2.4 seconds,
+ * a pace that reads as calm progress. A light band used to sweep across them every 1.6 seconds,
+ * crossing the words in under half a second and then holding still, so on screen the text seemed to
+ * blink on and off. The words are drawn in the line's own colour throughout and never fade further
+ * than 0.6, so a running step can be read at any moment of the cycle. Only `opacity` animates, which
+ * the compositor handles without painting the text again on every frame.
  */
 .tool-line-running {
-  background-image: linear-gradient(
-    100deg,
-    currentColor 40%,
-    color-mix(in oklab, currentColor 25%, transparent) 50%,
-    currentColor 60%
-  );
-  background-size: 250% 100%;
-  background-position: 100% 0;
-  background-clip: text;
-  -webkit-background-clip: text;
-  /*
-   * THE GLYPH FILL, NOT `color`. This was `color: transparent`, which blanked the gradient too —
-   * `currentColor` resolves against this element's own `color` — so nothing was ever drawn. This
-   * rule is unlayered and beats the `text-*` utility it is given, so the reduced-motion branch
-   * below, which puts `color` back, was the only place the text was readable.
-   */
-  -webkit-text-fill-color: transparent;
-  animation: tool-line-sweep 1.6s linear infinite;
+  animation: tool-line-pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes tool-line-sweep {
-  to {
-    background-position: -150% 0;
+@keyframes tool-line-pulse {
+  50% {
+    opacity: 0.6;
   }
 }
 
-/* Preserve running-state text without shimmer for reduced-motion users. */
+/* Reduced motion keeps the words at full strength and still. */
 @media (prefers-reduced-motion: reduce) {
   .tool-line-running {
     animation: none;
-    background-image: none;
-    color: inherit;
   }
 }
 
 .tool-line[open] .tool-line-chevron {
   transform: rotate(90deg);
-}
-
-/*
- * Row descriptions wrap on sense rather than on width.
- *
- * Here rather than on the `ItemDescription` primitive, which is where this started. That file has an
- * upstream: it is vendored from shadcn and the layout skill says not to edit it, so a class added
- * inside it is one the next `shadcn add item` silently removes — and the loss would surface as "the
- * screens look slightly worse" months later, with nothing to attribute it to.
- *
- * The primitive already emits the attribute this selects, so nothing has to be edited for it to
- * apply, and nothing upstream can take it away.
- */
-[data-slot="item-description"] {
-  text-wrap: pretty;
 }
 
 /*
@@ -289,4 +134,315 @@ body {
  */
 :where(div:has(> iframe.websandbox__frame)) {
   min-height: 200px;
+}
+
+/*
+ * The composer's @ menu, at the width prompt-area allows rather than the width of its longest name,
+ * so a Bot's title reads in full. prompt-area takes no class for its menu; it labels it by the
+ * trigger's character, so "@ suggestions" is this menu and not the `/` one. 20rem is the package's
+ * own cap, which its placement assumes when it keeps the menu inside the window, and its inline
+ * `max-width` still narrows the menu on a small screen.
+ *
+ * Each row centres the Bot's avatar on its name and title; the package aligns an icon to the first
+ * line, sized for a glyph, not a face.
+ */
+[role="listbox"][aria-label="@ suggestions"] {
+  width: 20rem;
+
+  & > [role="option"] {
+    align-items: center;
+    gap: --spacing(3);
+  }
+
+  /* A flex box, not an inline one, so no line-height space sits under the face. */
+  & > [role="option"] > span:first-child {
+    display: flex;
+    margin-top: 0;
+  }
+}
+
+/*
+ * A conversation's newest rows rendering in as it opens. The delay is set per row as
+ * `--arrive-delay`; see
+ * `openingStagger` in chat-transcript.tsx. Opacity and transform only, so nothing the scroller
+ * measured moves.
+ */
+.history-arrive {
+  animation: history-arrive 240ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation-delay: var(--arrive-delay, 0ms);
+}
+
+@keyframes history-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Reduced motion keeps the fade and drops the movement and the queue: gentler, not absent. */
+@media (prefers-reduced-motion: reduce) {
+  .history-arrive {
+    animation-name: history-arrive-fade;
+    animation-delay: 0ms;
+  }
+}
+
+@keyframes history-arrive-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+ * A component a Bot draws keeps its reading width (max-w-2xl) wherever it is previewed, but in a
+ * conversation it fills the answer column, which is wider than the composer, so a chart or table
+ * lines up with the code and tool cards around it. Unlayered, so it outranks the utility.
+ */
+[data-transcript-column] [data-slot="gallery-frame"] {
+  max-width: none;
+}
+
+/*
+ * An interface a Bot draws inside a Card has one frame, not two. CopilotKit draws a frame of its own
+ * around every interface in a chat (a border and 12px of padding), and the catalog's Card draws a
+ * border as well, so a Card on top, the shape most interfaces take, came out as a box inside a box.
+ * When the top component is a Card that draws a box, the frame gives up its border and padding and
+ * the Card, drawn in the app's tokens, is the one card in the conversation. Anything else on top,
+ * including a Card drawn as a borderless section or a transparent one, keeps the frame as its box.
+ *
+ * `data-a2ui-card="top"` is the catalog's mark for a Card that is not inside another one. A
+ * component given an accessible name it does not apply itself sits in a `display: contents` span.
+ */
+[data-generative-ui-chat-surface]:has(
+  > .a2ui-surface
+    > [data-a2ui-card="top"]:not(
+      [data-a2ui-card-variant="section"],
+      [data-a2ui-card-variant="transparent"]
+    ),
+  > .a2ui-surface
+    > [data-a2ui-accessibility]
+    > [data-a2ui-card="top"]:not(
+      [data-a2ui-card-variant="section"],
+      [data-a2ui-card-variant="transparent"]
+    )
+) {
+  border-width: 0;
+  padding: 0;
+}
+
+/*
+ * Markdown and code in an interface a Bot generates are drawn by a reply's renderer (see
+ * lib/copilot/a2ui-markdown.tsx), inside a surface that also carries CopilotKit's own stylesheet.
+ * That stylesheet is in no layer, so its heading sizes, and the `color: inherit` it gives every
+ * button inside a Card, outrank Tailwind's utilities however specific those are: headings came out
+ * smaller than in a reply and the copy buttons lost their muted colour. `revert-layer` hands exactly
+ * those properties back to the layered rules, which are the ones a reply is drawn with.
+ *
+ * The amount boxes of a Breakdown (lib/copilot/a2ui-breakdown.tsx) are the app's own inputs and
+ * take back their type size the same way.
+ */
+.a2ui-surface
+  :is(.openbot-markdown, .openbot-breakdown)
+  :is(h1, h2, h3, h4, h5, h6, button, input, select, textarea) {
+  font: revert-layer;
+  color: revert-layer;
+}
+
+/*
+ * The frame CopilotKit draws around an interface in the conversation has a fixed light grey border,
+ * which in the dark theme was a bright ring around the card. It takes the app's border colour.
+ */
+[data-generative-ui-chat-surface] {
+  border-color: var(--border);
+}
+
+/*
+ * The pattern behind an empty state. One rule, read entirely from the `--empty-pattern*` tokens in
+ * theme.css, so changing the pattern never means changing a component: the tile is a mask over a
+ * flat fill of `--empty-pattern-color`, faded out from the top-right corner by a second mask so it
+ * sits behind the empty state rather than across its text.
+ */
+.empty-pattern {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--empty-pattern-color);
+  opacity: var(--empty-pattern-opacity);
+  mask-image:
+    var(--empty-pattern),
+    radial-gradient(
+      circle at 85% 15%,
+      #000 0,
+      rgb(0 0 0 / 0.4) 30%,
+      transparent 60%
+    );
+  mask-repeat: repeat, no-repeat;
+  mask-size:
+    auto,
+    100% 100%;
+  mask-composite: intersect;
+}
+
+/*
+ * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
+ * so swapping or turning off the empty-state pattern does the same here. It fades out from the
+ * center instead of a corner, and is gone by the edge of its own box (`closest-side`), so the box's
+ * square never shows. The intro leaves it room to reach that edge (`HALO_ROOM` in
+ * conversation-intro.tsx).
+ *
+ * The dark theme's light pattern on a near-black ground stood out about 1.6 times as strongly as the
+ * light theme's, and read as a block of pixels around the orb rather than a halo; it is drawn at 0.6
+ * of the token's strength there so the two themes match. A skin's 0 is still 0.
+ */
+.orb-pattern {
+  position: absolute;
+  inset: -40px;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--empty-pattern-color);
+  opacity: var(--empty-pattern-opacity);
+  mask-image:
+    var(--empty-pattern),
+    radial-gradient(
+      circle closest-side,
+      #000 42%,
+      rgb(0 0 0 / 0.35) 78%,
+      transparent 100%
+    );
+  mask-repeat: repeat, no-repeat;
+  mask-size:
+    auto,
+    100% 100%;
+  mask-composite: intersect;
+}
+.dark .orb-pattern {
+  opacity: calc(var(--empty-pattern-opacity) * 0.6);
+}
+
+/*
+ * A Bot's sphere, the one drawing of a Bot at every size, so it reads as the same Bot wherever it
+ * is: its palette's lightest stop (c4) lit through c2 to c3 at the rim, with one sweep of c1 across
+ * it. `BotOrb` draws it still at avatar sizes, with CSS alone, and live when larger or busy, where
+ * the sweep turns. Before, the live orb drew AgentOrb's own mesh instead, in which c3, a violet in
+ * most palettes, lay across the top: the Personal Assistant was green in the sidebar and blue, teal
+ * and pink at the top of its page and its conversation (bot-orb-one-color.test.tsx).
+ */
+.bot-orb-still {
+  background:
+    radial-gradient(circle at 30% 24%, hsl(0 0% 100% / 0.28), transparent 34%),
+    conic-gradient(
+      from 200deg at 70% 30%,
+      var(--c1),
+      transparent 30% 65%,
+      var(--c1)
+    ),
+    radial-gradient(
+      circle at 38% 34%,
+      var(--c4) 0%,
+      var(--c2) 42%,
+      var(--c3) 100%
+    );
+}
+/*
+ * The live orb's disc: the same sphere as its ground, on the light page's `--background` in both
+ * themes, so it reads the same on either page (the mesh is clear in places, and on the dark page its
+ * own `--background` made a dark hole in the bottom of the sphere, with the halo's pattern showing
+ * through). Written here rather than as a token, since theme.css holds only shadcn's tokens. The
+ * sheen and the rim are AgentOrb's own, and its halftone is kept faint, since at full strength it
+ * washes light colors out to white.
+ */
+.bot-orb-live .agent-orb {
+  --background: oklch(0.983 0.003 286.4);
+  background-color: var(--background);
+  background-image: radial-gradient(
+    circle at 38% 34%,
+    var(--c4) 0%,
+    var(--c2) 42%,
+    var(--c3) 100%
+  );
+}
+/* The sweep, turning as AgentOrb turns its mesh, faster while the Bot works. */
+.bot-orb-live .agent-orb::before {
+  background: conic-gradient(
+    from calc(200deg + var(--angle)) at 70% 30%,
+    var(--c1),
+    transparent 30% 65%,
+    var(--c1)
+  );
+  box-shadow: none;
+  filter: blur(var(--blur-amount));
+}
+.bot-orb-live .agent-orb::after {
+  opacity: 0.25;
+  backdrop-filter: blur(calc(var(--blur-amount) * 1.5)) contrast(1.25);
+}
+
+/*
+ * The field behind the OpenBot for Business orb (components/edition/business-orb.tsx). It drifts
+ * up by exactly one tile per loop, so it never jumps. The orb in front is a Bot's live orb, which
+ * animates itself.
+ */
+.business-orb-field {
+  --business-orb-tile: 288px;
+  background-size: 288px var(--business-orb-tile);
+  opacity: 0.3;
+  filter: blur(3px);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 20%,
+    black 80%,
+    transparent
+  );
+  animation: business-orb-drift 18s linear infinite;
+}
+
+@keyframes business-orb-drift {
+  to {
+    background-position: 0 calc(-1 * var(--business-orb-tile));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .business-orb-field {
+    animation: none;
+  }
+}
+
+/*
+ * Teach a Bot's three steps sit on one soft gradient, the way an app's introduction does in other products. The
+ * colours are fixed tints rather than tokens, with a darker set for the dark theme, so the stage reads as a showcase
+ * while the cards on it keep the app's own colours.
+ */
+.teach-stage {
+  background:
+    radial-gradient(120% 90% at 0% 0%, #fbcfe8 0%, transparent 55%),
+    radial-gradient(90% 90% at 100% 100%, #c7d2fe 0%, transparent 60%),
+    linear-gradient(135deg, #fde2e4, #ede9fe);
+}
+.dark .teach-stage {
+  background:
+    radial-gradient(120% 90% at 0% 0%, #5b2147 0%, transparent 55%),
+    radial-gradient(90% 90% at 100% 100%, #2e3170 0%, transparent 60%),
+    linear-gradient(135deg, #2a1622, #1f1b33);
+}
+
+/* The steps the Recorder keeps, appearing one after another beside the window, and the form filling in. */
+@media (prefers-reduced-motion: no-preference) {
+  .teach-step {
+    animation: teach-arrive 0.4s ease-out both;
+  }
+  .teach-type {
+    animation: teach-arrive 0.4s ease-out 0.6s both;
+  }
+  .teach-delay-1 {
+    animation-delay: 1.2s;
+  }
+}
+@keyframes teach-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
 }

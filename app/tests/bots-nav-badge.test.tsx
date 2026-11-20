@@ -1,0 +1,398 @@
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  MutationObserver,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { decideApprovalMutationOptions } from "@/lib/approvals";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { answerBotAttention, attentionOf } from "./bots-api";
+import { awayFromOpenBot } from "./desktop-notifications.fixture";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
+import { settleReactWork } from "./settle-react-work";
+
+/**
+ * The badge on the sidebar's Bots item: how many things wait on the person across every Bot, or a
+ * dot when only something unread does. It replaced one sidebar row per Bot, so it also carries the
+ * browser notifications those rows used to send, and the one each check-in ping sends.
+ */
+
+beforeAll(() => {
+  GlobalRegistrator.register();
+  awayFromOpenBot();
+});
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+const originalNotification = globalThis.Notification;
+afterEach(() => {
+  global.fetch = originalFetch;
+  globalThis.Notification = originalNotification;
+});
+
+const attention = (
+  botId: string,
+  counts: Partial<{
+    questions: number;
+    approvals: number;
+    handoffs: number;
+    unread: number;
+    items: number;
+    tasks: { needsInput: number; ready: number; failed: number };
+    waitingIn: string | null;
+  }>,
+) =>
+  attentionOf(botId, botId === "expenses" ? "Expenses" : "Knowledge", counts);
+
+/** An open item as the API's check-in items list it, carried by `pingId`. */
+const item = (id: string, agentId: string, title: string, pingId: string) => ({
+  id,
+  botId: agentId,
+  title,
+  detail: "Why it was raised.",
+  sourceApp: "Gmail",
+  sourceRef: "gmail/message",
+  sourceLink: null,
+  pingId,
+  createdAt: "2026-10-30T10:00:00Z",
+});
+
+let served: ReturnType<typeof attention>[] = [];
+let lastPingId: string | null = null;
+let items: ReturnType<typeof item>[] = [];
+function serving(bots: ReturnType<typeof attention>[]) {
+  served = bots;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    pathOf(input) === CHECK_IN_ITEMS_PATH
+      ? Response.json({ checkInItems: items, nextCursor: null })
+      : (answerBotAttention(input, init, { bots: served, lastPingId }) ??
+        Response.json(
+          { error: "not served" },
+          { status: 404 },
+        ))) as unknown as typeof fetch;
+}
+afterEach(() => {
+  lastPingId = null;
+  items = [];
+});
+
+/** Stands in for the browser's Notification, recording each one it is asked to show. */
+function notifications() {
+  const sent: { title: string; body?: string; tag?: string; path?: string }[] =
+    [];
+  globalThis.Notification = Object.assign(
+    function (
+      this: unknown,
+      title: string,
+      options?: NotificationOptions & { extra?: { path?: string } },
+    ) {
+      sent.push({
+        title,
+        body: options?.body,
+        tag: options?.tag,
+        // The page a click opens in OpenBot Desktop, which reads it from `extra`.
+        path: options?.extra?.path,
+      });
+    },
+    { permission: "granted" },
+  ) as unknown as typeof Notification;
+  return sent;
+}
+
+function draw() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <BotsNavBadge />
+    </QueryClientProvider>,
+  );
+  return { view, client };
+}
+
+test("the badge adds up what waits on the person across every Bot", async () => {
+  serving([
+    attention("expenses", { questions: 1, approvals: 1 }),
+    attention("knowledge", { handoffs: 1, unread: 4 }),
+  ]);
+  const { view } = draw();
+  const badge = await view.findByText("3");
+  expect(badge.getAttribute("aria-label")).toBe("3 things need you");
+});
+
+test("allowing or denying an action reads the badge again at once, as answering a question does", async () => {
+  serving([attention("expenses", { approvals: 1 })]);
+  const answered = global.fetch;
+  const decided: string[] = [];
+  // The decision, at the API's address, and every other read as before.
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (/\/approvals\/[^/]+\/decide$/.test(pathOf(input))) {
+      decided.push(pathOf(input));
+      return Response.json({ id: "approval-1", status: "completed" });
+    }
+    return answered(input, init);
+  }) as unknown as typeof fetch;
+  const { view, client } = draw();
+  await view.findByText("1");
+
+  // Decided on the Needs you board: the server no longer counts it.
+  served = [attention("expenses", {})];
+  await act(async () => {
+    await new MutationObserver(
+      client,
+      decideApprovalMutationOptions(client),
+    ).mutate({ id: "approval-1", choice: "deny" });
+  });
+  expect(decided).toHaveLength(1);
+  // Well inside the badge's own poll, which is 15 seconds away.
+  await waitFor(() => expect(view.queryByText("1")).toBeNull(), {
+    timeout: 2_000,
+  });
+  expect(view.container.innerHTML).toBe("");
+});
+
+test("with only unread messages the badge is a dot, not a number", async () => {
+  serving([attention("expenses", { unread: 2 })]);
+  const { view } = draw();
+  expect(await view.findByLabelText("Unread messages")).toBeTruthy();
+  expect(view.container.textContent).toBe("");
+});
+
+test("with nothing waiting there is no badge", async () => {
+  serving([attention("expenses", {})]);
+  const { view, client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  expect(view.container.innerHTML).toBe("");
+});
+
+test("a Bot that starts needing the person sends a browser notification", async () => {
+  const notices = notifications();
+  serving([attention("expenses", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  // The state on arrival is not news.
+  expect(notices).toEqual([]);
+
+  served = [attention("expenses", { questions: 1 })];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() =>
+    expect(notices.map((notice) => notice.title)).toEqual([
+      "Expenses needs you",
+    ]),
+  );
+});
+
+test("a task that starts waiting on the person sends a browser notification, though no approval count rose", async () => {
+  const notices = notifications();
+  serving([attention("expenses", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  // The server counts a task's approval as the task needing input, never as an approval too.
+  served = [
+    attention("expenses", { tasks: { needsInput: 1, ready: 0, failed: 0 } }),
+  ];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() =>
+    expect(notices).toEqual([
+      {
+        title: "Expenses needs you",
+        body: "1 task waiting on you",
+        tag: "openbot-attention-expenses",
+        path: "/bots/expenses",
+      },
+    ]),
+  );
+});
+
+test("a Bot that starts waiting in a conversation sends a notice that opens that conversation", async () => {
+  const notices = notifications();
+  serving([attention("expenses", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  // A form the Bot asked with in the conversation, which the server counts as a question.
+  served = [attention("expenses", { questions: 1, waitingIn: "channel-plan" })];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() =>
+    expect(notices).toEqual([
+      {
+        title: "Expenses needs you",
+        body: "1 question",
+        // The conversation's tag: its reply notice, if any, is replaced by this one.
+        tag: "openbot-channel-plan",
+        path: "/channel/channel-plan",
+      },
+    ]),
+  );
+});
+
+test("the badge counts what Bots are stopped on, each once, and not what check-ins found", async () => {
+  serving([
+    attention("expenses", {
+      items: 2,
+      // An approval in the person's own conversation. The server counts one a task waits on as the
+      // task needing input instead, never as both, so every number here is added once.
+      approvals: 1,
+      tasks: { needsInput: 1, ready: 1, failed: 1 },
+    }),
+    attention("knowledge", { items: 1 }),
+  ]);
+  const { view } = draw();
+  // One approval and three tasks; the three items check-ins found are listed, not counted.
+  const badge = await view.findByText("4");
+  expect(badge.getAttribute("aria-label")).toBe("4 things need you");
+});
+
+test("what check-ins found alone is a dot, not a number", async () => {
+  serving([attention("knowledge", { items: 2 })]);
+  const { view } = draw();
+  expect(
+    await view.findByRole("img", { name: "Your check-ins found something" }),
+  ).toBeTruthy();
+  expect(view.queryByText("2")).toBeNull();
+});
+
+test("a ping of three items sends one browser notification, and nothing more until the next ping", async () => {
+  const sent = notifications();
+  serving([attention("expenses", {}), attention("knowledge", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+
+  // A ping folds three items from two Bots into one message.
+  lastPingId = "ping-1";
+  items = [
+    item("s1", "expenses", "Approve the March invoice", "ping-1"),
+    item("s2", "expenses", "Reply to Dana", "ping-1"),
+    item("s3", "knowledge", "Fix the stale onboarding page", "ping-1"),
+  ];
+  served = [
+    attention("expenses", { items: 2 }),
+    attention("knowledge", { items: 1 }),
+  ];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() => expect(sent).toHaveLength(1));
+  // As the phone says it: how many, then a line per item naming its Bot.
+  expect(sent[0]).toEqual({
+    title: "3 things need you",
+    body: [
+      "Expenses: Approve the March invoice",
+      "Expenses: Reply to Dana",
+      "Knowledge: Fix the stale onboarding page",
+    ].join("\n"),
+    tag: "openbot-ping-ping-1",
+    path: "/bots",
+  });
+
+  // The same ping read again, and an item raised after it that waits for the hourly slot: no news.
+  items = [...items, item("s4", "expenses", "Book the venue", "ping-2")];
+  served = [
+    attention("expenses", { items: 3 }),
+    attention("knowledge", { items: 1 }),
+  ];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await settleReactWork();
+  expect(sent).toHaveLength(1);
+
+  // The next ping is news again, and names its one Bot.
+  lastPingId = "ping-2";
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() => expect(sent).toHaveLength(2));
+  expect(sent[1]).toEqual({
+    title: "One thing needs you",
+    body: "Expenses: Book the venue",
+    tag: "openbot-ping-ping-2",
+    path: "/bots",
+  });
+});
+
+test("a ping that carried one thing twice, from two Bots, lists it once, labelled with its Bot", async () => {
+  const sent = notifications();
+  serving([attention("expenses", {}), attention("knowledge", {})]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+
+  lastPingId = "ping-1";
+  items = [
+    item("s1", "expenses", "Approve the Q4 budget by Friday", "ping-1"),
+    item("s2", "expenses", "Confirm November offsite headcount", "ping-1"),
+    item("s3", "knowledge", "confirm November offsite headcount.", "ping-1"),
+  ];
+  served = [
+    attention("expenses", { items: 2 }),
+    attention("knowledge", { items: 1 }),
+  ];
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]).toEqual({
+    title: "2 things need you",
+    body: [
+      "Expenses: Approve the Q4 budget by Friday",
+      "Expenses: Confirm November offsite headcount",
+    ].join("\n"),
+    tag: "openbot-ping-ping-1",
+    path: "/bots",
+  });
+});
+
+test("a ping already sent when the page opened is not announced again", async () => {
+  const sent = notifications();
+  lastPingId = "ping-1";
+  items = [item("s1", "expenses", "Approve the March invoice", "ping-1")];
+  serving([attention("expenses", { items: 1 })]);
+  const { client } = draw();
+  await waitFor(() =>
+    expect(client.getQueryState(botLifecycleKeys.attention)?.status).toBe(
+      "success",
+    ),
+  );
+  await act(async () => {
+    await client.refetchQueries({ queryKey: botLifecycleKeys.attention });
+  });
+  await settleReactWork();
+  expect(sent).toEqual([]);
+});

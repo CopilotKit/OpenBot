@@ -1,0 +1,466 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { BotRoster } from "@/components/bots/bot-roster";
+import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import type { BotAttention } from "@/lib/bot-lifecycle/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
+import { approvalInboxResponse } from "./approvals-api";
+import {
+  answerBotAttention,
+  answerBotsList,
+  attentionOf,
+  BOT_ATTENTION_PATH,
+} from "./bots-api";
+import { CONVERSATIONS_PATH, TASKS_PATH, taskOf } from "./conversations-api";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
+import { settleReactWork } from "./settle-react-work";
+
+/**
+ * The Bots roster: one list of every Bot a person can reach, replacing the Bots, Agents and Team
+ * Bots screens. The harness is this repository's: `GlobalRegistrator` around the file, `cleanup`
+ * after each test, a `QueryClient` per test with `retry: false`, and `fetch` stubbed per test.
+ */
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+function bot(overrides: Partial<AgentProfile> & { id: string }): AgentProfile {
+  return {
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
+    name: overrides.id,
+    title: "Title",
+    roleDescription: "Role",
+    avatarSeed: "seed",
+    visibility: "private",
+    endpoint: null,
+    builtIn: true,
+    hasAuth: false,
+    hasCallbackToken: false,
+    isolated: false,
+    isolationActive: false,
+    isolationOffReason: null,
+    hidden: false,
+    pinned: false,
+    systemOwned: false,
+    canManage: true,
+    mine: true,
+    ...overrides,
+  };
+}
+
+/** Every request the roster sent, as `METHOD path`. */
+const requests: string[] = [];
+
+/** The person's tasks, as the task list answers them. None unless a test sets some. */
+let tasks: unknown[] = [];
+afterEach(() => {
+  tasks = [];
+});
+
+/**
+ * Serves the visible roster, the hidden roster, and an attention list (empty unless given,
+ * `pageSize` Bots to a page), with nothing found by check-ins and no tasks.
+ */
+function serving(
+  visible: AgentProfile[],
+  hidden: AgentProfile[],
+  attention: BotAttention[] = [],
+  pageSize?: number,
+) {
+  requests.length = 0;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    requests.push(`${init?.method ?? "GET"} ${url}`);
+    const waiting = answerBotAttention(input, init, {
+      bots: attention,
+      pageSize,
+    });
+    if (waiting) return waiting;
+    if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: [], nextCursor: null });
+    if (url.split("?")[0] === TASKS_PATH)
+      return Response.json({ tasks, nextCursor: null });
+    if (url.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json({ conversations: [], nextCursor: null });
+    return (
+      answerBotsList(input, init, { visible, hidden }) ??
+      // Nothing waits on the person: the inbox is read, and is empty.
+      approvalInboxResponse(input) ??
+      Response.json({})
+    );
+  }) as unknown as typeof fetch;
+}
+
+let queryClient: QueryClient;
+beforeEach(() => {
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+});
+
+function draw() {
+  const rootRoute = createRootRoute();
+  const routeTree = rootRoute.addChildren([
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: BotRoster,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/bots/$agentId",
+      component: () => null,
+    }),
+  ]);
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+test("sections read Pinned, Yours, Shared with you, and each Bot appears once", async () => {
+  serving(
+    [
+      bot({ id: "favourite", name: "Favourite", pinned: true }),
+      bot({ id: "mine", name: "Mine" }),
+      bot({ id: "theirs", name: "Theirs", mine: false, canManage: false }),
+    ],
+    [],
+  );
+  const view = draw();
+  expect(await view.findByText("Theirs")).toBeTruthy();
+  const headings = [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+  expect(headings).toEqual(["Pinned", "Yours", "Shared with you"]);
+  expect(view.getAllByText("Favourite")).toHaveLength(1);
+});
+
+test("a row opens the Bot's own page", async () => {
+  serving([bot({ id: "mine", name: "Mine" })], []);
+  const view = draw();
+  const row = (await view.findByText("Mine")).closest("a");
+  expect(row?.getAttribute("href")).toBe("/bots/mine");
+});
+
+test("with every Bot of yours pinned, there is no empty Yours, only the way to make another", async () => {
+  serving([bot({ id: "favourite", name: "Favourite", pinned: true })], []);
+  const view = draw();
+  expect(await view.findByText("Favourite")).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "Yours" })).toBeNull();
+  expect(view.queryByText("All pinned")).toBeNull();
+  expect(view.getByText(/^Create a Bot for a specific job\./)).toBeTruthy();
+});
+
+test("a hidden Bot is under Hidden, folded until asked for, and its row opens its page", async () => {
+  serving(
+    [bot({ id: "mine", name: "Mine" })],
+    [bot({ id: "tucked", name: "Tucked", hidden: true })],
+  );
+  const view = draw();
+  expect(await view.findByText("Hidden")).toBeTruthy();
+  expect(view.queryByText("Tucked")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Show hidden Bots" }));
+  const row = view.getByText("Tucked").closest("a");
+  expect(row?.getAttribute("href")).toBe("/bots/tucked");
+});
+
+test("Done and Hidden each fold behind a Show a screen reader can tell apart", async () => {
+  const now = new Date().toISOString();
+  tasks = [
+    taskOf({
+      id: "marked",
+      agentId: "mine",
+      channelId: "channel_marked",
+      threadId: "thread_marked",
+      title: "Book the venue",
+      why: null,
+      origin: "delegated",
+      suggestionId: null,
+      sourceApp: null,
+      sourceLink: null,
+      originChannelId: null,
+      status: "resolved",
+      failure: null,
+      failedAt: null,
+      next: null,
+      resolvedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  ];
+  serving(
+    [bot({ id: "mine", name: "Mine" })],
+    [bot({ id: "tucked", name: "Tucked", hidden: true })],
+  );
+  const view = draw();
+  expect(await view.findByRole("heading", { name: "Done" })).toBeTruthy();
+  expect(await view.findByRole("heading", { name: "Hidden" })).toBeTruthy();
+  // Each button says which section it opens, and still reads Show on screen.
+  const done = view.getByRole("button", { name: "Show done tasks" });
+  const hidden = view.getByRole("button", { name: "Show hidden Bots" });
+  expect(done.textContent).toBe("Show");
+  expect(hidden.textContent).toBe("Show");
+  expect(done.getAttribute("aria-expanded")).toBe("false");
+  expect(view.queryByRole("button", { name: "Show" })).toBeNull();
+
+  fireEvent.click(done);
+  expect(await view.findByText("Book the venue")).toBeTruthy();
+  const hideDone = view.getByRole("button", { name: "Hide done tasks" });
+  expect(hideDone.textContent).toBe("Hide");
+  expect(hideDone.getAttribute("aria-expanded")).toBe("true");
+  expect(view.queryByText("Tucked")).toBeNull();
+
+  fireEvent.click(hidden);
+  expect(view.getByText("Tucked")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Hide hidden Bots" })).toBeTruthy();
+});
+
+test("with nothing hidden there is no Hidden section", async () => {
+  serving([bot({ id: "mine", name: "Mine" })], []);
+  const view = draw();
+  expect(await view.findByText("Mine")).toBeTruthy();
+  await waitFor(() =>
+    expect(queryClient.getQueryState(agentKeys.list(true))?.status).toBe(
+      "success",
+    ),
+  );
+  expect(view.queryByText("Hidden")).toBeNull();
+});
+
+test("a roster that never loaded says so, not that you have no Bots", async () => {
+  global.fetch = (async () =>
+    new Response(null, { status: 500 })) as unknown as typeof fetch;
+  const view = draw();
+  expect(await view.findByRole("alert")).toBeTruthy();
+  expect(
+    view.queryByText("You don't have any Bots yet. Create one with New Bot."),
+  ).toBeNull();
+});
+
+test("a failed refetch keeps the roster it already had, not the error", async () => {
+  queryClient.setQueryData(agentKeys.list(false), [
+    bot({ id: "mine", name: "Mine" }),
+  ]);
+  global.fetch = (async () =>
+    new Response(null, { status: 500 })) as unknown as typeof fetch;
+  const view = draw();
+  await waitFor(() =>
+    expect(queryClient.getQueryState(agentKeys.list(false))?.status).toBe(
+      "error",
+    ),
+  );
+  expect(view.getByText("Mine")).toBeTruthy();
+  expect(
+    view.queryByText("Couldn't load your Bots. Try again in a moment."),
+  ).toBeNull();
+});
+
+test("a Bot with something waiting stays in its own section, with its count", async () => {
+  serving(
+    [
+      bot({ id: "mine", name: "Mine" }),
+      bot({ id: "waiting", name: "Waiting", mine: false }),
+    ],
+    [],
+    [attentionOf("waiting", "Waiting", { questions: 1, approvals: 1 })],
+  );
+  const view = draw();
+  expect(await view.findByText("2")).toBeTruthy();
+  const headings = [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+  // What it waits on is on the Needs you board, by name; the Bot itself stays where it is.
+  expect(headings).toEqual(["Yours", "Shared with you"]);
+  expect(view.getAllByText("Waiting")).toHaveLength(1);
+});
+
+test("a Bot's check-in items are counted in the words the badge and Needs you use", async () => {
+  serving(
+    [bot({ id: "scout", name: "Scout", mine: false })],
+    [],
+    [attentionOf("scout", "Scout", { items: 2 })],
+  );
+  const view = draw();
+  expect(await view.findByText("2 things need you")).toBeTruthy();
+  expect(view.container.textContent).not.toContain("suggestion");
+});
+
+test("what each Bot waits on is read to the last page, so a Bot on the second still has its count", async () => {
+  serving(
+    [
+      bot({ id: "first", name: "First" }),
+      bot({ id: "second", name: "Second" }),
+    ],
+    [],
+    [
+      attentionOf("first", "First", { questions: 1 }),
+      attentionOf("second", "Second", { approvals: 3 }),
+    ],
+    1,
+  );
+  const view = draw();
+  expect(await view.findByText("3")).toBeTruthy();
+  expect(view.getByText("1")).toBeTruthy();
+  expect(requests).toContain(`GET ${BOT_ATTENTION_PATH}?limit=100`);
+  expect(requests).toContain(
+    `GET ${BOT_ATTENTION_PATH}?limit=100&cursor=from1`,
+  );
+  expect(requests.filter((line) => line.includes("/api/bots"))).toEqual([]);
+});
+
+test("personal edition labels starter Bots as included with OpenBot", async () => {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+  serving(
+    [bot({ id: "starter", name: "Starter", mine: false, systemOwned: true })],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Starter");
+  expect(
+    view.getByRole("heading", { name: "Included with OpenBot" }),
+  ).toBeTruthy();
+  expect(view.queryByText("Shared with you")).toBeNull();
+});
+
+test("while the roster loads it draws rows' shape, and never says there are no Bots", async () => {
+  serving([bot({ id: "mine", name: "Mine" })], []);
+  const served = global.fetch;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    await gate;
+    return served(input, init);
+  }) as typeof fetch;
+  const view = draw();
+  expect(
+    await view.findByRole("status", { name: "Loading your Bots" }),
+  ).toBeTruthy();
+  expect(view.queryByText("No Bots yet")).toBeNull();
+
+  release();
+  expect(await view.findByText("Mine")).toBeTruthy();
+  expect(view.queryByRole("status", { name: "Loading your Bots" })).toBeNull();
+});
+
+const headings = (view: ReturnType<typeof draw>) =>
+  [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+
+test("personal, with only the included assistant: the assistant comes first and nothing says No Bots yet", async () => {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+  serving(
+    [
+      bot({
+        id: "assistant",
+        name: "Personal Assistant",
+        mine: false,
+        systemOwned: true,
+      }),
+    ],
+    [],
+  );
+  const view = draw();
+  const assistant = await view.findByText("Personal Assistant");
+  expect(headings(view)).toEqual(["Included with OpenBot"]);
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  // The way to make one comes after the Bot that is already there.
+  const prompt = view.getByText(/^Create a Bot for a specific job\./);
+  expect(
+    assistant.compareDocumentPosition(prompt) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(view.getByRole("link", { name: "New Bot" }).getAttribute("href")).toBe(
+    "/bots?new=true",
+  );
+});
+
+test("owned and included Bots: Yours, then Included with OpenBot, and no creation prompt", async () => {
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    edition: "personal",
+  });
+  serving(
+    [
+      bot({ id: "mine", name: "Mine" }),
+      bot({
+        id: "assistant",
+        name: "Assistant",
+        mine: false,
+        systemOwned: true,
+      }),
+    ],
+    [],
+  );
+  const view = draw();
+  await view.findByText("Assistant");
+  expect(headings(view)).toEqual(["Yours", "Included with OpenBot"]);
+  expect(view.queryByText(/^Create a Bot for a specific job\./)).toBeNull();
+});
+
+test("a team member with only shared Bots sees them, with no empty Yours above", async () => {
+  serving([bot({ id: "theirs", name: "Theirs", mine: false })], []);
+  const view = draw();
+  await view.findByText("Theirs");
+  expect(headings(view)).toEqual(["Shared with you"]);
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  expect(view.getByText(/^Create a Bot for a specific job\./)).toBeTruthy();
+});
+
+test("with no Bots anywhere there is one empty state, with New Bot", async () => {
+  serving([], []);
+  const view = draw();
+  expect(await view.findByText("No Bots yet")).toBeTruthy();
+  expect(headings(view)).toEqual([]);
+  expect(view.getAllByText(/Create a Bot for a specific job\./)).toHaveLength(
+    1,
+  );
+  expect(view.getByRole("button", { name: "New Bot" })).toBeTruthy();
+  expect(view.queryByText("Nothing shared yet")).toBeNull();
+});
+
+test("with every Bot hidden it doesn't claim there are none", async () => {
+  serving([], [bot({ id: "tucked", name: "Tucked", hidden: true })]);
+  const view = draw();
+  expect(await view.findByText("No Bots on your list")).toBeTruthy();
+  expect(view.queryByText("No Bots yet")).toBeNull();
+  expect(view.getByText("Hidden")).toBeTruthy();
+});

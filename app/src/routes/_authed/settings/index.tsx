@@ -5,8 +5,13 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { StandingInstructions } from "@/components/settings/standing-instructions";
-import { useTheme } from "@/components/theme-provider";
+import { AiModelSection } from "@/components/settings/ai-connection";
+import { MessageListPreference } from "@/components/settings/message-list-preference";
+import { NameRow } from "@/components/settings/profile";
+import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
+import { StarOnGitHubSection } from "@/components/settings/star-on-github";
+import { ThemeRow } from "@/components/settings/theme-row";
+import { UsageDataSection } from "@/components/settings/usage-data";
 import {
   Item,
   ItemActions,
@@ -15,16 +20,14 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
+import { SkinPicker } from "@/skins/skin-picker";
 
 export const Route = createFileRoute("/_authed/settings/")({
   component: RouteComponent,
 });
 
 function RouteComponent() {
-  const { dark, setDark } = useTheme();
-
   /*
    * The measurements that used to be written out here now live in `PageShell`, which Skills, Admin
    * and this screen all render through. The reason they match is no longer that somebody remembered
@@ -35,33 +38,32 @@ function RouteComponent() {
    */
   return (
     <PageShell
-      description="How AgentForce looks and behaves for you. These apply to your account alone, on every deployment you sign in to."
-      title="Preferences"
+      description="Set your name, how OpenBot looks, and the instructions every Bot follows."
+      title="General"
     >
-      <PageSection title="General">
+      {/*
+       * What OpenBot and every Bot know of the person, first: their name and how they want things done. Both are free
+       * text, so both are a summary that opens a dialog.
+       */}
+      <PageSection title="About you">
         <PageRows>
-          <Item size="sm">
-            <ItemContent>
-              <ItemTitle>Dark theme</ItemTitle>
-              <ItemDescription>
-                Use the dark appearance across AgentForce.
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                aria-label="Dark theme"
-                checked={dark}
-                onCheckedChange={setDark}
-              />
-            </ItemActions>
-          </Item>
+          <NameRow />
+          <Separator />
+          <StandingInstructionsRow />
         </PageRows>
       </PageSection>
-      {/*
-       * Above the shortcuts and below the appearance switch, because it is the only thing on this
-       * screen that changes what a coworker says rather than what this browser looks like.
-       */}
-      <StandingInstructions />
+      {/* Only in OpenBot Desktop, which holds the AI connection and changes it in its own window. */}
+      <AiModelSection />
+      {/* Only in OpenBot Desktop, which sends usage data and keeps this choice. */}
+      <UsageDataSection />
+      <PageSection title="Appearance">
+        <PageRows>
+          <ThemeRow />
+          <Separator />
+          <SkinPicker />
+        </PageRows>
+        <MessageListPreference />
+      </PageSection>
       {/*
        * Drawn from the same registry the listeners match against, so this list is what the keys
        * actually do rather than what somebody remembered they did. Read-only on purpose: these
@@ -94,6 +96,8 @@ function RouteComponent() {
           ))}
         </PageRows>
       </PageSection>
+      {/* Last: OpenBot itself rather than this person's OpenBot. Gone when the deployment says so. */}
+      <StarOnGitHubSection />
     </PageShell>
   );
 }

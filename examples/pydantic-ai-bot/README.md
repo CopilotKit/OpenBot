@@ -46,7 +46,7 @@ that require Responses.
 
 ## Register it
 
-Give a coworker this endpoint, either from `/agents` in the UI or as a `remote-ag-ui` agent in a
+Give a coworker this endpoint, either from `/bots` in the UI or as a `remote-ag-ui` agent in a
 tenant package:
 
 ```yaml

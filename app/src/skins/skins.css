@@ -1,0 +1,38 @@
+/*
+ * Each skin scopes its tokens to `:root[data-skin="<id>"]` and `:root[data-skin="<id>"].dark`.
+ * That selector outranks OpenBot's own `.dark`, so a token a skin sets for light it must also set
+ * for dark, or dark mode would show the skin's light value. `app/tests/skins.test.ts` holds every
+ * skin to that.
+ */
+@import "./openduet/skin.css";
+@import "./opendots/skin.css";
+@import "./openfuse/skin.css";
+
+/*
+ * OpenBot's own composer column pads `px-4`, the transcript's inset, so a narrow pane keeps it off
+ * the edges. A skin keeps the column it was drawn with, which had no padding unless the skin gave it
+ * some, so the padding goes back to none here. `:where` holds this to the specificity of a single
+ * attribute, so a skin's own padding (OpenDuet's 12px, OpenDots' 16px in a narrow window) still wins,
+ * while being outside Tailwind's layers is enough to beat the `px-4` utility. Before the width
+ * rule below, which is more specific, so the stylesheet reads in ascending specificity.
+ */
+:where(:root[data-skin]) [data-slot="composer-column"] {
+  padding-inline: 0;
+}
+
+/*
+ * OpenBot's own look draws a Bot's answers and the composer in a 768px column. Every skin keeps the
+ * column it was drawn with, 672px for both.
+ */
+:root[data-skin] [data-transcript-column],
+:root[data-skin] [data-slot="composer-column"] {
+  max-width: var(--container-2xl);
+}
+
+/*
+ * The empty-state pattern is drawn for OpenBot's own palette, so a skin starts without it. A skin
+ * that wants one sets `--empty-pattern-opacity` (and its colour) in its own skin.css.
+ */
+:root[data-skin] {
+  --empty-pattern-opacity: 0;
+}

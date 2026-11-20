@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { GalleryFrame } from "./frame";
+import { GalleryMarkdown } from "./markdown";
 
 export const QuoteCardProps = z.object({
   quote: z
@@ -35,10 +36,12 @@ export function QuoteCard({ quote, attribution, context }: Partial<QuoteArgs>) {
   return (
     <GalleryFrame caption={context} title="Quotation">
       <blockquote className="border-l-2 border-border pl-4">
-        <p className="text-sm leading-relaxed">{quote}</p>
+        <GalleryMarkdown className="text-sm leading-relaxed">
+          {quote}
+        </GalleryMarkdown>
         {attribution ? (
           <footer className="mt-2 text-xs text-muted-foreground">
-            , {attribution}
+            {attribution}
           </footer>
         ) : null}
       </blockquote>
@@ -51,6 +54,7 @@ export const GALLERY: GalleryComponent[] = [
     name: "showQuote",
     title: "Quotation",
     kind: "card",
+    summary: "Shows a quotation and who said or wrote it.",
     description:
       "Show a quotation with its attribution. Use when the exact words matter, something a person said, or a line from a document you were given.",
     parameters: QuoteCardProps,

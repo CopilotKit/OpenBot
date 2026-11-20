@@ -2,7 +2,7 @@
 
 ## Setup
 
-Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `python3`, `openssl`, and `curl`. The
+Install Docker, [Bun](https://bun.sh) 1.4+ (the tests need it), `lsof`, `openssl`, and `curl`. The
 Intelligence provisioning below also needs `npx` (Node); `scripts/start.sh` uses `openssl` to mint
 the generated secrets on a first run.
 
@@ -11,15 +11,54 @@ cp .env.example .env
 bun install
 ```
 
-Provision CopilotKit Intelligence after `.env` exists:
+Connect CopilotKit Intelligence after `.env` exists. `.env.example` leaves its two addresses and
+its key empty. By default they are an Intelligence on this machine, which the CopilotKit CLI
+installs and connects (a preview for macOS with Docker Desktop):
+
+```sh
+npx --yes copilotkit@latest login
+npx --yes copilotkit@latest local setup
+npx --yes copilotkit@latest local connect --approve-connection
+```
+
+`local connect` writes `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
+`CPK_INTELLIGENCE_API_KEY` to `.env`; each installation has its own ports. For a managed project
+instead, set `INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai` and
+`INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai` in `.env`, then:
 
 ```sh
 npx --yes copilotkit@latest login
 npx --yes copilotkit@latest project select
+bun scripts/setup-learning.ts
 ```
 
-Put the `cpk-...` runtime key from `project select` in `.env` as
-`INTELLIGENCE_API_KEY`. There is no licence step. Then add `OPENAI_API_KEY`.
+For fresh managed setup, the helper provisions the selected project's key and creates or reuses
+its `openbot` Learning container. It writes `INTELLIGENCE_API_KEY` and
+`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` to `.env` only after verifying the container. Existing
+keys and custom targets are preserved. For fresh self-hosted setup, set `INTELLIGENCE_API_URL`
+to the deployment's HTTPS API origin and run only `bun scripts/setup-learning.ts`. Install
+Chrome or Edge first: the helper opens an isolated browser window for the deployment's usual
+sign-in, lets you choose an accessible project, and creates or reuses `openbot` before minting
+its runtime key. Local development may use a loopback HTTP origin. Existing key-only setups
+use authenticated Intelligence administration to create a container and assign it in OpenBot Admin.
+There is no managed license step. Then add `OPENAI_API_KEY`, or for Anthropic both
+`ANTHROPIC_API_KEY` and `BOT_PROVIDER=anthropic`.
+
+`login` opens a browser on this machine. With no browser, such as over SSH, use
+`npx --yes copilotkit@latest login --device`, which signs in with a code from a browser on any
+device. `project select` asks in the terminal; with no terminal to ask in, name the project:
+`npx --yes copilotkit@latest project select --project <slug or id> --json`.
+
+The same CLI sign-in also prepares Composio on the first `bash scripts/start.sh`;
+`bun run setup:composio` runs that step alone, independently of Learning. A failure
+does not stop the start: OpenBot runs with apps unavailable until a retry succeeds. A supplied
+`COMPOSIO_API_KEY`, an explicit Arcade selection, or an Arcade-only key is preserved.
+The helper saves a stable installation UUID privately before any provisioning request,
+then the CLI saves this installation's Composio project key in `.env`. Keep
+`.env.openbot-installation-id` with the installation when restarting or retrying;
+new installations generate their own file. A compatible published CLI and enabled hosted
+provisioning service must be available before adopting this startup flow. See
+[automatic project setup](plugins/composio.md#automatic-project-setup).
 
 Start the stack:
 
@@ -27,79 +66,92 @@ Start the stack:
 bash scripts/start.sh
 ```
 
+## Windows (WSL 2)
+
+On Windows, run the clone inside WSL 2 with Ubuntu. This was checked on Windows Server 2022 with
+Ubuntu 26.04.
+
+1. Install WSL 2 and Ubuntu with [Microsoft's instructions](https://learn.microsoft.com/windows/wsl/install)
+   (`wsl --install` in an administrator PowerShell), and restart Windows when it asks.
+
+2. In an Ubuntu terminal, install the tools from [Setup](#setup). A new Ubuntu 26.04 had none of them,
+   and Bun's installer stops without `unzip`:
+
+   ```sh
+   sudo apt-get update
+   sudo apt-get install -y ca-certificates curl git lsof openssl unzip nodejs npm
+   curl -fsSL https://bun.sh/install | bash
+   ```
+
+3. Install Docker Engine and its Compose plugin inside Ubuntu with
+   [Docker's Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/), then let your
+   user run it and open a new Ubuntu terminal:
+
+   ```sh
+   sudo usermod -aG docker $USER
+   ```
+
+4. Clone into your Ubuntu home directory, for example `~/OpenBot`, and follow [Setup](#setup) from
+   there. `npx --yes copilotkit@latest login` opens the sign-in page in your Windows browser.
+
+5. Keep an Ubuntu terminal open while you use OpenBot. WSL stops Ubuntu shortly after its last
+   terminal closes, and the app, the API server and Docker stop with it.
+
+6. Open the app from your Windows browser at <http://127.0.0.1:3010>. WSL forwards the port, and
+   <http://localhost:3010> works too.
+
 ## Running services
 
-Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server, the app, and the routine worker, and verifies health routes.
+Use `bash scripts/start.sh` for the full local stack. It starts Docker services, starts the API server, which applies its own migrations as it starts and fires routines itself, starts the app, and verifies health routes.
 
-Use `bash scripts/stop.sh` to take it down: the app, the routine worker, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
+The API server, the computer and the supervisor run from the published OpenBot images, pulled at the one tag in `backend-images.env`: `main` on the `main` branch, the images built from main, and the release's own version (`v1.0.3`) in a release's checkout, which the release PR pins. `start.sh` pulls them on every start, so `main` is current; offline, or with `IMAGE_PULL_POLICY=never`, it uses the copies already on the machine. An `OPENBOT_BACKEND_TAG` in the environment or `.env` runs another build. The app runs from this checkout, with Vite, so a change to it shows as you save; its `/api` calls go to the server's container on port 3001. The server's log is `docker compose logs server`. Run Compose by hand with `--env-file backend-images.env --env-file .env`, so it pulls the same images.
 
-Use `bun run dev` only when you want the app and API server without starting the Docker Bots and computers.
+Use `bash scripts/stop.sh` to take it down: the app, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
+
+Use `bun run dev` only when you want the app on its own, against a server that is already running.
 
 | Service           | Port                       |
 | ----------------- | -------------------------- |
 | `app`             | 3010                       |
 | `server`          | 3001                       |
 | `agent-computer`  | 4100                       |
-| `agent-bot`       | 4200                       |
-| `agent-langgraph` | 4201                       |
+| `agent-langgraph-agui` | 4201 host / 4206 container |
 | `supervisor`      | 4500 host / 4300 container |
 | PostgreSQL        | 5432                       |
 
-`start.sh` leaves existing matching services alone and reports when a port is held by another process.
+`start.sh` hands every selected Docker service, the API server included, to `docker compose up -d` on every run, so one whose configuration or image changed is recreated and an unchanged one is left as it is. It recreates the server when it generated a secret, leaves an app that already answers as OpenBot alone, and reports when a port is held by another process.
 
-**Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
-message is sent, and the only thing that reclaims the ones never sent is
-`bun scripts/cull-staged-attachments.ts` from `server/`, which the Helm chart runs hourly and which
-neither `docker-compose.yml` nor `start.sh` starts. It needs only `DATABASE_URL`, and takes a
-retention window in hours as its one optional argument, defaulting to 24. On a laptop that is
-usually nothing, because the rows are small and the database is yours. It stops being nothing at
-thirty-two: one person may hold that many unsent files across every channel at once, the refusal on
-the next one promises they are cleared within a day, and where nothing sweeps they are not, so a
-long-lived local deployment can reach a state where attaching anything is refused. Removing a file
-in the composer deletes it outright, so it takes abandoned drafts rather than ordinary use.
-[deployment.md](deployment.md) says the same for a real deployment.
+**The server sweeps staged attachments itself.** A file dropped into the composer is stored before
+the message is sent, and the server deletes the ones never sent once they are older than 24 hours,
+inside its own process; neither `docker-compose.yml` nor `start.sh` starts anything for it. One
+person may hold thirty-two unsent files across every channel at once, and the refusal on the next
+one promises they are cleared within a day, which that sweep keeps true. Removing a file in the
+composer deletes it outright. [deployment.md](deployment.md) says the same for a real deployment.
 
 ## Migrations
 
-After changing the Drizzle schema:
+The database schema and its migrations come with the server image. The server applies them itself
+when it starts, every run, and a database that is already current is left as it is. There is no
+migration step in `start.sh`, which only checks, once the server is up, that the tables are there.
+`docker-compose.yml` still defines a `migrate` and a `worker` service for one release, for an
+OpenBot Desktop app from the release before to read, and nothing starts them; a container of
+either that an earlier start left is removed.
+
+## The API spec
+
+The app talks to the server through one API, described in [`api/`](../api/README.md): the REST
+operations in `api/openapi.yaml`, bundled from one file per area in `api/openapi/`, and the
+WebSocket channels in `api/asyncapi.yaml`. The app's client is generated from the REST spec into
+`app/src/lib/api/generated` and checked in. After changing a file under `api/openapi/`:
 
 ```sh
-bun run --filter server db:generate
-bun run --filter server db:migrate
+bun run api:lint
+bun run api:generate
 ```
 
-Review generated migration files before sharing them. `start.sh` applies existing migrations when it starts the stack.
-
-**Do not hand-edit a generated migration.** It leaves a file that no longer matches what the
-generator produced. If the generated SQL will not work — `ADD COLUMN ... NOT NULL` fails on a table
-that already has rows — split it instead: generate the column nullable, add the data step, then
-generate the constraint.
-
-**A constraint that tightens an existing column belongs to a later release**, not to the release that
-adds the column. A rolling deploy runs the migrations and then serves from old and new replicas at
-once, and an old replica writes rows without the new column: under `NOT NULL` its writes start
-failing, so the release that added the column breaks for everybody who lands on a replica that has
-not been replaced yet. Ship the column nullable, let the fleet turn over, then tighten it. `issuer`
-on `accounts` is the worked example: the column is nullable and no migration tightens it.
-
-**A data step is its own migration**, created with the flag that exists for it:
-
-```sh
-bun run --filter server db:generate -- --custom --name=backfill_something
-```
-
-A generator diffs schema against schema, so a rule like "the rows whose provider is Google get
-Google's issuer" can never come out of one: it is not in the schema. `--custom` writes an empty file
-registered in the journal, and it is the only migration anybody should be writing by hand.
-
-CI enforces two things about this: `drizzle-kit check` for collisions and gaps between migrations,
-and a generate-and-fail-if-dirty probe that refuses a schema change with no migration written for it.
-
-**If `drizzle-kit migrate` hangs and then exits non-zero with no error**, the journal names a
-migration file that is not there. A rebase does this: `meta/_journal.json` is a checked-in file, so
-restoring it can reinstate entries for migrations that were renamed. `drizzle-kit check` reports
-"Everything's fine" in that state, because it compares schemas rather than checking that the journal
-and the directory agree. Compare `meta/_journal.json` against `ls server/drizzle/*.sql`.
+and commit the area file, `api/openapi.yaml` and the generated client together. CI fails a pull
+request whose bundle or client is stale, whose spec fails the lint, or whose change breaks a client
+of the base branch.
 
 ## Quality checks
 
@@ -113,11 +165,7 @@ bun run test
 bun run build
 ```
 
-Integration tests expect a PostgreSQL database with pgvector. Point `TEST_DATABASE_URL` at a dedicated database such as `postgres://openbot:openbot@localhost:5432/openbot_test` before running them.
-
-They refuse to use the application `openbot` database. `DATABASE_URL` is still the application setting, and the database client removes it from the process environment after opening a connection to preserve the Windows Bun connection fix, so tests use `TEST_DATABASE_URL` as their immutable fixture address. Running them against a deployment you are using puts test Bots in its audit trail and its activity reports, so create a separate database and migrate that before running the integration suite.
-
-CI uses `bun run test:ci` to verify the expected test count in addition to normal tests.
+CI uses `bun run test:ci` to verify the expected test count in addition to normal tests. It runs the suite in shards, one runner each, and the `tests` check passes only when every shard passed and their counts add up to the floor in `scripts/test-floor.ts`. To run one shard the way CI does, pass it to the same script: `bun run test:ci --shard=2/4`.
 
 `bun run test:smoke` is separate and needs a deployment that is up, and a session on it:
 
@@ -138,22 +186,6 @@ a broken deployment when nothing is broken. Take the cookie from a browser alrea
 deployment under test, from DevTools under Application, Cookies. It is a credential with that
 person's reach: it belongs in the environment of the run, not in a file or a pull request comment.
 Asked for without it, the run stops before the first test and names the variable.
-
-`bun run test:live-screen` is separate for a related reason and needs no deployment, only this
-directory's own dependencies:
-
-```sh
-cd agent-computer && bun install
-cd .. && bun run test:live-screen
-```
-
-It drives the live screen against the real computer process with a real Chromium: a socket closing
-while the browser is still starting, a second connection taking the screen from the first, the wheel
-refusing input from the socket that owns it, and a browser closing by request or by the idle sweep.
-Those need `agent-computer/src/index.ts`, which imports Playwright at module scope, and `playwright`
-is declared only in `agent-computer/package.json`, which `bun install` at the root does not reach. So
-without `OPENBOT_LIVE_SCREEN=1` the files skip before importing anything, which is what keeps
-`bun run test` and CI working where that dependency was never installed.
 
 ## Contribution checklist
 

@@ -8,3 +8,4 @@ src-tauri/gen/
 build-version.json
 src-tauri/tauri.build-version.conf.json
 src-tauri/build-version.plist
+src-tauri/tauri.signed-pinned.conf.json

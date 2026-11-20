@@ -49,7 +49,7 @@ jobs:
       - name: Run zizmor
         # `min-severity: low` blocks on the broadest set of findings without flagging
         # hypothetical-only informational notes.
-        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           min-severity: low
           advanced-security: false

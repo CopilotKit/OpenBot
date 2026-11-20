@@ -28,45 +28,40 @@ function packagesStartedBy(script: string, workspaces: string[]): string[] {
 }
 
 describe("OpenBot workspace", () => {
-  test("defines the app, server, and worker packages", () => {
+  // The clients and what they share, plus the Product Engineer sidecar packages. The OpenBot
+  // server and worker still run from the published images (backend-images.env).
+  test("defines the app, shared, extension, management agent, and Product Engineer packages, and no back end", () => {
     const manifest = rootManifest();
+    const names: Record<string, string> = {
+      app: "app",
+      shared: "@openbot/shared",
+      extension: "@openbot/recorder-extension",
+      "management-agent": "@openbot/management-agent",
+      "product-engineer-loop": "product-engineer-loop",
+      "product-engineer-sidecar": "product-engineer-sidecar",
+    };
 
-    expect(manifest.workspaces).toEqual([
-      "app",
-      "server",
-      "worker",
-      "product-engineer-loop",
-    ]);
+    expect(manifest.workspaces).toEqual(Object.keys(names));
 
-    for (const packageName of manifest.workspaces) {
-      expect(existsSync(join(repositoryRoot, packageName))).toBe(true);
-      expect(packageManifest(packageName).name).toBe(packageName);
+    for (const workspace of manifest.workspaces) {
+      expect(existsSync(join(repositoryRoot, workspace))).toBe(true);
+      expect(packageManifest(workspace).name).toBe(names[workspace] ?? "");
     }
   });
 
-  test("dev starts the app and the server, and not the routines worker", () => {
+  test("dev starts the app", () => {
     const manifest = rootManifest();
 
     expect(
       packagesStartedBy(manifest.scripts.dev, manifest.workspaces),
-    ).toEqual(["app", "server"]);
+    ).toEqual(["app"]);
   });
 
-  test("build still covers every workspace, including the worker", () => {
+  test("build covers every workspace", () => {
     const manifest = rootManifest();
 
     expect(
       packagesStartedBy(manifest.scripts.build, manifest.workspaces),
     ).toEqual(manifest.workspaces);
-  });
-
-  test("scripts/start.sh is what starts the routines worker", () => {
-    const startScript = readFileSync(
-      join(repositoryRoot, "scripts", "start.sh"),
-      "utf8",
-    );
-
-    expect(startScript).toContain("bun worker/src/index.ts");
-    expect(startScript).toContain("WORKER_SHARED_SECRET=");
   });
 });

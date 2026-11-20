@@ -83,3 +83,19 @@ test("a channel that cannot be started still fails the send", async () => {
     startWithChosen({ agentId: "risk-analyst", text: "hello", record, start }),
   ).rejects.toThrow("Could not start a channel");
 });
+
+test("the conversation starts without waiting for the record to be written", async () => {
+  const { calls, record, start } = harness(() => new Promise(() => {}));
+
+  await startWithChosen({
+    agentId: "risk-analyst",
+    text: "hello",
+    record,
+    start,
+  });
+
+  expect(calls).toEqual([
+    "record risk-analyst hello",
+    "start risk-analyst hello",
+  ]);
+});

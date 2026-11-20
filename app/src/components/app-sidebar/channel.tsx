@@ -1,63 +1,60 @@
 import {
+  IconPencil,
   IconPin,
-  IconPinFilled,
   IconPinnedOff,
   IconTrash,
 } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { RenameConversationDialog } from "@/components/channels/rename-conversation-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  deleteChannelMutationOptions,
-  setChannelPinnedMutationOptions,
-} from "@/lib/channels/mutations";
+import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
-import { ChannelAvatar } from "../channels/avatar";
+import { ChannelItemContent } from "./channel-item-content";
 
 /**
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
  * `content-visibility` keeps off-screen rows cheap without virtualization.
  *
- * Right-click opens Pin and Delete. Deleting is confirmed in a dialog that names the channel,
- * because the row it was invoked on is one of several identical-looking rows.
+ * Right-click opens Pin, Rename and Delete. Rename is offered only to the person who started the
+ * conversation, which is who the server lets rename it. Deleting is confirmed in a dialog that
+ * names the channel, because the row it was invoked on is one of several identical-looking rows.
  */
 export const Channel = memo(function Channel({
   channelId,
   participantIds,
   name,
   summary,
-  lastMessage,
+  untitled,
   lastMessageAt,
   pinned,
+  canRename,
   unread,
   busy,
+  emphasis,
 }: {
   channelId: string;
   participantIds: string[];
   name: string;
   /** What the conversation is about, once named. The channel name only says which Bot it is. */
   summary?: string;
-  /** Shown on that same line until the conversation has been named. */
-  lastMessage?: string;
+  /** Used as the thread title until the conversation has been named. See `untitledLine`. */
+  untitled?: string;
   lastMessageAt?: string;
   pinned: boolean;
+  /** Whether this person started the conversation, and so may rename it. The server's answer. */
+  canRename: boolean;
   unread: boolean;
   busy: boolean;
+  emphasis: MessageListEmphasis;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -70,9 +67,10 @@ export const Channel = memo(function Channel({
   });
   /* Types in only on arrival; an already-named row draws it outright. */
   const revealed = useTypedReveal(summary);
+  const threadTitle = revealed.text || untitled || "New conversation";
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
-  const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   /**
    * Why a pin did not take, said on the row it was asked of.
    *
@@ -83,79 +81,36 @@ export const Channel = memo(function Channel({
    */
   const [pinProblem, setPinProblem] = useState<string | null>(null);
 
-  const confirmDelete = async () => {
-    /*
-     * Away first when this row's channel is the one on screen.
-     *
-     * The roster invalidates the moment the delete lands, so this row — and the dialog living inside
-     * it — unmounts while the rest of this function is still owed. Navigating after the mutation
-     * therefore ran in a component that was already gone, leaving somebody looking at a conversation
-     * that no longer exists. Leaving before asking is safe in the other direction: a refused delete
-     * puts them on the roster with the channel still in it, and says why in the dialog.
-     */
-    if (isOpen) {
-      await navigate({ to: "/" });
-    }
-    try {
-      await deleteChannel.mutateAsync(channelId);
-    } catch {
-      // The error is on the mutation and rendered in the dialog; leaving it open says "not done".
-      return;
-    }
-    setConfirming(false);
-  };
-
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger>
           <Link
-            to="/channel/$channelId"
+            // Two or more Bots is a group conversation, which has its own shared transcript.
+            to={
+              participantIds.length > 1
+                ? "/group/$channelId"
+                : "/channel/$channelId"
+            }
             params={{ channelId }}
             type="button"
-            className="flex flex-row py-2 px-2 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
+            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
             activeProps={{
               className: "bg-foreground/5",
             }}
           >
-            <div className="">
-              <ChannelAvatar
-                participantIds={participantIds}
-                size={32}
-                typing={busy}
-              />
-            </div>
-            <div className="flex-col min-w-0 flex-1">
-              <div className="flex flex-row items-center justify-between gap-2">
-                <span
-                  className={`text-[14px] tracking-[-1%] truncate ${
-                    unread ? "font-medium" : ""
-                  }`}
-                >
-                  {name}
-                </span>
-                <div className="text-[12px] text-muted-foreground/70">
-                  {lastMessageAt}
-                </div>
-              </div>
-              <div className="mt-px flex h-4 items-center gap-1.5">
-                <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-muted-foreground">
-                  {/* Falls back to the last message, so the line never blanks while naming runs. */}
-                  {revealed.text ?? lastMessage}
-                  {revealed.typing ? (
-                    /* Solid, not blinking: this is over in under half a second. */
-                    <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-muted-foreground/70 align-middle" />
-                  ) : null}
-                </span>
-                {unread ? (
-                  /* State about the message beats state about the row, so it sits first. */
-                  <span className="size-2 shrink-0 rounded-full bg-primary" />
-                ) : null}
-                {pinned ? (
-                  <IconPinFilled className="size-3 shrink-0 text-muted-foreground/70" />
-                ) : null}
-              </div>
-            </div>
+            <ChannelItemContent
+              participantIds={participantIds}
+              name={name}
+              title={summary || untitled || "New conversation"}
+              displayedTitle={threadTitle}
+              lastMessageAt={lastMessageAt}
+              emphasis={emphasis}
+              busy={busy}
+              unread={unread}
+              pinned={pinned}
+              revealing={revealed.typing}
+            />
           </Link>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -169,18 +124,20 @@ export const Channel = memo(function Channel({
             }}
           >
             {pinned ? <IconPinnedOff /> : <IconPin />}
-            {pinned ? "Unpin channel" : "Pin channel"}
+            {pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
+          {canRename ? (
+            <ContextMenuItem onClick={() => setRenaming(true)}>
+              <IconPencil />
+              Rename conversation…
+            </ContextMenuItem>
+          ) : null}
           <ContextMenuItem
             variant="destructive"
-            onClick={() => {
-              // A refusal from a previous attempt is not news about this one.
-              deleteChannel.reset();
-              setConfirming(true);
-            }}
+            onClick={() => setConfirming(true)}
           >
             <IconTrash />
-            Delete channel…
+            Delete conversation…
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
@@ -189,45 +146,20 @@ export const Channel = memo(function Channel({
           {pinProblem}
         </p>
       ) : null}
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setConfirming(false);
-        }}
+      <RenameConversationDialog
+        channelId={channelId}
+        onOpenChange={setRenaming}
+        open={renaming}
+        title={summary || untitled || ""}
+      />
+      <DeleteConversationDialog
+        channelId={channelId}
+        // Away first when this row's channel is the one on screen.
+        leave={isOpen ? () => navigate({ to: "/" }) : undefined}
+        onOpenChange={setConfirming}
         open={confirming}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete {name}?</DialogTitle>
-            <DialogDescription>
-              The conversation will no longer appear for anyone in it.
-            </DialogDescription>
-          </DialogHeader>
-          {deleteChannel.error ? (
-            <p className="text-destructive text-sm">
-              {deleteChannel.error.message}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button
-              onClick={() => setConfirming(false)}
-              size="sm"
-              variant="ghost"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={deleteChannel.isPending}
-              onClick={() => {
-                void confirmDelete();
-              }}
-              size="sm"
-              variant="destructive"
-            >
-              {deleteChannel.isPending ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title={summary || untitled || ""}
+      />
     </>
   );
 });

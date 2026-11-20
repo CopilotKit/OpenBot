@@ -20,6 +20,20 @@
 # Refs are `<serverId>/<toolName>`, the same form a grant is written in. `google-drive` and `notion`
 # are catalogue connectors; a server an administrator adds by URL uses the id it was given.
 skills:
+  - slug: research-public-web
+    title: Research the public web
+    summary: Search current public sources and write a cited brief.
+    instructions: >-
+      Use the public-web research tools you hold to discover relevant sources and read selected
+      pages before answering. Honor an explicit user choice of another authorized provider. Keep
+      search objectives specific and queries concise. Send only the necessary research objective,
+      queries and URLs; do not send whole conversations or private documents. Cite the source URLs
+      and state missing evidence or provider errors. A missing grant requires an administrator;
+      never work around a denial.
+    tools:
+      - "@research/search"
+      - "@research/fetch"
+
   - slug: find-a-document
     title: Find a document
     summary: Search the connected document sources for a file and read what it says.
@@ -127,7 +141,7 @@ skills:
   # ever narrows MCP tools; these are offered whenever the grant is there.
   - slug: skill-creator
     title: Write a skill
-    summary: Interview me about a skill I want, write it, and save it as a new `/` command.
+    summary: Interview me about a skill I want, then write it and save it as a new skill.
     instructions: |-
       You are writing a skill: a named instruction anybody in this deployment can invoke with `/`.
       Interview first, write second, and save only what the person has agreed to.
@@ -223,9 +237,23 @@ skills:
   # `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` — are the app's own, registered in the
   # browser, and offered to whichever Bot holds this slug. `tools:` here is intersected with a Bot's
   # MCP GRANTS, so naming them would name nothing. The grant of this skill is the whole gate.
+  # Ticket → Cursor PR path. Coding runs on the Product Engineer sidecar + Cursor cloud, not in
+  # this Bot's computer. Direct people to /product-engineer; do not invent PR URLs.
+  - slug: implement-a-ticket
+    title: Implement a Linear ticket
+    summary: Send a Linear ticket through Product Engineer to open Cursor cloud PRs.
+    instructions: >-
+      When someone wants a Linear ticket implemented across the product repos, send them to the
+      Product Engineer page at /product-engineer with the ticket id (for example ORC-424). That page
+      drafts a plan, waits for human approval, then starts Cursor cloud coding and returns PR URLs.
+      You do not open pull requests yourself, and you must not invent a PR URL. If they ask how a
+      run is going, tell them to open /product-engineer or paste the ticket id there. Merge stays
+      in GitHub after a human certifies the run.
+    tools: []
+
   - slug: bot-creator
-    title: Make a coworker
-    summary: Work out what a new coworker should be, then put it in front of you to create.
+    title: Make a Bot
+    summary: Work out what a new Bot should be, then put it in front of you to create.
     instructions: >-
       You are working out what a new coworker should be, and the interview matters more than the
       speed: what you write becomes standing instructions handed to a model on every turn in every
@@ -247,6 +275,13 @@ skills:
       order, what to do when a step turns up nothing. Not a description of it in the third person,
       and never addressed to the person talking to it. Keep it under a thousand characters, which is
       the limit and is usually more than enough — a long instruction is not a careful one.
+
+      Write each rule as a plain sentence with its reason, and never in capitals for emphasis: a
+      model applies an emphatic rule further than it was meant. Leave out how to work in general,
+      because OpenBot already tells every Bot to use what it has, take the step in the same reply,
+      retry a failed call once and deliver with the gaps named. Never tell it to stop at the first
+      error, to ask whenever something is unclear, or to ask the person to sign in and wait: each of
+      those makes a coworker stall where it should finish.
 
       Call list_bot_skills and offer only the skills that fit the job. Putting a skill on a coworker
       is the only capability that gets granted here: no connector, no tool and no address, and you

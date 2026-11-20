@@ -1,4 +1,14 @@
-import { tryClient } from "@/lib/client";
+import {
+  cancelComputerControl,
+  getComputerControl,
+  releaseComputerControl,
+  requestComputerControl,
+  sendComputerHumanInput,
+  supplyComputerSecret,
+  takeComputerControl,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
 
 /**
  * Handing control of a Bot's computer to a person, and back.
@@ -11,44 +21,125 @@ import { tryClient } from "@/lib/client";
  * should say nothing, not tear down the screen the person is looking at.
  */
 
-export type ControlState = {
-  holder: "bot" | "human";
-  since: string;
-  reason?: string;
-  requested: boolean;
-  /** What the Bot is waiting for, by name only. Present means show the masked prompt. */
-  secretWanted?: string;
-};
+export type { ComputerControlState as ControlState } from "@openbot/shared/computer-control";
 
-async function callControl(
-  computerId: string,
-  path: string,
-  method?: string,
+import type {
+  ComputerControlState as ControlState,
+  RequestHelpInput,
+} from "@openbot/shared/computer-control";
+
+/** A write's key: one per call, so a retry the network makes is the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+/** The control state a call answered, or nothing when it failed or answered something else. */
+async function controlFrom(
+  call: Promise<unknown>,
 ): Promise<ControlState | null> {
-  const response = await tryClient(
-    `/api/computers/${computerId}${path}`,
-    method ? { method } : {},
+  const value: unknown = await call.catch((error: unknown) => {
+    // A stopped read is the caller's to see; any other failure is no answer.
+    if (error instanceof DOMException && error.name === "AbortError")
+      throw error;
+    return null;
+  });
+  if (!value || typeof value !== "object" || !("holder" in value)) return null;
+  if (value.holder !== "bot" && value.holder !== "human") return null;
+  return value as ControlState;
+}
+
+/**
+ * The reason a request for the wheel gave, when the Bot raised it: what the Bot needs the person for. A person's own
+ * take (`manual`) carries the app's own words for asking ("I want to take control of the browser."), and echoing them
+ * back read as though the person had said them. Nothing then, and nothing for a request this state does not describe.
+ */
+export function botsReason(control: ControlState | null): string | undefined {
+  return control?.request && control.request.source !== "manual"
+    ? control.reason
+    : undefined;
+}
+
+export function readControl(
+  computerId: string,
+  requestId?: string,
+  signal?: AbortSignal,
+) {
+  return controlFrom(
+    getComputerControl(
+      organizationId(),
+      computerId,
+      requestId ? { requestId } : undefined,
+      signal ? { signal } : {},
+    ),
   );
-  if (!response.ok) return null;
-  // A non-JSON or wrong-shaped body used to throw out of the readers and reject the panel's
-  // poll. Reads answer null on failure, so malformed succeeds as missing.
-  const body = (await response.json().catch(() => null)) as unknown;
-  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-  const holder = (body as { holder?: unknown }).holder;
-  if (holder !== "bot" && holder !== "human") return null;
-  return body as ControlState;
 }
 
-export function readControl(computerId: string) {
-  return callControl(computerId, "/control");
+/** A read of the wheel that answered "not found": the Bot is not one this person can use. */
+export const BOT_GONE = "gone";
+
+/**
+ * Who is driving, for the poll: as `readControl`, and saying when the Bot itself is not there.
+ *
+ * The API answers the read 404 when the Bot does not exist or is not this person's any more (a Bot
+ * shared with a team they were taken out of). That is an answer and not a hiccup: asking again a
+ * second later gets it again, for as long as the screen stays open.
+ */
+export async function readControlOrGone(
+  computerId: string,
+  signal?: AbortSignal,
+): Promise<ControlState | typeof BOT_GONE | null> {
+  let gone = false;
+  const control = await controlFrom(
+    getComputerControl(
+      organizationId(),
+      computerId,
+      undefined,
+      signal ? { signal } : {},
+    ).catch((error: unknown) => {
+      gone = error instanceof ClientError && error.status === 404;
+      throw error;
+    }),
+  );
+  return gone ? BOT_GONE : control;
 }
 
-export function takeControl(computerId: string) {
-  return callControl(computerId, "/control/take", "POST");
+export async function takeControl(computerId: string, requestId?: string) {
+  const id =
+    requestId ??
+    (
+      await controlFrom(
+        requestComputerControl(
+          organizationId(),
+          computerId,
+          {
+            reason: "I want to take control of the browser.",
+            // A person's own take, so nothing shows its reason back to them as though the Bot had asked.
+            source: "manual",
+          } satisfies RequestHelpInput,
+          once(),
+        ),
+      )
+    )?.request?.id;
+  return id
+    ? controlFrom(
+        takeComputerControl(
+          organizationId(),
+          computerId,
+          { requestId: id },
+          once(),
+        ),
+      )
+    : null;
 }
 
-export function releaseControl(computerId: string) {
-  return callControl(computerId, "/control/release", "POST");
+export function releaseControl(computerId: string, requestId: string) {
+  return controlFrom(
+    releaseComputerControl(organizationId(), computerId, { requestId }, once()),
+  );
+}
+
+export function cancelControl(computerId: string, requestId: string) {
+  return controlFrom(
+    cancelComputerControl(organizationId(), computerId, { requestId }, once()),
+  );
 }
 
 /**
@@ -62,19 +153,17 @@ export async function supplySecret(
   text: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const response = await tryClient(
-      `/api/computers/${computerId}/human/secret`,
-      { method: "POST", body: { text } },
-    );
-    if (response.ok) return { ok: true };
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    return { ok: false, error: body?.error ?? "That could not be entered." };
-  } catch {
+    await supplyComputerSecret(organizationId(), computerId, { text }, once(), {
+      fallback: "Couldn't type that into the page. Try again.",
+    });
+    return { ok: true };
+  } catch (error) {
     return {
       ok: false,
-      error: "The assistant's computer could not be reached.",
+      error:
+        error instanceof ClientError
+          ? error.message
+          : "Couldn't reach the Bot's computer. Try again.",
     };
   }
 }
@@ -94,10 +183,7 @@ export function sendHumanInput(
 ): void {
   inputQueue = inputQueue
     .then(() =>
-      tryClient(`/api/computers/${computerId}/human/${kind}`, {
-        method: "POST",
-        body,
-      }),
+      sendComputerHumanInput(organizationId(), computerId, kind, body, once()),
     )
     // Fire-and-forget: the user can see/retry input failures, while the input queue must keep moving.
     .catch(() => undefined);

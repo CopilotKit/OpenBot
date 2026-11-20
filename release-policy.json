@@ -1,0 +1,36 @@
+{
+  "$schema": "./shared/release-policy.schema.json",
+  "version": "v1.1.0",
+  "compatibility": {
+    "launcherApi": 1,
+    "configSchema": 1,
+    "extensionApi": 1,
+    "database": {
+      "from": [
+        "0088_approval_reviewer_guidance",
+        "0085_approval_rule_account",
+        "0083_learning_skill_approvals",
+        "0082_routine_goal",
+        "0077_channel_opening"
+      ],
+      "to": "0132_bot_task_runs",
+      "rollbackCompatible": false
+    },
+    "intelligenceCapabilities": []
+  },
+  "upgrade": {
+    "fromVersions": [
+      "v1.0.3",
+      "v1.0.2",
+      "v1.0.1",
+      "v1.0.0",
+      "v0.3.4",
+      "v0.3.3",
+      "v0.3.2",
+      "v0.3.1",
+      "v0.3.0"
+    ],
+    "requiresDowntime": true,
+    "recovery": "restore-backup"
+  }
+}

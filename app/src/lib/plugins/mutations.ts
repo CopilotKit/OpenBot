@@ -1,6 +1,34 @@
-import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  type MutationFunctionContext,
+  mutationOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
+import {
+  deleteBotGrant,
+  replaceBotGrant,
+} from "@/lib/api/generated/bot-grants/bot-grants";
+import {
+  confirmConnection,
+  confirmSharedConnection,
+  connectApp,
+  connectSharedApp,
+  disconnectApp,
+  disconnectConnectedAccount,
+  disconnectSharedApp,
+  makeConnectedAccountDefault,
+  recheckConnection,
+  recheckSharedConnection,
+} from "@/lib/api/generated/connections/connections";
+import type {
+  ConnectionStart as ApiConnectionStart,
+  ConnectAppRequest,
+} from "@/lib/api/generated/model";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { ClientError } from "@/lib/client";
+import { desktopShell } from "@/lib/desktop/shell";
+import { confirmOnReturn } from "./confirm-on-return";
 import { pluginKeys } from "./queries";
+import type { SharedUseApproval } from "./shared-use";
 
 /**
  * Writes against what a deployment has installed: MCP servers, skills, and which Bots carry them.
@@ -10,48 +38,8 @@ import { pluginKeys } from "./queries";
  * two of everything.
  */
 
-/** A skill as the server accepts it. `global` is an administrator writing for everybody. */
-export type SkillInput = {
-  slug: string;
-  title: string;
-  summary?: string;
-  instructions: string;
-  global?: boolean;
-  /**
-   * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
-   *
-   * Sent on every save, including empty, because the server replaces the set rather than merging
-   * into it: omitting the field to mean "leave them alone" and sending `[]` to mean "clear them"
-   * would be the same request from a form that just had its last one unticked.
-   */
-  tools?: string[];
-};
-
-/** A curated server from the catalogue, which supplies the URL. */
-export type CuratedServerInput = {
-  key: string;
-  instanceHost?: string;
-  credentialId?: string;
-};
-
-/**
- * A server somebody typed the URL of, which therefore has to pass the URL checks.
- *
- * `token` is carried through as the previous version did. It is already a credential by the time
- * this is sent — the id beside it is what the record keeps — so the server has no use for it.
- */
-export type CustomServerInput = {
-  id: string;
-  title: string;
-  url: string;
-  token?: string;
-  credentialId?: string;
-};
-
 /** Which kinds of plugin a grant can be about. */
 export type PluginKind = "mcp" | "skill";
-
-const FALLBACK = "That did not work.";
 
 /**
  * Refetch everything the plugin screens read.
@@ -65,13 +53,13 @@ const FALLBACK = "That did not work.";
  * changed — it is very often the opposite, and the write it leaves behind is exactly the one the
  * screen is drawing.
  *
- * THE SHAPE, IN THE SERVER'S OWN WORDS. `POST /servers` inserts the row and then refreshes the
- * server's tools, answering 409 when that refresh faults over a row that is now there.
- * `POST /composio/apps` creates the authorization config at Composio, writes the row, and says so in
- * its own 409. `POST /grants`, `DELETE /grants`, `POST /skills` and `DELETE /skills/:slug` each
- * commit and then file the trail row, and a failing audit insert is a 500 over a change that
- * happened. `DELETE /servers/:id/connection` revokes the account at the vendor before it deletes
- * anything here. And the two brokered writes the screens draw hardest on raise from inside the
+ * THE SHAPE, IN THE SERVER'S OWN WORDS. Adding an app (createApp) writes the app and then asks it
+ * what it offers, answering 409 when that faults over an app that is now there, and adding one from
+ * the directory creates its authorization config at the directory's service first.
+ * `POST /grants`, `DELETE /grants`, `POST /skills` and `DELETE /skills/:slug` each commit and then
+ * file the trail row, and a failing audit insert is a 500 over a change that happened.
+ * disconnectApp revokes the account at the vendor before it deletes anything here. And the two
+ * brokered writes the screens draw hardest on raise from inside the
  * store AFTER recording what they found: `recheckBrokeredConnection` writes the verdict and the
  * action it spent and then raises with Composio's refusal, and `connectBrokeredWithFields` records
  * the account it could not withdraw and then raises with a sentence telling the person to disconnect
@@ -100,28 +88,72 @@ export function invalidatePlugins(queryClient: QueryClient) {
  * grant, so the audit trail is unchanged, but the reader is refreshed once at the end rather than
  * between every pair. Anything granting a single one should use the mutation below instead, which
  * carries the refetch with it.
+ *
+ * `approval` IS HOW A GRANT ON A SHARED APP NARROWS ITS OWN AUDIENCE. Granting a Bot a shared app it
+ * is not yet covered for is what provokes the audience refusal in the first place, so the one screen
+ * that offers the grant is also where an administrator can pre-empt it by shipping the approval the
+ * grant would otherwise go ask for. Sent only when present, for the reason every optional body field
+ * in this file is: a grant that carries no opinion about audience must not read as one that narrowed
+ * it to nothing.
  */
 export function grantPlugin(variables: {
-  kind: PluginKind;
+  kind: PluginKind | "bot";
   ref: string;
   agentId: string;
+  approval?: SharedUseApproval;
 }): Promise<unknown> {
-  return client("/api/plugins/grants", {
-    method: "POST",
-    body: {
-      kind: variables.kind,
-      ref: variables.ref,
-      agentId: variables.agentId,
-    },
-    fallback: "That Agent could not be changed.",
-  });
+  return replaceBotGrant(
+    organizationId(),
+    variables.agentId,
+    grantIdOf(variables.kind, variables.ref),
+    { "Idempotency-Key": idempotencyKey() },
+    variables.approval ? { approval: variables.approval } : {},
+    { fallback: "Couldn't change that Bot." },
+  );
+}
+
+/**
+ * Take one thing from a Bot. A Bot that doesn't have it is already without it, so that answer is the
+ * write done, as it always was here.
+ */
+export async function revokePlugin(variables: {
+  kind: PluginKind | "bot";
+  ref: string;
+  agentId: string;
+}): Promise<void> {
+  try {
+    await deleteBotGrant(
+      organizationId(),
+      variables.agentId,
+      grantIdOf(variables.kind, variables.ref),
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Couldn't change that Bot." },
+    );
+  } catch (error) {
+    if (error instanceof ClientError && error.code === "BOT_GRANT_NOT_FOUND")
+      return;
+    throw error;
+  }
+}
+
+/**
+ * A grant's address in the API: `action:<app id>:<action name>` for an app's action (its ref is
+ * `<app id>/<action name>`), `skill:<slug>`, or `bot:<Bot id>`.
+ */
+export function grantIdOf(kind: PluginKind | "bot", ref: string): string {
+  if (kind === "skill") return `skill:${ref}`;
+  if (kind === "bot") return `bot:${ref}`;
+  const slash = ref.indexOf("/");
+  return slash < 0
+    ? `action:${ref}:`
+    : `action:${ref.slice(0, slash)}:${ref.slice(slash + 1)}`;
 }
 
 /**
  * Whether one Bot carries one plugin.
  *
- * Granting posts to the collection; withholding deletes from it, and the delete identifies the row
- * by query string because a grant has no id of its own — it is the three things it joins.
+ * Granting puts the grant at its address under the Bot (replaceBotGrant); withholding deletes it
+ * there (deleteBotGrant). The address is the kind and what it names (see {@link grantIdOf}).
  */
 export function setPluginGrantMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
@@ -135,147 +167,7 @@ export function setPluginGrantMutationOptions(queryClient: QueryClient) {
         await grantPlugin(variables);
         return;
       }
-      await client(
-        `/api/plugins/grants?kind=${variables.kind}&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
-        { method: "DELETE", fallback: "That Agent could not be changed." },
-      );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-export function addCuratedServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: CuratedServerInput) => {
-      await client("/api/plugins/servers", {
-        method: "POST",
-        body: input,
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-export function addCustomServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: CustomServerInput) => {
-      await client("/api/plugins/servers/custom", {
-        method: "POST",
-        body: input,
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Add a Composio app to the deployment, named by its slug.
- *
- * Its own endpoint rather than a curated key, because the catalogue is the vendor's rather than
- * ours: the slug is all the server needs to look the app up and record the row.
- */
-export function enableComposioAppMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: { slug: string }) => {
-      await client("/api/plugins/composio/apps", {
-        method: "POST",
-        body: input,
-        fallback: "That app could not be added.",
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Re-read a server's tool list, which is what makes a newly-added tool appear.
- *
- * The id is encoded, as every id in this file is. It is not this app's text: a custom server's id
- * is whatever an administrator typed when they added it, so a `/` in one adds a path segment the
- * URL parser resolves before any handler sees it, and a `?` truncates the id into a query. This was
- * the one interpolation here that went in raw.
- */
-export function refreshPluginServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (serverId: string) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/refresh`,
-        {
-          method: "POST",
-          body: {},
-          fallback: FALLBACK,
-        },
-      );
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-export function removePluginServerMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (serverId: string) => {
-      await client(`/api/plugins/servers/${encodeURIComponent(serverId)}`, {
-        method: "DELETE",
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/**
- * Write a skill, or rewrite one.
- *
- * One endpoint for both: the slug is the identity, so posting an existing one replaces it. The
- * fallback names saving rather than creating for that reason.
- */
-export function saveSkillMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: (input: SkillInput): Promise<unknown> =>
-      client("/api/plugins/skills", {
-        method: "POST",
-        body: input,
-        /*
-         * The server refuses for reasons a form cannot check — a slug somebody else already owns is
-         * the common one — and paraphrasing that would throw away the only part worth reading.
-         */
-        fallback: "The skill could not be saved.",
-      }),
-    onSettled: () => invalidatePlugins(queryClient),
-  });
-}
-
-/** The deployment's OAuth client for a vendor reached as the person asking. */
-export type OAuthClientInput = {
-  serverId: string;
-  clientId: string;
-  clientSecret: string;
-};
-
-/**
- * Register the deployment's OAuth client for a `user-oauth` server.
- *
- * Its own write rather than a field on the curated-server input, because it has its own lifetime: a
- * client is rotated without the server being re-added, and re-adding a server should not mean
- * re-typing a client. It is also recorded against the server row, so it can only happen once that
- * row exists — which is why the page chains it rather than sending both at once.
- *
- * Nobody's documents are reachable with what this sends. A client identifies this deployment to the
- * vendor; the grant that reads anything belongs to each person and is made on their own settings page.
- */
-export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (input: OAuthClientInput) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(input.serverId)}/oauth-client`,
-        {
-          method: "POST",
-          body: { clientId: input.clientId, clientSecret: input.clientSecret },
-          fallback: "That OAuth client could not be registered.",
-        },
-      );
+      await revokePlugin(variables);
     },
     onSettled: () => invalidatePlugins(queryClient),
   });
@@ -321,21 +213,142 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
  * assignment to `window.location.href` typechecks, and the compiler has been told the same lie in
  * a second place. `null` is the one absent-value this inference cannot quietly discard, which is
  * what makes the branch below it obligatory rather than advisory.
+ *
+ * AND A THIRD ANSWER, WHICH IS NOT A URL AND NOT A FORM: `{ connected: true }`. A brokered app
+ * whose account the vendor already holds, with no row for it here, is recorded by the route on
+ * the spot, so the press ends connected with no page to visit. Unwrapping only the url read that
+ * answer as `null`, and every caller drew `null` as "this app takes a key" or as a failure, over an
+ * account that had just been recorded as connected. It is its own member of {@link ConnectStart}
+ * so a caller has to say what it draws for it.
  */
 export function connectAccountMutationOptions(
   returnTo: "settings" | "admin" = "settings",
+  shared = false,
 ) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<string | null> => {
-      const authorizationUrl = await client<string | undefined>(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}`,
-        "authorizationUrl",
-        { method: "POST", fallback: "That account could not be connected." },
-      );
-      return authorizationUrl ?? null;
-    },
+    mutationFn: async (
+      serverId: string,
+      context: MutationFunctionContext,
+    ): Promise<ConnectStart> =>
+      confirmedOnReturn(
+        context.client,
+        serverId,
+        shared,
+        startOf(
+          await startConnect(serverId, {
+            returnTo,
+            shared,
+            fallback: "Couldn't connect that account.",
+          }),
+        ),
+      ),
   });
 }
+
+/**
+ * Connect one more account at an app the person already has an account at: a second mailbox, a
+ * work calendar beside a personal one. The same press as Connect, asking for another account
+ * rather than for more permissions on the one that stands.
+ */
+export function connectAnotherAccountMutationOptions(
+  returnTo: "settings" | "admin" = "settings",
+) {
+  return mutationOptions({
+    mutationFn: async (
+      serverId: string,
+      context: MutationFunctionContext,
+    ): Promise<ConnectStart> =>
+      confirmedOnReturn(
+        context.client,
+        serverId,
+        false,
+        startOf(
+          await startConnect(serverId, {
+            returnTo,
+            another: true,
+            fallback: "Couldn't connect that account.",
+          }),
+        ),
+      ),
+  });
+}
+
+/**
+ * Every consent a connect press starts, in one place: in OpenBot Desktop's window the account is
+ * confirmed when the window is back in front, whatever screen it is on ({@link confirmOnReturn}).
+ * A person's own connection is confirmed as the return page did before, falling back to the app's
+ * shared account where the app has one.
+ */
+function confirmedOnReturn(
+  queryClient: QueryClient,
+  serverId: string,
+  shared: boolean,
+  start: ConnectStart,
+): ConnectStart {
+  if (start !== null && "authorizationUrl" in start)
+    confirmOnReturn(queryClient, serverId, () =>
+      confirmBrokeredConnection(serverId, shared || undefined),
+    );
+  return start;
+}
+
+/**
+ * One press of Connect, at the person's own connection or, for a Shared app, the app's shared one.
+ * Where the person comes back to is one of OpenBot's own pages: the app's page for admins, the
+ * person's connection page, or OpenBot Desktop when the press came from its window.
+ */
+function startConnect(
+  serverId: string,
+  press: {
+    returnTo: "settings" | "admin";
+    fallback: string;
+    shared?: boolean;
+    another?: boolean;
+    values?: Record<string, string>;
+  },
+): Promise<ApiConnectionStart> {
+  const headers = { "Idempotency-Key": idempotencyKey() };
+  const options = { fallback: press.fallback };
+  if (press.shared)
+    return connectSharedApp(
+      organizationId(),
+      serverId,
+      {
+        returnTo: desktopShell() ? "desktop" : "apps",
+        ...(press.values ? { values: press.values } : {}),
+      },
+      headers,
+      options,
+    );
+  const body: ConnectAppRequest = {
+    returnTo: desktopShell()
+      ? "desktop"
+      : press.returnTo === "admin"
+        ? "apps"
+        : "connections",
+    ...(press.another ? { anotherAccount: true } : {}),
+    ...(press.values ? { values: press.values } : {}),
+  };
+  return connectApp(organizationId(), "me", serverId, body, headers, options);
+}
+
+/** A sign-in page to visit, an account already connected, or `null` for a key form. */
+function startOf(start: ApiConnectionStart): ConnectStart {
+  if (start.next === "connected") return { connected: true };
+  if (start.next === "consent")
+    return { authorizationUrl: start.authorizationUrl };
+  return null;
+}
+
+/**
+ * What one press of Connect started: a consent page to visit, an account that is already
+ * connected, or `null` for neither (an app whose key somebody types). See
+ * {@link connectAccountMutationOptions}.
+ */
+export type ConnectStart =
+  | { authorizationUrl: string }
+  | { connected: true }
+  | null;
 
 /**
  * What asking the vendor about an account comes back with.
@@ -366,18 +379,90 @@ export type BrokeredConnectionConfirmation = { connected: boolean };
  */
 export function confirmBrokeredConnectionMutationOptions(
   queryClient: QueryClient,
+  shared?: boolean,
 ) {
   return mutationOptions({
-    mutationFn: async (
-      serverId: string,
-    ): Promise<BrokeredConnectionConfirmation> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/confirm`,
-        { method: "POST", fallback: "That connection could not be confirmed." },
-      );
-      return response.json();
-    },
+    mutationFn: (serverId: string) =>
+      confirmBrokeredConnection(serverId, shared),
     onSettled: () => invalidatePlugins(queryClient),
+  });
+}
+
+/** The confirm itself, for {@link confirmBrokeredConnectionMutationOptions} and the window's return. */
+async function confirmBrokeredConnection(
+  serverId: string,
+  shared?: boolean,
+): Promise<BrokeredConnectionConfirmation> {
+  const options = { fallback: "Couldn't confirm that connection." };
+  const confirmShared = () =>
+    confirmSharedConnection(
+      organizationId(),
+      serverId,
+      { "Idempotency-Key": idempotencyKey() },
+      options,
+    );
+  if (shared) return confirmShared();
+  try {
+    return await confirmConnection(
+      organizationId(),
+      "me",
+      serverId,
+      { "Idempotency-Key": idempotencyKey() },
+      options,
+    );
+  } catch (error) {
+    /*
+     * A caller may know the app and not whose account it was: a person's own connection refuses
+     * an app with one shared account as a conflict,
+     * and that account is then the one to confirm. A caller that knows says so.
+     */
+    if (
+      shared === undefined &&
+      error instanceof ClientError &&
+      error.status === 409 &&
+      error.code === "CONFLICT"
+    )
+      return confirmShared();
+    throw error;
+  }
+}
+
+/** Every disconnect of a person's own connection, so the app's page can stop reading it. */
+export const disconnectBrokeredMutationKey = [
+  ...pluginKeys.all,
+  "disconnect",
+] as const;
+
+/** Every disconnect of one account, which ends the connection when it was the last. */
+export const disconnectBrokeredAccountMutationKey = [
+  ...pluginKeys.all,
+  "disconnect-account",
+] as const;
+
+/**
+ * A connection the person just ended: its own reads (the connection and its accounts, and what a
+ * disconnect would also end) are dropped rather than read again, since a read would ask for a
+ * connection that is gone and answer 404. A read already on its way is dropped too, not left to land
+ * in the cache. Every other plugin read is refreshed, the person's connections among them, which is
+ * how the page learns the app is not connected.
+ */
+async function forgetEndedConnection(
+  queryClient: QueryClient,
+  serverId: string,
+) {
+  const own = [pluginKeys.accounts(serverId), pluginKeys.siblings(serverId)];
+  for (const queryKey of own) {
+    await queryClient.cancelQueries({ queryKey });
+    queryClient.removeQueries({ queryKey });
+  }
+  return queryClient.invalidateQueries({
+    queryKey: pluginKeys.all,
+    predicate: (query) =>
+      !own.some(
+        (key) =>
+          JSON.stringify(query.queryKey.slice(0, key.length)) ===
+          JSON.stringify(key),
+      ),
   });
 }
 
@@ -388,30 +473,76 @@ export function confirmBrokeredConnectionMutationOptions(
  * the vendor still holding a live grant on somebody's mailbox, which is not what the person who
  * pressed disconnect was told would happen.
  */
-export function disconnectBrokeredMutationOptions(queryClient: QueryClient) {
+export function disconnectBrokeredMutationOptions(
+  queryClient: QueryClient,
+  shared = false,
+) {
   return mutationOptions({
+    mutationKey: disconnectBrokeredMutationKey,
     mutationFn: async (serverId: string) => {
-      await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection`,
-        {
-          method: "DELETE",
-          fallback: "That account could not be disconnected.",
-        },
+      const headers = { "Idempotency-Key": idempotencyKey() };
+      const options = { fallback: "Couldn't disconnect that account." };
+      await (shared
+        ? disconnectSharedApp(organizationId(), serverId, headers, options)
+        : disconnectApp(organizationId(), "me", serverId, headers, options));
+    },
+    /*
+     * In `onSettled`, which a screen's own `onSuccess` and `onError` cannot shadow. A person's own
+     * connection that is gone has its reads dropped rather than read again; the app's one shared
+     * account is still there to read, not connected, so it is refreshed like the rest, as is
+     * everything after a disconnect that failed.
+     */
+    onSettled: (_result, error, serverId) =>
+      error || shared
+        ? invalidatePlugins(queryClient)
+        : forgetEndedConnection(queryClient, serverId),
+  });
+}
+
+const ACCOUNT_FALLBACK = "Couldn't change that account.";
+
+/** Make one of the person's accounts at an app the one their Bots use when they name none. */
+export function setDefaultBrokeredAccountMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (variables: { serverId: string; accountId: string }) => {
+      await makeConnectedAccountDefault(
+        organizationId(),
+        "me",
+        variables.serverId,
+        variables.accountId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: ACCOUNT_FALLBACK },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),
   });
 }
 
-export function removeSkillMutationOptions(queryClient: QueryClient) {
+/**
+ * Disconnect one of the person's accounts at an app and keep the rest. The last one ends the
+ * connection, as Disconnect always has.
+ */
+export function disconnectBrokeredAccountMutationOptions(
+  queryClient: QueryClient,
+) {
   return mutationOptions({
-    mutationFn: async (slug: string) => {
-      await client(`/api/plugins/skills/${encodeURIComponent(slug)}`, {
-        method: "DELETE",
-        fallback: FALLBACK,
-      });
-    },
-    onSettled: () => invalidatePlugins(queryClient),
+    mutationKey: disconnectBrokeredAccountMutationKey,
+    mutationFn: (variables: { serverId: string; accountId: string }) =>
+      disconnectConnectedAccount(
+        organizationId(),
+        "me",
+        variables.serverId,
+        variables.accountId,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't disconnect that account." },
+      ),
+    // The last account ends the connection, and the server says so. `onSettled`, as above.
+    onSettled: (result, error, variables) =>
+      !error && result?.connectionEnded
+        ? forgetEndedConnection(queryClient, variables.serverId)
+        : invalidatePlugins(queryClient),
   });
 }
 
@@ -449,21 +580,37 @@ export type BrokerField = {
  * `null` for the reason spelled out over {@link connectAccountMutationOptions}: an `undefined` in
  * this position is inferred away by `useMutation` and reaches the caller as a plain `BrokerField[]`.
  */
-export function brokeredConnectionFieldsMutationOptions() {
+export function brokeredConnectionFieldsMutationOptions(
+  returnTo: "settings" | "admin" = "settings",
+  shared = false,
+) {
   return mutationOptions({
-    mutationFn: async (serverId: string): Promise<BrokerField[] | null> => {
-      const fields = await client<BrokerField[] | undefined>(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connect`,
-        "fields",
-        {
-          method: "POST",
-          fallback: "That app could not be asked what it needs.",
-        },
-      );
-      return fields ?? null;
+    mutationFn: async (serverId: string): Promise<KeyForm | null> => {
+      const start = await startConnect(serverId, {
+        returnTo,
+        shared,
+        fallback: "Couldn't find out what this app needs.",
+      });
+      if (start.next !== "form") return null;
+      return {
+        // The form a person fills in: no default reads as no key at all, as it always has.
+        fields: start.fields.map(({ default: seeded, ...field }) =>
+          seeded === null ? field : { ...field, default: seeded },
+        ),
+        guide: start.guide,
+      };
     },
   });
 }
+
+/**
+ * Where a person gets the key an app asks for: what to do there, and the provider's own page for
+ * it. `url` is null where nobody has a page to point at; the steps are always there.
+ */
+export type KeyGuide = { steps: string; url: string | null };
+
+/** What the first press on a key app answers: the boxes to fill in, and where the key comes from. */
+export type KeyForm = { fields: BrokerField[]; guide: KeyGuide | null };
 
 /**
  * What handing a key over comes back with. Declared once, for the reason
@@ -508,6 +655,8 @@ export type BrokeredKeyConnection = {
  */
 export function connectBrokeredWithFieldsMutationOptions(
   queryClient: QueryClient,
+  returnTo: "settings" | "admin" = "settings",
+  shared = false,
 ) {
   return mutationOptions({
     mutationFn: async (variables: {
@@ -515,15 +664,19 @@ export function connectBrokeredWithFieldsMutationOptions(
       values: Record<string, string>;
     }): Promise<BrokeredKeyConnection> => {
       try {
-        const response = await client(
-          `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/connect`,
-          {
-            method: "POST",
-            body: { values: variables.values },
-            fallback: "That account could not be connected.",
-          },
-        );
-        return response.json();
+        const start = await startConnect(variables.serverId, {
+          returnTo,
+          shared,
+          values: variables.values,
+          fallback: "Couldn't connect that account.",
+        });
+        return start.next === "connected"
+          ? {
+              connected: true,
+              verified: start.verified === true,
+              probe: start.checkedAction,
+            }
+          : { connected: false, verified: false, probe: null };
       } finally {
         // Taken or refused, the request is over and this copy has nothing left to do.
         variables.values = {};
@@ -567,14 +720,31 @@ export type BrokeredKeyCheck = {
  */
 export function recheckBrokeredConnectionMutationOptions(
   queryClient: QueryClient,
+  shared = false,
 ) {
   return mutationOptions({
     mutationFn: async (serverId: string): Promise<BrokeredKeyCheck> => {
-      const response = await client(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connection/recheck`,
-        { method: "POST", fallback: "That connection could not be checked." },
-      );
-      return response.json();
+      const headers = { "Idempotency-Key": idempotencyKey() };
+      const options = { fallback: "Couldn't check that connection." };
+      const check = shared
+        ? await recheckSharedConnection(
+            organizationId(),
+            serverId,
+            headers,
+            options,
+          )
+        : await recheckConnection(
+            organizationId(),
+            "me",
+            serverId,
+            headers,
+            options,
+          );
+      return {
+        verified: check.verified,
+        verifiedAt: check.verifiedAt,
+        probe: check.checkedAction,
+      };
     },
     onSettled: () => invalidatePlugins(queryClient),
   });

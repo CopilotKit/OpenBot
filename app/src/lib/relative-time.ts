@@ -25,3 +25,27 @@ export function relativeTime(iso: string): string {
     scale.unit,
   );
 }
+
+const SHORT_UNITS = [
+  { limit: 3_600_000, divisor: 60_000, suffix: "m" },
+  { limit: 86_400_000, divisor: 3_600_000, suffix: "h" },
+  { limit: 604_800_000, divisor: 86_400_000, suffix: "d" },
+  { limit: Number.POSITIVE_INFINITY, divisor: 604_800_000, suffix: "w" },
+] as const;
+
+/**
+ * The sidebar's compact timestamp: "now", "5m", "3h", "2d", "6w".
+ *
+ * Rounded down, so a unit never shows its own upper bound ("60m"). A time slightly ahead of this
+ * clock, from a server whose clock runs fast, reads as "now" rather than a negative number.
+ */
+export function relativeTimeShort(iso: string, now: Date = new Date()): string {
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return iso;
+  const elapsed = now.getTime() - time;
+  if (elapsed < 60_000) return "now";
+  const scale =
+    SHORT_UNITS.find(({ limit }) => elapsed < limit) ??
+    SHORT_UNITS[SHORT_UNITS.length - 1];
+  return `${Math.floor(elapsed / scale.divisor)}${scale.suffix}`;
+}

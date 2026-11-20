@@ -27,6 +27,10 @@ describe("what the trail says a row was", () => {
     expect(outcomeOf("credential.rotation_refused")).toBe("refused");
   });
 
+  test("names a computer of its own refused to a Bot as a refusal", () => {
+    expect(outcomeOf("bot.isolation_refused")).toBe("refused");
+  });
+
   test("names an endpoint this deployment would not dial as a refusal", () => {
     expect(outcomeOf("agent.dial_refused")).toBe("refused");
   });

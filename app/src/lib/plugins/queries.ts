@@ -1,5 +1,21 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { everyPage } from "@/lib/api/every-page";
+import { listBotGrants } from "@/lib/api/generated/bot-grants/bot-grants";
+import {
+  getConnection,
+  getConnectionDisconnectPreview,
+  getSharedConnection,
+  listConnectedAccounts,
+  listConnections,
+} from "@/lib/api/generated/connections/connections";
+import type {
+  App,
+  AppTool,
+  AppWithdrawnGrant,
+  BotGrant,
+  Connection,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * Re-exported, not re-declared.
@@ -9,78 +25,20 @@ import { client } from "@/lib/client";
  */
 export type { BrokerField } from "./mutations";
 
-/** A tool one server offers, as the Plugins page sees it. */
-export type PluginTool = {
-  serverId: string;
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  /** `<serverId>/<name>`. What a grant names. */
-  ref: string;
-  /** Whether it changes something. Anything not positively known to be a read is a write. */
-  effect: "read" | "write";
-  /**
-   * Whether the vendor warns that it destroys something.
-   *
-   * Beside {@link effect} rather than folded into it: the rule engine judges reads and writes and
-   * gains nothing from a third value, while a person deciding whether to switch an action on is
-   * asking a different question. Recorded from the vendor's own labels, so false is an absence of a
-   * claim rather than a claim of safety.
-   */
-  destructive: boolean;
-  grantedTo: string[];
-};
+/**
+ * An app added here, as the API answers it (listApps). A screen reads `source` for how it was added
+ * and `connectsWith` for how a person connects an app from the directory, never a broker's name.
+ */
+export type PluginServer = App;
+
+/** One action an app offers, and the Bots that may use it. */
+export type PluginTool = AppTool;
 
 /**
- * A grant on a tool this server does not currently advertise.
- *
- * Held and not offered: nothing reaches a model, because a Bot is told about a tool only when the
- * grant and the tool list agree. That is a fact about what the vendor advertises today, not about the
- * grant, so it is reported rather than quietly dropped — a connector that starts advertising the name
- * again offers it again.
+ * An action Bots were given that the app no longer offers. Held and not offered: a Bot is told about
+ * an action only while the app offers it, and it comes back if the app offers it again.
  */
-export type WithdrawnGrant = {
-  /** `<serverId>/<toolName>`. What a grant names, and what an administrator revokes. */
-  ref: string;
-  name: string;
-  grantedTo: string[];
-};
-
-export type PluginServer = {
-  id: string;
-  title: string;
-  vendor: string;
-  url: string;
-  summary: string;
-  docsUrl: string;
-  /** `first-party` for a reviewed entry, `custom` for one an administrator added by URL. */
-  provenance: string;
-  hasCredential: boolean;
-  toolsRefreshedAt: string | null;
-  lastError: string | null;
-  addedBy: string | null;
-  /**
-   * Whether this server registers its own OAuth client (RFC 7591) rather than waiting on an
-   * administrator to paste one in.
-   */
-  dynamicClient: boolean;
-  /**
-   * How this server's authorization config was CREATED, for the brokered rows that have one.
-   *
-   * What was written down when somebody enabled the app, not what the catalogue publishes today.
-   * The catalogue is the vendor's, and an app it starts advertising under a different scheme has
-   * not moved the config this deployment already created — so a screen deciding what a live
-   * connection does reads this and never a fresh listing. The vocabulary is the vendor's own scheme
-   * literals (`OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH`, and the rest), so it is a string rather
-   * than a union this page would have to keep level with Composio's.
-   *
-   * Null is not an older brokered row. It is a row that is not brokered at all.
-   */
-  authScheme: string | null;
-  tools: PluginTool[];
-  /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
-  withdrawn: WithdrawnGrant[];
-};
+export type WithdrawnGrant = AppWithdrawnGrant;
 
 export type PluginSkill = {
   id: string;
@@ -104,107 +62,130 @@ export type PluginSkill = {
   tools: string[];
 };
 
-export type CatalogueItem = {
-  key: string;
-  title: string;
-  vendor: string;
-  summary: string;
-  docsUrl: string;
-  /**
-   * Whose credential reaches this server.
-   *
-   * `deployment-bearer` is a token an administrator holds for everybody, and the only one this page
-   * can collect. `user-oauth` is reached as whoever is asking, so each person connects their own
-   * account and there is no token to type here. `builtin` is a first-party capability that runs
-   * inside this deployment — there is nothing to connect and nothing to type.
-   */
-  auth: "none" | "deployment-bearer" | "user-oauth" | "builtin";
-  /** True for a vendor that gives every customer their own hostname. */
-  perInstance: boolean;
-};
+export type { CatalogueItem } from "@/lib/apps/queries";
 
-/** One app in Composio's directory, as the picker shows it. */
-export type ComposioApp = {
-  slug: string;
-  name: string;
-  description: string;
-  logo: string | null;
-  categories: string[];
-  /** The size of the decision, shown before enabling. */
-  actionCount: number;
-  enabled: boolean;
-};
-
-export type PluginsPage = {
-  catalogue: CatalogueItem[];
-  servers: PluginServer[];
-  skills: PluginSkill[];
-  /**
-   * Whether a Bot holding no credential of its own can still call a tool back.
-   *
-   * True when the deployment has a shared secret configured for it. A grant decides whether a tool
-   * is offered to a model at all; this decides whether the call it makes can be authenticated. With
-   * neither this nor a credential issued to the Bot, every call is refused before it reaches the
-   * grant, the boundary or the audit trail, which is not something a grant switch can show.
-   */
-  botsMayCallBack: boolean;
-  /**
-   * The redirect URI to register with a `user-oauth` vendor, exactly as this deployment will send it.
-   *
-   * From the server rather than assembled here, because it has to match what was registered
-   * character for character. Null when the deployment has no public URL and so cannot complete a
-   * consent flow at all.
-   */
-  redirectUri: string | null;
-  /**
-   * Whether this deployment has Composio configured.
-   *
-   * A boolean about configuration and never the key: the page needs to know whether the directory
-   * can be browsed at all, and that question is answerable without the API key ever leaving the
-   * server.
-   */
-  composioConfigured: boolean;
-};
-
-/** What one Bot holds, which is all the runtime needs to offer it. */
+/**
+ * What one Bot holds and is offered now: each app action whose app still lists it, as
+ * `<app id>/<action name>`, and each skill. Read from the Bot's grants (listBotGrants), leaving out an
+ * action its app no longer lists and the other Bots it may hand work to.
+ */
 export type GrantedPlugins = {
   tools: {
     ref: string;
-    toolName: string;
     description: string;
-    inputSchema: Record<string, unknown>;
+    destructive: boolean;
+    read: boolean;
   }[];
   skills: {
     slug: string;
     title: string;
     summary: string;
-    instructions: string;
   }[];
 };
 
+/** A Bot's grants as what it holds and is offered now. */
+export function grantedPluginsOf(grants: readonly BotGrant[]): GrantedPlugins {
+  return {
+    tools: grants.flatMap((grant) =>
+      grant.kind === "action" && grant.action
+        ? [
+            {
+              ref: grant.ref,
+              description: grant.action.description,
+              destructive: grant.action.destructive,
+              read: grant.action.read,
+            },
+          ]
+        : [],
+    ),
+    skills: grants.flatMap((grant) =>
+      grant.kind === "skill" && grant.skill
+        ? [
+            {
+              slug: grant.skill.slug,
+              title: grant.skill.title,
+              summary: grant.skill.summary,
+            },
+          ]
+        : [],
+    ),
+  };
+}
+
 export const pluginKeys = {
   all: ["plugins"] as const,
-  page: () => ["plugins", "page"] as const,
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
-  composioApps: (query: string) =>
-    ["plugins", "composio", "apps", query] as const,
+  sharedConnection: (serverId: string) =>
+    ["plugins", "shared-connection", serverId] as const,
+  siblings: (serverId: string) => ["plugins", "siblings", serverId] as const,
+  accounts: (serverId: string) => ["plugins", "accounts", serverId] as const,
 };
 
 /**
  * One account this person has connected, from their own point of view.
  *
- * DELIBERATELY NON-UNIFORM, because `/api/plugins/connections` concatenates two reads: connections
- * held in this deployment's own vault, and brokered ones Composio keeps on our behalf. The fields a
+ * DELIBERATELY NON-UNIFORM, because listConnections answers two kinds of row: connections held in
+ * this deployment's own vault, and brokered ones Composio keeps on our behalf. The fields a
  * settings row draws from — the server id, the scope, the date — line up across both, which is why
  * one type covers both. The pair below does not, so it is optional rather than required: making it
  * required would be a lie the compiler then enforced on every held row.
  */
 export type PluginConnection = {
   serverId: string;
+  /**
+   * Whether the credential behind this row has been withdrawn or deleted, present only on a HELD
+   * row — a brokered one keeps no secret here, so it has no equivalent question.
+   *
+   * A ROW IS NOT ACCESS. Revoking a credential leaves this row pointing at it, and reconnecting
+   * moves `credential_id` and `updated_at` without touching `connected_at`, so the presence of a
+   * row says nothing about whether the app can be used and nothing visible changes when it can be
+   * again. Anything drawing the word "connected" has to read this; anything listing the apps
+   * somebody has ever connected does not.
+   *
+   * Undefined on a brokered row and on any shape written before this existed, and the absence
+   * reads as not revoked.
+   */
+  revoked?: boolean;
   /** What the vendor actually granted, which is not always what was asked for. Empty for brokered. */
   scope: string;
   connectedAt: string;
+  /**
+   * Whose account this row is: the signed-in person's own (every row {@link connectionsQueryOptions}
+   * lists), or the one standing account of a Shared app (see {@link PluginServer.accountMode}), read
+   * with {@link sharedConnectionQueryOptions}, that every Bot holding a grant acts as regardless of
+   * who is asking. Undefined reads as `"person"`: see {@link personalConnections}.
+   */
+  holder?: "person" | "deployment";
+  /**
+   * Whether the deployment's one shared account is connected, present only on a DEPLOYMENT row.
+   *
+   * A Shared app's account is read even when nothing is connected to it yet — see
+   * {@link PluginServer.sharedVendorConnected} — so a reader cannot take the row's presence for a
+   * yes. This is the field that answers.
+   *
+   * NOTE: an unconnected deployment row has no real date for {@link connectedAt} either, which
+   * would want that field widened to `string | null` to say so honestly. Left as `string` here
+   * instead — `connected-accounts/$key.tsx` hands it straight to `new Date(...)`, and widening
+   * turned that red under `bun run typecheck`. A row with nothing connected must therefore be read
+   * through this field, not through `connectedAt`, until that caller is dealt with.
+   */
+  connected?: boolean;
+  /**
+   * The email of whoever connected the shared account, present only on a DEPLOYMENT row.
+   *
+   * Null is reachable: nobody has connected it yet, or the row predates this being recorded.
+   */
+  connectedBy?: string | null;
+  /**
+   * The vendor's own name for the connected account (an org, a bot, a workspace), present only on
+   * a DEPLOYMENT row.
+   *
+   * Shown instead of a person's name precisely because there isn't one here — the account is the
+   * deployment's, and this is what tells one Shared app's row apart from another's otherwise
+   * identical "connected" answer.
+   */
+  displayName?: string | null;
   /**
    * Whether a real call was last made with this credential, present only on a BROKERED row.
    *
@@ -213,9 +194,9 @@ export type PluginConnection = {
    * Composio's own dashboard. A held connection has no equivalent question, so its rows carry
    * neither field, and the absence of the pair is what tells the two READS apart — nothing more.
    *
-   * It is NOT how a reader learns how an app connects. That comes from {@link PluginServer.authScheme}
-   * on the server, and a page deriving it from a connection row instead would be a second answer to
-   * a question already carried.
+   * It is NOT how a reader learns how an app connects. That comes from the app's `connectsWith`
+   * (listApps), and a page deriving it from a connection row instead would be a second answer to a
+   * question already carried.
    */
   verified?: boolean;
   /**
@@ -271,8 +252,38 @@ export type PluginConnection = {
 
 export type PluginConnections = {
   connections: PluginConnection[];
-  redirectUri: string | null;
 };
+
+/**
+ * One of the person's own connections as listConnections answers it, in the shape the screens
+ * read: a held row carries `revoked`, a row the app keeps carries what its last check found.
+ */
+function personalRow(connection: Connection): PluginConnection {
+  return {
+    serverId: connection.appId,
+    scope: connection.scope ?? "",
+    connectedAt: connection.connectedAt,
+    holder: "person",
+    ...(connection.check === null
+      ? { revoked: connection.revoked }
+      : {
+          verified: connection.check.verified,
+          verifiedAt: connection.check.verifiedAt,
+          probe: connection.check.checkedAction,
+          checkable: connection.check.checkable,
+        }),
+  };
+}
+
+/**
+ * The connections that are the signed-in person's own. A Shared app's row is the deployment's, and
+ * every screen that asks "is this mine" must never read it as yes.
+ */
+export function personalConnections(
+  rows: PluginConnection[],
+): PluginConnection[] {
+  return rows.filter((row) => row.holder !== "deployment");
+}
 
 /**
  * The signed-in person's own connections.
@@ -284,41 +295,83 @@ export function connectionsQueryOptions() {
   return queryOptions({
     queryKey: pluginKeys.connections(),
     queryFn: async (): Promise<PluginConnections> => {
-      const response = await client("/api/plugins/connections", {
-        fallback: "Your connected accounts could not be loaded.",
+      const connections = await everyPage(async (cursor) => {
+        const page = await listConnections(
+          organizationId(),
+          "me",
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { fallback: "Couldn't load your connections." },
+        );
+        return { items: page.connections, nextCursor: page.nextCursor };
       });
-      return response.json();
-    },
-  });
-}
-
-export function pluginsPageQueryOptions() {
-  return queryOptions({
-    queryKey: pluginKeys.page(),
-    queryFn: async (): Promise<PluginsPage> => {
-      const response = await client("/api/plugins", {
-        fallback: "Plugins could not be loaded.",
-      });
-      return response.json();
+      return { connections: connections.map(personalRow) };
     },
   });
 }
 
 /**
- * Composio's app directory, narrowed by a search term.
- *
- * The term goes to our own endpoint because the vendor's client drops a search parameter and
- * answers with an unfiltered page, so filtering has to happen somewhere that admits to doing it.
+ * A Shared app's one account, which every Bot using the app acts as: whether it is connected, who
+ * connected it and the app's own name for it, with what its last check found. Read only for an app
+ * in Shared mode; a person's own connections never carry it.
  */
-export function composioAppsQueryOptions(query: string) {
+export function sharedConnectionQueryOptions(serverId: string) {
   return queryOptions({
-    queryKey: pluginKeys.composioApps(query),
-    queryFn: async (): Promise<{ apps: ComposioApp[] }> => {
-      const response = await client(
-        `/api/plugins/composio/apps?q=${encodeURIComponent(query)}`,
-        { fallback: "Composio's app directory could not be read." },
+    queryKey: pluginKeys.sharedConnection(serverId),
+    queryFn: async (): Promise<PluginConnection> => {
+      const shared = await getSharedConnection(organizationId(), serverId, {
+        fallback: "Couldn't load the shared account.",
+      });
+      return {
+        serverId: shared.appId,
+        scope: "",
+        connectedAt: shared.connectedAt ?? "",
+        holder: "deployment",
+        connected: shared.connected,
+        connectedBy: shared.connectedBy,
+        displayName: shared.accountName,
+        verified: shared.check?.verified ?? false,
+        verifiedAt: shared.check?.verifiedAt ?? null,
+        probe: shared.check?.checkedAction ?? null,
+        checkable: shared.check?.checkable ?? false,
+      };
+    },
+  });
+}
+
+/**
+ * What disconnecting this app would also end, as the server computed it.
+ *
+ * `siblings` are other apps' toolkit names (never this one) and `unanswered` is a COUNT of apps that
+ * could not be asked about. A deployment whose broker holds one account per app always answers
+ * empty.
+ */
+export type ConnectionSiblings = { siblings: string[]; unanswered: number };
+
+export function connectionSiblingsQueryOptions(serverId: string) {
+  return queryOptions({
+    queryKey: pluginKeys.siblings(serverId),
+    queryFn: async (): Promise<ConnectionSiblings> => {
+      const preview = await getConnectionDisconnectPreview(
+        organizationId(),
+        "me",
+        serverId,
+        { fallback: "Couldn't read which other apps share this connection." },
       );
-      return response.json();
+      const body: Partial<ConnectionSiblings> = {
+        siblings: preview.alsoEnds,
+        unanswered: preview.uncheckedCount,
+      };
+      /*
+       * NARROWED RATHER THAN TRUSTED: an answer that is not this shape is read as "nothing to say",
+       * which draws no warning, rather than a throw that takes the whole page down for a sentence.
+       */
+      return {
+        siblings: Array.isArray(body.siblings) ? body.siblings : [],
+        unanswered:
+          typeof body.unanswered === "number" && body.unanswered > 0
+            ? body.unanswered
+            : 0,
+      };
     },
   });
 }
@@ -331,12 +384,66 @@ export function agentPluginsQueryOptions(agentId: string) {
     queryKey: pluginKeys.forAgent(agentId),
     enabled: agentId.length > 0,
     refetchInterval: 15_000,
-    queryFn: async (): Promise<GrantedPlugins> => {
-      const response = await client(
-        `/api/plugins/for/${encodeURIComponent(agentId)}`,
-        { fallback: "This Bot's plugins could not be read." },
-      );
-      return response.json();
+    queryFn: async ({ signal }): Promise<GrantedPlugins> => {
+      const options = { signal, fallback: "Couldn't load this Bot's apps." };
+      // Every grant the Bot holds, page after page, so a Bot given a whole large app is read whole.
+      const grants = await everyPage(async (cursor) => {
+        const page = await listBotGrants(
+          organizationId(),
+          agentId,
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          options,
+        );
+        return { items: page.grants, nextCursor: page.nextCursor };
+      });
+      return grantedPluginsOf(grants);
+    },
+  });
+}
+
+/** One of the signed-in person's accounts at an app, as listConnectedAccounts answers it. */
+export type BrokeredAccountRecord = {
+  /** Which account a Disconnect or Make default press is about. Opaque. */
+  id: string;
+  /** What the app says the account is: an email address or a login. Null where it said none. */
+  identity: string | null;
+  /** What the person and their Bots call it: the identity, or "account 2" where there is none. */
+  label: string;
+  /** The account a Bot uses when it doesn't name one. */
+  isDefault: boolean;
+  connectedAt: string | null;
+};
+
+export type BrokeredAccounts = {
+  accounts: BrokeredAccountRecord[];
+  /** Whether this app can take another account beside the ones listed. The server decides. */
+  canAddAnother: boolean;
+};
+
+/**
+ * The person's own accounts at one brokered app. The server asks the app each time, so an account
+ * connected or ended elsewhere is listed as it stands now.
+ */
+export function brokeredAccountsQueryOptions(serverId: string) {
+  return queryOptions({
+    queryKey: pluginKeys.accounts(serverId),
+    queryFn: async (): Promise<BrokeredAccounts> => {
+      const fallback = "Couldn't list your accounts. Try again in a moment.";
+      // Whether another account can be added is the connection's, read beside its accounts.
+      const [accounts, connection] = await Promise.all([
+        everyPage(async (cursor) => {
+          const page = await listConnectedAccounts(
+            organizationId(),
+            "me",
+            serverId,
+            { limit: 100, ...(cursor ? { cursor } : {}) },
+            { fallback },
+          );
+          return { items: page.accounts, nextCursor: page.nextCursor };
+        }),
+        getConnection(organizationId(), "me", serverId, { fallback }),
+      ]);
+      return { accounts, canAddAnother: connection.canAddAccount };
     },
   });
 }

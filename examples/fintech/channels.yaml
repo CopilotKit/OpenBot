@@ -1,12 +1,12 @@
 channels:
   - id: general-assistant
     name: General Assistant
-    description: Plan, write, research, and get everyday work done.
+    description: Plan, write, research, and get everyday Descasio work done.
     permitted_agents: [general-assistant]
     allowed_groups: [all]
   - id: company-knowledge
     name: Descasio Knowledge
-    description: Find grounded answers in approved demo documents.
+    description: Find authorized answers from Descasio documents.
     permitted_agents: [knowledge]
     allowed_groups: [all]
   - id: engineering

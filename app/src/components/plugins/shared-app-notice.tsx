@@ -1,0 +1,83 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import {
+  botSharedAppsQueryOptions,
+  requestSharedUseMutationOptions,
+} from "@/lib/plugins/shared-use";
+
+/**
+ * What changing who can reach a Bot means for the shared accounts it uses, said BEFORE the change.
+ *
+ * An administrator's change is its own approval, so they are told that and nothing is asked of them.
+ * Anybody else is told plainly that the shared calls will be refused until an administrator agrees,
+ * and is given the one button that asks — the alternative being that the first person to find out
+ * is whoever the refused call was for.
+ */
+export function SharedAppNotice({
+  botId,
+  reason,
+}: {
+  botId: string;
+  reason: "publish" | "trigger";
+}) {
+  const queryClient = useQueryClient();
+  const me = useQuery(currentUserQueryOptions()).data;
+  const shared = useQuery(botSharedAppsQueryOptions(botId));
+  const ask = useMutation(requestSharedUseMutationOptions(queryClient));
+  const apps = shared.data?.apps ?? [];
+  if (apps.length === 0) return null;
+
+  if (isOrganizationAdmin(me?.role)) {
+    return (
+      <div className="space-y-1 text-sm">
+        {apps.map((app) => (
+          <p key={app.serverId}>
+            Saving also lets everyone who can use this Bot use the shared{" "}
+            {app.title} account.
+          </p>
+        ))}
+      </div>
+    );
+  }
+
+  const waiting = new Set(
+    (shared.data?.pending ?? []).map((request) => request.serverId),
+  );
+  return (
+    <div className="space-y-2 text-sm">
+      {apps.map((app) =>
+        waiting.has(app.serverId) ? (
+          <p className="text-muted-foreground" key={app.serverId}>
+            Waiting for an admin to approve the shared {app.title} account.
+          </p>
+        ) : app.covered ? null : (
+          <div className="flex flex-wrap items-center gap-2" key={app.serverId}>
+            <p className="text-amber-700 dark:text-amber-400">
+              This Bot can't use the shared {app.title} account until an admin
+              approves who can use the Bot.
+            </p>
+            <Button
+              aria-label={`Request approval for ${app.title}`}
+              disabled={ask.isPending}
+              onClick={() =>
+                ask.mutate({ botId, serverId: app.serverId, reason })
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Request approval
+            </Button>
+          </div>
+        ),
+      )}
+      {ask.error ? (
+        <p className="text-destructive" role="alert">
+          {ask.error.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}

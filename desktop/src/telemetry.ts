@@ -1,13 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ModelChoice } from "./ProviderPicker";
 
-export type SetupStep = "welcome" | "harness" | "model" | "install" | "ask";
+/**
+ * `connect` is the Start step, where OpenBot on this computer starts. `connect_openbot` is the
+ * first screen with an OpenBot that runs elsewhere chosen: the address field. The address itself is
+ * never part of an event.
+ */
+export type SetupStep =
+  | "welcome"
+  | "install"
+  | "account"
+  | "model"
+  | "connect"
+  | "connect_openbot";
 
 const HARNESSES = {
   crewai: "crewai",
   llamaindex: "llamaindex",
   agno: "agno",
   langgraph: "langgraph",
+  "langgraph-ts": "langgraph_ts",
   "google-adk": "google_adk",
   "pydantic-ai": "pydantic_ai",
   "microsoft-agent-framework": "microsoft_agent_framework",
@@ -26,8 +38,14 @@ export type SetupEvent =
   | { kind: "harness_chosen"; harness: Harness }
   | {
       kind: "model_chosen";
-      provider: "openai" | "anthropic" | "compatible" | "none";
-      credential_path: "subscription" | "api_key" | "none";
+      provider:
+        | "openai"
+        | "anthropic"
+        | "google"
+        | "xai"
+        | "compatible"
+        | "none";
+      credential_path: "subscription" | "api_key" | "oauth" | "none";
       custom_base_url: boolean;
     };
 
@@ -62,11 +80,20 @@ export function modelChoiceEvent(
       custom_base_url: Boolean(choice.baseUrl?.trim()),
     };
   }
+  if ((provider === "google" || provider === "xai") && login === "oauth") {
+    return {
+      kind: "model_chosen",
+      provider,
+      credential_path: "oauth",
+      custom_base_url: Boolean(choice.baseUrl?.trim()),
+    };
+  }
   if (provider === "openai-compatible" && login === "endpoint") {
     return {
       kind: "model_chosen",
       provider: "compatible",
-      credential_path: "api_key",
+      credential_path:
+        choice.apiKey?.trim() || choice.saved === true ? "api_key" : "none",
       custom_base_url: Boolean(choice.baseUrl?.trim()),
     };
   }

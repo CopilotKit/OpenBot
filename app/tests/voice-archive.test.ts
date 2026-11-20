@@ -1,0 +1,203 @@
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import type { VoiceSessionRecord } from "@openbot/shared/voice-session";
+import {
+  loadVoiceArchive,
+  saveVoiceSession,
+  voiceArchiveContext,
+  voiceSessionInput,
+  withVoiceChats,
+} from "../src/lib/voice/archive";
+import { queryClient } from "../src/query-client";
+import { conversationPath, problem } from "./conversations-api";
+
+afterEach(() => {
+  mock.restore();
+  queryClient.clear();
+});
+function mockFetch(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+) {
+  spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(handler, { preconnect: globalThis.fetch.preconnect }),
+  );
+}
+
+const call = (
+  id: string,
+  anchorMessageId: string | null = null,
+): VoiceSessionRecord => ({
+  id,
+  anchorMessageId,
+  channelId: "channel-1",
+  startedAt: "2026-09-22T12:00:00.000Z",
+  endedAt: "2026-09-22T12:01:00.000Z",
+  durationSeconds: 60,
+  summary: "Planned tomorrow's recording.",
+  summaryStatus: "ready",
+  transcript: [{ id: "user", role: "user", text: "Let's record tomorrow." }],
+});
+
+/** Where a conversation's saved calls are listed and saved: the API's address for them. */
+const SESSIONS = conversationPath("channel-1", "/voice-sessions");
+
+/** A saved call as the API answers it: its conversation is `conversationId`. */
+function answered({ channelId, ...rest }: VoiceSessionRecord) {
+  return { ...rest, conversationId: channelId };
+}
+
+test("call cards keep chronological order around delegated messages and missing anchors", () => {
+  const messages = [
+    { id: "before", role: "user" as const, content: "Before" },
+    { id: "delegate", role: "assistant" as const, content: "Tool result" },
+  ];
+  const result = withVoiceChats(messages, [
+    call("first"),
+    call("second", "before"),
+    call("third", "before"),
+    call("fourth", "missing"),
+    call("fifth", "missing"),
+  ]);
+  expect(result.map((message) => message.id)).toEqual([
+    "voice-chat:first",
+    "before",
+    "voice-chat:second",
+    "voice-chat:third",
+    "delegate",
+    "voice-chat:fourth",
+    "voice-chat:fifth",
+  ]);
+});
+
+test("history loading follows pagination and preserves failed-summary transcripts as context", async () => {
+  const urls: string[] = [];
+  mockFetch(async (input) => {
+    urls.push(String(input));
+    return Response.json(
+      urls.length === 1
+        ? { sessions: [answered(call("one"))], nextCursor: "next page" }
+        : {
+            sessions: [
+              {
+                ...answered(call("two")),
+                summary: null,
+                summaryStatus: "failed",
+              },
+            ],
+            nextCursor: null,
+          },
+    );
+  });
+  const records = await loadVoiceArchive("channel-1");
+  expect(records).toHaveLength(2);
+  expect(urls).toEqual([
+    `${SESSIONS}?limit=50`,
+    `${SESSIONS}?limit=50&cursor=next+page`,
+  ]);
+  expect(voiceArchiveContext(records)).toContain(
+    "user: Let's record tomorrow.",
+  );
+});
+
+test("a busy summary response retains the server's durable transcript instead of marking it unsaved", async () => {
+  // Saved, with its summary still to come: the API answers 200 and says so in `notice`.
+  mockFetch(async (input, init) =>
+    init?.method === "POST" && String(input) === SESSIONS
+      ? Response.json({
+          session: {
+            ...answered(call("busy")),
+            summary: null,
+            summaryStatus: "failed",
+          },
+          notice: "Summary service busy",
+        })
+      : problem(404, "Not found."),
+  );
+  saveVoiceSession(voiceSessionInput(call("busy")));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const records = await loadVoiceArchive("channel-1");
+  expect(records[0]?.saveState).toBeUndefined();
+  expect(records[0]?.summaryStatus).toBe("failed");
+  expect(records[0]?.saveError).toBe("Summary service busy");
+});
+
+test("a save answered by a page that is not JSON reads as a failed save, not a parser error", async () => {
+  for (const [id, response] of [
+    [
+      "proxy",
+      () =>
+        new Response("<html><body>502 Bad Gateway</body></html>", {
+          status: 502,
+          headers: { "content-type": "text/html" },
+        }),
+    ],
+    ["empty", () => new Response(null, { status: 204 })],
+  ] as const) {
+    mockFetch(async (_input, init) =>
+      init?.method === "POST"
+        ? response()
+        : Response.json({ sessions: [], nextCursor: null }),
+    );
+    saveVoiceSession(voiceSessionInput(call(id)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const record = (await loadVoiceArchive("channel-1")).find(
+      (entry) => entry.id === id,
+    );
+    expect(record?.saveState).toBe("unsaved");
+    expect(record?.saveError).toStartWith("Could not save this voice chat.");
+    mock.restore();
+    queryClient.clear();
+  }
+});
+
+test("save failure remains retryable with the same session id and original transcript", async () => {
+  const sent: unknown[] = [];
+  const keys: (string | null)[] = [];
+  let fail = true;
+  mockFetch(async (input, init) => {
+    if (String(input).split("?")[0] !== SESSIONS)
+      return problem(404, "Not found.");
+    if (init?.method !== "POST")
+      return Response.json({ sessions: [], nextCursor: null });
+    sent.push(JSON.parse(String(init.body)));
+    keys.push(new Headers(init.headers).get("Idempotency-Key"));
+    return fail
+      ? problem(503, "Database unavailable")
+      : Response.json({ session: answered(call("retry")) });
+  });
+  const input = voiceSessionInput(call("retry"));
+  saveVoiceSession(input);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect((await loadVoiceArchive("channel-1"))[0]?.saveState).toBe("unsaved");
+  fail = false;
+  saveVoiceSession(input);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect((await loadVoiceArchive("channel-1"))[0]?.saveState).toBeUndefined();
+  // The conversation is in the address; the call itself is the body, the same both times.
+  const { channelId: _conversation, ...body } = input;
+  expect(sent).toEqual([body, body]);
+  expect(keys.every(Boolean)).toBe(true);
+});
+
+test("earlier calls' context is cut between characters", () => {
+  const emoji = "\u{1F600}";
+  const context = voiceArchiveContext([
+    { ...call("long"), summary: `${emoji.repeat(6000)}.` },
+  ]);
+  expect(context.isWellFormed()).toBe(true);
+  expect(context).toBe(`${emoji.repeat(5999)}.`);
+});
+
+/*
+ * The transcript skips re-rendering a voice-chat card whose message object is the same one it drew
+ * last time. Building a new object for every call on every render meant every card re-rendered on
+ * every token of a reply streaming below it.
+ */
+test("the same call gives the same card message on every render", () => {
+  const messages = [{ id: "before", role: "user" as const, content: "Before" }];
+  const calls = [call("first", "before")];
+
+  const once = withVoiceChats(messages, calls);
+  const again = withVoiceChats([...messages], calls);
+
+  expect(again[1]).toBe(once[1]);
+});

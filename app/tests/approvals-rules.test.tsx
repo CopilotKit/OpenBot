@@ -1,0 +1,616 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { InlineApproval } from "@/components/approvals/inline-approval";
+import { ApprovalSettings } from "@/components/approvals/settings";
+import { toVisibleChatItems } from "@/components/channels/chat-messages";
+import {
+  groupToolSteps,
+  ToolActivity,
+} from "@/components/channels/tool-activity";
+import { TeamBotConsents } from "@/components/settings/team-bot-consents";
+import { deploymentKeys } from "@/lib/deployment/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
+import { DEPLOYMENT_PATH } from "./admin-settings-api";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  problemResponse,
+} from "./approvals-api";
+import {
+  answerBotsList,
+  CLEAR_TEAM_BOT_CONSENTS_PATH,
+  noContent,
+  type SentRequest,
+  sentRequest,
+} from "./bots-api";
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(() => GlobalRegistrator.unregister());
+
+const originalFetch = global.fetch;
+let role: "user" | "admin" = "user";
+const sent: { path: string; method: string; body: unknown }[] = [];
+
+const inbox = {
+  enabled: false,
+  requests: [
+    {
+      id: "request-1",
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      action: {
+        botId: "Shopper",
+        toolRef: "computer_click",
+        effect: "write",
+        scope: "shop.example",
+        threadId: "thread",
+        args: { element: "Pay now" },
+        target: {},
+        toolCallId: "pay-call",
+        policy: {
+          behaviour: "hand_off",
+          source: "safety",
+          reason:
+            "Paying, purchasing or moving money is always done by the person.",
+        },
+      },
+    },
+  ],
+  rules: [
+    {
+      id: "mine",
+      botId: "*",
+      toolRef: "mcp/gmail/*",
+      effect: "*",
+      scope: "*",
+      behaviour: "allow",
+    },
+  ],
+  teamRules: [
+    {
+      id: "locked",
+      botId: "*",
+      toolRef: "mcp/drive/share",
+      effect: "*",
+      scope: "*",
+      behaviour: "ask",
+    },
+  ],
+  preferences: { enabled: false, autoReview: false, hostCommands: "allow" },
+  team: {
+    enforceAutoReview: true,
+    customRulesEnabled: true,
+    hostCommandsCap: "ask",
+  },
+  hostCommands: "ask",
+  questions: [],
+};
+
+/** Per-test changes to the inbox the server returns. */
+let inboxOverride: Record<string, unknown> = {};
+/** A refusal the server gives the next time a rule is added, or none. */
+let refuseRule: string | null = null;
+
+beforeEach(() => {
+  sent.length = 0;
+  inboxOverride = {};
+  refuseRule = null;
+  role = "user";
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(path);
+      if (init?.method && init.method !== "GET") {
+        sent.push({
+          path: url,
+          method: init.method,
+          body: init.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        if (
+          url === "/api/v2/organizations/default/people/me/approval-rules" &&
+          refuseRule
+        ) {
+          const error = refuseRule;
+          refuseRule = null;
+          return problemResponse(400, error);
+        }
+        return approvalWriteResponse(url, init) ?? Response.json({ ok: true });
+      }
+      {
+        const approvals = approvalInboxResponse(url, {
+          ...inbox,
+          ...inboxOverride,
+        });
+        if (approvals) return approvals;
+      }
+      const bots = answerBotsList(path, init, {
+        visible: [{ id: "shopper-bot", name: "Shop" }],
+      });
+      if (bots) return bots;
+      if (url === ME_PATH)
+        return meResponse({
+          user: { id: "me", email: "me@example.test", role },
+        });
+      return new Response(null, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+});
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+/** A screen in a router of one route, for the links it holds. */
+function draw(
+  screen: ReactNode = <ApprovalSettings />,
+  edition: "team" | "personal" = "team",
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  client.setQueryData(deploymentKeys.capabilities(), { edition });
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: createRootRoute({ component: () => screen }),
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+test("organization rules are locked for members, enforced auto-review is shown as required, and the host cap is named", async () => {
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Ask before taking action (organization rule)");
+  const mine = view.getByRole("combobox", {
+    name: "Behaviour for Any action on Gmail",
+  });
+  expect(mine.textContent).toContain("Take action without asking");
+  expect(view.getByText("Locked")).toBeTruthy();
+  const review = view.getByRole("switch", { name: "Auto-review" });
+  expect(review.getAttribute("aria-checked")).toBe("true");
+  expect(view.getByText(/An admin requires this/)).toBeTruthy();
+  expect(
+    view.getByText(/An admin limits this to "Ask every time"/),
+  ).toBeTruthy();
+  expect(view.getByText(/Organization rules are locked/)).toBeTruthy();
+  expect(view.queryByText("Organization settings")).toBeNull();
+});
+
+test("a member changes a saved rule in place", async () => {
+  const view = draw(<ApprovalSettings />);
+  const mine = await view.findByRole("combobox", {
+    name: "Behaviour for Any action on Gmail",
+  });
+  const user = userEvent.setup({ document });
+  await user.click(mine);
+  await user.click(
+    await view.findByRole("option", { name: "Hand off to you" }),
+  );
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/v2/organizations/default/people/me/approval-rules/mine",
+      method: "PATCH",
+      body: { behaviour: "hand_off" },
+    }),
+  );
+  expect(
+    view.queryByRole("combobox", { name: "Behaviour for Share on Drive" }),
+  ).toBeNull();
+});
+
+test("a member adds a rule with one of the four behaviours", async () => {
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Add a rule");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a rule/ }));
+  await user.type(
+    await view.findByRole("textbox", { name: "Tool or app" }),
+    "mcp/slack/*",
+  );
+  // Rules here apply to every Bot, so there is no Bot to name.
+  expect(view.queryByRole("textbox", { name: "Bot" })).toBeNull();
+  await user.click(view.getByRole("combobox", { name: "Behaviour" }));
+  await user.click(
+    await view.findByRole("option", { name: "Take action if pre-approved" }),
+  );
+  await user.click(view.getByRole("button", { name: "Save rule" }));
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/v2/organizations/default/people/me/approval-rules",
+      method: "POST",
+      body: {
+        botId: "*",
+        toolRef: "mcp/slack/*",
+        effect: "*",
+        scope: "*",
+        behaviour: "pre_approved",
+      },
+    }),
+  );
+});
+
+test("a rule that is not saved keeps the dialog open, with what was typed and why", async () => {
+  refuseRule = "That tool is not one a Bot can use.";
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Add a rule");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a rule/ }));
+  await user.type(
+    await view.findByRole("textbox", { name: "Tool or app" }),
+    "mcp/nowhere/*",
+  );
+  await user.click(view.getByRole("button", { name: "Save rule" }));
+  const dialog = await view.findByRole("dialog");
+  expect((await within(dialog).findByRole("alert")).textContent).toContain(
+    "That tool is not one a Bot can use.",
+  );
+  expect(
+    (
+      within(dialog).getByRole("textbox", {
+        name: "Tool or app",
+      }) as HTMLInputElement
+    ).value,
+  ).toBe("mcp/nowhere/*");
+  // Saved the second time, the dialog closes.
+  await user.click(within(dialog).getByRole("button", { name: "Save rule" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(
+    sent.filter(
+      (request) =>
+        request.path ===
+        "/api/v2/organizations/default/people/me/approval-rules",
+    ),
+  ).toHaveLength(2);
+});
+
+test("two rules for one tool are told apart by the rest of what they match, never cut short", async () => {
+  inboxOverride = {
+    rules: [
+      {
+        id: "anywhere",
+        botId: "*",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "*",
+        behaviour: "ask",
+      },
+      {
+        id: "one-site",
+        botId: "*",
+        toolRef: "computer_click",
+        effect: "write",
+        scope: "checkout.a-very-long-shop-name.example",
+        behaviour: "allow",
+      },
+    ],
+  };
+  const view = draw(<ApprovalSettings />);
+  const match = await view.findByText(
+    "changes on checkout.a-very-long-shop-name.example",
+  );
+  expect(match.className).toContain("line-clamp-none");
+  // The action, in its approval card's words, stays the row's title.
+  expect(view.getAllByText("Click")).toHaveLength(2);
+});
+
+test("with personal rules switched off by the team, they are shown as not applying and none can be added", async () => {
+  inboxOverride = {
+    team: { ...inbox.team, customRulesEnabled: false },
+  };
+  const view = draw(<ApprovalSettings />);
+  expect(
+    await view.findByText(
+      /An admin has turned off personal rules\. Yours are kept but don't apply\./,
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Add a rule")).toBeNull();
+});
+
+test("an administrator is told where team settings are", async () => {
+  role = "admin";
+  const view = draw(<ApprovalSettings />);
+  const link = await view.findByRole("link", { name: "Admin → Approvals" });
+  expect(link.getAttribute("href")).toBe("/admin/approvals");
+});
+
+test("the personal edition's one person is not pointed at an Admin it does not have", async () => {
+  role = "admin";
+  const served = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      String(path) === DEPLOYMENT_PATH
+        ? Response.json({ edition: "personal" })
+        : served(path, init),
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw(<ApprovalSettings />, "personal");
+  await view.findByText("Rules for every Bot");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(view.queryByRole("link", { name: "Admin → Approvals" })).toBeNull();
+});
+
+test("a member is not pointed at Admin", async () => {
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Rules for every Bot");
+  expect(view.queryByRole("link", { name: "Admin → Approvals" })).toBeNull();
+});
+
+test("rules for every Bot point to where rules for a single Bot are", async () => {
+  inboxOverride = {
+    rules: [
+      ...inbox.rules,
+      {
+        id: "one-bot",
+        botId: "shopper-bot",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "*",
+        behaviour: "ask",
+      },
+    ],
+  };
+  const view = draw(<ApprovalSettings />);
+  const link = await view.findByRole("link", { name: "that Bot's page" });
+  expect(link.getAttribute("href")).toBe("/bots");
+  // A rule naming one Bot lives on that Bot's page, not here.
+  expect(
+    view.queryByRole("combobox", { name: "Behaviour for Click" }),
+  ).toBeNull();
+});
+
+test("a rule naming no Bot this person can open is listed so it can be removed", async () => {
+  inboxOverride = {
+    rules: [
+      ...inbox.rules,
+      {
+        id: "orphan",
+        botId: "Shopper",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "*",
+        behaviour: "allow",
+      },
+    ],
+  };
+  const view = draw(<ApprovalSettings />);
+  expect(await view.findByText("Rules for other Bots")).toBeTruthy();
+  expect(
+    view.getByRole("combobox", { name: "Behaviour for Click" }),
+  ).toBeTruthy();
+});
+
+test("a pending change is drawn in the conversation where the action was, and decided there", async () => {
+  const view = render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <InlineApproval toolCallId="pay-call" fallback={<p>Clicked on page</p>} />
+      <InlineApproval
+        toolCallId="other-call"
+        fallback={<p>Filled in field</p>}
+      />
+    </QueryClientProvider>,
+  );
+  await view.findByRole("region", { name: "Waiting for your approval" });
+  expect(view.getByText("Click on shop.example")).toBeTruthy();
+  // Another call's line is left to its own renderer.
+  expect(view.getByText("Filled in field")).toBeTruthy();
+  expect(view.queryByText("Clicked on page")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "I did it myself" }));
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/v2/organizations/default/people/me/approvals/request-1/decide",
+      method: "POST",
+      body: { decision: "handled" },
+    }),
+  );
+});
+
+test("in the real transcript shape a waiting click is folded into browser activity, so its card is drawn beside the group", async () => {
+  // What the channel transcript builds from the conversation: a navigate that finished and the
+  // click the chat stopped on, unanswered, grouped into one browser-activity line.
+  const items = groupToolSteps(
+    toVisibleChatItems([
+      { id: "u1", role: "user", content: "Order a pizza on httpbin" },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "nav-call",
+            type: "function",
+            function: {
+              name: "computer_navigate",
+              arguments: '{"url":"https://httpbin.org/forms/post"}',
+            },
+          },
+          {
+            id: "pay-call",
+            type: "function",
+            function: {
+              name: "computer_click",
+              arguments: '{"ref":"e7","snapshotId":3}',
+            },
+          },
+        ],
+      },
+      {
+        id: "t1",
+        role: "tool",
+        toolCallId: "nav-call",
+        content: '{"ok":true,"url":"https://httpbin.org/forms/post"}',
+      },
+    ] as never),
+    // Browser steps fold whatever the app draws, so nothing else needs naming here.
+    () => false,
+  );
+  const group = items.find((item) => item.kind === "tools");
+  if (group?.kind !== "tools") throw new Error("no tool group");
+  const view = render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      {/* ToolActivity mounts the waiting cards beside its folded line itself. */}
+      <ToolActivity group={group} active={false} />
+    </QueryClientProvider>,
+  );
+  await view.findByRole("region", { name: "Waiting for your approval" });
+  // Only the waiting call gets a card; the finished navigate does not.
+  expect(
+    view.getAllByRole("region", { name: "Waiting for your approval" }),
+  ).toHaveLength(1);
+  expect(view.getByRole("button", { name: "I did it myself" })).toBeTruthy();
+});
+
+test("personal approvals keep the person's controls without team-only explanations or shared Bots", async () => {
+  inboxOverride = {
+    teamRules: [],
+    team: { enforceAutoReview: false, customRulesEnabled: true },
+    hostCommands: "allow",
+  };
+  const view = draw(
+    <>
+      <ApprovalSettings />
+      <TeamBotConsents />
+    </>,
+    "personal",
+  );
+  await view.findByText("Rules for every Bot");
+  expect(view.queryByText(/Organization rules are locked/)).toBeNull();
+  expect(view.queryByText("Shared Bots")).toBeNull();
+  expect(view.getByRole("switch", { name: "Extra vigilant" })).toBeTruthy();
+  expect(view.getByRole("switch", { name: "Auto-review" })).toBeTruthy();
+});
+test("team approvals still show the shared Bot account controls", async () => {
+  const view = draw(<TeamBotConsents />);
+  expect(await view.findByText("Shared Bots")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Reset" })).toBeTruthy();
+});
+
+test("Reset forgets every answer the person gave shared Bots, as the API's own write for them", async () => {
+  const cleared: SentRequest[] = [];
+  const served = global.fetch;
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = sentRequest(path, init);
+      if (request.path !== CLEAR_TEAM_BOT_CONSENTS_PATH)
+        return served(path, init);
+      cleared.push(request);
+      return noContent();
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = draw(<TeamBotConsents />);
+  fireEvent.click(await view.findByRole("button", { name: "Reset" }));
+  expect(
+    await view.findByText("Reset. Each shared Bot will ask again."),
+  ).toBeTruthy();
+  expect(cleared).toEqual([
+    {
+      method: "POST",
+      path: CLEAR_TEAM_BOT_CONSENTS_PATH,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: undefined,
+    },
+  ]);
+});
+
+/*
+ * What always asks, said where the switches are, in the words onboarding uses, and only what is
+ * true: a Bot deleting a file in its own workspace is an ordinary change
+ * (server/src/approvals/policy.ts, NOT_ACCOUNT_ACTIONS), so the page must not promise that every
+ * delete asks. The switch says it adds every change on top.
+ */
+test.each(["team", "personal"] as const)(
+  "the %s edition says what always asks, and that a Bot's own workspace is left out of it",
+  async (edition) => {
+    inboxOverride = {
+      teamRules: [],
+      team: { enforceAutoReview: false, customRulesEnabled: true },
+    };
+    const view = draw(<ApprovalSettings />, edition);
+    await view.findByText("Rules for every Bot");
+    const said = view.container.textContent ?? "";
+    for (const sentence of [
+      "Bots ask for your approval before deleting, sending, sharing, posting, or paying in your apps or on websites. You can allow each one once, for a conversation, or always.",
+      "They also ask before every edit or command in a folder on your own computer.",
+      "Bots leave changing a password on a website for you to do yourself.",
+      "Bots can create, edit, and delete files in their own workspace without asking, unless your settings or rules say so.",
+      "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
+    ])
+      expect(said.replace(/\s+/g, " ")).toContain(sentence);
+    expect(said).not.toContain(
+      "Review a Bot's changes to websites, connected apps, and files.",
+    );
+  },
+);
+
+/*
+ * FOUND IN THE 1.0 RC1 MAC PASS: a rule saved from an approval card's "Always allow here" was
+ * titled by its tool id ("computer_click", "composio-gmail/GMAIL_SEND_EMAIL" over "on
+ * composio-gmail"). It is titled in the words the card used for the same action.
+ */
+test("a saved rule is titled in its approval card's words, never by its tool id", async () => {
+  inboxOverride = {
+    rules: [
+      {
+        id: "click-here",
+        botId: "*",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "en.wikipedia.org",
+        behaviour: "allow",
+      },
+      {
+        id: "send-mail",
+        botId: "*",
+        toolRef: "composio-gmail/GMAIL_SEND_EMAIL",
+        effect: "*",
+        scope: "composio-gmail",
+        behaviour: "allow",
+      },
+    ],
+    teamRules: [],
+  };
+  const view = draw(<ApprovalSettings />);
+  expect(
+    await view.findByRole("combobox", { name: "Behaviour for Click" }),
+  ).toBeTruthy();
+  expect(view.getByText("Click")).toBeTruthy();
+  expect(view.getByText("on en.wikipedia.org")).toBeTruthy();
+  expect(view.getByText("Send email on Gmail")).toBeTruthy();
+  const text = view.container.textContent ?? "";
+  expect(text).not.toContain("computer_click");
+  expect(text).not.toContain("composio");
+  expect(text).not.toContain("GMAIL_SEND_EMAIL");
+});

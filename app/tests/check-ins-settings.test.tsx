@@ -1,0 +1,204 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { CheckInsSection } from "@/components/settings/check-ins";
+import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
+import { authKeys } from "@/lib/auth/queries";
+import { deploymentKeys } from "@/lib/deployment/queries";
+import { queryClient } from "@/query-client";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
+import { answerBotsList } from "./bots-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
+import { settleReactWork } from "./settle-react-work";
+
+/*
+ * The person's own switch for every Bot's check-ins, in Settings, Notifications, and what it says
+ * when an admin turned check-ins off for them. Each Bot's own check-ins (on its Memory page, or on
+ * What it can do in the personal edition) say the same, since none of them runs while either is off.
+ */
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+let proactive: "on" | "off" = "on";
+let allowed = true;
+const writes: { request: string; body: unknown }[] = [];
+
+function serving() {
+  writes.length = 0;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    const method = init?.method ?? "GET";
+    const preferences = () => ({
+      messageListEmphasis: "thread",
+      selfHostBannerDismissed: true,
+      narration: null,
+      skin: "openbot",
+      proactive,
+    });
+    if (path === PREFERENCES_PATH && method === "PATCH") {
+      const body = JSON.parse(String(init?.body));
+      writes.push({ request: `${method} ${path}`, body });
+      proactive = body.proactive;
+      return preferencesResponse({ preferences: preferences() });
+    }
+    if (path === PREFERENCES_PATH)
+      return preferencesResponse({ preferences: preferences() });
+    if (pathOf(path) === CHECK_INS_PATH)
+      return Response.json({
+        nextCursor: null,
+        checkIns: [
+          {
+            id: "p1",
+            botId: "expenses",
+            conversationId: "c1",
+            focus: "",
+            enabled: true,
+            intervalMinutes: 60,
+            nextRunAt: "2026-10-30T12:00:00Z",
+            lastRunAt: null,
+            lastStatus: "idle",
+            lastError: null,
+          },
+        ],
+        allowed,
+      });
+    const bots = answerBotsList(path, init, {
+      visible: [{ id: "expenses", name: "Expenses" }],
+    });
+    if (bots) return bots;
+    return Response.json({ error: "not served" }, { status: 404 });
+  }) as unknown as typeof fetch;
+}
+
+beforeEach(() => {
+  proactive = "on";
+  allowed = true;
+  // A save writes the stored preferences into the app's one cache, so the switch draws from it.
+  queryClient.clear();
+  queryClient.setQueryData(authKeys.currentUser(), {
+    id: "alice",
+    email: "alice@example.com",
+    name: "Alice",
+    role: "user",
+  });
+});
+
+async function draw(node: ReactNode) {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => node }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+test("turning check-ins off for all Bots saves it and says so", async () => {
+  serving();
+  const view = await draw(<CheckInsSection />);
+  const toggle = await view.findByRole("switch", {
+    name: "Check-ins for all your Bots",
+  });
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  expect(
+    view.getByText(
+      "On. Your Bots check what they can read and tell you when something needs you, at most once an hour.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(writes).toEqual([
+      {
+        request: `PATCH ${PREFERENCES_PATH}`,
+        body: { proactive: "off" },
+      },
+    ]),
+  );
+  expect(
+    await view.findByText("Off. None of your Bots check in for you."),
+  ).toBeTruthy();
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+});
+
+test("in the personal edition, the switch reads the same and names no page", async () => {
+  serving();
+  // No memory there, so no Memory page: see `offersMemory`.
+  queryClient.setQueryData(deploymentKeys.capabilities(), {
+    generativeUi: true,
+    selfHostBanner: false,
+    localEvaluation: true,
+    edition: "personal",
+  });
+  const view = await draw(<CheckInsSection />);
+  expect(
+    await view.findByText(
+      "On. Your Bots check what they can read and tell you when something needs you, at most once an hour.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/Memory page|What it can do/)).toBeNull();
+});
+
+test("turned off by an admin, the switch says who and can't be turned back on", async () => {
+  allowed = false;
+  serving();
+  const view = await draw(<CheckInsSection />);
+  expect(await view.findByText("Turned off by your admin.")).toBeTruthy();
+  const toggle = view.getByRole("switch", {
+    name: "Check-ins for all your Bots",
+  });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  expect(toggle.hasAttribute("data-disabled")).toBe(true);
+});
+
+test("a Bot's own check-ins say they are off for all your Bots, and won't run now", async () => {
+  proactive = "off";
+  serving();
+  const view = await draw(<ProactiveResearchSettings agentId="expenses" />);
+  expect(
+    await view.findByText(/You turned off check-ins for all your Bots in/),
+  ).toBeTruthy();
+  expect(view.getByRole("link", { name: "Routines" })).toBeTruthy();
+  expect(
+    view.getByText("Every hour · Tells you · Off for all your Bots"),
+  ).toBeTruthy();
+});
+
+test("a Bot's own check-ins say an admin turned them off", async () => {
+  allowed = false;
+  serving();
+  const view = await draw(<ProactiveResearchSettings agentId="expenses" />);
+  expect(
+    await view.findByText("Your admin turned off check-ins for you."),
+  ).toBeTruthy();
+  expect(
+    view.getByText("Every hour · Tells you · Turned off by your admin"),
+  ).toBeTruthy();
+});

@@ -1,6 +1,11 @@
 /** Root package.json owns release versions; generated overlays identify each build. */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  formatVersion,
+  parseVersion,
+  type Version,
+} from "../../scripts/release-version";
 
 const root = resolve(import.meta.dir, "../..");
 const native = "desktop/src-tauri/";
@@ -15,17 +20,25 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 function version(value: unknown, label: string, allowPlaceholder = false) {
+  let parsed: Version | undefined;
+  try {
+    parsed = typeof value === "string" ? parseVersion(value) : undefined;
+  } catch {
+    parsed = undefined;
+  }
   if (
-    typeof value !== "string" ||
-    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value) ||
-    value.split(".").some((part) => Number(part) > 65535) ||
-    (!allowPlaceholder && value === "0.0.0")
+    !parsed ||
+    [parsed.major, parsed.minor, parsed.patch].some((part) => part > 65535) ||
+    (!allowPlaceholder &&
+      parsed.major === 0 &&
+      parsed.minor === 0 &&
+      parsed.patch === 0)
   ) {
     throw new Error(
-      `${label}: expected a non-placeholder numeric release version (major.minor.patch)`,
+      `${label}: expected a non-placeholder release version (major.minor.patch with an optional -rc.N or -beta.N)`,
     );
   }
-  return value;
+  return formatVersion(parsed);
 }
 
 function state() {
@@ -91,6 +104,62 @@ function replaceVersion(text: string, releaseVersion: string, lock: boolean) {
   return result;
 }
 
+/**
+ * An internal build's version, ordered after the release package.json names and before the next:
+ * `X.Y.(Z+1)-internal.<commits>.g<commit>` after the release `X.Y.Z`, and
+ * `X.Y.Z-rc.N.internal.<commits>.g<commit>` after the candidate `X.Y.Z-rc.N` (or `-beta.N`).
+ *
+ * Installers and the app order versions by semver (https://semver.org/#spec-item-11), where a
+ * prerelease orders before its own release. package.json names the last release, so every build
+ * from the tree comes after it, yet `0.3.3-internal.860.g…`, built after 0.3.3 was released, read
+ * as older than 0.3.3 and the Windows installer offered to uninstall the "newer" 0.3.3 first. A
+ * prerelease of the next patch orders after X.Y.Z and before X.Y.(Z+1) and every later release.
+ * More identifiers after a candidate's order after rc.N, and `N` still orders it before rc.(N+1).
+ *
+ * semver compares a prerelease identifier that is a number as a number and any other as text.
+ * Named after the commit alone, two internal builds ordered by their hashes (`g4400ba…` before
+ * `gd298de…`), so the number of commits before the hash orders a later commit after an earlier one.
+ */
+function internalVersion(
+  releaseVersion: string,
+  commits: number,
+  sourceSha: string,
+) {
+  const build = `internal.${commits}.g${sourceSha.slice(0, 12)}`;
+  const release = parseVersion(releaseVersion);
+  if (release.pre) return `${releaseVersion}.${build}`;
+  // Windows keeps each part of the numeric version in 16 bits (see `version`).
+  if (release.patch >= 65535) {
+    throw new Error(
+      `${releaseVersion}: the next patch does not fit a Windows version field`,
+    );
+  }
+  return `${formatVersion({ ...release, patch: release.patch + 1 })}-${build}`;
+}
+
+/** The commits in HEAD's history. A shallow checkout has only some of them, so it is refused. */
+function commitCount() {
+  const shallow = Bun.spawnSync(
+    ["git", "rev-parse", "--is-shallow-repository"],
+    { cwd: root },
+  );
+  if (shallow.stdout.toString().trim() !== "false") {
+    throw new Error(
+      "An internal build is numbered by its commit count, and this checkout is shallow or not a repository. Check out the full history (actions/checkout with fetch-depth: 0).",
+    );
+  }
+  const count = Bun.spawnSync(["git", "rev-list", "--count", "HEAD"], {
+    cwd: root,
+  });
+  const text = count.stdout.toString().trim();
+  if (count.exitCode !== 0 || !/^[1-9][0-9]*$/.test(text)) {
+    throw new Error(
+      `Could not count the source commits: ${count.stderr.toString().trim()}`,
+    );
+  }
+  return Number(text);
+}
+
 function main(command: string | undefined) {
   if (!["sync", "check", "internal", "release"].includes(command ?? "")) {
     throw new Error(
@@ -126,7 +195,7 @@ function main(command: string | undefined) {
   }
   const buildVersion =
     command === "internal"
-      ? `${releaseVersion}-internal.g${sourceSha.slice(0, 12)}`
+      ? internalVersion(releaseVersion, commitCount(), sourceSha)
       : releaseVersion;
   const metadata = {
     version: buildVersion,
@@ -136,9 +205,12 @@ function main(command: string | undefined) {
   };
   // Tauri copies semver into both Apple keys unchanged. Keep those numeric while
   // retaining the complete internal identity in custom plist keys and app metadata.
+  // They are the build version's major.minor.patch, the same numbers Tauri puts in
+  // the Windows fixed version fields, so neither platform's numbers go backwards.
+  const numeric = buildVersion.split("-")[0];
   const fields = {
-    CFBundleShortVersionString: releaseVersion,
-    CFBundleVersion: releaseVersion,
+    CFBundleShortVersionString: numeric,
+    CFBundleVersion: numeric,
     OpenBotBuildVersion: buildVersion,
     OpenBotSourceRevision: sourceSha,
   };

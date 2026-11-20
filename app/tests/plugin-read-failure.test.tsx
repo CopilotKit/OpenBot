@@ -1,0 +1,279 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { appKeys } from "@/lib/apps/queries";
+import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
+import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
+import { Route as AdminToolRoute } from "@/routes/_authed/admin/plugins/$key_.tools.$tool";
+import { seedAppReads } from "./apps-api";
+import { answerBotsList } from "./bots-api";
+
+/**
+ * A connector's own pages, when the apps read (listApps) fails.
+ *
+ * Each of them decides whether the connector exists from the apps read, and `isPending` goes false
+ * on a failed fetch exactly as it does on a successful one, so a request that never came back fell
+ * through to "there is no such connector" — about a connector that may be added and granted right
+ * now. The per-Bot grant screen beside them already tells the two apart (`plugins.data && !server`,
+ * see `bot-app-grants-screen.test.tsx`); these are the three pages that did not.
+ *
+ * Only the plugins read fails here. The connections and roster reads answer, so each case is about
+ * that one read and nothing else on the page.
+ *
+ * THE HARNESS IS THIS REPOSITORY'S, as in `bot-app-grants-screen.test.tsx` and
+ * `brokered-account-row.test.tsx`: `GlobalRegistrator` in `beforeAll`/`afterAll`, `cleanup` in
+ * `afterEach`, queries off `render()`'s own return, a `QueryClient` with `retry: false`, and each
+ * exported `Route` singleton captured and restored around its `.update()`.
+ */
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(() => GlobalRegistrator.unregister());
+
+const APP_KEY = "slack";
+const TOOL_NAME = "list_channels";
+const originalFetch = global.fetch;
+
+beforeEach(() => {
+  global.fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const path = String(input).split("?")[0];
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          headers: { "content-type": "application/json" },
+        });
+      if (path === "/api/plugins/connections") return json({ connections: [] });
+      const bots = answerBotsList(path, init, { visible: [] });
+      if (bots) return bots;
+      // The one read under test: a 500 with no body, the shape a broken server sends.
+      return new Response(null, { status: 500 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+});
+
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+/** A client the failing query settles on in one attempt, so no test waits on a retry. */
+function failingQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+/** A client already holding app reads that genuinely lack this connector. */
+function answeredWithout() {
+  const client = failingQueryClient();
+  seedAppReads(client, { botsMayCallBack: true });
+  return client;
+}
+
+function captureRouteState(route: object): Record<string, unknown> {
+  return { ...route, options: { ...(route as { options: object }).options } };
+}
+
+function restoreRouteState(
+  route: object,
+  snapshot: Record<string, unknown>,
+): void {
+  for (const key of Object.keys(route)) {
+    if (!(key in snapshot)) {
+      delete (route as Record<string, unknown>)[key];
+    }
+  }
+  Object.assign(route, snapshot);
+}
+
+const routes = [AdminAppRoute, AdminToolRoute, ConnectedAccountRoute];
+const pristine = routes.map(captureRouteState);
+let snapshots: Record<string, unknown>[] = [];
+
+beforeEach(() => {
+  snapshots = pristine.map(captureRouteState);
+});
+
+afterEach(() => {
+  routes.forEach((route, index) => {
+    restoreRouteState(route, snapshots[index] ?? {});
+  });
+});
+
+type Updatable = { update: (options: unknown) => unknown };
+
+/** `/admin/plugins/$key` and `/admin/plugins/$key/tools/$tool`, at the ids their `useParams` read. */
+function renderAdmin(client: QueryClient, at: string) {
+  const rootRoute = createRootRoute({ component: Outlet });
+  const authedRoute = createRoute({
+    id: "/_authed",
+    getParentRoute: () => rootRoute,
+    component: Outlet,
+  });
+  const adminRoute = createRoute({
+    path: "/admin",
+    getParentRoute: () => authedRoute,
+    component: Outlet,
+  });
+  const pluginsRoute = createRoute({
+    path: "/plugins/",
+    getParentRoute: () => adminRoute,
+    component: () => null,
+  });
+  const app = (AdminAppRoute as unknown as Updatable).update({
+    id: "/plugins/$key",
+    path: "/plugins/$key",
+    getParentRoute: () => adminRoute,
+  });
+  const tool = (AdminToolRoute as unknown as Updatable).update({
+    id: "/plugins/$key_/tools/$tool",
+    path: "/plugins/$key/tools/$tool",
+    getParentRoute: () => adminRoute,
+  });
+  const tree = rootRoute.addChildren([
+    authedRoute.addChildren([
+      adminRoute.addChildren([pluginsRoute, app as never, tool as never]),
+    ]),
+  ]);
+  const router = createRouter({
+    routeTree: tree,
+    history: createMemoryHistory({ initialEntries: [at] }),
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+/** `/connections/$key`, at the id its `useParams` reads. */
+function renderAccount(client: QueryClient) {
+  const rootRoute = createRootRoute({ component: Outlet });
+  const authedRoute = createRoute({
+    id: "/_authed",
+    getParentRoute: () => rootRoute,
+    component: Outlet,
+  });
+  const appRoute = createRoute({
+    id: "/_app",
+    getParentRoute: () => authedRoute,
+    component: Outlet,
+  });
+  const connectionsRoute = createRoute({
+    path: "/connections",
+    getParentRoute: () => appRoute,
+    component: Outlet,
+  });
+  const indexRoute = createRoute({
+    path: "/",
+    getParentRoute: () => connectionsRoute,
+    component: () => null,
+  });
+  const account = (ConnectedAccountRoute as unknown as Updatable).update({
+    id: "/$key",
+    path: "/$key",
+    getParentRoute: () => connectionsRoute,
+  });
+  const tree = rootRoute.addChildren([
+    authedRoute.addChildren([
+      appRoute.addChildren([
+        connectionsRoute.addChildren([indexRoute, account as never]),
+      ]),
+    ]),
+  ]);
+  const router = createRouter({
+    routeTree: tree,
+    history: createMemoryHistory({
+      // An app's key: `slack` is the Slack link's own page under Connections, which reads no plugins.
+      initialEntries: ["/connections/notion"],
+    }),
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+async function waitForFailedRead(client: QueryClient) {
+  await waitFor(() => {
+    expect(client.getQueryState(appKeys.list())?.status).toBe("error");
+  });
+}
+
+test("a connector's admin page says the list of apps failed, not that there is no such app", async () => {
+  const client = failingQueryClient();
+  const view = renderAdmin(client, `/admin/plugins/${APP_KEY}`);
+  await waitForFailedRead(client);
+
+  expect(
+    await view.findByText("Couldn't load apps. Try again in a moment."),
+  ).toBeTruthy();
+  expect(view.queryByText("Not an app")).toBeNull();
+  expect(view.queryByText("Nothing to configure.")).toBeNull();
+});
+
+test("a list that genuinely lacks the connector still says it is not an app", async () => {
+  const client = answeredWithout();
+  const view = renderAdmin(client, `/admin/plugins/${APP_KEY}`);
+  await waitForFailedRead(client);
+
+  expect(await view.findByText("Not an app")).toBeTruthy();
+  expect(
+    view.queryByText("Couldn't load apps. Try again in a moment."),
+  ).toBeNull();
+});
+
+test("a tool's admin page says the plugin list failed, not that the connector is off", async () => {
+  const client = failingQueryClient();
+  const view = renderAdmin(
+    client,
+    `/admin/plugins/${APP_KEY}/tools/${TOOL_NAME}`,
+  );
+  await waitForFailedRead(client);
+
+  expect(
+    await view.findByText("Couldn't load plugins. Try again in a moment."),
+  ).toBeTruthy();
+  expect(view.queryByText("This connector isn't turned on.")).toBeNull();
+  expect(
+    view.queryByText("This connector has no tool with that name."),
+  ).toBeNull();
+});
+
+test("a list that genuinely lacks the connector still says it is not enabled, on the tool page", async () => {
+  const client = answeredWithout();
+  const view = renderAdmin(
+    client,
+    `/admin/plugins/${APP_KEY}/tools/${TOOL_NAME}`,
+  );
+  await waitForFailedRead(client);
+
+  expect(await view.findByText("This connector is off")).toBeTruthy();
+  expect(
+    view.queryByText("Couldn't load plugins. Try again in a moment."),
+  ).toBeNull();
+});
+
+test("a connected account's page says the plugin list failed, not that it is not a service to connect", async () => {
+  const client = failingQueryClient();
+  const view = renderAccount(client);
+  await waitForFailedRead(client);
+
+  expect(await view.findByRole("alert")).toBeTruthy();
+  expect(view.queryByText("You don't connect this app yourself.")).toBeNull();
+});

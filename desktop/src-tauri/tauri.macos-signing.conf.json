@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA1N0I1QzdFNTIwQTRDRDUKUldUVlRBcFNmbHg3QlRWN2RGVmtRdnlnTFhDU1Y4TkpMTlpvNm1ZdWkxWFZpSTNFUUtzQkZFS2EK",
+      "endpoints": [
+        "https://downloads.copilotkit.ai/latest/latest.json",
+        "https://github.com/CopilotKit/OpenBot/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

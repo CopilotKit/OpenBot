@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 export function GalleryFrame({
   title,
@@ -14,7 +15,10 @@ export function GalleryFrame({
   children: ReactNode;
 }) {
   return (
-    <figure className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card">
+    <figure
+      data-slot="gallery-frame"
+      className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card dark:border-transparent"
+    >
       {(title || action) && (
         <figcaption className="flex items-start justify-between gap-4 border-b border-border px-4 py-3">
           <div className="min-w-0">
@@ -58,5 +62,50 @@ export function Badge({
     >
       {children}
     </span>
+  );
+}
+
+/** Only web addresses become links. Anything else the model wrote is shown as text. */
+export function isWebAddress(url: unknown): url is string {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
+/**
+ * A figure that opens where it came from, when the Bot gave a web address for it.
+ *
+ * Optional: with no address, or with anything but http(s), this is exactly what was drawn before,
+ * `wrap` deciding whether that was a `div` with `className` or the children alone. With one, it is
+ * an ordinary link opened the way a source under a chart is: a new tab, no referrer, which OpenBot
+ * Desktop hands to the person's own browser. Named by `name`, the figure's label and value, since a
+ * bar or a row read alone says neither.
+ */
+export function FigureLink({
+  href,
+  name,
+  className,
+  wrap = true,
+  children,
+}: {
+  href: unknown;
+  name: string;
+  className?: string;
+  wrap?: boolean;
+  children: ReactNode;
+}) {
+  if (!isWebAddress(href))
+    return wrap ? <div className={className}>{children}</div> : children;
+  return (
+    <a
+      aria-label={name}
+      className={cn(
+        className ?? "-m-1 block p-1",
+        "rounded-md transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none",
+      )}
+      href={href}
+      rel="noreferrer noopener"
+      target="_blank"
+    >
+      {children}
+    </a>
   );
 }

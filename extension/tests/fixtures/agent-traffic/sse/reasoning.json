@@ -1,0 +1,438 @@
+{
+  "name": "reasoning",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 57,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"reasoner\"},\"body\":{\"threadId\":\"4d582330-f33d-462f-ac79-56afc0616a92\",\"runId\":\"510a0708-f417-4611-a7f5-78c85434091c\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"0e884135-208a-4bb0-8ba4-8725b7c95024\",\"role\":\"user\",\"content\":\"Think it through step by step first: a bat and a ball cost 1.10 dollars in total, and the bat costs 1.00 dollar more than the ball. How much is the ball? Call no tools, answer with the amount only.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 72,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"4d582330-f33d-462f-ac79-56afc0616a92\",\"runId\":\"510a0708-f417-4611-a7f5-78c85434091c\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"4d582330-f33d-462f-ac79-56afc0616a92\",\"runId\":\"510a0708-f417-4611-a7f5-78c85434091c\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"0e884135-208a-4bb0-8ba4-8725b7c95024\",\"role\":\"user\",\"content\":\"Think it through step by step first: a bat and a ball cost 1.10 dollars in total, and the bat costs 1.00 dollar more than the ball. How much is the ball? Call no tools, answer with the amount only.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 869,
+          "text": "data: {\"type\":\"REASONING_START\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\"}\n\ndata: {\"type\":\"REASONING_MESSAGE_START\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"role\":\"reasoning\"}\n\n"
+        },
+        {
+          "at": 3354,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"**Clarifying output format**\\n\\nI\"}\n\n"
+        },
+        {
+          "at": 3358,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" realize\"}\n\ndata: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" I\"}\n\ndata: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" can\"}\n\n"
+        },
+        {
+          "at": 3359,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" safely\"}\n\n"
+        },
+        {
+          "at": 3362,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" provide\"}\n\n"
+        },
+        {
+          "at": 3367,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" the\"}\n\n"
+        },
+        {
+          "at": 3372,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" amount\"}\n\n"
+        },
+        {
+          "at": 3377,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" of\"}\n\n"
+        },
+        {
+          "at": 3385,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" \\\"\"}\n\n"
+        },
+        {
+          "at": 3392,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"0\"}\n\n"
+        },
+        {
+          "at": 3396,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3403,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"05\"}\n\n"
+        },
+        {
+          "at": 3424,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" dollars\"}\n\n"
+        },
+        {
+          "at": 3428,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\",\\\"\"}\n\n"
+        },
+        {
+          "at": 3437,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" but\"}\n\n"
+        },
+        {
+          "at": 3441,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" it\"}\n\n"
+        },
+        {
+          "at": 3447,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" seems\"}\n\n"
+        },
+        {
+          "at": 3453,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" the\"}\n\n"
+        },
+        {
+          "at": 3458,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" instruction\"}\n\n"
+        },
+        {
+          "at": 3463,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" is\"}\n\n"
+        },
+        {
+          "at": 3469,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" to\"}\n\n"
+        },
+        {
+          "at": 3476,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" just\"}\n\n"
+        },
+        {
+          "at": 3478,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" give\"}\n\n"
+        },
+        {
+          "at": 3485,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" the\"}\n\n"
+        },
+        {
+          "at": 3491,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" amount\"}\n\n"
+        },
+        {
+          "at": 3497,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3499,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" So\"}\n\n"
+        },
+        {
+          "at": 3505,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\",\"}\n\n"
+        },
+        {
+          "at": 3520,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" I'll\"}\n\n"
+        },
+        {
+          "at": 3523,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" output\"}\n\n"
+        },
+        {
+          "at": 3529,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" it\"}\n\n"
+        },
+        {
+          "at": 3538,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" as\"}\n\n"
+        },
+        {
+          "at": 3545,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" \\\"$\"}\n\n"
+        },
+        {
+          "at": 3556,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"0\"}\n\n"
+        },
+        {
+          "at": 3563,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3568,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"05\"}\n\ndata: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"\\\"\"}\n\n"
+        },
+        {
+          "at": 3576,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" without\"}\n\n"
+        },
+        {
+          "at": 3582,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" any\"}\n\n"
+        },
+        {
+          "at": 3589,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" additional\"}\n\n"
+        },
+        {
+          "at": 3593,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" text\"}\n\n"
+        },
+        {
+          "at": 3599,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3604,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" That\"}\n\n"
+        },
+        {
+          "at": 3609,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" keeps\"}\n\n"
+        },
+        {
+          "at": 3613,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" it\"}\n\n"
+        },
+        {
+          "at": 3622,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" straightforward\"}\n\n"
+        },
+        {
+          "at": 3626,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" and\"}\n\n"
+        },
+        {
+          "at": 3635,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" clear\"}\n\n"
+        },
+        {
+          "at": 3637,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3644,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" I\"}\n\n"
+        },
+        {
+          "at": 3649,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" want\"}\n\n"
+        },
+        {
+          "at": 3653,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" to\"}\n\n"
+        },
+        {
+          "at": 3664,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" make\"}\n\n"
+        },
+        {
+          "at": 3678,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" sure\"}\n\n"
+        },
+        {
+          "at": 3681,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" I\"}\n\n"
+        },
+        {
+          "at": 3686,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" follow\"}\n\n"
+        },
+        {
+          "at": 3691,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" the\"}\n\n"
+        },
+        {
+          "at": 3696,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" guidelines\"}\n\n"
+        },
+        {
+          "at": 3702,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" correctly\"}\n\n"
+        },
+        {
+          "at": 3709,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\",\"}\n\n"
+        },
+        {
+          "at": 3713,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" so\"}\n\n"
+        },
+        {
+          "at": 3718,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" no\"}\n\n"
+        },
+        {
+          "at": 3724,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" extra\"}\n\n"
+        },
+        {
+          "at": 3727,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" information\"}\n\n"
+        },
+        {
+          "at": 3732,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" will\"}\n\n"
+        },
+        {
+          "at": 3743,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" be\"}\n\n"
+        },
+        {
+          "at": 3750,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" confusing\"}\n\n"
+        },
+        {
+          "at": 3761,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" for\"}\n\n"
+        },
+        {
+          "at": 3765,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" anyone\"}\n\n"
+        },
+        {
+          "at": 3773,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\".\"}\n\n"
+        },
+        {
+          "at": 3776,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" Let's\"}\n\n"
+        },
+        {
+          "at": 3784,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" keep\"}\n\n"
+        },
+        {
+          "at": 3789,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" it\"}\n\n"
+        },
+        {
+          "at": 3795,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\" simple\"}\n\n"
+        },
+        {
+          "at": 3801,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\",\"delta\":\"!\"}\n\n"
+        },
+        {
+          "at": 3856,
+          "text": "data: {\"type\":\"REASONING_MESSAGE_END\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\"}\n\ndata: {\"type\":\"REASONING_END\",\"messageId\":\"rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0\"}\n\n"
+        },
+        {
+          "at": 3924,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0\",\"delta\":\"$\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0\",\"delta\":\"0\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0\",\"delta\":\".\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0\",\"delta\":\"05\"}\n\n"
+        },
+        {
+          "at": 4258,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"4d582330-f33d-462f-ac79-56afc0616a92\",\"runId\":\"510a0708-f417-4611-a7f5-78c85434091c\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-5-mini\",\"inputTokens\":255,\"outputTokens\":253,\"totalTokens\":508,\"reasoningTokens\":192,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 4259,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "f5dd9e94-25ea-4912-a975-581a916c6009",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539205122
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "0e884135-208a-4bb0-8ba4-8725b7c95024",
+            "runId": null,
+            "threadId": "4d582330-f33d-462f-ac79-56afc0616a92",
+            "agentId": "reasoner",
+            "role": "user",
+            "textLength": 197,
+            "text": "Think it through step by step first: a bat and a ball cost 1.10 dollars in total, and the bat costs 1.00 dollar more than the ball. How much is the ball? Call no tools, answer with the amount only.",
+            "seq": 2
+          },
+          "timestamp": 1792539205174
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "510a0708-f417-4611-a7f5-78c85434091c",
+            "threadId": "4d582330-f33d-462f-ac79-56afc0616a92",
+            "agentId": "reasoner",
+            "seq": 3
+          },
+          "timestamp": 1792539205195
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "f5dd9e94-25ea-4912-a975-581a916c6009",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "rs_019fac63cb8539ae006ad7fa46022087d085440850211c6b7c:0",
+            "runId": "510a0708-f417-4611-a7f5-78c85434091c",
+            "threadId": "4d582330-f33d-462f-ac79-56afc0616a92",
+            "agentId": "reasoner",
+            "role": "reasoning",
+            "textLength": 378,
+            "text": "**Clarifying output format**\n\nI realize I can safely provide the amount of \"0.05 dollars,\" but it seems the instruction is to just give the amount. So, I'll output it as \"$0.05\" without any additional text. That keeps it straightforward and clear. I want to make sure I follow the guidelines correctly, so no extra information will be confusing for anyone. Let's keep it simple!",
+            "seq": 4
+          },
+          "timestamp": 1792539208976
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "f5dd9e94-25ea-4912-a975-581a916c6009",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_019fac63cb8539ae006ad7fa48f75887d08f524a687721ddc0",
+            "runId": "510a0708-f417-4611-a7f5-78c85434091c",
+            "threadId": "4d582330-f33d-462f-ac79-56afc0616a92",
+            "agentId": "reasoner",
+            "role": "assistant",
+            "textLength": 5,
+            "text": "$0.05",
+            "seq": 5
+          },
+          "timestamp": 1792539209379
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "510a0708-f417-4611-a7f5-78c85434091c",
+            "threadId": "4d582330-f33d-462f-ac79-56afc0616a92",
+            "agentId": "reasoner",
+            "seq": 6
+          },
+          "timestamp": 1792539209380
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

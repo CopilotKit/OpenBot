@@ -32,9 +32,16 @@ export type Hotkey = {
 export const HOTKEYS = [
   {
     id: "new-chat",
-    label: "New chat",
-    description: "Start a new chat from anywhere in the app.",
+    label: "New conversation",
+    description: "Start a new conversation from anywhere in OpenBot.",
     combo: { key: "n", shift: true },
+  },
+  {
+    id: "command-menu",
+    label: "Command palette",
+    description:
+      "Open a page, a Bot or a conversation by typing its name. Works while you're typing a message.",
+    combo: { key: "k", mod: true },
   },
 ] as const satisfies readonly Hotkey[];
 
@@ -53,6 +60,22 @@ const isMac =
   /Mac|iPhone|iPad/.test(navigator.platform);
 
 /**
+ * The key a keystroke names, spelled the way a combo spells it.
+ *
+ * `key` first, because it follows the layout: on Dvorak the letter N is not where QWERTY puts it, and
+ * the key a person presses when told "N" is the one that writes an N. A layout that writes another
+ * script has no such key. Shift and the N key write "Т" on Russian and "Ν" (Greek capital nu, not a
+ * Latin N) on Greek, so a shortcut read from `key` alone never fired there. When `key` is a single
+ * character outside ASCII, the physical key in `code` is the only N there is.
+ */
+export function keyOf(event: KeyboardEvent): string {
+  const written = event.key.toLowerCase();
+  if (written.length !== 1 || written.charCodeAt(0) < 0x80) return written;
+  const physical = /^(?:Key|Digit)([A-Z0-9])$/.exec(event.code);
+  return physical?.[1]?.toLowerCase() ?? written;
+}
+
+/**
  * Whether this keystroke is this combo — exactly, not at-least.
  *
  * Every modifier is compared, including the ones the combo does not ask for: Shift+N must not
@@ -66,7 +89,7 @@ export function matchesHotkey(
   const mod = isMac ? event.metaKey : event.ctrlKey;
   const otherMod = isMac ? event.ctrlKey : event.metaKey;
   return (
-    event.key.toLowerCase() === combo.key &&
+    keyOf(event) === combo.key &&
     event.shiftKey === Boolean(combo.shift) &&
     mod === Boolean(combo.mod) &&
     !otherMod &&

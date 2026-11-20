@@ -1,0 +1,100 @@
+name: Downloads sync
+
+# Mirrors the Latest stable release's signed installers to downloads.copilotkit.ai, the address the
+# website links to (scripts/downloads-sync.sh, docs/releasing.md). It serves only what the signing
+# runs attached, and its latest/ folder changes only when a stable release becomes Latest. It also
+# copies everything else the Desktop app downloads for that release, so the app can download it all
+# from there and use GitHub only when that fails: the container images its desktop-images.json names
+# (from ghcr.io, under v2/), its container-images.json, desktop-images.json and Mac updater archives,
+# its source archive, and the Podman and Compose installers it pins (under tools/),
+# scripts/downloads-images.ts.
+#
+# Started by the signing run that makes a stable release Latest (scripts/release-make-latest.sh),
+# every six hours in case anything drifted or that start failed, and by hand. Each run compares
+# checksums and uploads only what differs, so a run with nothing new changes nothing.
+#
+# Last, on a run for the Latest release, it removes the installers of every older release from
+# releases/<tag>/ (scripts/release-older-installers.sh), so a fresh install never starts from one.
+#
+# It signs in to AWS as `openbot-release-downloads`, which trusts this workflow on main and nothing
+# else, and may only write the bucket, delete under releases/, and invalidate the distribution
+# named below.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Mirror only releases/<tag>/ and the images of this release, such as v0.3.0 or a candidate such as v1.0.0-rc.1. Empty mirrors the Latest release, latest/ included, and the images of every prerelease newer than it from the last 30 days.
+        type: string
+        default: ""
+        required: false
+      rollout:
+        description: With a stable tag, also put its signed installers and feed under rollout/<tag>/, for a staged rollout. latest/ is left alone.
+        type: boolean
+        default: false
+        required: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions: {}
+
+# One sync at a time, and a running one is never cancelled: it may be halfway through latest/.
+concurrency:
+  group: downloads-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Mirror the Latest release to downloads.copilotkit.ai
+    if: github.repository == 'CopilotKit/OpenBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # read the release and download its assets
+      id-token: write # sign in to AWS as openbot-release-downloads
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOWNLOADS_BUCKET: copilotkit-openbot-downloads
+      DOWNLOADS_DISTRIBUTION_ID: EQ4EH8L79LPGX
+      DOWNLOADS_TAG: ${{ inputs.tag }}
+      DOWNLOADS_ROLLOUT: ${{ inputs.rollout }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604598162673:role/openbot-release-downloads
+          role-session-name: openbot-downloads-sync
+          aws-region: us-east-1
+      # crane (go-containerregistry) reads the images from ghcr.io: a pinned release, checked
+      # against its published SHA-256 before it runs.
+      - name: Install crane
+        env:
+          CRANE_VERSION: 0.22.1
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/crane.tar.gz" \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "$CRANE_SHA256  $RUNNER_TEMP/crane.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/crane"
+          tar -xzf "$RUNNER_TEMP/crane.tar.gz" -C "$RUNNER_TEMP/crane" crane
+          echo "$RUNNER_TEMP/crane" >> "$GITHUB_PATH"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      # Everything else the app downloads for the release: its container images, its source
+      # archive and the engine installers it pins (scripts/downloads-images.ts). First, and it
+      # fails unless every image answers through the address, so latest/ below never names a
+      # release whose images are not there.
+      - run: bun scripts/downloads-images.ts
+      - run: scripts/downloads-sync.sh
+      # The installers of every release older than the Latest one, which a fresh install must not
+      # start from; everything else under releases/<tag>/ stays, and each removed path is
+      # invalidated (scripts/release-older-installers.sh, docs/releasing.md "Older installers").
+      # On every run for the Latest release, scheduled or dispatched with no tag, so it follows
+      # each release that becomes Latest; never on a run for one tag.
+      - name: Remove the installers of releases older than Latest
+        if: ${{ !inputs.tag }}
+        run: scripts/release-older-installers.sh bucket

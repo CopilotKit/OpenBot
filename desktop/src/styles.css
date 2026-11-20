@@ -1,86 +1,198 @@
 /*
- * OpenBot Desktop: the setup window.
+ * OpenBot Desktop: the setup window, in OpenBot's own visual system.
  *
- * The world is the one the product sits next to: warm off-white ground, near-black text, almost no
- * chrome, and one rounded focal element per screen. Measured from Grok rather than guessed — the
- * ground is a warm #F9F8F7 and the hairlines are a warm-tinted black at 4-8% rather than a cool
- * gray, which is most of why that interface reads calm instead of clinical.
+ * The values are OpenBot's tokens from `app/src/theme.css`, copied rather than approximated, so the
+ * window someone sets up in looks like the product it turns into: Inter, OpenBot's lavender frame
+ * with a white card on it, its near-black primary button, its periwinkle focus ring, its 10px radius
+ * and its type scale (on a 15px base, as the app sets text). The app's shadcn names are kept as
+ * written (`--background`, `--card`, `--muted-foreground`, ...) and the names these screens were
+ * first written against are mapped onto them below, so every rule still reads one vocabulary.
  *
- * `universalSans` is deliberately absent: it is xAI's own face and not ours to ship. Inter is the
- * documented fallback and the system stack is what a desktop window can rely on with no network at
- * the moment it draws.
+ * Inter is bundled (`@fontsource-variable`), not fetched: the window draws before anything
+ * guarantees a network, and a first-run screen that falls back to the system face is not on brand.
  *
- * Light is committed rather than defaulted. The use scene is a corporate laptop in an office in the
- * daytime, and this window is the first thing somebody sees after a download.
+ * Light and dark follow the system through `prefers-color-scheme`, as the window's appearance does.
+ * The app switches with a `.dark` class instead; the dark values below are its `.dark` values. The
+ * macOS title bar takes this ground (see `SETUP_BACKGROUND` and `match_title_bar`).
  */
 :root {
-  /* Warm, not neutral. Every gray here is tinted from the same 15/13/10 black. */
-  --ground: #f9f8f7;
-  --raised: #ffffff;
-  --ink: #050505;
-  --ink-soft: rgba(15, 13, 10, 0.62);
-  --ink-faint: rgba(15, 13, 10, 0.45);
-  --hair: rgba(15, 13, 10, 0.08);
-  --hair-soft: rgba(15, 13, 10, 0.04);
-  --sunk: rgba(15, 13, 10, 0.04);
-  --accent: #050505;
-  --accent-ink: #ffffff;
-  --bad: #b3261e;
-  --good: #1a7f37;
+  /* OpenBot's tokens, light (app/src/theme.css `:root`). */
+  --background: oklch(0.983 0.003 286.4);
+  --foreground: oklch(0.108 0.015 220.9);
+  --card: oklch(1 0 0);
+  --primary: oklch(0.108 0.015 220.9);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.956 0.005 286.3);
+  --muted: oklch(0.956 0.005 286.3);
+  --muted-foreground: oklch(0.506 0.013 285.9);
+  --destructive: oklch(0.504 0.178 22.9);
+  --success: oklch(0.514 0.1 167.2);
+  --border: oklch(0.894 0.014 286.1);
+  --input: oklch(0.894 0.014 286.1);
+  --ring: oklch(0.644 0.167 276.1);
+  /* The frame: the sidebar's tint, which the window edge (and here the whole ground) shares. */
+  --sidebar: oklch(0.948 0.011 286.2);
+  --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
+  --radius: 0.625rem;
 
-  /* One radius family: 12px for rows and controls, 16px for the focal card. */
-  --r-row: 12px;
-  --r-card: 16px;
+  /* OpenBot's radius scale (theme.css `@theme`). */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
 
-  font-family:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif,
-    system-ui, sans-serif;
-  font-size: 14px;
+  /* OpenBot's type scale: Tailwind's sizes times 15/16 (theme.css `@theme`). */
+  --text-xs: 0.703125rem; /* 11.25px */
+  --text-sm: 0.8203125rem; /* 13.125px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0546875rem; /* 16.875px */
+  --text-2xl: 1.40625rem; /* 22.5px */
+
+  /* Tailwind's shadows, which the app's cards and popovers use. */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+
+  /* The names these screens were written against, onto OpenBot's tokens. */
+  --surface-main: var(--sidebar);
+  --surface-container: var(--card);
+  --surface-hovered: var(--muted);
+  --white-50: var(--card);
+  --white-65: var(--card);
+  --white-70: var(--muted);
+  --active-tint: var(--sidebar-accent);
+
+  --border-default: var(--border);
+  --border-container: var(--border);
+  --border-action: var(--ring);
+
+  --text-primary: var(--foreground);
+  --text-secondary: var(--muted-foreground);
+  --text-disabled: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --text-invert: var(--primary-foreground);
+
+  --grey-200: var(--secondary);
+  --grey-600: color-mix(in srgb, var(--foreground) 25%, var(--border));
+  --ink-5: var(--muted);
+
+  /* Actions: the app's default button, its `primary/80` hover, and `opacity-50` when disabled. */
+  --action: var(--primary);
+  --action-ink: var(--primary-foreground);
+  --action-hover: color-mix(in srgb, var(--primary) 80%, transparent);
+
+  /* Brand marks are drawn for a white ground, in either theme. */
+  --mark-ground: #ffffff;
+  --mark-ink: #010507;
+
+  --color-scheme: light;
+
+  /* State */
+  --good: var(--success);
+  --bad: var(--destructive);
+  /* The app's focus ring: `ring-3 ring-ring/50`. */
+  --lilac-30: color-mix(in srgb, var(--ring) 50%, transparent);
+
+  --r-item: var(--radius-sm);
+  --r-card: var(--radius-lg);
+  --r-sheet: var(--radius-xl);
+  --r-full: 9999px;
+
+  --elevation-sm: var(--shadow-xs);
+  --elevation-md: var(--shadow-sm);
+
+  --sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Machine output only (technical details, commands): the system's own monospace. */
+  --mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --ink-faint: var(--text-disabled);
+  --hair: var(--border-container);
+  --raised: var(--surface-container);
+  --sunk: var(--ink-5);
+  --accent: var(--text-primary);
+  --accent-ink: var(--text-invert);
+  --r-row: var(--r-card);
+
+  color-scheme: var(--color-scheme);
+  font-family: var(--sans);
+  font-size: 16px;
   line-height: 1.5;
-  color: var(--ink);
-  background: var(--ground);
+  color: var(--text-primary);
+  background: var(--surface-main);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/*
- * NO DARK VARIANT, DELIBERATELY, and this is the one place in the product where that is right.
- *
- * This window exists for about five minutes, once, before it becomes OpenBot and hands over to the
- * app — which does follow the system. A first-run screen is the product's handshake, and the look
- * committed here is the warm light one measured from the interface this is meant to sit beside.
- * Following the system instead would mean the first thing half of all installers ever see is a
- * variant nobody composed against a reference.
- *
- * The app this hands over to keeps its own light and dark. Only the setup window is pinned.
- */
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: var(--ground);
-  color: var(--ink);
+  background: var(--surface-main);
+  color: var(--text-primary);
 }
 
 /*
- * The window is 900x640 and cannot be resized into something else, so it is composed as a room
- * rather than a page: one centred column, vertically settled, with the same optical centre on every
- * step. A wizard whose content jumps position between steps reads as four different screens.
+ * The ground. OpenBot's pages sit on flat surfaces, so the window does too: the frame's lavender,
+ * with nothing painted over it. The element stays so a skin can draw on it later.
  */
-main {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2.5rem 2rem;
+.backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  background: var(--surface-main);
 }
 
-.sheet {
-  width: 100%;
-  max-width: 30rem;
+/*
+ * The window's column: the update offer, when there is one, then the step. Exactly the window's
+ * height: the step fills whatever the offer leaves, and the page itself never scrolls.
+ */
+#root {
+  height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * The window keeps the size and place it opened with (1000x800, or what the person made it): one
+ * card, centred across and held at the same height from the top on every step. A step taller than
+ * the room it has scrolls inside its card. The window used to grow to fit a taller step and move
+ * up to stay on screen, so on Windows it jumped 54 px up and 139 px taller on "Connect your AI".
+ *
+ * Held from the top, not centred up and down. Rows come and go while a step waits (the update's
+ * row, its download bar), and a centred card moved everything already on screen up or down with
+ * each one: on Windows the Start screen jumped 31px when the update's row appeared, 20px when its
+ * bar did, and 20px back when the bar went. Anchored at the top, a step only ever grows downward.
+ */
+main {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* A little room above the card, not a band: on Windows F, 95 px of it pushed the AI step's
+     background row below the fold. */
+  padding: clamp(16px, 3vh, 32px) 24px 24px;
+}
+
+/* The one focal surface per screen: a white card on the frame, as OpenBot draws its panels. */
+.sheet {
+  width: 100%;
+  max-width: 36rem;
+  display: flex;
+  flex-direction: column;
+  padding: 32px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--elevation-md);
   /* One authored entrance, on the step rather than on every element. */
   animation: settle 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -98,178 +210,461 @@ main {
   }
 }
 
-/* Where you are, stated quietly. Operate mode: a four-step flow that says nothing about progress
-   makes people wonder how much is left, which is when they close it. */
+/*
+ * The top of every setup step: OpenBot's mark and name, then where you are. The product the person
+ * is setting up is named on every screen, whichever account a step signs in to.
+ */
+.setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 28px;
+}
+
+/* The header's own, smaller lockup is set after `.lockup` and `.orb`, below. */
+
+/* Where you are: every section by name, the current one as the app marks a selected row. */
 .steps-of {
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  margin: 0 0 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.sections {
+  list-style: none;
+  padding: 0;
+}
+
+.sections li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--r-full);
+  color: var(--text-disabled);
+  white-space: nowrap;
+}
+
+.sections li.done {
+  color: var(--text-secondary);
+}
+
+/* Done is ticked, in the success colour; the tick is drawn, so the name reads as before. */
+.sections li.done::before {
+  content: "";
+  width: 6px;
+  height: 10px;
+  margin: -3px 2px 0 0;
+  border: solid var(--good);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.sections li.current {
+  color: var(--text-primary);
+  background: var(--active-tint);
 }
 
 h1 {
-  font-size: 1.5rem;
-  line-height: 1.2;
+  font-size: var(--text-2xl);
+  line-height: 1.3;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0 0 0.6rem;
+  letter-spacing: -0.025em;
+  margin: 0 0 8px;
   text-wrap: balance;
 }
 
 h2 {
-  font-size: 0.95rem;
+  font-size: var(--text-base);
+  line-height: 22px;
   font-weight: 600;
-  margin: 0 0 0.35rem;
+  margin: 0 0 4px;
 }
 
 .lede {
-  color: var(--ink-soft);
-  margin: 0 0 1.5rem;
+  font-size: var(--text-base);
+  line-height: 22px;
+  color: var(--text-secondary);
+  margin: 0 0 20px;
   max-width: 34rem;
+  text-wrap: pretty;
+}
+
+/* A product's name in a lede: the heading's ink and weight, so it reads as a name. */
+.lede strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .lede.big {
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: var(--text-lg);
+  line-height: 26px;
 }
 
 .footnote {
-  font-size: 0.8rem;
-  color: var(--ink-faint);
-  line-height: 1.55;
-  margin: 1.25rem 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  margin: 16px 0 0;
+}
+
+/* Where Cancel was, in a button's height, so the card keeps its size as Cancel goes. */
+.cannot-cancel {
+  margin: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
 }
 
 /* Controls */
 .row {
   display: flex;
-  gap: 0.6rem;
+  gap: 8px;
   align-items: center;
-  margin-top: 1.5rem;
+  margin-top: 24px;
 }
 
+.connection-sheet .row {
+  flex-wrap: wrap;
+}
+
+/* Retry under the sentence that says what an update needs: with it, and apart from the rows. */
+.row.room-retry {
+  margin: 0 0 24px;
+}
+
+/*
+ * Buttons are OpenBot's `Button`: sentence case in the body face, 10px corners, the near-black
+ * primary fill. `lg` (40px) on these screens, as the app's own onboarding sets its Continue.
+ */
 button {
-  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  line-height: 1;
   font-weight: 500;
-  padding: 0.6rem 1.1rem;
-  border-radius: var(--r-row);
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r-card);
   border: 1px solid transparent;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--action);
+  color: var(--action-ink);
   cursor: pointer;
   transition:
-    opacity 0.15s ease,
-    background 0.15s ease;
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    opacity 150ms ease-out;
 }
 
 button:hover:not(:disabled) {
-  opacity: 0.88;
+  background: var(--action-hover);
 }
 
+/*
+ * Pressed is instant. With only a hover fade, nothing changed at the moment of the press, and the
+ * click read as arriving late.
+ */
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  transition: none;
+}
+
+/* The app's disabled button: the same button at half strength. */
 button:disabled {
-  opacity: 0.35;
+  opacity: 0.5;
   cursor: default;
 }
 
+/* The app's `outline` button. */
 button.quiet {
-  background: transparent;
-  color: var(--ink-soft);
-  border-color: var(--hair);
+  background: var(--background);
+  color: var(--text-primary);
+  border-color: var(--border);
 }
 
 button.quiet:hover:not(:disabled) {
-  color: var(--ink);
-  border-color: var(--ink-faint);
-  opacity: 1;
+  background: var(--muted);
 }
 
+button.quiet:active:not(:disabled) {
+  background: var(--muted);
+}
+
+button.quiet:disabled,
+button.text-link:disabled {
+  opacity: 0.5;
+}
+
+/* A way out that reads as a sentence, not as a second choice of equal weight: the app's `link`. */
+button.text-link {
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  min-height: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-top: 16px;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 4px;
+}
+
+button.text-link:hover:not(:disabled) {
+  background: transparent;
+  text-decoration-color: currentColor;
+}
+
+/*
+ * Intelligence stopped while another screen is in front: a card that interrupts on purpose. The
+ * ring's tint when it is waiting on the person, the destructive tint when it failed.
+ */
+.local-alert {
+  border: 1px solid color-mix(in srgb, var(--destructive) 30%, var(--border));
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--destructive) 6%, var(--card));
+  padding: 16px;
+  margin: 0 0 20px;
+}
+
+/* After the install's own rows on the Install screen, apart from them rather than against them. */
+.steps + .local-alert {
+  margin-top: 16px;
+}
+
+.local-alert.needs {
+  border-color: color-mix(in srgb, var(--ring) 45%, var(--border));
+  background: color-mix(in srgb, var(--ring) 7%, var(--card));
+}
+
+/* "Update OpenBot" sits where a failure card would, so it keeps that card's place: apart from what
+   is above it, and the next row's own gap below. */
+.local-alert.app-too-old {
+  margin: 20px 0 0;
+}
+
+.local-alert h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.local-alert h2::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+
+.local-alert.needs h2::before {
+  background: var(--ring);
+}
+
+.local-alert p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.local-alert .row {
+  margin-top: 12px;
+}
+
+/* A card with nothing said above its button (the heading over it already says why): no gap above. */
+.local-alert.app-too-old > .row:first-child {
+  margin-top: 0;
+}
+
+/* Under its button, a line keeps the row's gap rather than touching the button. */
+.local-alert .row + .footnote {
+  margin-top: 12px;
+}
+
+/* A Podman machine too small for setup: under the rows that said so, apart from them. */
+.steps + .podman-too-small {
+  margin-top: 16px;
+}
+
+/* What a choice would delete, said as the card's other lines are. */
+.local-alert details > p {
+  margin-top: 8px;
+}
+
+.local-alert details ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+/* Local Intelligence setting up behind the screen in front: one line. */
+.local-status {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 20px;
+}
+
+/* The app's focus: the ring colour, three pixels, at half strength. */
 :focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
+  outline: 3px solid var(--lilac-30);
+  outline-offset: 1px;
 }
 
-/* Fields */
+/* Fields: the app's `Label` over its `Input`. */
 .field {
-  margin-bottom: 0.9rem;
+  margin-bottom: 16px;
 }
 
 .field label {
   display: block;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-  margin-bottom: 0.35rem;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 .field input {
   font: inherit;
+  font-size: var(--text-sm);
   width: 100%;
-  padding: 0.6rem 0.75rem;
-  border-radius: var(--r-row);
-  border: 1px solid var(--hair);
-  background: var(--raised);
-  color: var(--ink);
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--input);
+  background: var(--card);
+  color: var(--text-primary);
+  transition:
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
 
 .field input::placeholder {
-  color: var(--ink-faint);
+  color: var(--muted-foreground);
 }
 
 .field input:focus-visible {
-  border-color: var(--ink-faint);
+  border-color: var(--ring);
   outline: none;
-  box-shadow: 0 0 0 3px var(--sunk);
+  box-shadow: 0 0 0 3px var(--lilac-30);
+}
+
+.field input:disabled {
+  opacity: 0.5;
+  background: var(--muted);
 }
 
 /* The list of choices. Rows, not a grid of same-size cards. */
 fieldset.picker {
   border: 0;
   padding: 0;
-  margin: 0.75rem 0 0;
+  margin: 4px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 8px;
   max-height: 17rem;
   overflow-y: auto;
 }
 
 /*
- * A tile carries its own ink, and this is not belt-and-braces.
- *
- * MEASURED: the project list rendered as six blank white rectangles. `button` sets
- * `color: var(--accent-ink)`, which is white, and `.tile` overrode the background to white without
- * overriding the colour. The provider and Bot rows are `label`s and never inherited it, so the one
- * tile in the product that is a real button was the one nobody could read. Nothing errored and
- * nothing looked broken: the names were simply invisible, and the screen asked somebody to choose
- * between six empty boxes.
+ * Every provider shows without a scrolling list of its own: past the room the window has, the card
+ * scrolls instead.
+ */
+fieldset.picker.providers {
+  max-height: none;
+  overflow-y: visible;
+  position: relative;
+}
+
+/* The chosen row's own text stops short of Change rather than running under it. */
+.tile.beside-change {
+  padding-right: 84px;
+}
+
+/* Sits on the one chosen row, so going back is where the eye already is. */
+button.text-link.change-provider {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  margin: 0;
+}
+
+/*
+ * A tile carries its own ink and undoes a button's size and centring, so it reads as a row of text
+ * whatever element draws it. Drawn as the app's outline `Item`: 16px in, 12px between mark and text.
  */
 .tile {
   position: relative;
-  color: var(--ink);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.5;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 32px 1fr;
+  justify-content: stretch;
+  grid-template-columns: 36px 1fr;
   grid-template-areas:
     "mark name"
     "mark summary";
   align-items: center;
-  column-gap: 0.7rem;
-  row-gap: 0.1rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--hair-soft);
-  border-radius: var(--r-row);
-  background: var(--raised);
+  column-gap: 12px;
+  row-gap: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
+    border-color 100ms ease,
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.tile:active {
+  transform: none;
+  background: var(--muted);
+  transition: none;
 }
 
 .tile:hover {
-  border-color: var(--hair);
+  background: color-mix(in srgb, var(--muted) 60%, var(--card));
 }
 
-.tile.chosen {
-  border-color: var(--ink);
+/* Chosen as the app marks a selected row: the lilac tint, edged in the ring colour. */
+.tile.chosen,
+.tile.chosen:hover {
+  background: color-mix(in srgb, var(--ring) 6%, var(--card));
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
 }
 
 .mark-tile {
@@ -281,46 +676,45 @@ fieldset.picker {
 .tile-summary {
   grid-area: summary;
 }
-.tile-note {
-  grid-column: 2;
-}
 
 .tile-name {
   font-weight: 500;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
+  line-height: 22px;
 }
 
 .tile-summary {
-  color: var(--ink-faint);
-  font-size: 0.75rem;
-  line-height: 1.35;
-}
-
-.tile-note {
-  justify-self: start;
-  font-size: 0.68rem;
-  color: var(--ink-soft);
-  background: var(--sunk);
-  border-radius: 999px;
-  padding: 0.08rem 0.45rem;
-  margin-top: 0.15rem;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 /* A brand's mark, or its name where no usable mark exists. Same box either way. */
 .mark-tile {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid var(--hair-soft);
+  padding: 7px;
+  border-radius: var(--radius-md);
+  background: var(--mark-ground);
+  border: 1px solid var(--border);
   flex: none;
 }
 
 .mark-tile img {
+  width: 100%;
+  height: 100%;
+}
+
+/* A plain icon where a row stands for no one vendor, drawn in the marks' ink. */
+.mark-icon {
+  padding: 6px;
+  color: var(--mark-ink);
+}
+
+.mark-icon svg {
   width: 100%;
   height: 100%;
 }
@@ -330,12 +724,12 @@ fieldset.picker {
 }
 
 .mark-wordmark span {
-  font-size: 0.52rem;
+  font-size: 0.5rem;
   font-weight: 600;
   line-height: 1.05;
   text-align: center;
   letter-spacing: -0.02em;
-  color: #050505;
+  color: var(--mark-ink);
   hyphens: none;
 }
 
@@ -349,134 +743,1059 @@ fieldset.picker {
 }
 
 .tile:has(.tile-input:focus-visible) {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--lilac-30);
 }
 
-/* The framework list, which almost nobody should open. */
+/*
+ * The ways to run OpenBot, on the first screen. OpenBot (Self-Contained) is the one this app sets
+ * up. OpenBot for Business is one card holding its two ways to run, each a smaller row inside it,
+ * and either books a call.
+ */
+fieldset.picker.hosting {
+  max-height: none;
+  overflow-y: visible;
+  margin: 4px 0 12px;
+}
+
+/* A shade tighter than the provider list, so the whole first screen fits the window's default size. */
+fieldset.picker.hosting .tile {
+  padding-block: 9px;
+}
+
+fieldset.picker.hosting .tile.chosen {
+  cursor: default;
+}
+
+/*
+ * OpenBot for Business: drawn as a row, mark and name and summary where every row has them, with
+ * its two choices stacked under the summary. Not itself a choice, so no hover of its own; while one
+ * of its choices is picked its edge is the chosen row's ring.
+ */
+.tile-group {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  grid-template-areas:
+    "mark name"
+    "mark summary"
+    ". options";
+  align-items: center;
+  column-gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  line-height: 1.5;
+}
+
+.tile-group.chosen {
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
+}
+
+.tile-options {
+  grid-area: options;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* One of Business's ways to run: the row's shape, smaller, its words on one line. */
+.tile-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  cursor: pointer;
+  transition:
+    border-color 100ms ease,
+    background-color 100ms ease,
+    box-shadow 100ms ease;
+}
+
+.tile-option:hover {
+  background: color-mix(in srgb, var(--muted) 60%, var(--card));
+}
+
+.tile-option:active {
+  background: var(--muted);
+}
+
+.tile-option.chosen,
+.tile-option.chosen:hover {
+  cursor: default;
+  background: color-mix(in srgb, var(--ring) 6%, var(--card));
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--border));
+}
+
+.tile-option.held,
+.tile-option.held:hover,
+.tile-option.held:active {
+  cursor: default;
+  background: var(--card);
+}
+
+.tile-option:has(.tile-input:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--lilac-30);
+}
+
+.tile-option-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.tile-option-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.tile-option-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tile-option-summary {
+  color: var(--text-secondary);
+}
+
+/* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
+.cloud-marks {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.cloud-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--mark-ground);
+}
+
+.cloud-mark img {
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * Under the rows: the way to connect this app to an OpenBot a company already runs, in the row
+ * summary's size and colour, starting where the rows' text does. Close under them, so the first
+ * screen still fits the window's default size.
+ */
+fieldset.picker.hosting .tile-aside {
+  margin: -6px 0 0;
+  padding-left: 65px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+/* A link in a sentence: the sentence's own line, none of a button's height or gap. */
+button.text-link.inline-link {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
+/*
+ * OpenBot for Business, under the rows: the app's OpenBot for Business view stacked for the card.
+ * Where it runs in big letters, what it adds in three short lists, then the calendar to book a
+ * call on a card of its own. Sizes are the app dialog's: 28px icon tiles, 10px between rows.
+ */
+.business-booker {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.business-deploy {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.business-group h3 {
+  margin: 0 0 10px;
+  font-size: var(--text-xs);
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.business-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.business-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-primary);
+}
+
+.business-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.business-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.business-more {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+/* Book a demo: the dialog's muted side, as a band across the card under the list. */
+.book-a-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.book-a-demo h2 {
+  margin: 0;
+}
+
+.book-a-demo-line {
+  margin: 0 0 12px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* A real control, so a card: the card's fill and border, the calendar drawn in its colours. */
+.booking-calendar {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sheet);
+  background: var(--card);
+}
+
+.booking-calendar iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.booking-calendar[data-ready] iframe {
+  opacity: 1;
+}
+
+.booking-calendar-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .booking-calendar iframe {
+    transition: none;
+  }
+}
+
+.book-a-demo-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.book-a-demo-fallback p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+/* The way on when the calendar can't load: the app's primary button, full width, as a link. */
+a.button-link.primary {
+  width: 100%;
+  gap: 6px;
+  border-color: transparent;
+  background: var(--action);
+  color: var(--action-ink);
+}
+
+a.button-link.primary:hover {
+  background: var(--action-hover);
+}
+
+a.button-link.primary svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Not choosable for now, while an address is checked or the browser is waited on: Cancel is. */
+fieldset.picker.hosting .tile.held,
+fieldset.picker.hosting .tile.held:hover,
+fieldset.picker.hosting .tile.held:active {
+  cursor: default;
+  background: var(--card);
+}
+
+/*
+ * OpenBot for Business, under the choices: the address of the OpenBot to connect to, what happens
+ * next under the field, then Connect. What went wrong with the address is said under the field,
+ * in the destructive colour; anything else is said in a card between the field and the button.
+ */
+.connect-to-openbot .field {
+  margin: 8px 0 0;
+}
+
+/* Held while it is checked or signed in to: still readable, on the ground of a field at rest. */
+.connect-to-openbot .field input:read-only {
+  background: var(--muted);
+}
+
+.address-problem {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.connect-to-openbot .footnote {
+  margin-top: 8px;
+}
+
+/*
+ * A connection that didn't work, or a sign-in that stopped or ended: the card that waits on the
+ * person, with the shell's sentence in ink. Not the failure card: nothing on this computer failed.
+ */
+.connect-to-openbot .local-alert {
+  margin: 16px 0 0;
+}
+
+.connect-to-openbot .local-alert p {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A link that is the way on, drawn as the app's `outline` button. */
+a.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 150ms ease-out;
+}
+
+a.button-link:hover {
+  background: var(--muted);
+}
+
+/* What Self-hosted asks of this computer: the reason, then the four needs, two to a line. */
+.needs .lede {
+  margin-bottom: 6px;
+}
+
+/* The setup-time line under the needs: Install's own gap is all there is between them. */
+.needs + .lede {
+  margin-bottom: 0;
+}
+
+.needs-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 2px 16px;
+  margin: 0 0 4px;
+  padding-left: 20px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 22px;
+}
+
+/* A disclosure: options almost nobody should open. */
 details {
-  border-top: 1px solid var(--hair-soft);
-  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 4px;
+}
+
+/* Under a screen's buttons, its rule keeps the row's own gap rather than touching them. Zero
+   specificity, so a disclosure that sets its own margin (`.blocker-manual`) keeps it. */
+:where(.row) + details {
+  margin-top: 24px;
 }
 
 details > summary {
   cursor: pointer;
-  font-size: 0.82rem;
-  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-secondary);
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 8px;
 }
 
 details > summary::-webkit-details-marker {
   display: none;
 }
 
+/* A chevron, as the app's disclosures draw one. */
 details > summary::before {
   content: "";
-  width: 0;
-  height: 0;
-  border-left: 4px solid currentColor;
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
+  width: 5px;
+  height: 5px;
+  margin: 0 2px 0 1px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
   transition: transform 0.15s ease;
 }
 
 details[open] > summary::before {
-  transform: rotate(90deg);
+  transform: rotate(45deg);
 }
 
 details > summary:hover {
-  color: var(--ink);
+  color: var(--text-primary);
 }
 
-/* The chosen provider's own panel: the one raised surface per screen. */
+/* The chosen provider's own panel: a muted well inside the card, as the app sets a group apart. */
 .chosen-provider {
-  border: 1px solid var(--hair);
+  border: 1px solid var(--border);
   border-radius: var(--r-card);
-  background: var(--raised);
-  padding: 1rem;
-  margin-top: 0.9rem;
+  background: color-mix(in srgb, var(--muted) 45%, var(--card));
+  padding: 16px;
+  margin-top: 8px;
 }
 
+.chosen-provider > .lede {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  margin-bottom: 12px;
+}
+
+.chosen-provider > .field:last-child,
+.chosen-provider > .field:has(+ .footnote) {
+  margin-bottom: 0;
+}
+
+.chosen-provider > button:not(.quiet):not(.text-link) {
+  align-self: flex-start;
+  margin-bottom: 12px;
+}
+
+.provider-sign-in-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/*
+ * "Sign in with" a provider: the app's outline button with the provider's mark before its name, as
+ * the web app's sign-in page sets Google, Microsoft and Okta. Outline rather than the filled
+ * primary, because Google allows its colour G only on a light, dark or neutral button.
+ */
+button.sign-in-with {
+  gap: 10px;
+  padding-left: 12px;
+}
+
+.chosen-provider > button.sign-in-with {
+  margin-bottom: 12px;
+}
+
+.button-mark {
+  display: inline-flex;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.button-mark img {
+  width: 100%;
+  height: 100%;
+}
+
+/* The app's tabs: a muted track with the active tab raised in the card colour. */
 .segmented {
   display: inline-flex;
-  background: var(--sunk);
-  border-radius: 999px;
+  gap: 2px;
+  background: var(--muted);
+  border-radius: var(--r-card);
   padding: 3px;
-  margin-bottom: 0.9rem;
+  margin-bottom: 14px;
 }
 
 .segmented button {
-  border: 0;
-  background: transparent;
-  color: var(--ink-soft);
-  border-radius: 999px;
-  padding: 0.3rem 0.8rem;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-weight: 500;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
 }
 
-.segmented button.on {
-  background: var(--raised);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(15, 13, 10, 0.08);
+.segmented button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.segmented button.on,
+.segmented button.on:hover:not(:disabled) {
+  background: var(--card);
+  color: var(--text-primary);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+
+a {
+  color: var(--text-primary);
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 4px;
+}
+
+a:hover {
+  text-decoration-color: currentColor;
 }
 
 .caution,
 .fallback {
-  font-size: 0.78rem;
-  color: var(--ink-faint);
-  line-height: 1.5;
-  margin: 0.9rem 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  margin: 14px 0 0;
 }
 
 .caution a,
 .fallback a {
-  color: var(--ink);
-  text-underline-offset: 2px;
+  color: var(--text-primary);
 }
 
-/* Something is in the way, or something failed. */
+/* The code a CopilotKit sign-in page shows, to compare letter by letter. */
+.sign-in-code {
+  font-family: var(--mono);
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+}
+
+/* A failure said inside a row: the sentence in the destructive colour, the rest as before. */
+.inline-failure .caution,
+.inline-error {
+  color: var(--destructive);
+}
+
+/*
+ * Something is in the way, or something failed: the app's destructive alert. A tinted card with
+ * the state in its colour, inside the card it belongs to.
+ */
 .blocker {
-  /* No coloured side border: the heading already carries the state, and a thick accent stripe is
-     decoration standing in for hierarchy. */
+  border: 1px solid color-mix(in srgb, var(--destructive) 28%, var(--border));
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--destructive) 5%, var(--card));
+  padding: 14px 16px;
+  margin: 20px 0 0;
+}
+
+.blocker h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--destructive);
+}
+
+/* A filled circle with a mark in it, drawn so it takes the theme's destructive colour. */
+.blocker h2::before {
+  content: "!";
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--destructive);
+  color: var(--card);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.blocker p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+/* A Windows prerequisite: wider than a step, because its commands are long and must stay legible. */
+.blocker-sheet {
+  max-width: 44rem;
+}
+
+.blocker-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+.blocker-steps li::marker {
+  font-family: var(--mono);
+  color: var(--text-secondary);
+}
+
+/* The same steps inside a setup card (`PodmanTooSmall`), at the card's own text size. */
+.podman-too-small .blocker-steps {
+  margin-top: 12px;
+  gap: 14px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.blocker-asks {
+  margin: 0;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-primary);
+}
+
+.blocker-manual {
+  margin-top: 28px;
+}
+
+.blocker-manual > .blocker-steps {
+  margin-top: 16px;
+}
+
+.blocker-steps code {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 1px 4px;
+  border-radius: var(--r-item);
+  background: var(--surface-container);
+  border: 1px solid var(--border-container);
+  overflow-wrap: anywhere;
+}
+
+/* Commands to paste, in mono, with Copy pinned to the corner. */
+.command {
+  position: relative;
+  margin-top: 8px;
+  background: var(--surface-container);
+  border: 1px solid var(--border-container);
+  border-radius: var(--r-card);
+}
+
+.command pre {
+  margin: 0;
+  padding: 14px 96px 14px 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The block is the box: a command in a list of steps is not also boxed as inline code. */
+.blocker-steps .command code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.command button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* A newer OpenBot exists. Shares the blocker's box because it is the same shape of interruption,
+   without its red heading: this is good news, not something in the way. Above the backdrop, as
+   `main` is: the backdrop is fixed, and painted over anything in the page's flow that is not. */
+.update-offer {
+  position: relative;
+  z-index: 1;
+  flex: none;
   border: 1px solid var(--hair);
   border-radius: var(--r-row);
   background: var(--raised);
   padding: 0.9rem 1rem;
-  margin: 1rem 0 0;
+  margin: 24px auto 0;
+  width: min(36rem, calc(100% - 48px));
 }
 
-.blocker h2 {
-  color: var(--bad);
-}
-
-.blocker p {
+.update-offer p {
   margin: 0;
   color: var(--ink-soft);
   font-size: 0.85rem;
 }
 
-/* Per-item progress, because this is the slowest screen in the product. */
+.update-offer .row {
+  margin-top: 0.9rem;
+}
+
+.setup-help {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.external-link-error {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Per-item progress, because this is the slowest screen in the product. One bordered group of
+ * rows, as the app lists the rows of a settings section.
+ */
 .steps {
-  margin-top: 1.25rem;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  overflow: hidden;
 }
 
 .step {
   display: grid;
-  grid-template-columns: 1rem 1fr auto;
-  gap: 0.5rem;
-  align-items: baseline;
-  font-size: 0.82rem;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "mark label status"
+    ". detail detail";
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 12px 16px;
+  font-size: var(--text-base);
+  line-height: 22px;
+}
+
+.step + .step {
+  border-top: 1px solid var(--border);
 }
 
 .step .mark {
-  font-size: 0.75rem;
+  grid-area: mark;
+  display: inline-flex;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.step-label {
+  grid-area: label;
+  font-weight: 500;
+}
+
+/* Status is a badge, as the app draws one: small, rounded, tinted by state. */
+.step-status {
+  grid-area: status;
+  justify-self: end;
+  font-size: var(--text-xs);
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--secondary);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.step-status.good {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.step-status.bad {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+
+.step-elapsed {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.step-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--ring);
+  border-radius: 50%;
+  animation: step-spin 0.8s linear infinite;
+}
+
+/*
+ * One Start, start to finish (`StartJourney`): what is happening now, the time left and so far, and
+ * one bar over every row that only moves forward. Drawn as the rows are, above them.
+ */
+/*
+ * As tall as what it says: what is happening, one line of time, then the bar, in the card's own
+ * padding. What changes is said in place, so nothing in it or under it moves: the time line is one
+ * line whatever it says ("About 3 minutes left", "Taking longer than usual, still working", a
+ * download's bytes). A fixed 130 px card left an empty band under the bar in its usual one-line
+ * form. Docker Desktop's hand-off, three lines, holds its own height while it shows (`.handing-off`).
+ */
+.journey {
+  margin: 4px 0 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  display: grid;
+  gap: 10px;
+}
+
+.journey-head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  font-size: var(--text-base);
+  line-height: 22px;
+}
+
+.journey-said {
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* The time left and so far, under what is happening: one quiet line, as a row's detail. */
+.journey-head .journey-time {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Another app's window wants the person: its three lines held while it shows, whatever it says. */
+.journey.handing-off .journey-said {
+  min-height: 66px;
+}
+
+.journey progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  background: var(--border);
+}
+
+.journey progress::-webkit-progress-bar {
+  background: var(--border);
+}
+
+.journey progress::-webkit-progress-value {
+  background: var(--ring);
+  border-radius: inherit;
+  transition: width 0.8s ease-out;
+}
+
+.journey progress::-moz-progress-bar {
+  background: var(--ring);
+  border-radius: inherit;
+}
+
+/*
+ * Why updating OpenBot has a screen, under its progress (`SelfContainedNote`): the window's icon
+ * tile, then the reason and OpenBot for Business, on the muted ground the app gives an aside, in
+ * the rows' smaller type so the progress above stays what the eye reads first.
+ */
+.self-contained {
+  margin-top: 16px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  /* Its own areas: `.mark-tile` names its area `mark`, as the hosting tiles lay it out. */
+  grid-template-areas: "mark words";
+  column-gap: 14px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--muted) 55%, var(--card));
+}
+
+.self-contained-words {
+  grid-area: words;
+}
+
+.self-contained h2 {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.self-contained p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.self-contained p + p {
+  margin-top: 6px;
+}
+
+.self-contained a {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/*
+ * While Docker Desktop's three-line hand-off shows, the journey is 44px taller, and the card
+ * scrolled at the window's default size. The note keeps its heading, which says why, and the pitch
+ * with its link, and leaves out the sentence between until the hand-off goes.
+ */
+main > .sheet:has(.journey.handing-off) .self-contained-why {
+  display: none;
+}
+
+/*
+ * The background install's row, last in the step (`BehindSlot`). ONE height, its tallest form's
+ * (its name, one line, and a download bar with its bytes under them), whatever it says: a plain
+ * line, a download, unpacking, waiting for you, installed. Each line is one line, cut short with
+ * an ellipsis rather than wrapping onto a second. On Windows F, Continue, pinned in the same foot,
+ * moved up 14 px and back with no input as the row went from a plain line (118 px) to a download
+ * (132 px) and back. A card that says setup stopped is the one thing that may make it taller.
+ */
+.behind-slot {
+  margin-top: 24px;
+  height: 132px;
+}
+
+.behind-slot:has(> .local-alert) {
+  height: auto;
+  min-height: 132px;
+}
+
+/* A row paused for room says what to free and offers Try again: it may be taller too. */
+.behind-slot:has(.step-action) {
+  height: auto;
+  min-height: 132px;
+}
+
+.behind-slot > .steps {
+  margin-top: 0;
+}
+
+/* Under a row with no buttons in it, as while the account step waits: one gap, not two. */
+.row:empty + .behind-slot {
+  margin-top: 0;
+}
+
+.behind-slot > .local-alert {
+  margin: 12px 0 0;
+}
+
+/* A step that waits on the person, not on work: the spinner's ring, standing still. */
+.step-waiting {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ring);
+  border-radius: 50%;
+}
+
+@keyframes step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-spinner {
+    animation: none;
+  }
 }
 
 .step .mark.good {
@@ -485,11 +1804,163 @@ details > summary:hover {
 .step .mark.bad {
   color: var(--bad);
 }
+/* A step that ended without doing what it set out to, and stops nothing: quiet, not red. */
+.step .mark.note {
+  color: var(--text-secondary);
+}
 
 .step .detail {
-  color: var(--ink-faint);
-  font-size: 0.75rem;
-  text-align: right;
+  grid-area: detail;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.step .detail:empty {
+  display: none;
+}
+
+/* A paused row's Try again, under what its line says to do first (`Progress.onTryAgain`). */
+.step .step-action {
+  grid-column: 2 / -1;
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.step .downloads {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The background row's lines stay on one line each (see `.behind-slot`). After the rules they cut. */
+.behind-slot .step-label,
+.behind-slot .step .detail,
+.behind-slot .step .downloads > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+ * A plain line, with no download under it, may take up to three lines: the row is then 130 px of
+ * the 132 held, its badge on a line of its own included, so it still never moves anything. Cut at one line, "The Podman on this computer is
+ * too old for OpenBot, so OpenBot is updating it." read "...so OpenBot is u…"; cut at two, Docker
+ * Desktop's hand-off read "...OpenBot comes back when Docker is…". The longest line that reaches
+ * this row is three lines at 1016x839 and at 720x560 (`setupLayout.browser.test.ts`).
+ */
+.behind-slot .step:not(:has(> .downloads)) .detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+}
+
+.downloads progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  background: var(--border);
+}
+
+.downloads progress::-webkit-progress-bar {
+  background: var(--border);
+}
+
+.downloads progress::-webkit-progress-value {
+  background: var(--ring);
+  border-radius: inherit;
+}
+
+.downloads progress::-moz-progress-bar {
+  background: var(--ring);
+  border-radius: inherit;
+}
+
+/* A size not known yet: the same track with a segment moving along it, claiming no fraction. */
+.downloads progress:indeterminate,
+.downloads progress:indeterminate::-webkit-progress-bar {
+  background: linear-gradient(
+      90deg,
+      var(--border) 0 45%,
+      var(--ring) 45% 55%,
+      var(--border) 55% 100%
+    )
+    var(--border);
+  background-size: 300% 100%;
+  animation: downloads-indeterminate 1.6s linear infinite;
+}
+
+.downloads progress:indeterminate::-moz-progress-bar {
+  background: transparent;
+}
+
+@keyframes downloads-indeterminate {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .downloads progress:indeterminate,
+  .downloads progress:indeterminate::-webkit-progress-bar {
+    animation: none;
+  }
+}
+
+@media (max-width: 580px) {
+  .sheet {
+    padding: 24px;
+  }
+
+  .setup-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .step {
+    grid-template-columns: 16px minmax(0, 1fr);
+    grid-template-areas:
+      "mark label"
+      ". status"
+      ". detail";
+  }
+
+  .step-status {
+    justify-self: start;
+  }
+}
+
+/*
+ * The background row's name whole, with its step and time on a line of their own under it, as a
+ * narrow window sets every row. On Windows G the badge ("Step 3 of 4 · 4m 18s elapsed") cut the
+ * name to "Installing OpenBot in the backgr…". After the rules it changes. Its tallest forms still
+ * fill the 132 px held and no more: a download (name, badge, line, bar and bytes), or a plain line
+ * of three (`.behind-slot`).
+ */
+.behind-slot .step {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-areas:
+    "mark label"
+    ". status"
+    ". detail";
+}
+
+.behind-slot .step-status {
+  justify-self: start;
 }
 
 .sr-only {
@@ -522,8 +1993,8 @@ details > summary:hover {
   --c2: oklch(70% 0.18 210);
   --c3: oklch(66% 0.2 285);
   --c4: oklch(72% 0.19 325);
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   position: relative;
   isolation: isolate;
@@ -549,7 +2020,10 @@ details > summary:hover {
   mix-blend-mode: screen;
 }
 
-/* The rim: lit from above, shaded below, so it sits in the page rather than on it. */
+/*
+ * The rim: lit from above. No shading below: on the dark card a dark lower rim melts into the
+ * ground, and at the header's 22px it read as the mark's bottom being sliced off.
+ */
 .orb::after {
   content: "";
   position: absolute;
@@ -557,74 +2031,464 @@ details > summary:hover {
   border-radius: 50%;
   box-shadow:
     inset 0 0 0 1px hsl(0 0% 100% / 0.16),
-    inset 0 2px 4px hsl(0 0% 100% / 0.22),
-    inset 0 -2px 5px hsl(0 0% 0% / 0.4);
+    inset 0 2px 4px hsl(0 0% 100% / 0.22);
 }
 
+/* The app's name beside its mark, set as the app's sidebar sets it. */
 .lockup {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1.75rem;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+/*
+ * The trademark sign on OpenBot's name, as open.bot sets it and as the app's `Trademark` does: a
+ * small superscript in the name's own colour, its top level with the capitals, that leaves the line
+ * where it was. Never under 8px, so it still reads beside the header's 16px name.
+ */
+.lockup .trademark {
+  vertical-align: 0.4em;
+  letter-spacing: 0;
+  margin-left: 0.1em;
+  font-size: max(0.45em, 8px);
+  font-weight: 500;
+  line-height: 0;
 }
 
 .lockup span {
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
+  line-height: 22px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
+}
+
+/*
+ * The lockup at the top of every setup step, and on the sign-in a stopped setup asks for: smaller,
+ * as the app's sidebar header sets it.
+ */
+.setup-header .lockup,
+.local-needs .lockup {
+  margin: 0;
+  gap: 8px;
+}
+
+.setup-header .orb,
+.local-needs .orb {
+  width: 22px;
+  height: 22px;
+}
+
+.setup-header .lockup span,
+.local-needs .lockup span {
+  font-size: var(--text-base);
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* "by CopilotKit" beside the name: the same size, quieter, so OpenBot still leads. */
+.setup-header .lockup span.lockup-by,
+.local-needs .lockup span.lockup-by {
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: -2px;
+}
+
+/* On the sign-in card, under its heading: the same space above it as below. */
+.local-needs .lockup {
+  margin: 12px 0;
 }
 
 /* The developer half of a failure: present, and never the headline. */
 .detail-of {
   border: 0;
-  padding: 0.6rem 0 0;
+  padding: 10px 0 0;
   margin: 0;
 }
 
 .detail-of > summary {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 
 .detail-of pre {
-  margin: 0.5rem 0 0;
-  padding: 0.6rem 0.7rem;
-  background: var(--sunk);
-  border-radius: 8px;
-  font-size: 0.72rem;
-  line-height: 1.45;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--muted) 70%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 18px;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 9rem;
   overflow-y: auto;
-  color: var(--ink-soft);
+  color: var(--text-secondary);
   /* Monospace here is for machine output, which is what it is for. */
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
+}
+
+/* The tick beside "Signed in", for the moment before the screen moves on by itself. */
+.signed-in-mark {
+  color: var(--good);
+  font-weight: 600;
+}
+
+/* Something running now, said beside the rows' spinner. */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.status-line .step-spinner {
+  flex: none;
+}
+
+/* "Restarting your Podman machine" keeps the gap the buttons it replaces had under the paragraph:
+   `.local-alert p` takes every margin off, the status line's own included. */
+.podman-too-small .status-line {
+  margin-top: 12px;
 }
 
 /*
- * The answer on the last screen. Given weight on purpose: it is the one piece of text in the whole
- * wizard that was produced rather than written, and it is the proof the install actually worked.
+ * On the first screen the line keeps the height of its tallest state, the line, the bar and the
+ * bytes under it, whatever it says: the usage-data text under it never moves (`EarlyDownloadsLine`).
+ * Its own box, so the line's top margin is inside the height it holds.
  */
-.answer {
-  margin: 20px 0 4px;
-  padding: 16px 18px;
-  border-radius: 14px;
-  background: var(--raised);
-  border: 1px solid var(--hair);
+.early-downloads.first-screen {
+  display: flow-root;
+  min-height: 72px;
 }
 
-.answer-from {
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--ink-faint);
+/* The downloads the first screen started: their line, and its bar under it. */
+.early-downloads .downloads {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
 }
 
-.answer-text {
+/* The Status window: one card per part, each with its memory and its actions. */
+.status-part {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.status-part .row {
+  margin-top: 12px;
+}
+
+.status-part .footnote {
+  margin-top: 12px;
+}
+
+.status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-head h2 {
   margin: 0;
-  font-size: 17px;
-  line-height: 1.45;
-  color: var(--ink);
-  white-space: pre-wrap;
+}
+
+.status-state {
+  font-size: var(--text-xs);
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--secondary);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.status-list li span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.status-list li span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 24px 0 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.status-details dt {
+  color: var(--text-disabled);
+}
+
+.status-details dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The menu's status on whichever setup screen is showing, without moving that screen. */
+.window-status {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--elevation-md);
+}
+
+.window-status .status-line {
+  margin: 0;
+}
+
+/*
+ * Dark, following the system: OpenBot's own `.dark` tokens (app/src/theme.css), the near-black plum
+ * ground with the frame darkest and the cards lightest. Everything else follows from the mapping in
+ * `:root`.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.182 0.023 296.6);
+    --foreground: oklch(0.956 0.005 286.3);
+    --card: oklch(0.212 0.028 297.1);
+    --primary: oklch(0.956 0.005 286.3);
+    --primary-foreground: oklch(0.108 0.015 220.9);
+    --secondary: oklch(0.253 0.032 297.6);
+    --muted: oklch(0.253 0.032 297.6);
+    --muted-foreground: oklch(0.69 0.017 285.9);
+    --destructive: oklch(0.792 0.121 16.4);
+    --success: oklch(0.832 0.13 170.1);
+    --border: oklch(0.28 0.035 298.6);
+    --input: oklch(0.28 0.035 298.6);
+    --ring: oklch(0.713 0.151 277.7);
+    --sidebar: oklch(0.156 0.017 295.8);
+    --sidebar-accent: oklch(0.832 0.085 281.4 / 12%);
+
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
+
+    --color-scheme: dark;
+  }
+
+  /* The app's dark `outline` button: `dark:bg-input/30`, a shade above the card. */
+  button.quiet,
+  button.another-question,
+  a.button-link {
+    background: color-mix(in srgb, var(--input) 30%, transparent);
+    border-color: var(--input);
+  }
+
+  button.quiet:hover:not(:disabled),
+  button.another-question:hover:not(:disabled),
+  a.button-link:hover {
+    background: color-mix(in srgb, var(--input) 50%, transparent);
+  }
+
+  .field input {
+    background: color-mix(in srgb, var(--input) 30%, transparent);
+  }
+
+  /* Marks are drawn for a white ground, so on a dark button they sit on a white tile of their own. */
+  .button-mark {
+    width: 20px;
+    height: 20px;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--mark-ground);
+  }
+}
+
+/* Get troubleshooting logs, under a failure and in the Status window: one line, two buttons. */
+.troubleshooting {
+  margin-top: 16px;
+}
+
+.troubleshooting p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.troubleshooting .row {
+  margin-top: 8px;
+}
+
+.troubleshooting .caution {
+  margin-top: 8px;
+}
+
+.troubleshooting .caution.failed {
+  color: var(--destructive);
+}
+
+/*
+ * Last, after every `.sheet` rule: the card scrolls once its step is taller than the room it has
+ * (see `main`), and what is in it keeps its size.
+ */
+main > .sheet {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+/*
+ * A step with a pinned foot keeps its scrollbar's room whether the scrollbar shows or not, and
+ * gives it back from its right padding (`--gutter`, which `StepFooter` measures), so what is in it
+ * is as wide either way. On Windows G the background row moved about 15 px sideways as the card's
+ * scrollbar went when a provider was chosen.
+ */
+main > .sheet:has(> .step-footer) {
+  scrollbar-gutter: stable;
+  padding-right: calc(32px - var(--gutter, 0px));
+}
+
+main > .sheet > * {
+  flex-shrink: 0;
+}
+
+/*
+ * A setup step's foot stays in view: its actions and the background install's row, pinned to the
+ * bottom of the card's visible area while the step scrolls above them (`StepFooter`). On Windows F
+ * the AI step was taller than the window and the background row sat below the fold; with only the
+ * row pinned, Continue sat under it until the person scrolled.
+ */
+main > .sheet > .step-footer {
+  position: sticky;
+  bottom: -32px;
+  z-index: 1;
+  margin-bottom: -32px;
+  padding-bottom: 32px;
+  background: var(--card);
+}
+
+/* Its actions' gap above them is inside it, so what scrolls under it does not show through. */
+/*
+ * While the step goes on under the foot, what is under it fades into the foot, so it plainly goes
+ * on below (`StepFooter`). On Windows G the AI step's last provider sat under the foot with a
+ * sliver of its edge showing, and nothing said the list went on.
+ */
+main > .sheet > .step-footer.more-below::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 56px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--card) 0%, transparent),
+    var(--card)
+  );
+  pointer-events: none;
+}
+
+main > .sheet > .step-footer > .row:first-child {
+  margin-top: 0;
+  padding-top: 24px;
+}
+
+main > .sheet > .step-footer > .row:first-child:empty {
+  padding-top: 0;
+}
+
+/*
+ * With its own actions above the foot, as Cancel is while the account step signs in, the foot's
+ * empty row still holds the card's one gap above the background row. It sat flush against Cancel.
+ */
+main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
+  padding-top: 24px;
+}
+
+@media (max-width: 580px) {
+  main > .sheet:has(> .step-footer) {
+    padding-right: calc(24px - var(--gutter, 0px));
+  }
+
+  main > .sheet > .step-footer {
+    bottom: -24px;
+    margin-bottom: -24px;
+    padding-bottom: 24px;
+  }
+}
+
+/*
+ * Usage data, on the last screen of setup: a small checkbox and a line or two beside it, in the
+ * footnote's size and colour. No card: it is a choice, not a step. Under the step's words and above
+ * its rows, the lede's own gap on either side, so nothing that comes and goes below can move it.
+ */
+.usage-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: start;
+  margin: 0 0 20px;
+  font-size: var(--text-xs);
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.usage-choice p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* The app's `Checkbox`: 14px, its primary fill when checked. */
+.usage-choice input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 1px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.usage-choice input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+.usage-choice label {
+  cursor: pointer;
+}
+
+.usage-choice .usage-choice-failed {
+  grid-column: 2;
 }

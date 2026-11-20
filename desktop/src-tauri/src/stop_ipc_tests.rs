@@ -167,6 +167,163 @@ mod stop_ipc {
         );
     }
 
+    /// The app's own logger, writing into a folder of its own for the rest of this process, and
+    /// the file it writes. Only in an isolated process: a process has one logger.
+    fn log_to_a_file() -> PathBuf {
+        let folder = temp_root("stop-log");
+        let app = tauri::test::mock_app();
+        let (_, level, logger) = logging::builder(
+            tauri_plugin_log::TargetKind::Folder {
+                path: folder.clone(),
+                file_name: Some(logging::FILE_NAME.into()),
+            },
+            logging::MAX_FILE_BYTES,
+            logging::KEPT_FILES,
+        )
+        .split(app.handle())
+        .expect("the logger builds");
+        log::set_boxed_logger(logger).expect("nothing else logs in this process");
+        log::set_max_level(level);
+        folder.join(format!("{}.log", logging::FILE_NAME))
+    }
+
+    /// The log's entries without their timestamps: `INFO  [stop] finished in 3.1s`.
+    fn entries(file: &Path) -> Vec<String> {
+        std::fs::read_to_string(file)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.split_once(' ').map(|(_, entry)| entry.to_owned()))
+            .collect()
+    }
+
+    /// Where `wanted` first is in `entries`, or a failure that shows the whole log.
+    fn position(entries: &[String], wanted: impl Fn(&str) -> bool, what: &str) -> usize {
+        entries
+            .iter()
+            .position(|entry| wanted(entry))
+            .unwrap_or_else(|| panic!("no {what} in the log:\n{}", entries.join("\n")))
+    }
+
+    /// Stop's own two entries bracket the work: who asked and where, the engine's commands, then
+    /// how Stop ended and how long it took. The same as Start, whichever way Stop was asked.
+    fn assert_stop_logged(file: &Path, root: &Path, from: &str) {
+        let entries = entries(file);
+        let folder = root.file_name().unwrap().to_string_lossy().into_owned();
+        let asked = position(
+            &entries,
+            |entry| {
+                entry.starts_with("INFO  [stop] asked in ")
+                    && entry.ends_with(&format!("{folder} {from}"))
+            },
+            &format!("[stop] asked line ending \"{folder} {from}\""),
+        );
+        let down = position(
+            &entries,
+            |entry| entry.starts_with("INFO  [compose down] finished in "),
+            "[compose down] line",
+        );
+        let took = regex::Regex::new(r"^INFO  \[stop\] finished in \d+\.\ds$").unwrap();
+        let finished = position(
+            &entries,
+            |entry| took.is_match(entry),
+            "[stop] finished line",
+        );
+        assert!(
+            asked < down && down < finished,
+            "out of order:\n{}",
+            entries.join("\n")
+        );
+    }
+
+    /// Settings > This computer's Stop on Windows logged only the menu's own lines and the engine's
+    /// commands: no `[stop]` entry, so no outcome or duration for the Stop somebody pressed.
+    #[test]
+    fn stop_from_settings_logs_who_asked_how_it_ended_and_how_long_it_took() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::stop_from_settings_logs_who_asked_how_it_ended_and_how_long_it_took",
+        ) {
+            return;
+        }
+        let log = log_to_a_file();
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/settings-stop";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        // The command Settings > This computer invokes.
+        tauri::async_runtime::block_on(desktop_page::stop(fixture.app.handle().clone()))
+            .expect("OpenBot on this computer stops as it did");
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+
+        assert_stop_logged(&log, &fixture.root, "from Settings");
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    /// Quit stops everything too, and logged only its screen's rows.
+    #[test]
+    fn stop_by_quit_logs_who_asked_how_it_ended_and_how_long_it_took() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::stop_by_quit_logs_who_asked_how_it_ended_and_how_long_it_took",
+        ) {
+            return;
+        }
+        let log = log_to_a_file();
+        let fixture = Fixture::new();
+        let compose = fixture.compose_barrier();
+
+        let app = fixture.app.handle().clone();
+        let quitting = std::thread::spawn(move || quit_cleanup_shown(&app));
+        await_compose(&compose).write_all(&[0]).unwrap();
+        assert_eq!(quitting.join().unwrap(), Vec::<String>::new());
+
+        assert_stop_logged(&log, &fixture.root, "by Quit");
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    /// Restart is asked from Settings and from the Status window, and its entry says which. Show
+    /// says it was asked, as every other action does, before how it ended.
+    #[test]
+    fn restart_and_show_log_who_asked_and_how_they_ended() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::restart_and_show_log_who_asked_and_how_they_ended",
+        ) {
+            return;
+        }
+        let log = log_to_a_file();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        // Nothing running, so both end at once, and say why.
+        tauri::async_runtime::block_on(desktop_page::restart(app.handle().clone()))
+            .expect_err("nothing to restart");
+        tauri::async_runtime::block_on(show_openbot(app.handle().clone()))
+            .expect_err("nothing to show");
+
+        let entries = entries(&log);
+        let failed = |tag: &str| {
+            let failed = regex::Regex::new(&format!(r"^ERROR \[{tag}\] failed after \d+\.\ds: "))
+                .unwrap();
+            move |entry: &str| failed.is_match(entry)
+        };
+        let asked = position(
+            &entries,
+            |entry| entry == "INFO  [restart] asked from Settings",
+            "[restart] asked from Settings",
+        );
+        let ended = position(&entries, failed("restart"), "[restart] failed line");
+        assert!(asked < ended, "{}", entries.join("\n"));
+        let asked = position(
+            &entries,
+            |entry| entry == "INFO  [show] asked",
+            "[show] asked",
+        );
+        let ended = position(&entries, failed("show"), "[show] failed line");
+        assert!(asked < ended, "{}", entries.join("\n"));
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
     fn async_runtime_progresses() -> bool {
         let (sent, received) = mpsc::channel();
         tauri::async_runtime::spawn(async move {
@@ -185,7 +342,8 @@ mod stop_ipc {
         let fixture = Fixture::new();
         let compose = fixture.compose_barrier();
         let shell = fixture.app.state::<Shell>();
-        let cleanup = shell.children.lock().unwrap();
+        // The first lock host cleanup takes; held here, it keeps that cleanup waiting.
+        let cleanup = shell.host_access.lock().unwrap();
         let dispatch = fixture.dispatch();
         wait_until(|| shell.generation.load(SeqCst) == 1);
         // Always release both barriers before asserting against the old synchronous command.
@@ -278,18 +436,10 @@ mod stop_ipc {
             pending,
             "Stop finished while Start still held the side-effect lock"
         );
-        let error = tauri::async_runtime::block_on(start_host_processes(
-            &attempt,
-            &fixture.root,
-            &fixture.root.join(".logs"),
-            Path::new("must-not-launch"),
-            &stack::Secrets::new(),
-            |_| panic!("cancelled Start published a child"),
-            |_| panic!("cancelled Start reached readiness"),
-        ))
-        .unwrap_err();
+        let error = attempt
+            .lock_current()
+            .expect_err("a cancelled Start resumed a side effect");
         assert_eq!(error.said, StartAttempt::cancelled().said);
-        assert!(shell.children.lock().unwrap().is_empty());
         assert!(shell.root.lock().unwrap().is_none());
     }
 
@@ -305,13 +455,13 @@ mod stop_ipc {
         *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
         let compose = fixture.compose_barrier();
 
-        stop_from_menu(fixture.app.handle().clone());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
         await_compose(&compose).write_all(&[71]).unwrap();
 
         let shell = fixture.app.state::<Shell>();
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);
         assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
-        let problem = last_failure(fixture.app.handle().clone())
+        let problem = last_failure_now(fixture.app.handle())
             .expect("menu Stop failure should be retained for setup");
         assert_eq!(
             problem.said,
@@ -325,7 +475,7 @@ mod stop_ipc {
                     && detail.contains("synthetic Compose refusal")),
             "{problem:?}"
         );
-        assert!(last_failure(fixture.app.handle().clone()).is_none());
+        assert!(last_failure_now(fixture.app.handle()).is_none());
         assert!(
             recovery_required(&shell, &fixture.root),
             "reading the retained notice must not clear recovery-required state"
@@ -340,17 +490,243 @@ mod stop_ipc {
             return;
         }
         let fixture = Fixture::new();
+        std::fs::write(
+            fixture.root.join(".openbot-prepared.json"),
+            "completed preparation",
+        )
+        .unwrap();
+        preparation::record_launch(&fixture.root, None).unwrap();
+        // A launch is offered only with its local Intelligence stack; a shared one is never stopped.
+        local_eval_state::begin(
+            &fixture.root,
+            &local_eval::StackId::parse("local-abc123").unwrap(),
+            local_eval_state::Ownership::Shared,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        let configured = || {
+            already_configured(
+                fixture.app.handle().clone(),
+                fixture.root.to_string_lossy().into_owned(),
+            )
+        };
+        assert!(configured().launch.is_some());
         let setup = "tauri://localhost/menu-stop-success";
         *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
         let compose = fixture.compose_barrier();
-        stop_from_menu(fixture.app.handle().clone());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
         await_compose(&compose).write_all(&[0]).unwrap();
 
         wait_until(|| fixture.window.url().unwrap().as_str() == setup);
         assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
         let shell = fixture.app.state::<Shell>();
-        assert!(last_failure(fixture.app.handle().clone()).is_none());
+        assert!(last_failure_now(fixture.app.handle()).is_none());
         assert!(!recovery_required(&shell, &fixture.root));
+        let stopped = configured();
+        assert!(stopped.launch.is_some(), "Stop retains the installed setup");
+        assert!(!stopped.auto_start, "Stop must survive setup reloading");
+        let reopened = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let resumed = already_configured(
+            reopened.handle().clone(),
+            fixture.root.to_string_lossy().into_owned(),
+        );
+        assert!(resumed.launch.is_some());
+        assert!(
+            resumed.auto_start,
+            "a fresh app session may resume the saved installation"
+        );
+    }
+
+    /// EC2 Mac: OpenBot updated its installation at Start, and later its engine machine stopped
+    /// under the open window. Setup came back but never started OpenBot again: the update's own
+    /// stop had marked the session as stopped by the person, which only their Stop may do.
+    #[test]
+    fn an_update_stop_keeps_automatic_start_and_a_person_stop_ends_it() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::an_update_stop_keeps_automatic_start_and_a_person_stop_ends_it",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let configured = || {
+            already_configured(
+                fixture.app.handle().clone(),
+                fixture.root.to_string_lossy().into_owned(),
+            )
+        };
+        assert!(configured().auto_start);
+
+        // The update's stop, as `upgrade` and an app update run it.
+        let compose = fixture.compose_barrier();
+        let handle = fixture.app.handle().clone();
+        let root = fixture.root.clone();
+        let update = std::thread::spawn(move || stop_for_update(&handle, &root));
+        await_compose(&compose).write_all(&[0]).unwrap();
+        update.join().unwrap().unwrap();
+        assert!(
+            configured().auto_start,
+            "an update's stop is not the person stopping OpenBot"
+        );
+
+        // The person's Stop, on what the update started again.
+        *fixture.app.state::<Shell>().containers.lock().unwrap() = Some(ContainerDeployment {
+            root: fixture.root.clone(),
+            address: engine::Address::new(engine::Engine::Docker, None),
+        });
+        let setup = "tauri://localhost/update-then-stop";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::Menu);
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(
+            !configured().auto_start,
+            "the person's Stop still holds OpenBot stopped"
+        );
+    }
+
+    /// Settings' Change on the AI model row: OpenBot stops, the window goes to setup, and setup
+    /// is told once to open at its AI screen. A Stop that failed tells it nothing: OpenBot may
+    /// still be running, and setup shows the failure with Start, as after any failed Stop.
+    #[test]
+    fn change_ai_connection_from_settings_stops_then_opens_the_ai_screen_once() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::change_ai_connection_from_settings_stops_then_opens_the_ai_screen_once",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/change-ai-connection";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        change_ai_connection_from_settings(fixture.app.handle().clone());
+        // Nothing to open at until OpenBot has stopped.
+        assert!(!take_ai_connection_change(fixture.app.handle().clone()));
+        await_compose(&compose).write_all(&[0]).unwrap();
+
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
+        assert!(take_ai_connection_change(fixture.app.handle().clone()));
+        assert!(
+            !take_ai_connection_change(fixture.app.handle().clone()),
+            "a later visit to setup opens at Start"
+        );
+    }
+
+    /// After Stop from the Status window, its App row offered no Start. Its Start now runs the
+    /// setup page's own Start OpenBot, once: said to a setup page already there, and kept for one
+    /// still loading. A main window showing anything else is sent to setup, whose page takes it.
+    #[test]
+    fn start_from_the_status_window_asks_the_setup_page_to_start_once() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::start_from_the_status_window_asks_the_setup_page_to_start_once",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/status-start";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+        let (heard, told) = mpsc::channel();
+        fixture.window.listen(START_ASKED_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+
+        // The Status window's Stop (`stop_openbot_from_status`).
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::StatusWindow);
+        await_compose(&compose).write_all(&[0]).unwrap();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(
+            !take_start_asked(fixture.app.handle().clone()),
+            "Stop asks for no Start"
+        );
+
+        start_openbot_from_status(fixture.app.handle().clone()).unwrap();
+        told.recv_timeout(DEADLINE)
+            .expect("the setup page already there is told");
+        assert_eq!(fixture.window.url().unwrap().as_str(), setup);
+        assert!(take_start_asked(fixture.app.handle().clone()));
+        assert!(
+            !take_start_asked(fixture.app.handle().clone()),
+            "one Start per ask"
+        );
+
+        // Showing OpenBot's own page: sent to setup, and the ask kept for its page to take on load.
+        fixture
+            .window
+            .navigate("http://127.0.0.1:3010/".parse().unwrap())
+            .unwrap();
+        start_openbot_from_status(fixture.app.handle().clone()).unwrap();
+        assert_eq!(fixture.window.url().unwrap().as_str(), setup);
+        assert!(take_start_asked(fixture.app.handle().clone()));
+    }
+
+    /// Seen on a Mac and on Windows: after the App row's Start brought everything up, the open
+    /// Status window's services row still said Stopped, with Start, until Refresh. A Start and a
+    /// Stop that finish, whichever way, tell the Status window to read again, and not before.
+    #[test]
+    fn the_status_window_reads_again_when_a_start_or_a_stop_finishes() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::the_status_window_reads_again_when_a_start_or_a_stop_finishes",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let status = tauri::WebviewWindowBuilder::new(&fixture.app, "status", Default::default())
+            .build()
+            .unwrap();
+        let (heard, told) = mpsc::channel();
+        status.listen(STATUS_REFRESH_EVENT, move |_| {
+            let _ = heard.send(());
+        });
+
+        // A Start that ends at once: the fixture's OpenBot, in another folder, still runs.
+        let elsewhere = temp_root("status-refresh-elsewhere");
+        let started = tauri::async_runtime::block_on(start_stack_now(
+            fixture.app.handle().clone(),
+            elsewhere.to_string_lossy().into_owned(),
+            "http://127.0.0.1:1".into(),
+            "ws://127.0.0.1:2".into(),
+            compatible_choice(None, None),
+            None,
+        ));
+        assert!(started.is_err(), "{started:?}");
+        told.recv_timeout(DEADLINE)
+            .expect("told once the Start ended");
+
+        let compose = fixture.compose_barrier();
+        stop_from_menu(fixture.app.handle().clone(), AskedFrom::StatusWindow);
+        let mut stopping = await_compose(&compose);
+        assert!(
+            told.recv_timeout(Duration::from_millis(300)).is_err(),
+            "not told while the Stop runs"
+        );
+        stopping.write_all(&[0]).unwrap();
+        told.recv_timeout(DEADLINE)
+            .expect("told once the Stop ended");
+    }
+
+    #[test]
+    fn change_ai_connection_after_a_failed_stop_opens_setup_as_usual() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::change_ai_connection_after_a_failed_stop_opens_setup_as_usual",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/change-ai-connection-failed";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        change_ai_connection_from_settings(fixture.app.handle().clone());
+        await_compose(&compose).write_all(&[71]).unwrap();
+
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert!(!take_ai_connection_change(fixture.app.handle().clone()));
+        assert!(last_failure_now(fixture.app.handle()).is_some());
     }
 
     #[test]
@@ -364,7 +740,7 @@ mod stop_ipc {
         let shell = fixture.app.state::<Shell>();
         // A poisoned cleanup lock is a real panic boundary; it must reject IPC, not abandon it.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _cleanup = shell.children.lock().unwrap();
+            let _cleanup = shell.host_access.lock().unwrap();
             panic!("synthetic cleanup lock poisoning");
         }))
         .expect_err("poison the cleanup lock");

@@ -1,19 +1,56 @@
 """AG2 as a Bot. AG-UI is an extra in AG2's own package, so `ag2[ag-ui]` is the dependency."""
 
+import hmac
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings, openai_api
 
 from ag2 import Agent
 from ag2.ag_ui import AGUIStream
-from ag2.config import OpenAIConfig
+from ag2.config import AnthropicConfig, OpenAICompletionsConfig, OpenAIResponsesConfig
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
+
+def _config() -> AnthropicConfig | OpenAICompletionsConfig | OpenAIResponsesConfig:
+    """The provider the model screen chose, which AG2 reaches through a config of its own.
+
+    `BOT_PROVIDER` is `anthropic` for an Anthropic key and `openai` otherwise, an OpenAI-compatible
+    endpoint included. Each SDK reads its own key from the environment.
+
+    An OpenAI model takes AG2's Responses config when it takes function tools only there
+    (`gpt-5.6` and later, `gpt-5.4` and `gpt-5.5` once a run carries an effort, the `-pro` models:
+    "To use function tools, use /v1/responses"), and the
+    Chat Completions config otherwise, which every OpenAI-compatible endpoint serves. Both are
+    named explicitly: AG2 1.4.0 turns the bare `OpenAIConfig` into the Responses config, which
+    would move every compatible endpoint onto an API most of them do not serve.
+    """
+    settings = bot_settings("agent-ag2")
+    provider = settings.provider
+    model = settings.model
+    if provider == "anthropic":
+        # Compose exports missing overrides as ""; the SDK only defaults an absent URL.
+        base_url = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+        return AnthropicConfig(model=model, base_url=base_url)
+    # The same "" for OPENAI_BASE_URL, which Compose writes whenever the model screen chose a plain
+    # OpenAI key. The SDK only defaults an absent URL; given "", every request fails to connect.
+    base_url = (os.environ.get("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
+    if openai_api(model) == "responses":
+        return OpenAIResponsesConfig(model=model, base_url=base_url)
+    return OpenAICompletionsConfig(model=model, base_url=base_url)
+
+
 agent = Agent(
     name="openbot",
     prompt="Answer the question you are asked, briefly and correctly.",
-    config=OpenAIConfig(model=(os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()),
+    config=_config(),
 )
 stream = AGUIStream(agent)
 
@@ -25,7 +62,7 @@ async def refuse_without_the_server_token(request: Request, call_next):
     if request.url.path != "/health":
         expected = (os.environ.get("MANAGED_AGENT_TOKEN") or "").strip()
         offered = (request.headers.get(TOKEN_HEADER) or "").strip()
-        if not expected or offered != expected:
+        if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
             return JSONResponse({"error": "unauthorised"}, status_code=401)
     return await call_next(request)
 

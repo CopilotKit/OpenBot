@@ -1,18 +1,7 @@
-import {
-  IconArrowLeft,
-  IconBuildingBank,
-  IconCode,
-  IconDeviceDesktop,
-  IconFileText,
-  IconKey,
-  IconLayoutGrid,
-  IconListDetails,
-  IconPuzzle,
-  IconShieldCheck,
-  IconUsers,
-} from "@tabler/icons-react";
+import { IconArrowLeft } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
+import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
 import {
   Sidebar,
   SidebarContent,
@@ -29,97 +18,15 @@ const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 
 /**
- * The same four groups, in the same order, as the admin index.
- *
- * A rail that lists ten things flat asks somebody to know which of them is the one they want. The
- * grouping is the only navigation help this screen offers, so it has to agree with the page it
- * navigates to — two different orderings of the same ten links is worse than either ordering.
+ * Admin's rail: Overview, then the same groups, in the same order, as the overview page. Both draw
+ * `ADMIN_SECTIONS`, because the grouping is the only navigation help this screen offers, and two
+ * orderings of the same links is worse than either one.
  */
-const GROUPS: {
-  label: string;
-  items: {
-    icon: React.ComponentType<{ className?: string }>;
-    linkOptions: LinkOptions;
-    title: string;
-  }[];
-}[] = [
-  {
-    label: "What Bots can reach",
-    items: [
-      {
-        title: "Credentials",
-        icon: IconKey,
-        linkOptions: { to: "/admin/credentials" },
-      },
-      {
-        title: "Boundaries",
-        icon: IconShieldCheck,
-        linkOptions: { to: "/admin/boundaries" },
-      },
-      {
-        title: "Computers",
-        icon: IconDeviceDesktop,
-        linkOptions: { to: "/admin/computers" },
-      },
-    ],
-  },
-  {
-    label: "What Bots can do",
-    items: [
-      {
-        title: "Plugins",
-        icon: IconPuzzle,
-        linkOptions: { to: "/admin/plugins" },
-      },
-      {
-        title: "Skills",
-        icon: IconFileText,
-        linkOptions: { to: "/admin/skills" },
-      },
-      {
-        title: "UI Components",
-        icon: IconLayoutGrid,
-        linkOptions: { to: "/admin/components" },
-      },
-      {
-        title: "Playground",
-        icon: IconCode,
-        linkOptions: { to: "/admin/playground" },
-      },
-    ],
-  },
-  {
-    label: "Who can get in",
-    items: [
-      {
-        title: "People",
-        icon: IconUsers,
-        linkOptions: { to: "/admin/people" },
-      },
-      {
-        title: "Identity providers",
-        icon: IconBuildingBank,
-        linkOptions: { to: "/admin/identity-providers" },
-      },
-    ],
-  },
-  {
-    label: "What happened",
-    items: [
-      {
-        title: "Audit",
-        icon: IconListDetails,
-        linkOptions: { to: "/admin/audit" },
-      },
-    ],
-  },
-];
-
 export function AdminSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
   return (
-    <Sidebar {...props}>
+    <Sidebar variant="inset" {...props}>
       {/*
        * Pinned to the same height as the app sidebar's header. Left to itself this one is 60px
        * against the app's 45px — `p-2` around a `size="lg"` button rather than a fixed height — so
@@ -166,9 +73,9 @@ export function AdminSidebar({
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
-        {GROUPS.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+        {ADMIN_SECTIONS.map((group) => (
+          <SidebarGroup key={group.title}>
+            <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
             <SidebarMenu className="gap-px">
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.title}>

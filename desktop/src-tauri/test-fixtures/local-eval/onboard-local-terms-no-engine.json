@@ -1,0 +1,10 @@
+{
+  "command": "onboard local-terms",
+  "status": "blocked",
+  "preflight": {
+    "status": "fail",
+    "reason": "docker_unavailable",
+    "detail": "Podman could not be queried. Start the Podman machine (podman machine start), then retry. If Podman is already running, check that it is rootful and that its API socket is available."
+  },
+  "next": "Tell the developer `preflight.detail` in one sentence. Do not ask about the evaluation agreement. Offer the managed route, CopilotKit cloud, which needs no Docker. If they choose it, run `npx --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@647a03b onboard deployment --choice managed`, then run `npx --yes https://pkg.pr.new/CopilotKit/Intelligence/copilotkit@647a03b onboard setup-message --target <empty|existing>` and do what its `next` says. If they fix Docker instead, run this command again."
+}

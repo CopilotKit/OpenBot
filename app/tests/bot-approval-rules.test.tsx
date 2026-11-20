@@ -1,0 +1,164 @@
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { BotApprovalRules } from "@/components/approvals/bot-rules";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  PERSON_APPROVAL_RULES_PATH,
+} from "./approvals-api";
+import { settleReactWork } from "./settle-react-work";
+
+/** A Bot's Approval rules page: the person's rules for this Bot, and the team rules that reach it. */
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+const rule = (id: string, botId: string, toolRef: string) => ({
+  id,
+  botId,
+  toolRef,
+  effect: "*",
+  scope: "*",
+  behaviour: "ask",
+});
+
+const sent: { path: string; method: string; body: unknown }[] = [];
+function serving() {
+  sent.length = 0;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method && init.method !== "GET") {
+      sent.push({
+        path: url,
+        method: init.method,
+        body: init.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return approvalWriteResponse(input, init) ?? Response.json({ ok: true });
+    }
+    return approvalInboxResponse(input, {
+      enabled: true,
+      requests: [],
+      questions: [],
+      rules: [
+        rule("mine", "expenses", "mcp/gmail/*"),
+        rule("other", "knowledge", "mcp/drive/*"),
+        rule("every", "*", "mcp/slack/*"),
+      ],
+      teamRules: [
+        rule("team-every", "*", "mcp/drive/share"),
+        rule("team-expenses", "expenses", "computer_click"),
+        rule("team-knowledge", "knowledge", "host/*"),
+      ],
+      preferences: { enabled: true, autoReview: false, hostCommands: "ask" },
+      team: {
+        enforceAutoReview: false,
+        customRulesEnabled: true,
+        hostCommandsCap: "allow",
+      },
+      hostCommands: "ask",
+    }) as Response;
+  }) as unknown as typeof fetch;
+}
+
+function draw() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: createRootRoute({
+      component: () => <BotApprovalRules agentId="expenses" />,
+    }),
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+test("only this Bot's own rules can be changed, and the team rules that reach it are shown locked", async () => {
+  serving();
+  const view = draw();
+  expect(
+    await view.findByRole("combobox", {
+      name: "Behaviour for Any action on Gmail",
+    }),
+  ).toBeTruthy();
+  expect(
+    view.queryByRole("combobox", { name: "Behaviour for Any action on Drive" }),
+  ).toBeNull();
+  expect(
+    view.queryByRole("combobox", { name: "Behaviour for Any action on Slack" }),
+  ).toBeNull();
+  expect(view.getByText("Share on Drive")).toBeTruthy();
+  expect(view.getByText("Click")).toBeTruthy();
+  expect(view.queryByText("Any action in your folders")).toBeNull();
+});
+
+test("a rule added here is for this Bot, with no Bot to type", async () => {
+  serving();
+  const view = draw();
+  await view.findByText("Add a rule");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a rule/ }));
+  await user.type(
+    await view.findByRole("textbox", { name: "Tool or app" }),
+    "mcp/notion/*",
+  );
+  expect(view.queryByRole("textbox", { name: "Bot" })).toBeNull();
+  await user.click(view.getByRole("button", { name: "Save rule" }));
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/v2/organizations/default/people/me/approval-rules",
+      method: "POST",
+      body: {
+        botId: "expenses",
+        toolRef: "mcp/notion/*",
+        effect: "*",
+        scope: "*",
+        behaviour: "ask",
+      },
+    }),
+  );
+});
+
+test("a personal rule whose Bot is a pattern matching this Bot is shown and can be removed here", async () => {
+  serving();
+  const served = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await served(input, init);
+    if (
+      String(input).split("?")[0] !== PERSON_APPROVAL_RULES_PATH ||
+      (init?.method ?? "GET") !== "GET"
+    )
+      return response;
+    const body = await response.json();
+    body.approvalRules.push(rule("pattern", "exp*", "mcp/linear/*"));
+    return Response.json(body);
+  }) as unknown as typeof fetch;
+  const view = draw();
+  expect(
+    await view.findByRole("combobox", {
+      name: "Behaviour for Any action on Linear",
+    }),
+  ).toBeTruthy();
+});

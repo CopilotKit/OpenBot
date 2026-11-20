@@ -34,3 +34,30 @@ export function Mark({ id, name }: { id: string | null; name: string }) {
     </div>
   );
 }
+
+/**
+ * A brand's mark on its own, named for a screen reader by `name`, for a row that lists brands
+ * rather than naming one: the clouds OpenBot for Business runs on. Nothing where there is no mark.
+ */
+export function MarkImage({ id, name }: { id: string; name: string }) {
+  const uri = markFor(id);
+  if (!uri) return null;
+  return <img src={uri} alt={name} title={name} data-mark={id} />;
+}
+
+/**
+ * A provider's mark at the start of its "Sign in with" button, as the web app's sign-in page sets
+ * Google's, Microsoft's and Okta's on theirs.
+ *
+ * Decorative, like the tile's: the button's label already names the provider. A provider with no
+ * vendored mark gets none, and the label stands alone rather than beside something invented.
+ */
+export function ButtonMark({ id }: { id: string | null }) {
+  const uri = markFor(id);
+  if (!uri) return null;
+  return (
+    <span className="button-mark">
+      <img src={uri} alt="" aria-hidden="true" data-mark={id} />
+    </span>
+  );
+}

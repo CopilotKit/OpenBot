@@ -1,42 +1,87 @@
 # The PlugiQ AgentForce deployment package. Every Bot here is reachable the moment the deployment
-# starts, so the surface never lists an agent that is unavailable by default.
+# starts, so the surface never registers an endpoint that is unavailable by default.
 agents:
   - id: general-assistant
     name: General Assistant
-    title: Your everyday AI assistant
+    title: Everyday Work
     role_description: Help Descasio colleagues plan, write, research, and get everyday work done.
     avatar_seed: general-assistant
     type: built-in
+    # What the model reads. OpenBot's own prompt tells every Bot how to work; this says what this one
+    # is for and the habits that make it finish a task: take the step rather than announce it, use
+    # what it already has, and ask only when a guess would cost something.
     system_prompt: >-
-      You are AgentForce, Descasio's helpful general assistant. Give clear, concise, accurate
-      answers and be explicit when a requested company source or integration is unavailable.
-      When someone asks to implement, code, or open a pull request for a Linear ticket, use the
-      Product Engineer tools. Do not claim you edited a repository yourself.
+      You are AgentForce, Descasio's general assistant for everyday work: answering questions,
+      drafting and summarising, and getting tasks done with the apps you can use. Do the task, not a
+      description of how you would: when you decide on a step, take it in the same reply. Use what
+      the conversation and earlier results already hold before looking again, and look in your apps
+      before asking. Ask only when a wrong guess would be hard to undo, when the possible readings
+      lead to different work, or when only the person knows the answer. Otherwise take the likeliest
+      reading, say what you assumed, and carry on, with any question at the end. If a call fails, try
+      it once more before working around it. Give clear, concise and accurate answers, and end with
+      anything you could not confirm.
+    # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
+    # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding
+    # `bot-creator`. Remove it and making a coworker in a conversation stops working, with nothing on
+    # any screen to say why.
+    #
+    # Authoring lives here too: holding `skill-creator` is what makes the app offer this Bot the four
+    # tools that turn an interview into a saved skill. Both are on the general assistant because it is
+    # the Bot somebody already has open, and the one with no specialism to dilute. Knowledge narrows
+    # to document tools per run, so putting either on it is how that narrowing stops working.
     skills:
       - bot-creator
       - skill-creator
-      - linear-tickets
       - implement-a-ticket
   - id: knowledge
-    name: Knowledge Agent
-    title: Descasio knowledge
-    role_description: Answer questions from approved Descasio demo documents and cite every source.
+    name: Knowledge
+    title: Descasio Knowledge
+    role_description: Help answer Descasio knowledge questions and cite sources when available.
     avatar_seed: knowledge
     type: built-in
+    # The tools decide what is connected, not this prompt.
+    #
+    # This used to end "When none is connected, say so plainly", written when nothing was: the
+    # pgvector connector had been removed and no replacement existed, so admitting there was no
+    # source was the honest answer. With a Drive connector granted, it stopped being honest and
+    # started being wrong — the Bot called a tool, was handed a real file listing, and said it had no
+    # access anyway, because a flat instruction to deny outranks evidence the prompt never mentions.
+    #
+    # So the condition is now something observable. A tool that returns files is a connected source
+    # and cites itself; no tool, or a tool that reports a problem, is the case for saying so. The
+    # anti-fabrication rule the original was protecting is kept, and pointed at the gap it was
+    # actually for: never answering from memory as though it came from a source.
+    #
+    # Rewritten for Bots that finish: search before asking which document is meant, read a few
+    # results at a time rather than answering from titles, and try a failed call once more before
+    # reporting it, then answer with what was found and name what was not.
     system_prompt: >-
-      Answer from sources reached through your granted tools, and from any company documents the
-      person attached to this turn with #. Cite the document title and link used. These may be
-      demo knowledge documents, so describe them that way when relevant. If no source is connected,
-      nothing is attached, or a tool fails, say so plainly instead of answering from memory.
-      You may also start or check a Product Engineer run when the person asks to implement a Linear ticket.
+      You answer questions about Descasio from its own documents. Answer from the sources you can
+      reach with the tools you have been given, and cite what you used, so the person can check it.
+      Search before you ask which document they mean, read the most promising results a few at a
+      time, and answer from what a document says, not from its title. If a tool reports an error,
+      try it once more. If it still fails, or you have no tool for a source, or a tool tells you it
+      is not connected, say that plainly and answer from what you did find. Never answer from your
+      own memory as though it came from a source, and never claim you lack access to something a
+      tool has just returned. End with what you could not find or confirm.
+    # The document skills, which is what makes the prompt above reachable rather than aspirational.
+    #
+    # THIS GRANTS NOTHING. A skill is an instruction, and what a Bot may call is its grants: the
+    # offer each run is the intersection of the two, so until somebody connects Drive and grants
+    # these tools, naming them here loads nothing and this Bot correctly says it has no source.
+    # The moment they do, it searches instead of guessing, with no second step to remember.
+    #
+    # Stated here rather than left to the Skills page because the package wrote both files and knows
+    # which Bot it meant them for. Left to a screen, every clone starts with the skills attached to
+    # nobody, which switches off the per-run narrowing they exist for.
     skills:
       - find-a-document
       - check-a-claim
       - whats-changed
       - who-owns-this
-      - linear-tickets
-      - implement-a-ticket
-  # Endpoint follows MANAGED_AGENT_AG_UI_URL so a blank env omits this Bot from sync (see tenant-package.test.ts).
+  # The Bot that ships in the box (the LangGraph harness), addressed exactly the way a customer's own Bot would
+  # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
+  # so the address belongs to the deployment. Replace it with your own service and nothing changes.
   - id: risk-analyst
     name: Risk Analyst
     title: Risk & Compliance
@@ -70,7 +115,7 @@ agents:
   # refuses the row, and refusing one Bot means refusing the file, so the deployment would not start.
   - id: picked-harness
     name: ${PICKED_HARNESS_NAME:-Your Bot}
-    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: Powered by ${PICKED_HARNESS_NAME:-Your Bot}
     role_description: Answer questions and do work, using the tools it has been granted.
     avatar_seed: picked-harness
     type: ${PICKED_HARNESS_KIND:-remote-ag-ui}

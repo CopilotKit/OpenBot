@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { PluginTool } from "@/lib/plugins/queries";
-import { readOnlyRefs } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId";
+import { readOnlyRefs } from "@/components/manage/plugin-bot-page";
 
 /**
  * What one button on the per-Bot grant screen promises, checked without drawing anything.
@@ -19,9 +19,7 @@ import { readOnlyRefs } from "@/routes/_authed/admin/plugins/$key_.bots.$agentId
 /** A minimal but complete `PluginTool`, overridable per case. */
 function tool(overrides: Partial<PluginTool> & { name: string }): PluginTool {
   return {
-    serverId: "slack",
     description: "Does something.",
-    inputSchema: {},
     ref: `slack/${overrides.name}`,
     effect: "read",
     destructive: false,

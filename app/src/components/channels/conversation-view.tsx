@@ -7,56 +7,150 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChatTranscript } from "@/components/channels/chat-transcript";
+import { useBotLook } from "@/components/agents/bot-look";
+import {
+  ChatTranscript,
+  skillLabels,
+} from "@/components/channels/chat-transcript";
 import {
   type AgentOption,
   type CommandOption,
   Composer,
   type ComposerDraft,
-  type DocumentOption,
   type DroppedAttachments,
   type QueueAction,
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
-import { attachmentUrl } from "@/lib/channels/attachments";
-import { apiFetch } from "@/lib/client";
+import { StillWorkingError } from "@/components/channels/composer/queue";
+import {
+  NotifyPrompt,
+  notifyPromptAnswered,
+} from "@/components/notifications/notify-prompt";
+import { StarPrompt } from "@/components/star-prompt/star-prompt";
+import { deleteAttachment } from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
+import { useNotificationPermission } from "@/lib/notifications/permission";
 import { newId } from "../../lib/new-id";
+
+/** How soon a drain the Bot was still too busy for goes again. Nothing is sent while it waits. */
+export const STILL_WORKING_RETRY_MS = 500;
 
 export function ConversationView({
   messages,
+  threadId,
   busy = false,
   notice,
+  attached,
   agents = [],
-  documents = [],
   commands,
   channelId,
+  holdsFilesUntilSent = false,
+  attachmentLimits,
   disabled = false,
+  onSendHeld,
   pending = false,
   autoFocus = false,
   stopped,
+  working,
   stoppable,
   queueWhileBusy = false,
   restoring = false,
+  intro,
+  starterSuggestions,
   onSubmit,
   onStop,
+  voiceCall,
+  modelPicker,
+  routine,
 }: {
   messages: readonly Message[];
+  threadId?: string;
   busy?: boolean;
+  /** Shown above the composer. An error, or why this conversation is read-only. */
   notice?: ReactNode;
+  /**
+   * A drawer on the composer's top edge, for what the next message answers: a little narrower than
+   * the composer, and tucked under it, so the two read as one control.
+   */
+  attached?: ReactNode;
   agents?: readonly AgentOption[];
-  documents?: readonly DocumentOption[];
+  /**
+   * The `/` menu for this Bot's granted skills, supplied by the route that owns grant loading.
+   */
   commands?: readonly CommandOption[];
+  /**
+   * The channel this conversation belongs to, forwarded to the composer so it can upload
+   * attachments to it. Omitted by a caller with no channel yet: `/channel/new` creates one on
+   * first send.
+   */
   channelId?: string;
+  /**
+   * No channel yet, and files are still welcome: the composer holds them until the first message
+   * creates the conversation. See `Composer`.
+   */
+  holdsFilesUntilSent?: boolean;
+  /** How large a picked file may be, forwarded to the composer (`useAttachmentLimits`). */
+  attachmentLimits?: ComposerAttachmentLimits;
   disabled?: boolean;
+  /** Writing is open and sending waits on the caller; forwarded to the composer. */
+  onSendHeld?: () => void;
+  /**
+   * A turn is in flight: the Bot has been asked something and has not come back yet.
+   *
+   * It has to mean the TURN and not the run underneath it. A turn that uses the browser is several
+   * runs in a row with the agent reporting itself idle between them, and a caller that passes its
+   * agent's run status straight through will tell this component the conversation is free in the
+   * middle of an answer. `queueWhileBusy` is the part that cannot survive that, because the queue
+   * drains on this falling.
+   */
   pending?: boolean;
+  /** Focus the composer the moment it can take a caret; forwarded to the composer. */
   autoFocus?: boolean;
+  /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
+  /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
+  working?: ReactNode;
+  /**
+   * There is a run for Stop to abort, which is a narrower fact than `pending` and is the honest one
+   * to draw a Stop button from. Defaults to `pending` for a caller with no gap between the two.
+   */
   stoppable?: boolean;
+  /**
+   * Let somebody type at a Bot that is already working, and run what they typed when it finishes.
+   *
+   * Off by default, and asked for rather than assumed, because it is only true of a conversation
+   * that will still be here when the turn ends. The compose screen creates the channel on send and
+   * navigates away; a message parked there would go down with the unmount, and a message that
+   * silently disappears is a worse answer than a send button that will not go.
+   *
+   * The other place somebody talks to a Bot, the direct `/bot` chat, does not get this either, and
+   * not by a decision made here: that screen draws CopilotKit's own chat rather than this composer,
+   * so there is nothing on it for this flag to reach. Giving it the same affordance means either
+   * moving it onto this composer or asking for it upstream, and neither is a queue.
+   */
   queueWhileBusy?: boolean;
+  /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
+  /**
+   * The top of the conversation, drawn above the first message and scrolled away with it. Only
+   * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
+   */
+  intro?: ReactNode;
+  /**
+   * One-time starter tasks, separate from the Bot introduction and its attribution. Directly above
+   * the composer, and not drawn while `attached` is out.
+   */
+  starterSuggestions?: ReactNode;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
+  /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
+  voiceCall?: { active: boolean; supported: boolean; onStart(): void };
+  /** The composer's model picker. See `Composer`. */
+  modelPicker?: ReactNode;
+  /** The Bot and conversation for the composer's routine clock. See `Composer`. */
+  routine?: { agentId: string; channelId: string };
 }) {
   /*
    * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
@@ -68,6 +162,7 @@ export function ConversationView({
    * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
    * survive a reload, and it is not an outbox.
    */
+  const orbs = useBotLook() === "orb";
   const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
   const queuedRef = useRef<readonly QueuedMessage[]>(queued);
 
@@ -113,6 +208,7 @@ export function ConversationView({
    * for the same fact.
    */
   const [running, setRunning] = useState(false);
+  const notificationPermission = useNotificationPermission();
   const inFlight = pending || running;
 
   /**
@@ -223,15 +319,26 @@ export function ConversationView({
    * The one answer to a failed send, used by both paths that can produce a run. See the drain's
    * `catch` for why restoring rather than releasing, and `heldBack` for why the hold.
    */
+  /**
+   * A drain refused because the Bot still had the turn (`StillWorkingError`) asked nothing of the
+   * server, so it is not held back: it goes again on this tick, until the Bot is free.
+   */
+  const [busyRetry, setBusyRetry] = useState(0);
   const restoreFailedRun = useCallback(
-    (messages: readonly QueuedMessage[]) => {
+    (messages: readonly QueuedMessage[], error?: unknown) => {
       if (messages.length === 0) {
         return;
       }
+      const stillWorking = error instanceof StillWorkingError;
       // Before the restore, not after: the effect reads both off refs, and the guard has to be
       // true by the moment the queue is non-empty again rather than one statement later.
-      heldBack.current = true;
+      heldBack.current = !stillWorking;
       apply({ messages, type: "restore" });
+      if (stillWorking)
+        setTimeout(
+          () => setBusyRetry((tick) => tick + 1),
+          STILL_WORKING_RETRY_MS,
+        );
     },
     [apply],
   );
@@ -285,8 +392,8 @@ export function ConversationView({
        */
       if (next.restoreIfRunFails.length > 0) {
         const carried = next.restoreIfRunFails;
-        void started.catch(() => {
-          restoreFailedRun(carried);
+        void started.catch((error: unknown) => {
+          restoreFailedRun(carried, error);
         });
       }
       return started;
@@ -315,8 +422,10 @@ export function ConversationView({
    * said is finished. The cost is that anything parked when that happens stays on screen unrun,
    * under a notice that explains why, which is the honest half of the trade.
    *
-   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`.
+   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`. A drain the Bot
+   * was only too busy for is no failure: it goes again on `busyRetry`.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `busyRetry` is the trigger to try a drain the Bot was too busy for again.
   useEffect(() => {
     if (inFlight) {
       /*
@@ -336,7 +445,7 @@ export function ConversationView({
       return;
     }
     const carried = next.restoreIfRunFails;
-    void startRef.current(next.run).catch(() => {
+    void startRef.current(next.run).catch((error: unknown) => {
       /*
        * Swallowed on purpose, and only here. A failed send from the composer throws so the composer
        * can put the words back in the box; the box for these is the queue they came out of, and the
@@ -368,26 +477,26 @@ export function ConversationView({
        * are back in the box, so the decision belongs to the call sites — this one, and the join in
        * `submit`, which answers the same question from the same list.
        */
-      restoreFailedRun(carried);
+      restoreFailedRun(carried, error);
     });
-  }, [apply, disabled, inFlight, restoreFailedRun]);
+  }, [apply, disabled, inFlight, restoreFailedRun, busyRetry]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-1 min-h-0">
         {/*
-         * The command NAMES, joined, rather than the option objects.
+         * The commands and their names as one string, rather than the option objects.
          *
          * The transcript needs them only to tell a real skill chip from a message that happens to
-         * begin with a slash, and its message rows are memoised on primitives — handing them an
+         * begin with a slash, and to name it; its message rows are memoised on primitives — handing them an
          * array would give every message a new prop identity on each refetch and re-render the whole
          * conversation to change nothing.
          */}
         <ChatTranscript
+          threadId={threadId}
           busy={busy}
-          commandNames={(commands ?? [])
-            .map((command) => command.name)
-            .join(",")}
+          commandLabels={skillLabels(commands ?? [])}
+          {...(orbs && intro ? { intro } : {})}
           messages={messages}
           onRemoveQueued={(id) => {
             apply({ id, type: "remove" });
@@ -395,19 +504,91 @@ export function ConversationView({
           queued={queued}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
+          working={working}
         />
       </div>
-      <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">
+      {/*
+       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
+       *
+       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
+       * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
+       * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
+       * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
+       * before, and below that it stands 16px off each edge.
+       *
+       * A width, not a breakpoint, on purpose. A viewport breakpoint does not know how much of the
+       * window the sidebar takes, and a container query would need `@container` on an ancestor of
+       * the composer, which is layout containment: it would become the containing block for the @
+       * menu, which is `position: fixed` at the caret (see `DictationSurface`).
+       */}
+      <div
+        className="mx-auto w-full max-w-[calc(var(--container-3xl)+2rem)] shrink-0 px-4 pb-4"
+        data-slot="composer-column"
+      >
         {notice}
+        {/*
+         * Notifications are offered once this person has started a task: a Bot is working for them,
+         * so what a notification is for is plain. Read off the transcript, so the conversation a
+         * first message from home opens offers it too.
+         */}
+        {messages.some((message) => message.role === "user") ? (
+          <NotifyPrompt />
+        ) : null}
+        {/*
+         * The ask to star OpenBot on GitHub, when the server says it is due (`StarPrompt`), and never
+         * beside the notifications offer: one card above the composer at a time, and the offer that
+         * is useful to this person goes first.
+         *
+         * Never right after an error: not while the last turn here ended without an answer
+         * (`stopped`, where a failed run is said). Not read off `notice`: a conversation passes one
+         * every time, mostly empty, so its presence says nothing. It also waits while OpenBot Desktop has not yet
+         * said whether notifications are on (`checking`), or the card could draw, be counted as
+         * shown, and vanish when the answer is "not asked yet". And never in a conversation that
+         * cannot take a message: the brief "Picking a Bot" screen, or one whose Bot was deleted.
+         */}
+        {disabled ||
+        stopped ||
+        notificationPermission === "checking" ||
+        (notificationPermission === "default" &&
+          !notifyPromptAnswered()) ? null : (
+          <StarPrompt />
+        )}
+        {/*
+         * THE DRAWER IS THE LAST THING ABOVE THE COMPOSER, AND THE STARTER TASKS STEP ASIDE FOR IT.
+         *
+         * It is tucked under the composer (`-mb-4`, no bottom border), so anything drawn between the
+         * two lands on its open bottom edge. The starter tasks and the notifications offer used to
+         * sit there, and the question the Bot was waiting on read as cut off behind them.
+         *
+         * The starter tasks give way rather than move above the drawer: while the Bot waits on an
+         * answer they cannot start anything (`channel-chat.tsx` disables them), they look the same
+         * disabled, and in the Desktop's default window the room belongs to the question. They come
+         * back when it is answered or dismissed.
+         */}
+        {attached ? (
+          <div
+            className="mx-5 -mb-4 rounded-t-2xl border border-border border-b-0 bg-muted pb-4"
+            data-slot="composer-drawer"
+          >
+            {attached}
+          </div>
+        ) : (
+          starterSuggestions
+        )}
         <Composer
+          modelPicker={modelPicker}
+          {...(routine ? { routine } : {})}
           agents={agents}
-          documents={documents}
           autoFocus={autoFocus}
           {...(channelId ? { channelId } : {})}
+          holdsFilesUntilSent={holdsFilesUntilSent}
+          {...(attachmentLimits ? { attachmentLimits } : {})}
           {...(commands ? { commands } : {})}
-          className="w-full mt-auto"
+          className="relative w-full mt-auto"
           compact
+          voiceCall={voiceCall}
           disabled={disabled}
+          {...(onSendHeld ? { onSendHeld } : {})}
           droppedAttachments={droppedAttachments}
           onQueue={
             queueWhileBusy
@@ -497,8 +678,7 @@ function releaseStagedAttachment(attachment: Attachment): void {
   if (typeof metadata?.attachmentId !== "string") {
     return;
   }
-  void apiFetch(attachmentUrl(metadata.attachmentId), {
-    method: "DELETE",
-    credentials: "include",
+  void deleteAttachment(organizationId(), metadata.attachmentId, {
+    "Idempotency-Key": idempotencyKey(),
   }).catch(() => undefined);
 }

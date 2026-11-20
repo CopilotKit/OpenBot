@@ -1,0 +1,458 @@
+{
+  "note": "Captured from the live Arcade catalogue on 2026-09-15, read-only. Shapes are verbatim; identifiers that could be project-specific are redacted. Regenerate rather than hand-edit.",
+  "tools": {
+    "read": {
+      "fully_qualified_name": "Apollo.EnrichOrganization@0.1.0",
+      "qualified_name": "Apollo.EnrichOrganization",
+      "name": "EnrichOrganization",
+      "description": "Turn a company domain into firmographics (industry, size, revenue, funding,\nlocation) so a rep can qualify and size an account. Consumes one enrichment\ncredit on a match; when the plan is out of credits the result reports\nstatus=insufficient_credits rather than failing.",
+      "toolkit": {
+        "name": "Apollo",
+        "description": "Arcade tools designed for LLMs to interact with Apollo.io sales intelligence",
+        "version": "0.1.0"
+      },
+      "input": {
+        "parameters": [
+          {
+            "name": "domain",
+            "required": true,
+            "description": "Company domain to look up, such as apollo.io. A full URL or www prefix is accepted and normalized.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          }
+        ]
+      },
+      "output": {
+        "available_modes": [
+          "value",
+          "error"
+        ],
+        "description": "The matched company, or found=False when no match.",
+        "value_schema": {
+          "val_type": "json",
+          "properties": {
+            "status": {
+              "val_type": "string",
+              "enum": [
+                "ok",
+                "insufficient_credits"
+              ]
+            },
+            "found": {
+              "val_type": "boolean"
+            },
+            "id": {
+              "val_type": "string"
+            },
+            "name": {
+              "val_type": "string"
+            },
+            "domain": {
+              "val_type": "string"
+            },
+            "industry": {
+              "val_type": "string"
+            },
+            "estimated_num_employees": {
+              "val_type": "integer"
+            },
+            "annual_revenue": {
+              "val_type": "integer",
+              "nullable": true
+            },
+            "total_funding": {
+              "val_type": "integer",
+              "nullable": true
+            },
+            "founded_year": {
+              "val_type": "integer",
+              "nullable": true
+            },
+            "location": {
+              "val_type": "string"
+            },
+            "phone": {
+              "val_type": "string",
+              "nullable": true
+            }
+          },
+          "required_keys": [
+            "annual_revenue",
+            "domain",
+            "estimated_num_employees",
+            "found",
+            "founded_year",
+            "id",
+            "industry",
+            "location",
+            "name",
+            "phone",
+            "status",
+            "total_funding"
+          ]
+        }
+      },
+      "requirements": {
+        "met": false,
+        "secrets": [
+          {
+            "key": "APOLLO_API_KEY",
+            "met": false,
+            "status_reason": "Secret APOLLO_API_KEY not found"
+          }
+        ]
+      },
+      "metadata": {
+        "classification": {
+          "service_domains": [
+            "crm"
+          ]
+        },
+        "behavior": {
+          "operations": [
+            "read"
+          ],
+          "read_only": true,
+          "destructive": false,
+          "idempotent": true,
+          "open_world": true
+        }
+      }
+    },
+    "write": {
+      "fully_qualified_name": "Asana.AttachFileToTask@1.2.2",
+      "qualified_name": "Asana.AttachFileToTask",
+      "name": "AttachFileToTask",
+      "description": "Attaches a file to an Asana task\n\nProvide exactly one of file_content_str, file_content_base64, or file_content_url, never more\nthan one.\n\n- Use file_content_str for text files (will be encoded using file_encoding)\n- Use file_content_base64 for binary files like images, PDFs, etc.\n- Use file_content_url if the file is hosted on an external URL",
+      "toolkit": {
+        "name": "Asana",
+        "description": "Arcade tools designed for LLMs to interact with Asana",
+        "version": "1.2.2"
+      },
+      "input": {
+        "parameters": [
+          {
+            "name": "task_id",
+            "required": true,
+            "description": "The ID of the task to attach the file to.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "file_name",
+            "required": true,
+            "description": "The name of the file to attach with format extension. E.g. 'Image.png' or 'Report.pdf'.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "file_content_str",
+            "required": false,
+            "description": "The string contents of the file to attach. Use this if the file is a text file. Defaults to None.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "file_content_base64",
+            "required": false,
+            "description": "The base64-encoded binary contents of the file. Use this for binary files like images or PDFs. Defaults to None.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "file_content_url",
+            "required": false,
+            "description": "The URL of the file to attach. Use this if the file is hosted on an external URL. Defaults to None.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "file_encoding",
+            "required": false,
+            "description": "The encoding of the file to attach. Only used with file_content_str. Defaults to 'utf-8'.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          }
+        ]
+      },
+      "output": {
+        "available_modes": [
+          "value",
+          "error"
+        ],
+        "description": "The task with the file attached.",
+        "value_schema": {
+          "val_type": "json"
+        }
+      },
+      "requirements": {
+        "met": true,
+        "authorization": {
+          "id": "arcade-asana",
+          "provider_id": "asana",
+          "provider_type": "oauth2",
+          "oauth2": {
+            "scopes": [
+              "default"
+            ]
+          },
+          "status": "active"
+        }
+      },
+      "metadata": {
+        "classification": {
+          "service_domains": [
+            "project_management"
+          ]
+        },
+        "behavior": {
+          "operations": [
+            "create"
+          ],
+          "read_only": false,
+          "destructive": false,
+          "idempotent": false,
+          "open_world": true
+        }
+      }
+    },
+    "destructive": {
+      "fully_qualified_name": "Attio.RemoveFromList@1.1.3",
+      "qualified_name": "Attio.RemoveFromList",
+      "name": "RemoveFromList",
+      "description": "Remove a record from an Attio list.\n\nNote: Use the entry_id, not the record_id. Get entry_id from get_list_entries.",
+      "toolkit": {
+        "name": "Attio",
+        "description": "Arcade tools designed for LLMs to interact with Attio CRM",
+        "version": "1.1.3"
+      },
+      "input": {
+        "parameters": [
+          {
+            "name": "list_id",
+            "required": true,
+            "description": "List UUID",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "entry_id",
+            "required": true,
+            "description": "Entry UUID (not record ID)",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          }
+        ]
+      },
+      "output": {
+        "available_modes": [
+          "value",
+          "error"
+        ],
+        "description": "Removal confirmation",
+        "value_schema": {
+          "val_type": "json"
+        }
+      },
+      "requirements": {
+        "met": true,
+        "authorization": {
+          "id": "arcade-attio",
+          "provider_id": "attio",
+          "provider_type": "oauth2",
+          "oauth2": {
+            "scopes": [
+              "call_recording:read",
+              "list_configuration:read-write",
+              "list_entry:read-write",
+              "meeting:read",
+              "note:read-write",
+              "object_configuration:read-write",
+              "record_permission:read-write",
+              "task:read-write",
+              "user_management:read"
+            ]
+          },
+          "status": "active"
+        }
+      },
+      "metadata": {
+        "classification": {
+          "service_domains": [
+            "crm"
+          ]
+        },
+        "behavior": {
+          "operations": [
+            "delete"
+          ],
+          "read_only": false,
+          "destructive": true,
+          "idempotent": true,
+          "open_world": true
+        }
+      }
+    },
+    "unclassified": {
+      "fully_qualified_name": "AirtableApi.AddBaseCollaborator@0.4.1",
+      "qualified_name": "AirtableApi.AddBaseCollaborator",
+      "name": "AddBaseCollaborator",
+      "description": "Add a collaborator to an Airtable base.\n\n    Use this tool to add a new collaborator to a specified Airtable base. It facilitates inviting one collaborator at a time.\n\n    Note: Understanding the request schema is necessary to properly create\n    the stringified JSON input object for execution.\n\nThis operation also requires path parameters.\n\n    Modes:\n    - GET_REQUEST_SCHEMA: Returns the schema. Only call if you don't\n      already have it. Do NOT call repeatedly if you already received\n      the schema.\n    - EXECUTE: Performs the operation with the provided request body\n      JSON.\n      Note: You must also provide the required path parameters when executing.\n\n    If you need the schema, call with mode='get_request_schema' ONCE, then execute.\n    ",
+      "toolkit": {
+        "name": "AirtableApi",
+        "description": "Tools that enable LLMs to interact directly with the airtable API.",
+        "version": "0.4.1"
+      },
+      "input": {
+        "parameters": [
+          {
+            "name": "mode",
+            "required": true,
+            "description": "Operation mode: 'get_request_schema' returns the OpenAPI spec for the request body, 'execute' performs the actual operation",
+            "value_schema": {
+              "val_type": "string",
+              "enum": [
+                "get_request_schema",
+                "execute"
+              ]
+            },
+            "inferrable": true
+          },
+          {
+            "name": "base_id",
+            "required": false,
+            "description": "The ID of the Airtable base to which the collaborator will be added.  Required when mode is 'execute', ignored when mode is 'get_request_schema'.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "request_body",
+            "required": false,
+            "description": "Stringified JSON representing the request body. Required when mode is 'execute', ignored when mode is 'get_request_schema'",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          }
+        ]
+      },
+      "output": {
+        "available_modes": [
+          "value",
+          "error"
+        ],
+        "description": "Response from the API endpoint 'add-base-collaborator'.",
+        "value_schema": {
+          "val_type": "json"
+        }
+      },
+      "requirements": {
+        "met": false,
+        "authorization": {
+          "id": "arcade-airtable",
+          "provider_type": "oauth2",
+          "oauth2": {
+            "scopes": [
+              "workspacesAndBases:write"
+            ]
+          },
+          "status": "inactive",
+          "status_reason": "Provider not found"
+        }
+      }
+    },
+    "unscoped": {
+      "fully_qualified_name": "AirtableApi.ListBases@0.4.1",
+      "qualified_name": "AirtableApi.ListBases",
+      "name": "ListBases",
+      "description": "Appended to the recorded response: a generated action whose oauth2 requirement declares no scopes.",
+      "toolkit": {
+        "name": "AirtableApi",
+        "description": "Tools that enable LLMs to interact directly with the airtable API.",
+        "version": "0.4.1"
+      },
+      "input": {
+        "parameters": [
+          {
+            "name": "mode",
+            "required": true,
+            "description": "Operation mode: 'get_request_schema' returns the OpenAPI spec for the request body, 'execute' performs the actual operation",
+            "value_schema": {
+              "val_type": "string",
+              "enum": [
+                "get_request_schema",
+                "execute"
+              ]
+            },
+            "inferrable": true
+          },
+          {
+            "name": "base_id",
+            "required": false,
+            "description": "The ID of the Airtable base to which the collaborator will be added.  Required when mode is 'execute', ignored when mode is 'get_request_schema'.",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          },
+          {
+            "name": "request_body",
+            "required": false,
+            "description": "Stringified JSON representing the request body. Required when mode is 'execute', ignored when mode is 'get_request_schema'",
+            "value_schema": {
+              "val_type": "string"
+            },
+            "inferrable": true
+          }
+        ]
+      },
+      "output": {
+        "available_modes": [
+          "value",
+          "error"
+        ],
+        "description": "Response from the API endpoint 'add-base-collaborator'.",
+        "value_schema": {
+          "val_type": "json"
+        }
+      },
+      "requirements": {
+        "met": false,
+        "authorization": {
+          "id": "arcade-airtable",
+          "provider_type": "oauth2",
+          "oauth2": {},
+          "status": "inactive",
+          "status_reason": "Provider not found"
+        }
+      }
+    }
+  },
+  "page_envelope": {
+    "limit": 2,
+    "offset": 0,
+    "page_count": 2,
+    "total_count": 8258,
+    "items": []
+  }
+}

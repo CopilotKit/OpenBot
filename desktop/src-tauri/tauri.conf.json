@@ -13,17 +13,53 @@
     "windows": [
       {
         "title": "OpenBot",
-        "width": 900,
-        "height": 640,
+        "width": 1000,
+        "height": 800,
         "minWidth": 720,
         "minHeight": 560,
-        "resizable": true
+        "resizable": true,
+        "titleBarStyle": "Transparent",
+        "backgroundThrottling": "disabled",
+        "dragDropEnabled": false,
+        "create": false
       }
     ],
     "security": { "csp": null }
   },
   "bundle": {
     "active": true,
+    "macOS": {
+      "entitlements": "./Entitlements.plist"
+    },
+    "windows": {
+      "nsis": {
+        "template": "./windows/installer.nsi",
+        "installerHooks": "./windows/hooks.nsh",
+        "languages": ["English"],
+        "customLanguageFiles": {
+          "English": "./windows/installer-english.nsh"
+        },
+        "installerIcon": "./icons/icon.ico",
+        "uninstallerIcon": "./icons/icon.ico",
+        "headerImage": "./windows/installer-header.bmp",
+        "sidebarImage": "./windows/installer-sidebar.bmp"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["pkexec", "procps", "lsof", "ca-certificates"],
+        "postRemoveScript": "./linux/remove.sh"
+      },
+      "rpm": {
+        "depends": [
+          "/usr/bin/pkexec",
+          "/usr/bin/ps",
+          "/usr/bin/lsof",
+          "ca-certificates"
+        ],
+        "postRemoveScript": "./linux/remove.sh"
+      }
+    },
     "targets": ["dmg", "nsis", "appimage", "deb", "rpm"],
     "icon": [
       "icons/32x32.png",
@@ -32,9 +68,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "copyright": "CopilotKit",
+    "publisher": "CopilotKit",
+    "copyright": "OpenBot by CopilotKit",
     "category": "DeveloperTool",
     "shortDescription": "Run OpenBot on your own machine",
     "longDescription": "OpenBot Desktop installs the container engine, raises the stack, and keeps it running."
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["openbot"]
+      }
+    }
   }
 }

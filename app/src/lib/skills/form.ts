@@ -1,3 +1,4 @@
+import { RESEARCH_ROLES } from "@openbot/shared/research";
 import { z } from "zod";
 
 /**
@@ -33,7 +34,7 @@ export const skillFormSchema = z.object({
   instructions: z
     .string()
     .trim()
-    .min(1, "Instructions are required — this is what the Bot follows."),
+    .min(1, "Instructions are required. They are what the Bot follows."),
   /**
    * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
    *
@@ -75,6 +76,9 @@ export function undeclaredElsewhere(
   selected: readonly string[],
   offered: readonly string[],
 ): string[] {
-  const known = new Set(offered);
+  const known = new Set([
+    ...offered,
+    ...RESEARCH_ROLES.map((role) => role.ref),
+  ]);
   return selected.filter((ref) => !known.has(ref));
 }

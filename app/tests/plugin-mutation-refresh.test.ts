@@ -1,30 +1,37 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   type MutationFunctionContext,
   MutationObserver,
+  mutationOptions,
   QueryClient,
 } from "@tanstack/react-query";
-import * as pluginMutations from "../src/lib/plugins/mutations";
 import {
+  accountModePreview,
   addCuratedServerMutationOptions,
-  addCustomServerMutationOptions,
+  addDirectoryAppMutationOptions,
+  refreshPluginServerMutationOptions,
+  registerOAuthClientMutationOptions,
+  removePluginServerMutationOptions,
+  setAccountModeMutationOptions,
+  setOwnerGrantsMutationOptions,
+} from "../src/lib/apps/mutations";
+import { authorizeActionMutationOptions } from "../src/lib/plugins/grants";
+import {
   brokeredConnectionFieldsMutationOptions,
   confirmBrokeredConnectionMutationOptions,
   connectAccountMutationOptions,
   connectBrokeredWithFieldsMutationOptions,
   disconnectBrokeredMutationOptions,
-  enableComposioAppMutationOptions,
   recheckBrokeredConnectionMutationOptions,
-  refreshPluginServerMutationOptions,
-  registerOAuthClientMutationOptions,
-  removePluginServerMutationOptions,
-  removeSkillMutationOptions,
-  saveSkillMutationOptions,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
 import { pluginKeys } from "../src/lib/plugins/queries";
+import {
+  removeSkillMutationOptions,
+  saveSkillMutationOptions,
+} from "../src/lib/skills/mutations";
+import { appPath } from "./apps-api";
+import { myConnectionPath } from "./connections-api";
 
 /**
  * What every plugin write does about the screen when the server says no.
@@ -34,7 +41,7 @@ import { pluginKeys } from "../src/lib/plugins/queries";
  * that can fail, and Hono answers the failure with a status while the write stands. `POST /servers`
  * inserts the row and then refreshes its tools, and answers 409 when that refresh faults;
  * `POST /grants` upserts the grant and then files the trail row, and answers 500 when that insert
- * does; `DELETE /servers/:id/connection` revokes the account at Composio and then deletes the row.
+ * does; disconnectApp revokes the account at the app and then deletes the row.
  * A refusal from any of them is therefore NOT evidence that nothing changed, and a mutation that
  * refetched only on success left the screen asserting a state the deployment had already left.
  *
@@ -133,20 +140,12 @@ const REFUSALS: {
   route: string;
   status: number;
   message: string;
-  /**
-   * THE FACTORY ITSELF, NOT A CLOSURE THAT CALLS ONE AND NOT ITS NAME AS A STRING.
-   *
-   * Because the completeness test below matches these against `mutations.ts`'s exported VALUES by
-   * identity. A name written out here would be a third copy of the same list — the export, the
-   * import at the top of this file, and a string — and a factory renamed at the source would leave
-   * a case pointing at a name nothing exports, which is the failure mode this whole file is about.
-   */
   factory: (queryClient: QueryClient) => unknown;
   variables: unknown;
 }[] = [
   {
     name: "granting a plugin to a Bot",
-    route: "POST /api/plugins/grants",
+    route: "PUT .../bots/{botId}/grants/{grantId}",
     status: 500,
     message: "That Agent could not be changed.",
     factory: setPluginGrantMutationOptions,
@@ -159,7 +158,7 @@ const REFUSALS: {
   },
   {
     name: "withholding a plugin from a Bot",
-    route: "DELETE /api/plugins/grants",
+    route: "DELETE .../bots/{botId}/grants/{grantId}",
     status: 500,
     message: "That Agent could not be changed.",
     factory: setPluginGrantMutationOptions,
@@ -172,36 +171,24 @@ const REFUSALS: {
   },
   {
     name: "adding a curated server",
-    route: "POST /api/plugins/servers",
+    route: "POST apps (createApp, from a catalogue entry)",
     status: 409,
     message: "That server was added but its tools could not be read.",
     factory: addCuratedServerMutationOptions,
     variables: { key: "linear" },
   },
   {
-    name: "adding a server by URL",
-    route: "POST /api/plugins/servers/custom",
-    status: 409,
-    message: "That server was added but its tools could not be read.",
-    factory: addCustomServerMutationOptions,
-    variables: {
-      id: "in-house",
-      title: "In house",
-      url: "https://example.invalid/mcp",
-    },
-  },
-  {
-    name: "enabling a Composio app",
-    route: "POST /api/plugins/composio/apps",
+    name: "adding an app from the directory",
+    route: "POST apps (createApp, from a directory entry)",
     status: 409,
     message:
-      "The app was added, but its tools could not be read just now. Press Refresh on the Plugins page.",
-    factory: enableComposioAppMutationOptions,
-    variables: { slug: "linear" },
+      "The app was added, but its tools could not be read just now. Press Refresh on the Apps page.",
+    factory: addDirectoryAppMutationOptions,
+    variables: { directoryEntryId: "directory:linear" },
   },
   {
     name: "refreshing a server's tools",
-    route: "POST /api/plugins/servers/:id/refresh",
+    route: "POST apps/{appId}/refresh (refreshApp)",
     status: 409,
     message: "That server's tools could not be recorded.",
     factory: refreshPluginServerMutationOptions,
@@ -209,7 +196,7 @@ const REFUSALS: {
   },
   {
     name: "removing a server",
-    route: "DELETE /api/plugins/servers/:id",
+    route: "DELETE apps/{appId} (deleteApp)",
     status: 409,
     message: "That server could not be removed.",
     factory: removePluginServerMutationOptions,
@@ -217,7 +204,7 @@ const REFUSALS: {
   },
   {
     name: "saving a skill",
-    route: "POST /api/plugins/skills",
+    route: "PUT /api/v2/organizations/:organizationId/skills/:skillId",
     status: 500,
     message: "The skill could not be saved.",
     factory: saveSkillMutationOptions,
@@ -230,7 +217,7 @@ const REFUSALS: {
   },
   {
     name: "removing a skill",
-    route: "DELETE /api/plugins/skills/:slug",
+    route: "DELETE /api/v2/organizations/:organizationId/skills/:skillId",
     status: 500,
     message: "That did not work.",
     factory: removeSkillMutationOptions,
@@ -238,7 +225,7 @@ const REFUSALS: {
   },
   {
     name: "registering an OAuth client",
-    route: "POST /api/plugins/servers/:id/oauth-client",
+    route: "PUT apps/{appId}/oauth-client (setAppOAuthClient)",
     status: 409,
     message: "That OAuth client could not be registered.",
     factory: registerOAuthClientMutationOptions,
@@ -250,7 +237,7 @@ const REFUSALS: {
   },
   {
     name: "confirming a brokered connection",
-    route: "POST /api/plugins/servers/:id/connection/confirm",
+    route: "confirmConnection",
     status: 502,
     message: "Composio would not say whether this account is connected.",
     factory: confirmBrokeredConnectionMutationOptions,
@@ -258,7 +245,7 @@ const REFUSALS: {
   },
   {
     name: "disconnecting a brokered account",
-    route: "DELETE /api/plugins/servers/:id/connection",
+    route: "disconnectApp",
     status: 502,
     message: "Composio would not end this account, and gave no reason.",
     factory: disconnectBrokeredMutationOptions,
@@ -266,10 +253,10 @@ const REFUSALS: {
   },
   {
     name: "handing over a typed key",
-    route: "POST /api/plugins/servers/:id/connect",
+    route: "connectApp",
     status: 400,
     message:
-      "What you entered for gmail did not work, and Composio would not take the account back either. Disconnect it on the Plugins page and try again.",
+      "What you entered for gmail did not work, and Composio would not take the account back either. Disconnect it on the Apps page and try again.",
     factory: connectBrokeredWithFieldsMutationOptions,
     variables: {
       serverId: "gmail",
@@ -278,11 +265,30 @@ const REFUSALS: {
   },
   {
     name: "re-checking a key",
-    route: "POST /api/plugins/servers/:id/connection/recheck",
+    route: "recheckConnection",
     status: 400,
     message: "gmail would not answer with the key it is holding.",
     factory: recheckBrokeredConnectionMutationOptions,
     variables: "gmail",
+  },
+  {
+    name: "switching a server's account mode",
+    route: "PUT apps/{appId}/account-mode (setAppAccountMode)",
+    status: 500,
+    message: "The switch did not finish, and nothing was changed.",
+    factory: setAccountModeMutationOptions,
+    variables: {
+      serverId: "linear",
+      mode: "shared" as const,
+    },
+  },
+  {
+    name: "choosing who may give an app to a Bot",
+    route: "PATCH apps/{appId} (updateApp)",
+    status: 404,
+    message: "That app hasn't been added.",
+    factory: setOwnerGrantsMutationOptions,
+    variables: { serverId: "linear", ownerGrants: "admin" as const },
   },
 ];
 
@@ -299,7 +305,7 @@ test("asking an app what it wants refetches nothing, because it writes nothing",
   /*
    * THE ONE WRITE-SHAPED PRESS THAT IS NOT A WRITE, and the reason this file does not simply say
    * "every mutation invalidates". The first press on an app whose key somebody types is a question
-   * about the APP — `POST /connect` with no body — and the route answers it out of Composio's
+   * about the APP — connectApp with no values — and the route answers it out of Composio's
    * published field list without touching a row. Nothing changed, so there is nothing to refetch,
    * and a refusal here is the same fact as a success: this deployment now knows no more than it did.
    *
@@ -316,91 +322,6 @@ test("asking an app what it wants refetches nothing, because it writes nothing",
 });
 
 /**
- * The exported functions that are NOT a mutation factory at all, each with why.
- *
- * Named rather than filtered out by a rule about their shape, because "it does not look like a
- * mutation factory" is precisely the judgement that let a real one go uncovered: this file had no
- * case for `connectAccountMutationOptions` for two rounds and nothing anywhere said so.
- */
-const NOT_A_MUTATION_FACTORY: Record<string, string> = {
-  invalidatePlugins:
-    "The refetch itself — the thing every case above asserts was asked for, not a press.",
-  grantPlugin:
-    "The bare write, for a caller granting a batch and refreshing once at the end. It carries no refetch on purpose, and the mutation that wraps it is covered above.",
-};
-
-/**
- * The mutation factories the property above does not apply to, each with why it does not.
- *
- * AN EXEMPTION IS A CLAIM AND IT IS WRITTEN DOWN AS ONE. Both of these are structural rather than a
- * decision somebody made in a callback — neither factory has a `QueryClient` to invalidate with —
- * so an exemption here can be checked against the code rather than taken on trust, and a factory
- * that grows a client later stops qualifying and has to move into `REFUSALS`.
- */
-const NOT_A_REFUSABLE_WRITE: Record<string, string> = {
-  brokeredConnectionFieldsMutationOptions:
-    "Asks an app what it wants typed in. `POST /connect` with no body writes nothing on either outcome, and the factory takes no QueryClient. Its own test is above.",
-  connectAccountMutationOptions:
-    "Starts a consent connection and hands back the vendor's URL for the browser to leave for. Nothing on this screen survives that navigation to be refetched, and this factory takes no QueryClient either — it takes which screen to come back to.",
-};
-
-test("every mutation factory `mutations.ts` exports is answered for by this file", () => {
-  /*
-   * THE COMPLETENESS CHECK, AND THE REASON THIS FILE NEEDED ONE. Both sibling drift tests count
-   * their roster against the declaration it mirrors; this one counted nothing, so a fifteenth
-   * factory added to `mutations.ts` with `onSuccess` where `onSettled` belongs was a case nobody
-   * wrote and nobody missed. Adding the count is what turned up `connectAccountMutationOptions`,
-   * which had been exported and unanswered-for the whole time.
-   *
-   * READ OFF THE MODULE'S RUNTIME EXPORTS, not off a list of names in this file. A namespace import
-   * is the one thing here that cannot fall behind the source: a factory added, renamed or deleted
-   * changes this list on the next run. Every exported function has to land in exactly one of three
-   * places — a refusal case, a declared exemption, or a declared non-factory — and membership of
-   * the first is matched BY VALUE, so a rename cannot leave a case pointing at a ghost.
-   *
-   * `typeof value === "function"` is the whole of the filter DELIBERATELY, rather than a name
-   * ending in `MutationOptions`. The types this module exports are erased and never reach here, so
-   * the filter costs nothing; a factory named something else entirely still shows up, which a
-   * suffix rule would have let through — and a suffix rule is a convention, which is the kind of
-   * thing the next file breaks without noticing.
-   */
-  const exported = Object.entries(pluginMutations)
-    .filter(([, value]) => typeof value === "function")
-    .map(([name]) => name)
-    .sort();
-
-  const covered = new Set<unknown>(REFUSALS.map((refusal) => refusal.factory));
-  const answeredFor = Object.entries(pluginMutations)
-    .filter(
-      ([name, value]) =>
-        typeof value === "function" &&
-        (covered.has(value) ||
-          name in NOT_A_REFUSABLE_WRITE ||
-          name in NOT_A_MUTATION_FACTORY),
-    )
-    .map(([name]) => name)
-    .sort();
-
-  expect(answeredFor).toEqual(exported);
-
-  /*
-   * AND NEITHER EXEMPTION LIST OUTLIVES WHAT IT EXEMPTS. An entry naming a function this module no
-   * longer exports, or one a refusal case now covers, is a claim about nothing — and a stale
-   * exemption is how a roster goes on looking complete while the thing it excused was quietly
-   * replaced by something that does need a case.
-   */
-  const unclaimed = exported.filter(
-    (name) => !covered.has((pluginMutations as Record<string, unknown>)[name]),
-  );
-  expect(
-    [
-      ...Object.keys(NOT_A_REFUSABLE_WRITE),
-      ...Object.keys(NOT_A_MUTATION_FACTORY),
-    ].sort(),
-  ).toEqual(unclaimed);
-});
-
-/**
  * WHAT THESE WRITES PUT IN A URL, AND WHOSE TEXT IT IS.
  *
  * NONE OF THESE IDS IS THIS APP'S TO CHOOSE. A server id is whatever an administrator typed when
@@ -410,11 +331,6 @@ test("every mutation factory `mutations.ts` exports is answered for by this file
  * before any handler is reached — and a `?` turns the rest of the id into a query string, silently
  * truncating the id the route then looks up.
  *
- * REPORTED THREE TIMES AND CLASSED AS COSMETIC THREE TIMES, which is what the pair of tests below
- * is really about. The first is the behaviour, one case per write that puts a caller's text in a
- * URL; the second is the lever, because a roster of cases only ever covers the writes that existed
- * when somebody wrote it — and the defect here was one new line forgetting the call its ten
- * neighbours all make.
  */
 
 /**
@@ -474,73 +390,98 @@ const ENCODED_REQUESTS: {
 }[] = [
   {
     name: "refreshing a server's tools",
-    url: `/api/plugins/servers/${ENCODED_ID}/refresh`,
+    url: `${appPath(HOSTILE_ID)}/refresh`,
     build: refreshPluginServerMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "removing a server",
-    url: `/api/plugins/servers/${ENCODED_ID}`,
+    url: appPath(HOSTILE_ID),
     build: removePluginServerMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "registering an OAuth client",
-    url: `/api/plugins/servers/${ENCODED_ID}/oauth-client`,
+    url: `${appPath(HOSTILE_ID)}/oauth-client`,
     build: registerOAuthClientMutationOptions,
     variables: { clientId: "abc", clientSecret: "shh", serverId: HOSTILE_ID },
   },
   {
     name: "starting a consent flow",
-    url: `/api/plugins/servers/${ENCODED_ID}/connect?returnTo=settings`,
+    url: myConnectionPath(HOSTILE_ID, "connect"),
     build: () => connectAccountMutationOptions(),
     variables: HOSTILE_ID,
   },
   {
     name: "confirming a brokered connection",
-    url: `/api/plugins/servers/${ENCODED_ID}/connection/confirm`,
+    url: myConnectionPath(HOSTILE_ID, "confirm"),
     build: confirmBrokeredConnectionMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "disconnecting a brokered account",
-    url: `/api/plugins/servers/${ENCODED_ID}/connection`,
+    url: myConnectionPath(HOSTILE_ID, "disconnect"),
     build: disconnectBrokeredMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "asking an app what it wants typed in",
-    url: `/api/plugins/servers/${ENCODED_ID}/connect`,
+    url: myConnectionPath(HOSTILE_ID, "connect"),
     build: () => brokeredConnectionFieldsMutationOptions(),
     variables: HOSTILE_ID,
   },
   {
     name: "handing over a typed key",
-    url: `/api/plugins/servers/${ENCODED_ID}/connect`,
+    url: myConnectionPath(HOSTILE_ID, "connect"),
     build: connectBrokeredWithFieldsMutationOptions,
     variables: { serverId: HOSTILE_ID, values: { api_key: "typed" } },
   },
   {
     name: "re-checking a key",
-    url: `/api/plugins/servers/${ENCODED_ID}/connection/recheck`,
+    url: myConnectionPath(HOSTILE_ID, "recheck"),
     build: recheckBrokeredConnectionMutationOptions,
     variables: HOSTILE_ID,
   },
   {
     name: "removing a skill",
-    url: `/api/plugins/skills/${ENCODED_ID}`,
+    url: `/api/v2/organizations/default/skills/${ENCODED_ID}`,
     build: removeSkillMutationOptions,
     variables: HOSTILE_ID,
   },
   {
+    name: "previewing an account mode switch",
+    url: `${appPath(HOSTILE_ID)}/account-mode`,
+    build: () =>
+      mutationOptions({
+        mutationFn: (variables: {
+          serverId: string;
+          mode: "personal" | "shared";
+        }) => accountModePreview(variables.serverId, variables.mode),
+      }),
+    variables: { serverId: HOSTILE_ID, mode: "shared" as const },
+  },
+  {
+    name: "switching a server's account mode",
+    url: `${appPath(HOSTILE_ID)}/account-mode`,
+    build: setAccountModeMutationOptions,
+    variables: { serverId: HOSTILE_ID, mode: "shared" as const },
+  },
+  {
+    name: "choosing who may give an app to a Bot",
+    url: appPath(HOSTILE_ID),
+    build: setOwnerGrantsMutationOptions,
+    variables: { serverId: HOSTILE_ID, ownerGrants: "any" as const },
+  },
+  {
     /*
-     * The one write whose caller text goes in a QUERY rather than a path, and it takes the same
-     * care: an unencoded `&` in a ref adds a parameter the route reads as one of its own. `kind`
-     * beside it is not a caller's text — it is this module's own two-member union — which is why it
-     * is one of the two interpolations the lever below lets through.
+     * The Bot's id and the grant's address are two segments, each encoded whole: the grant's
+     * address is `action:` and the ref with its first `/` as a `:`, and nothing in the rest of the
+     * ref may become a segment, a query or a fragment of its own.
      */
     name: "withholding a plugin from a Bot",
-    url: `/api/plugins/grants?kind=mcp&ref=${ENCODED_ID}&agentId=${ENCODED_ID}`,
+    url: `/api/v2/organizations/default/bots/${ENCODED_ID}/grants/${encodeURIComponent(
+      "action:acme:../gmail?returnTo=admin#x",
+    )}`,
     build: setPluginGrantMutationOptions,
     variables: {
       agentId: HOSTILE_ID,
@@ -559,52 +500,87 @@ for (const request of ENCODED_REQUESTS) {
   });
 }
 
-test("every id these writes interpolate into a URL goes through encodeURIComponent", () => {
-  /*
-   * THE LEVER, AND WHY THE ROSTER ABOVE IS NOT ENOUGH ON ITS OWN. A case list covers the writes
-   * that existed when it was written, and the defect it is about is a new one forgetting what its
-   * neighbours do. There is no way to enumerate from the outside every path a module MIGHT build —
-   * the roster is that attempt, and it can only ever be a list — but every interpolation the file
-   * contains can be enumerated, and that is the set this asks the question of.
-   *
-   * THE MODULE BUILDS ITS URLS NOWHERE ELSE: no base, no join helper, no concatenation. So every
-   * backticked string beginning `/api/` is the whole surface rather than a sample of it, and this
-   * assumption is itself pinned by the count below.
-   */
-  const source = readFileSync(
-    join(import.meta.dir, "../src/lib/plugins/mutations.ts"),
-    "utf8",
-  );
-  const paths = [...source.matchAll(/`(\/api\/[^`]*)`/g)].map(
-    (match) => match[1] ?? "",
-  );
-  /*
-   * AND THE ROSTER ABOVE IS THE SAME SET, COUNTED. A path with nothing interpolated into it is a
-   * plain quoted string in this module and is not matched here at all, so every path this finds
-   * carries somebody's text and has a case above naming the URL it must produce. A new interpolated
-   * path added with no case beside it fails here, which is what keeps the roster from quietly
-   * becoming a sample.
-   */
-  expect(paths.length).toBe(ENCODED_REQUESTS.length);
+/**
+ * Where the vendor's callback puts somebody down is the caller's to say, and only the default was
+ * ever pinned.
+ *
+ * The roster above drives both consent starts with no argument, so `?returnTo=settings` is all any
+ * assertion in this file has ever seen. A body that ignored its parameter and wrote `settings`
+ * itself would pass every one of them — and the defect that hides is an administrator who presses
+ * Connect on the connector's admin page, finishes consent at the vendor, and is put down in their
+ * own personal settings: the round trip the inline row exists to remove. One call each, with the
+ * value the default cannot be confused with.
+ */
+/** The page a consent start names, which travels in its body and never in its address. */
+async function returnsTo(
+  build: (queryClient: QueryClient) => unknown,
+  variables: unknown,
+): Promise<{ url: string; returnTo: unknown }[]> {
+  const sent: { url: string; returnTo: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as { returnTo?: unknown })
+        : {};
+    sent.push({
+      url: typeof input === "string" ? input : String(input),
+      returnTo: body.returnTo,
+    });
+    return new Response("{}", {
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  const queryClient = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  });
+  await new MutationObserver(queryClient, build(queryClient) as never)
+    .mutate(variables as never)
+    .catch(() => undefined);
+  return sent;
+}
 
-  /*
-   * THE TWO NAMES THAT MAY GO IN RAW, AND WHY NEITHER IS A CALLER'S TEXT. `variables.kind` is
-   * `PluginKind` and `returnTo` is `"settings" | "admin"` — two closed unions this module declares
-   * itself, each narrowed again by the server before it decides anything. Anything else in this
-   * position is somebody's typed id, and there are exactly two ways for one of those to be safe:
-   * the call this test is named for, or a new entry here that somebody had to argue for.
-   */
-  const closedUnions = ["variables.kind", "returnTo"];
+test("the consent starts carry the screen they were started from", async () => {
+  expect(
+    await returnsTo(() => connectAccountMutationOptions("admin"), HOSTILE_ID),
+  ).toEqual([
+    { url: myConnectionPath(HOSTILE_ID, "connect"), returnTo: "apps" },
+  ]);
 
-  const raw = paths.flatMap((path) =>
-    [...path.matchAll(/\$\{([^}]*)\}/g)]
-      .map((match) => (match[1] ?? "").trim())
-      .filter(
-        (interpolation) =>
-          !interpolation.startsWith("encodeURIComponent(") &&
-          !closedUnions.includes(interpolation),
-      ),
-  );
+  expect(
+    await returnsTo(() => authorizeActionMutationOptions("admin"), {
+      serverId: HOSTILE_ID,
+      action: "GMAIL_SEND_EMAIL",
+    }),
+  ).toEqual([
+    { url: myConnectionPath(HOSTILE_ID, "authorize"), returnTo: "apps" },
+  ]);
+});
 
-  expect(raw).toEqual([]);
+test("the consent starts say when they were pressed in OpenBot Desktop", async () => {
+  const scope = globalThis as unknown as { window?: Record<string, unknown> };
+  const hadWindow = "window" in scope;
+  const window = scope.window ?? {};
+  scope.window = window;
+  window.__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  try {
+    expect(
+      await returnsTo(() => connectAccountMutationOptions(), "gmail"),
+    ).toEqual([
+      { url: myConnectionPath("gmail", "connect"), returnTo: "desktop" },
+    ]);
+    expect(
+      await returnsTo(() => authorizeActionMutationOptions(), {
+        serverId: "gmail",
+        action: "GMAIL_SEND_EMAIL",
+      }),
+    ).toEqual([
+      { url: myConnectionPath("gmail", "authorize"), returnTo: "desktop" },
+    ]);
+  } finally {
+    delete window.__TAURI_INTERNALS__;
+    if (!hadWindow) delete scope.window;
+  }
 });

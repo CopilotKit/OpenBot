@@ -1,4 +1,3 @@
-import type { Attachment } from "@copilotkit/react-core/v2";
 import {
   afterAll,
   afterEach,
@@ -7,6 +6,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import type { Attachment } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
@@ -109,9 +109,7 @@ test("a pick-time refusal still names the file with no crypto.randomUUID", async
   ]);
 
   await waitFor(() => expect(view.queryByRole("alert")).not.toBeNull());
-  expect(
-    view.queryByText(/can carry scripts and is not accepted/),
-  ).not.toBeNull();
+  expect(view.queryByText(/SVG files aren't accepted/)).not.toBeNull();
   // The rest of the gesture survived the refusal, which is the part the throw used to take with it.
   await waitFor(() =>
     expect(view.queryByLabelText("Remove notes.txt")).not.toBeNull(),

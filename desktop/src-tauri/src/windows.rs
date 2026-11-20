@@ -54,6 +54,9 @@ pub enum Blocker {
     VirtualMachinePlatformDisabled,
     /// Virtualization is off in firmware. Only the person, in their BIOS, can fix this.
     VirtualizationDisabled,
+    /// This Windows is itself a virtual machine whose host does not pass virtualization through,
+    /// so WSL 2 cannot start one. Only the host can fix this.
+    NestedVirtualizationUnavailable,
     /// The account cannot elevate.
     NotAdministrator,
 }
@@ -97,6 +100,12 @@ impl Blocker {
                  there, which OpenBot cannot do: restart, open the firmware settings, and enable \
                  Intel VT-x or AMD-V."
             }
+            Blocker::NestedVirtualizationUnavailable => {
+                "This Windows runs in a virtual machine whose host does not pass virtualization \
+                 through to it, so Windows Subsystem for Linux cannot start. Turn on nested \
+                 virtualization for this virtual machine in its host, then start it and OpenBot \
+                 again."
+            }
             Blocker::NotAdministrator => {
                 "Setting up Windows Subsystem for Linux needs administrator rights. Ask an \
                  administrator to open Windows Terminal or PowerShell as an administrator and run \
@@ -108,13 +117,9 @@ impl Blocker {
         }
     }
 
-    /// Whether the shell can clear this itself. Two of the four are ours; two are not.
-    /// Whether OpenBot could fix this itself, one day.
-    ///
-    /// Nothing acts on this yet. `wsl --install` needs elevation and a restart, and the resumable
-    /// state machine that would carry somebody across that reboot is designed and not built, so
-    /// every blocker screen currently tells a person what to run. Kept because the two halves are
-    /// genuinely different: WSL is installable and a firmware setting is not.
+    /// Whether this account can clear it without anybody else. A standard account can still use
+    /// `fix`, with an administrator typing their password into the prompt; a firmware setting
+    /// cannot be fixed from Windows at all.
     pub fn ours_to_fix(self) -> bool {
         matches!(
             self,
@@ -251,10 +256,188 @@ fn virtualization_available(hypervisor_present: bool, firmware_enabled: bool) ->
     hypervisor_present || firmware_enabled
 }
 
+/*
+How long each probe of the check may take before it is stopped and counts as no answer. None of
+these is a failure: a probe that runs out of time says nothing either way (`answered_in_time`).
+The probes are short questions when Windows is well; when one hangs, it hangs on something outside
+OpenBot, and the setup window's saved-setup check waits on it.
+
+Seen on Windows Server 2022 after OpenBot updated itself: the window was "Not Responding" on
+"Checking your saved setup" for more than five minutes, and its one child was the PowerShell asking
+`Win32_OptionalFeature` for the WSL feature. That class answers through Windows's servicing stack,
+which was busy (TrustedInstaller, TiWorker and DismHost working after WSL was turned on and Windows
+restarted), and the query waited behind it.
+*/
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+struct ProbeLimits {
+    /// One PowerShell probe: PowerShell's own start and a CIM or registry read. Seconds on a cold
+    /// machine, while WMI's provider host starts; thirty is several times that.
+    powershell: std::time::Duration,
+    /// `wsl.exe --version` only asks the WSL service for its version strings, and starts no VM.
+    wsl_version: std::time::Duration,
+    /// How long a feature probe runs before the window says Windows is busy: a quiet machine
+    /// answers it in a few seconds.
+    servicing_busy_after: std::time::Duration,
+    /// How long a probe runs before it is reported as slow (`Heard::Probe`). A quiet machine
+    /// answers each of these in a second or two; five is past that and still well short of the
+    /// limit, so a machine getting slow shows up before it times out.
+    slow_after: std::time::Duration,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const PROBE_LIMITS: ProbeLimits = ProbeLimits {
+    powershell: std::time::Duration::from_secs(30),
+    wsl_version: std::time::Duration::from_secs(30),
+    servicing_busy_after: std::time::Duration::from_secs(5),
+    slow_after: std::time::Duration::from_secs(5),
+};
+
+/// What the check says while it runs, for the window and for usage data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Heard {
+    /// A feature probe is waiting on Windows's servicing: the window says Windows is busy.
+    ServicingBusy,
+    /// A probe ran long (`ProbeLimits::slow_after`) or was stopped at its limit, after
+    /// `duration_ms`. Its name only, never what it ran.
+    Probe {
+        probe: crate::telemetry::WindowsProbeKind,
+        outcome: crate::telemetry::WindowsProbeOutcome,
+        duration_ms: u64,
+    },
+}
+
+/// What a probe that took `took` says: nothing when it answered within `slow_after`.
+pub fn heard_of(
+    probe: crate::telemetry::WindowsProbeKind,
+    timed_out: bool,
+    took: std::time::Duration,
+    slow_after: std::time::Duration,
+) -> Option<Heard> {
+    use crate::telemetry::WindowsProbeOutcome as Outcome;
+    let outcome = if timed_out {
+        Outcome::TimedOut
+    } else if took >= slow_after {
+        Outcome::Slow
+    } else {
+        return None;
+    };
+    Some(Heard::Probe {
+        probe,
+        outcome,
+        duration_ms: u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+    })
+}
+
+/// Which probe `blocker_with` is running, by what it asks.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn probe_of(program: &str, args: &[&str]) -> crate::telemetry::WindowsProbeKind {
+    use crate::telemetry::WindowsProbeKind as Probe;
+    if program == "wsl.exe" {
+        return Probe::WslVersion;
+    }
+    let command = args.last().copied().unwrap_or_default();
+    if command.contains("Win32_ComputerSystem") {
+        Probe::Virtualization
+    } else if command.contains("S-1-5-32-544") {
+        Probe::Administrator
+    } else if command.contains("Microsoft-Windows-Subsystem-Linux") {
+        Probe::WslFeature
+    } else if command.contains("VirtualMachinePlatform") {
+        Probe::VirtualMachinePlatformFeature
+    } else if command.contains("WslService") {
+        Probe::WslService
+    } else {
+        Probe::DefaultWslVersion
+    }
+}
+
+/// Whether a probe asks Windows's servicing stack, as a `Win32_OptionalFeature` query does (above).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn asks_servicing(args: &[&str]) -> bool {
+    args.iter().any(|arg| arg.contains("Win32_OptionalFeature"))
+}
+
+/// The check's probes as `blocker` runs them: each bounded by its limit, `tell` told while a
+/// feature probe waits on Windows's servicing and of any probe that ran long or out of time. Once
+/// one feature probe has run out of time, the next would only wait behind the same servicing, so it
+/// is not run, and says nothing either.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+struct Probing<'a> {
+    limits: ProbeLimits,
+    tell: &'a dyn Fn(Heard),
+    servicing_timed_out: bool,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+impl Probing<'_> {
+    /// `program` with `args`, run as `binary`: the program itself, or a stand-in in a test.
+    fn run(
+        &mut self,
+        binary: &std::ffi::OsStr,
+        program: &str,
+        args: &[&str],
+    ) -> std::io::Result<std::process::Output> {
+        let servicing = asks_servicing(args);
+        if servicing && self.servicing_timed_out {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "not asked: Windows's servicing did not answer the feature probe before it",
+            ));
+        }
+        let limit = if program == "wsl.exe" {
+            self.limits.wsl_version
+        } else {
+            self.limits.powershell
+        };
+        let tell = self.tell;
+        let busy = || tell(Heard::ServicingBusy);
+        let started = std::time::Instant::now();
+        let output = crate::quiet::output_watching(
+            crate::quiet::command(binary).args(args),
+            limit,
+            servicing.then_some((self.limits.servicing_busy_after, &busy as &dyn Fn())),
+        );
+        let timed_out =
+            matches!(&output, Err(error) if error.kind() == std::io::ErrorKind::TimedOut);
+        if servicing && timed_out {
+            self.servicing_timed_out = true;
+        }
+        if let Some(heard) = heard_of(
+            probe_of(program, args),
+            timed_out,
+            started.elapsed(),
+            self.limits.slow_after,
+        ) {
+            tell(heard);
+        }
+        output
+    }
+}
+
+/// `wsl.exe --system --exec true` cold-starts WSL's VM when it is stopped, which is the state after
+/// Quit stops OpenBot's machine, and that can take tens of seconds. Hyper-V refusing the VM, the
+/// one answer that matters here, comes when the VM is created, not after it boots. Running out of
+/// time is not that refusal, so a slow start is never turned into a blocker; the engine's own
+/// start waits for WSL after this.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const WSL_SYSTEM_START: std::time::Duration = std::time::Duration::from_secs(60);
+/// A cold start measured about six seconds on Windows Server 2022, so a start is slow past twenty:
+/// three times that, and a third of the limit.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const WSL_SYSTEM_SLOW: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Read the machine and say which blocker, if any, is in the way. `tell` hears that Windows's
+/// servicing holds the check, for the window to say so, and of probes that ran long or timed out.
 #[cfg(target_os = "windows")]
-pub fn blocker() -> Result<Option<Blocker>, Problem> {
+pub fn blocker(tell: &dyn Fn(Heard)) -> Result<Option<Blocker>, Problem> {
+    let mut probing = Probing {
+        limits: PROBE_LIMITS,
+        tell,
+        servicing_timed_out: false,
+    };
     blocker_with(
-        |program, args| crate::quiet::command(program).args(args).output(),
+        |program, args| probing.run(program.as_ref(), program, args),
         || {
             let root = std::env::var_os("SystemRoot")
                 .filter(|root| !root.is_empty())
@@ -330,11 +513,13 @@ fn decode_probe_text(bytes: &[u8]) -> Result<String, String> {
     // non-ASCII diagnostics; PowerShell's ASCII boolean results and modern UTF-8 also work here.
     if bytes.starts_with(&[0xff, 0xfe]) || bytes.contains(&0) {
         let bytes = bytes.strip_prefix(&[0xff, 0xfe]).unwrap_or(bytes);
-        if bytes.len() % 2 != 0 {
+        if !bytes.len().is_multiple_of(2) {
             return Err("Truncated UTF-16 probe output".into());
         }
         let units = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         String::from_utf16(&units).map_err(|error| error.to_string())
@@ -355,6 +540,57 @@ fn probe_bool(operation: &str, output: &str) -> Result<bool, Problem> {
     }
 }
 
+/// Local WMI reads work in the signed-in user's token; the DISM cmdlet
+/// Get-WindowsOptionalFeature requires elevation even when it only reads state.
+fn optional_feature_probe_command(feature: &str) -> String {
+    format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $features = @(Get-CimInstance -ClassName Win32_OptionalFeature -Filter \"Name = '{feature}'\"); \
+         if ($features.Count -ne 1 -or $null -eq $features[0].InstallState) {{ \
+           throw '{feature} query did not return one feature state' \
+         }}; \
+         $features[0].InstallState"
+    )
+}
+
+fn probe_feature_enabled(operation: &str, output: &str) -> Result<bool, Problem> {
+    // https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-optionalfeature
+    // Unknown (4) is not evidence that a feature is disabled.
+    match output.trim() {
+        "1" => Ok(true),
+        "2" | "3" => Ok(false),
+        _ => Err(detection_failed(
+            operation,
+            format!("Expected InstallState 1 (enabled), 2 (disabled), or 3 (absent); probe returned: {output}"),
+        )),
+    }
+}
+
+fn modern_wsl_probe_command() -> &'static str {
+    "$ErrorActionPreference = 'Stop'; \
+     $null -ne (Get-CimInstance -ClassName Win32_Service -Filter \"Name = 'WslService'\")"
+}
+
+/// A probe's output, or `None` when it ran out of time (`quiet::output_within`).
+///
+/// A probe that did not answer in time says nothing about the machine. It is not a blocker, which
+/// would send somebody to fix what may be fine, and not a failed check, which would stop a launch
+/// on a machine that ran yesterday. The probes after it still run, so a blocker one of them finds
+/// is still shown. Any other failure stays the detection error it always was.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn answered_in_time(
+    operation: &str,
+    output: std::io::Result<std::process::Output>,
+) -> Option<std::io::Result<std::process::Output>> {
+    match output {
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+            log::warn!("[windows check] {operation} did not answer: {error}. Going on without it.");
+            None
+        }
+        output => Some(output),
+    }
+}
+
 /// The native adapter above only supplies process execution and the legacy kernel-file check.
 /// Keeping the decision path shared lets failure tests run without touching Windows components.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -362,106 +598,151 @@ fn blocker_with(
     mut run: impl FnMut(&str, &[&str]) -> std::io::Result<std::process::Output>,
     kernel_file_exists: impl FnOnce() -> Result<bool, Problem>,
 ) -> Result<Option<Blocker>, Problem> {
+    // What a probe printed, `None` when it did not answer in time.
+    let mut ask = |operation: &str, program: &str, args: &[&str]| {
+        answered_in_time(operation, run(program, args))
+            .map(|output| probe_text(operation, output))
+            .transpose()
+    };
+
     // A running hypervisor is positive virtualization evidence even when firmware reports False.
-    // Stop converts CIM/DISM non-terminating errors into failed probes instead of partial answers.
+    // Stop converts CIM non-terminating errors into failed probes instead of partial answers.
     let virtualization = "Windows virtualization support (powershell)";
-    let reported = probe_text(
+    if let Some(reported) = ask(
         virtualization,
-        run(
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference = 'Stop'; \
+         'hypervisor=' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent; \
+         'firmware=' + ((Get-CimInstance Win32_Processor | \
+           ForEach-Object { $_.VirtualizationFirmwareEnabled }) -contains $true)",
+        ],
+    )? {
+        let lines: Vec<_> = reported.lines().map(str::trim).collect();
+        let [hypervisor, firmware] = lines.as_slice() else {
+            return Err(detection_failed(
+                virtualization,
+                format!("Unexpected probe output: {reported}"),
+            ));
+        };
+        let hypervisor = hypervisor.strip_prefix("hypervisor=").ok_or_else(|| {
+            detection_failed(
+                virtualization,
+                format!("Missing hypervisor result: {reported}"),
+            )
+        })?;
+        let firmware = firmware.strip_prefix("firmware=").ok_or_else(|| {
+            detection_failed(
+                virtualization,
+                format!("Missing firmware result: {reported}"),
+            )
+        })?;
+        if !virtualization_available(
+            probe_bool(virtualization, hypervisor)?,
+            probe_bool(virtualization, firmware)?,
+        ) {
+            return Ok(Some(Blocker::VirtualizationDisabled));
+        }
+    }
+
+    /*
+     * Whether this account can approve an administrator prompt, not whether this process already
+     * runs elevated. Under UAC an administrator's apps run with a filtered token in which
+     * Administrators (S-1-5-32-544) is a deny-only group, so `IsInRole(Administrator)` answered
+     * false for every administrator who opened OpenBot normally, and they were all told to go and
+     * find one. The group is in the token's claims either way: as a group SID once elevated, as a
+     * deny-only SID before. A standard account has neither. Matched by SID, so it is the same in
+     * every language.
+     */
+    let administrator = "Windows administrator rights (powershell)";
+    let elevated = ask(administrator, "powershell", &[
+        "-NoProfile", "-NonInteractive", "-Command",
+        "$ErrorActionPreference = 'Stop'; \
+         [bool]([Security.Principal.WindowsIdentity]::GetCurrent().Claims | Where-Object { $_.Value -eq 'S-1-5-32-544' })",
+    ])?
+    .map(|said| probe_bool(administrator, &said))
+    .transpose()?;
+    // Not known, the blocker is the one with the administrator prompt: a standard account can
+    // still clear it, with an administrator typing their password into that prompt.
+    let for_this_account = |blocker| {
+        if elevated == Some(false) {
+            Blocker::NotAdministrator
+        } else {
+            blocker
+        }
+    };
+
+    let wsl_feature = "the WSL feature state (powershell)";
+    let enabled = ask(
+        wsl_feature,
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &optional_feature_probe_command("Microsoft-Windows-Subsystem-Linux"),
+        ],
+    )?
+    .map(|said| probe_feature_enabled(wsl_feature, &said))
+    .transpose()?;
+    if enabled == Some(false) {
+        // Modern WSL2 uses WslService and does not require the legacy WSL1 optional component.
+        // https://learn.microsoft.com/en-us/windows/wsl/faq#was-lxssmanager-replaced-by-wslservice
+        // Service presence only establishes installation; VMP and kernel health are checked below.
+        let modern_wsl = "the WSL service (powershell)";
+        let installed = ask(
+            modern_wsl,
             "powershell",
             &[
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "$ErrorActionPreference = 'Stop'; \
-         'hypervisor=' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent; \
-         'firmware=' + ((Get-CimInstance Win32_Processor | \
-           ForEach-Object { $_.VirtualizationFirmwareEnabled }) -contains $true)",
+                modern_wsl_probe_command(),
             ],
-        ),
-    )?;
-    let lines: Vec<_> = reported.lines().map(str::trim).collect();
-    let [hypervisor, firmware] = lines.as_slice() else {
-        return Err(detection_failed(
-            virtualization,
-            format!("Unexpected probe output: {reported}"),
-        ));
-    };
-    let hypervisor = hypervisor.strip_prefix("hypervisor=").ok_or_else(|| {
-        detection_failed(
-            virtualization,
-            format!("Missing hypervisor result: {reported}"),
-        )
-    })?;
-    let firmware = firmware.strip_prefix("firmware=").ok_or_else(|| {
-        detection_failed(
-            virtualization,
-            format!("Missing firmware result: {reported}"),
-        )
-    })?;
-    if !virtualization_available(
-        probe_bool(virtualization, hypervisor)?,
-        probe_bool(virtualization, firmware)?,
-    ) {
-        return Ok(Some(Blocker::VirtualizationDisabled));
-    }
-
-    let administrator = "Windows administrator rights (powershell)";
-    let elevated = probe_bool(administrator, &probe_text(administrator, run("powershell", &[
-        "-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference = 'Stop'; \
-         ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
-    ]))?)?;
-
-    let wsl_feature = "the WSL feature state (powershell)";
-    let enabled = probe_bool(wsl_feature, &probe_text(wsl_feature, run("powershell", &[
-        "-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference = 'Stop'; \
-         $state = (Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux).State; \
-         if ($null -eq $state) { throw 'WSL feature query returned no state' }; \
-         $state -eq 'Enabled'",
-    ]))?)?;
-    if !enabled {
-        return Ok(Some(if elevated {
-            Blocker::WslAbsent
-        } else {
-            Blocker::NotAdministrator
-        }));
+        )?
+        .map(|said| probe_bool(modern_wsl, &said))
+        .transpose()?;
+        if installed == Some(false) {
+            return Ok(Some(for_this_account(Blocker::WslAbsent)));
+        }
     }
 
     let vmp_feature = "the Virtual Machine Platform feature state (powershell)";
-    let enabled = probe_bool(vmp_feature, &probe_text(vmp_feature, run("powershell", &[
-        "-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference = 'Stop'; \
-         $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
-         if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
-         $state -eq 'Enabled'",
-    ]))?)?;
-    if !enabled {
-        return Ok(Some(if elevated {
-            Blocker::VirtualMachinePlatformDisabled
-        } else {
-            Blocker::NotAdministrator
-        }));
+    let enabled = ask(
+        vmp_feature,
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &optional_feature_probe_command("VirtualMachinePlatform"),
+        ],
+    )?
+    .map(|said| probe_feature_enabled(vmp_feature, &said))
+    .transpose()?;
+    if enabled == Some(false) {
+        return Ok(Some(for_this_account(
+            Blocker::VirtualMachinePlatformDisabled,
+        )));
     }
 
     let default_version = "the default WSL version (registry)";
-    let default_version = parse_default_wsl_version(
+    let default_version = ask(
         default_version,
-        &probe_text(
-            default_version,
-            run(
-                "powershell",
-                &[
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    default_wsl_version_probe_command(),
-                ],
-            ),
-        )?,
-    )?;
-    if default_version == 1 {
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            default_wsl_version_probe_command(),
+        ],
+    )?
+    .map(|said| parse_default_wsl_version(default_version, &said))
+    .transpose()?;
+    if default_version == Some(1) {
         return Ok(Some(Blocker::WslOne));
     }
 
@@ -470,10 +751,14 @@ fn blocker_with(
     if kernel_file_exists()? {
         return Ok(None);
     }
-    let version_output = probe_text(
+    let Some(version_output) = ask(
         "the WSL version (wsl.exe --version)",
-        run("wsl.exe", &["--version"]),
-    )?;
+        "wsl.exe",
+        &["--version"],
+    )?
+    else {
+        return Ok(None);
+    };
     if !wsl_kernel_present(&version_output, false) {
         return Ok(Some(Blocker::WslNoKernel));
     }
@@ -481,8 +766,637 @@ fn blocker_with(
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn blocker() -> Result<Option<Blocker>, Problem> {
+pub fn blocker(_tell: &dyn Fn(Heard)) -> Result<Option<Blocker>, Problem> {
     Ok(None)
+}
+
+/**
+Whether WSL 2 can start a virtual machine here, asked of WSL itself.
+
+Every other check reads the same on a PC running Hyper-V and in a virtual machine whose host passes
+no virtualization through: a hypervisor is present and the firmware flag reads off. Measured in
+Windows 11 on ARM under VMware Fusion: every check passed, Docker Desktop was installed, and it
+then stopped on "Nested virtualization is not available" while OpenBot waited for it. So this
+starts WSL's own system distribution, which exists with no Linux distribution installed, and asks
+whether Hyper-V refused to create its VM.
+
+Only that refusal is a blocker. Any other failure (an older WSL without `--system`, say) is not
+evidence about virtualization, and is left for Docker to report. Nor is running out of time
+(`WSL_SYSTEM_START`).
+*/
+#[cfg(target_os = "windows")]
+pub fn nested_virtualization_blocker(tell: &dyn Fn(Heard)) -> Option<Blocker> {
+    let started = std::time::Instant::now();
+    let output = crate::quiet::output_within(
+        crate::quiet::command("wsl.exe").args(["--system", "--exec", "true"]),
+        WSL_SYSTEM_START,
+    );
+    if let Some(heard) = heard_of(
+        crate::telemetry::WindowsProbeKind::WslSystemStart,
+        matches!(&output, Err(error) if error.kind() == std::io::ErrorKind::TimedOut),
+        started.elapsed(),
+        WSL_SYSTEM_SLOW,
+    ) {
+        tell(heard);
+    }
+    let output = answered_in_time("WSL's own VM (wsl.exe --system)", output)?.ok()?;
+    let said = format!(
+        "{}\n{}",
+        decode_probe_text(&output.stdout).unwrap_or_default(),
+        decode_probe_text(&output.stderr).unwrap_or_default()
+    );
+    (!output.status.success() && hyper_v_refused(&said))
+        .then_some(Blocker::NestedVirtualizationUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn nested_virtualization_blocker(_tell: &dyn Fn(Heard)) -> Option<Blocker> {
+    None
+}
+
+/// WSL's words for "Hyper-V cannot create a virtual machine here": the HCS error, by name or code.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hyper_v_refused(said: &str) -> bool {
+    said.contains("HCS_E_HYPERV_NOT_INSTALLED") || said.contains("0x80370102")
+}
+
+/// The machine's own architecture, in `std::env::consts::ARCH`'s words, for choosing what to
+/// download and run.
+///
+/// Not this program's: Windows on ARM runs an x64 OpenBot under emulation, where `ARCH` says
+/// `x86_64` on an ARM64 machine. Docker's x64 installer refuses that machine, and an x64 Bun or
+/// Compose would run emulated when a native one exists. Windows says what the machine is through
+/// `IsWow64Process2` (Windows 10 1709 and later); anything it cannot answer falls back to `ARCH`.
+pub fn machine_arch() -> &'static str {
+    #[cfg(target_os = "windows")]
+    if let Some(arch) = windows_machine_arch() {
+        return arch;
+    }
+    std::env::consts::ARCH
+}
+
+#[cfg(target_os = "windows")]
+fn windows_machine_arch() -> Option<&'static str> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn IsWow64Process2(
+            process: *mut std::ffi::c_void,
+            process_machine: *mut u16,
+            native_machine: *mut u16,
+        ) -> i32;
+    }
+    let (mut process, mut native) = (0u16, 0u16);
+    // SAFETY: the pseudo-handle for this process is always valid, and both out-pointers are to
+    // locals that outlive the call.
+    if unsafe { IsWow64Process2(GetCurrentProcess(), &mut process, &mut native) } == 0 {
+        return None;
+    }
+    machine_name(native)
+}
+
+/// `IMAGE_FILE_MACHINE_*` to `ARCH`'s names, for the two machines Windows 11 runs on.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn machine_name(machine: u16) -> Option<&'static str> {
+    match machine {
+        0xAA64 => Some("aarch64"),
+        0x8664 => Some("x86_64"),
+        _ => None,
+    }
+}
+
+/// What OpenBot runs to clear a blocker: a PowerShell script, behind one administrator prompt when
+/// it changes the machine, and whether Windows has to restart before the change is real.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fix {
+    pub script: &'static str,
+    pub elevated: bool,
+    pub restart: bool,
+}
+
+/// Turn on WSL 2 and nothing else: no Linux distribution, which `wsl --install` would add and then
+/// open after the restart asking for a UNIX username nobody needs.
+///
+/// Both Windows features through DISM every time, because that works on every build and is a no-op
+/// for one already on; `wsl --install` alone can find WSL present and leave Virtual Machine
+/// Platform off. DISM exits 3010 for "done, restart needed", which is success here. Then the
+/// current WSL and its kernel, best effort: the inbox `wsl.exe` of older builds refuses
+/// `--no-distribution` (measured on Server 2022), and a kernel still missing after the restart is
+/// its own blocker, with its own fix.
+const ENABLE_WSL: &str = r#"$ErrorActionPreference = 'Continue'
+foreach ($feature in 'Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') {
+  & dism.exe /online /enable-feature /featurename:$feature /all /norestart /quiet | Out-Null
+  if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+    throw "dism.exe could not turn on $feature (exit $LASTEXITCODE)"
+  }
+}
+& wsl.exe --install --no-distribution | Out-Null
+exit 0"#;
+
+/// The WSL kernel, from GitHub where this WSL knows how, because the Store is often what a managed
+/// machine has switched off; the Store otherwise.
+const UPDATE_WSL: &str = r#"$ErrorActionPreference = 'Continue'
+& wsl.exe --update --web-download | Out-Null
+if ($LASTEXITCODE -eq 0) { exit 0 }
+& wsl.exe --update | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "wsl.exe --update failed (exit $LASTEXITCODE)" }
+exit 0"#;
+
+/// A per-account setting, so it runs as the person rather than as whoever approved a prompt.
+const WSL_VERSION_TWO: &str = r#"$ErrorActionPreference = 'Continue'
+& wsl.exe --set-default-version 2 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "wsl.exe --set-default-version 2 failed (exit $LASTEXITCODE)" }
+exit 0"#;
+
+impl Blocker {
+    /// How OpenBot clears this itself, or None when it cannot: firmware is not Windows's to change.
+    ///
+    /// A standard account gets the same fix as an administrator. Windows asks for an
+    /// administrator's password instead of a yes, and the features it turns on are the machine's,
+    /// so they are on for this account too.
+    pub fn fix(self) -> Option<Fix> {
+        match self {
+            Blocker::WslAbsent
+            | Blocker::VirtualMachinePlatformDisabled
+            | Blocker::NotAdministrator => Some(Fix {
+                script: ENABLE_WSL,
+                elevated: true,
+                restart: true,
+            }),
+            Blocker::WslNoKernel => Some(Fix {
+                script: UPDATE_WSL,
+                elevated: true,
+                restart: true,
+            }),
+            Blocker::WslOne => Some(Fix {
+                script: WSL_VERSION_TWO,
+                elevated: false,
+                restart: false,
+            }),
+            Blocker::VirtualizationDisabled | Blocker::NestedVirtualizationUnavailable => None,
+        }
+    }
+}
+
+/// The exit code that means the person said no to the administrator prompt: `ERROR_CANCELLED`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DECLINED: i32 = 1223;
+
+/// The script as PowerShell's `-EncodedCommand` takes it: UTF-16LE, base64. Nothing in it is
+/// quoted twice, which is what passing a script through `Start-Process` otherwise comes to.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn encoded(script: &str) -> String {
+    use base64::Engine;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Run `script` elevated: Windows shows its prompt, the script runs hidden, and its error, if it
+/// has one, comes back through `log` because an elevated process cannot write to our pipes.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn elevated_launcher(script: &str, log: &Path) -> String {
+    let log = log.display().to_string().replace('\'', "''");
+    let inner = format!(
+        "try {{\n{script}\n}} catch {{ $_ | Out-String | Set-Content -LiteralPath '{log}' -Encoding UTF8; exit 1 }}"
+    );
+    format!(
+        r#"$ErrorActionPreference = 'Stop'
+try {{
+  $process = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{}'
+  exit $process.ExitCode
+}} catch {{
+  $error_ = $_.Exception
+  while ($error_) {{ if ($error_.NativeErrorCode -eq {DECLINED}) {{ exit {DECLINED} }}; $error_ = $error_.InnerException }}
+  throw
+}}"#,
+        encoded(&inner)
+    )
+}
+
+/// What came of running a fix, before any restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Fixed {
+    /// Done; Windows has to restart before it counts.
+    RestartNeeded,
+    /// Done, and nothing else needed.
+    Done,
+    /// The person said no to Windows' administrator prompt. Nothing changed; the window asks again.
+    Declined,
+}
+
+/// Turn the outcome of running a fix into what the screen says.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn fixed(
+    fix: Fix,
+    status: Option<i32>,
+    log: Option<String>,
+    stderr: &str,
+) -> Result<Fixed, Problem> {
+    match status {
+        Some(0) => Ok(if fix.restart {
+            Fixed::RestartNeeded
+        } else {
+            Fixed::Done
+        }),
+        // A decision, not a failure: the window says OpenBot needs it, and asks again.
+        Some(DECLINED) => Ok(Fixed::Declined),
+        status => Err(Problem::with(
+            "OpenBot could not set up Windows Subsystem for Linux. Try again, or run the commands \
+             yourself.",
+            log.filter(|log| !log.trim().is_empty())
+                .unwrap_or_else(|| format!("exit {status:?}: {}", stderr.trim())),
+        )),
+    }
+}
+
+/// Run a blocker's fix and say what came of it. `scratch` holds the elevated script's error log.
+#[cfg(target_os = "windows")]
+pub fn run_fix(fix: Fix, scratch: &Path) -> Result<Fixed, Problem> {
+    std::fs::create_dir_all(scratch).map_err(|error| {
+        Problem::with(
+            "OpenBot could not set up Windows Subsystem for Linux.",
+            error.to_string(),
+        )
+    })?;
+    let log = scratch.join("windows-fix-error.txt");
+    let _ = std::fs::remove_file(&log);
+    let script = if fix.elevated {
+        elevated_launcher(fix.script, &log)
+    } else {
+        fix.script.to_string()
+    };
+    let output = crate::quiet::command("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+        ])
+        .arg(encoded(&script))
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not set up Windows Subsystem for Linux.",
+                error.to_string(),
+            )
+        })?;
+    fixed(
+        fix,
+        output.status.code(),
+        std::fs::read_to_string(&log).ok(),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn run_fix(_fix: Fix, _scratch: &Path) -> Result<Fixed, Problem> {
+    Err(Problem::plain(
+        "Only Windows needs Windows Subsystem for Linux.",
+    ))
+}
+
+/// Where a fix that needs a restart is remembered, with the boot it was made in.
+pub fn restart_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("windows-restart.json")
+}
+
+#[derive(Serialize, Deserialize)]
+struct AwaitingRestart {
+    boot: String,
+}
+
+/// Remember that Windows has to restart, against this boot.
+pub fn record_restart_needed(data_dir: &Path, boot: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(data_dir)?;
+    std::fs::write(
+        restart_path(data_dir),
+        serde_json::to_string(&AwaitingRestart {
+            boot: boot.to_string(),
+        })
+        .unwrap_or_default(),
+    )
+}
+
+/// Whether a fix is still waiting for its restart: recorded in the boot that is running now.
+///
+/// Checked before the blocker is, because a feature switched on reads as on straight away while
+/// WSL cannot use it until Windows restarts; going on then would fail later, in Docker. A record
+/// from an earlier boot means the restart happened, so it is removed.
+pub fn restart_pending(data_dir: &Path, boot: &str) -> bool {
+    let path = restart_path(data_dir);
+    let Some(recorded) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<AwaitingRestart>(&text).ok())
+    else {
+        let _ = std::fs::remove_file(&path);
+        return false;
+    };
+    if recorded.boot == boot {
+        return true;
+    }
+    let _ = std::fs::remove_file(&path);
+    false
+}
+
+/// When Windows last started, to tell one boot from the next.
+#[cfg(target_os = "windows")]
+pub fn boot() -> Result<String, Problem> {
+    probe_text(
+        "when Windows last started (powershell)",
+        // Bounded as the check's probes are. Out of time, the boot is not known: an error.
+        crate::quiet::output_within(
+            crate::quiet::command("powershell").args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('yyyyMMddHHmmss')",
+            ]),
+            PROBE_LIMITS.powershell,
+        ),
+    )
+    .map(|text| text.trim().to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn boot() -> Result<String, Problem> {
+    Ok(String::new())
+}
+
+/// Restart Windows now, with OpenBot set to open once when the person signs back in.
+#[cfg(target_os = "windows")]
+pub fn restart() -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot could not restart Windows. Restart it from the Start menu.",
+            detail,
+        )
+    };
+    let program = std::env::current_exe().map_err(|error| failed(error.to_string()))?;
+    // Best effort: without it the person opens OpenBot themselves, as the screen already says.
+    let _ = crate::quiet::command("reg.exe")
+        .args([
+            "add",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+            "/v",
+            "OpenBot",
+            "/t",
+            "REG_SZ",
+            "/d",
+            &format!("\"{}\"", program.display()),
+            "/f",
+        ])
+        .output();
+    let output = crate::quiet::command("shutdown.exe")
+        .args(["/r", "/t", "0"])
+        .output()
+        .map_err(|error| failed(error.to_string()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failed(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn restart() -> Result<(), Problem> {
+    Err(Problem::plain("Only Windows restarts from here."))
+}
+
+/// The drive that holds the engine's disk, and how much is free on it: on Windows the drive a
+/// Podman machine's or Docker Desktop's disk is on, and on a Mac its own disk (`mac`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineDrive {
+    /// `C:`, or None when the disk's folder is not on a lettered drive, and on a Mac.
+    pub drive: Option<String>,
+    pub free: u64,
+    /// The Mac's own disk, where Docker Desktop and Podman keep their machine's disk.
+    pub mac: bool,
+}
+
+/**
+The drive under the engine's disk on a Mac: the volume of the home folder, where Docker Desktop
+(`~/Library/Containers/com.docker.docker`) and Podman (`~/.local/share/containers/podman/machine`)
+keep their machine's disk. That disk is a sparse file of 64 GB to a terabyte, so a container sees it
+free whatever the Mac has: a Mac with 7.5 GB free of 926 GB showed a Docker disk with room, and the
+update that filled it broke Docker's disk ("EXT4-fs error ... Detected aborted journal"). None off a
+Mac, or when it cannot be read.
+*/
+pub fn mac_drive() -> Option<MachineDrive> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(MachineDrive {
+            drive: None,
+            free: crate::early_downloads::free_space(Path::new(&home))?,
+            mac: true,
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/**
+Where a Podman machine on WSL keeps its disk, and the space free on that drive.
+
+The machine's disk is a sparse virtual disk of about a terabyte, so the space a container sees free
+inside it says nothing about the space left on Windows: a machine can show 941 GiB free on a drive
+with 30. Podman imports each machine as the WSL distribution `podman-<machine>`
+(`env.WithPodmanPrefix`), and WSL records the folder it holds the disk in as that distribution's
+`BasePath`. None off Windows, and when WSL has no such distribution.
+*/
+pub fn podman_machine_drive(machine: &str) -> Option<MachineDrive> {
+    #[cfg(target_os = "windows")]
+    {
+        machine_drive_in(LXSS, &podman_distribution(machine))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = machine;
+        None
+    }
+}
+
+/// The WSL distribution Podman makes for `machine`, as Podman names it (`env.WithPodmanPrefix`).
+pub fn podman_distribution(machine: &str) -> String {
+    if machine.starts_with("podman") {
+        machine.to_owned()
+    } else {
+        format!("podman-{machine}")
+    }
+}
+
+/// The drive a Windows path is on, `C:`, with or without the `\\?\` prefix WSL records it with.
+pub fn drive_of(path: &str) -> Option<String> {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    match path.as_bytes() {
+        [letter, b':', ..] if letter.is_ascii_alphabetic() => {
+            Some(format!("{}:", letter.to_ascii_uppercase() as char))
+        }
+        _ => None,
+    }
+}
+
+/// Where WSL records each distribution it has, for the person signed in.
+#[cfg(target_os = "windows")]
+const LXSS: &str = r"Software\Microsoft\Windows\CurrentVersion\Lxss";
+
+/// WSL's note, under `LXSS`, that this person has had its welcome window: a DWORD, 1 once shown.
+#[cfg(target_os = "windows")]
+const WSL_WELCOME_SHOWN: &str = "OOBEComplete";
+
+/**
+Keep WSL's own "Welcome to Windows Subsystem for Linux" window from opening when Podman makes
+OpenBot's machine.
+
+WSL's service opens that window (`wslsettings.exe`, `wsl-settings://oobe`) when a person registers
+a distribution, unless `OOBEComplete` under their own `HKCU\...\Lxss` key is set or they already
+had another distribution (`LxssUserSessionImpl::_LaunchOOBEIfNeeded` in microsoft/WSL).
+`podman machine init` registers one through `wsl --import`, so on a computer that has never had a
+distribution the window opens in the middle of OpenBot's setup. Nothing on the command line stops
+it: `--import` turns off only the distribution's own first run, `wsl --install --no-launch` is about
+starting a distribution after installing one, and `.wslconfig` has no such key. Setting the value
+is what the WSL team gives as the way to stop the window (microsoft/WSL#13223), and Microsoft's
+WindowsDeveloperConfig sets it for the same reason.
+
+The value is the person's own, so it is written here, in their session, just before the machine is
+made. Not in the elevated `ENABLE_WSL`, which runs as whoever approved the prompt. Best effort: a
+value that cannot be written costs only the window.
+*/
+pub fn skip_wsl_welcome() {
+    #[cfg(target_os = "windows")]
+    if let Err(error) = skip_wsl_welcome_in(LXSS) {
+        log::warn!("[wsl] could not turn off WSL's welcome window: {error}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn skip_wsl_welcome_in(registry: &str) -> windows_registry::Result<()> {
+    windows_registry::CURRENT_USER
+        .create(registry)?
+        .set_u32(WSL_WELCOME_SHOWN, 1)
+}
+
+#[cfg(target_os = "windows")]
+fn machine_drive_in(registry: &str, distribution: &str) -> Option<MachineDrive> {
+    let folder = distribution_folder(registry, distribution)?;
+    let free = free_space(&folder)?;
+    Some(MachineDrive {
+        drive: drive_of(&folder),
+        free,
+        mac: false,
+    })
+}
+
+/// The `BasePath` WSL recorded for `distribution`, under `registry` in the person's own hive.
+#[cfg(target_os = "windows")]
+fn distribution_folder(registry: &str, distribution: &str) -> Option<String> {
+    let lxss = windows_registry::CURRENT_USER.open(registry).ok()?;
+    let ids: Vec<String> = lxss.keys().ok()?.collect();
+    ids.iter().find_map(|id| {
+        let entry = lxss.open(id).ok()?;
+        let name = entry.get_string("DistributionName").ok()?;
+        if !name.eq_ignore_ascii_case(distribution) {
+            return None;
+        }
+        entry.get_string("BasePath").ok()
+    })
+}
+
+/**
+Where Docker Desktop keeps its WSL disks, and the space free on that drive.
+
+Docker Desktop on WSL keeps its data on a sparse virtual disk of about a terabyte, so a container
+sees about a terabyte free whatever the drive under it has: Windows G showed 938.3 GiB free in a
+container with 15 GB free on C:, and setup took C: from 14.5 to 11.8 GB. The drive is found as Docker
+Desktop finds its disks (`docker_data_folder`). None off Windows.
+*/
+pub fn docker_data_drive() -> Option<MachineDrive> {
+    #[cfg(target_os = "windows")]
+    {
+        let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+        let read = |folder: Option<String>, file: &str| {
+            folder.and_then(|folder| {
+                std::fs::read_to_string(Path::new(&folder).join("Docker").join(file)).ok()
+            })
+        };
+        let folder = docker_data_folder(
+            read(env("APPDATA"), "settings-store.json").as_deref(),
+            read(env("APPDATA"), "settings.json").as_deref(),
+            env("LOCALAPPDATA").as_deref(),
+            env("SystemDrive").as_deref(),
+        )?;
+        // A folder Docker has not made yet is on the drive its path names.
+        let free = free_space(&folder)
+            .or_else(|| drive_of(&folder).and_then(|drive| free_space(&format!(r"{drive}\"))))?;
+        Some(MachineDrive {
+            drive: drive_of(&folder),
+            free,
+            mac: false,
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/**
+The folder Docker Desktop keeps its WSL disks in (`disk\docker_data.vhdx`, `main\ext4.vhdx`), from
+the contents of its settings files under `%APPDATA%\Docker` and the person's folders.
+
+Settings > Resources > Advanced > Disk image location sets it: `CustomWslDistroDir` in
+`settings-store.json`, or `customWslDistroDir` in the `settings.json` of releases before that file.
+Otherwise it is `%LOCALAPPDATA%\Docker\wsl`, and without that, the system drive.
+*/
+pub fn docker_data_folder(
+    settings_store: Option<&str>,
+    settings: Option<&str>,
+    local_app_data: Option<&str>,
+    system_drive: Option<&str>,
+) -> Option<String> {
+    let chosen = |file: Option<&str>| {
+        let settings: serde_json::Value = serde_json::from_str(file?).ok()?;
+        ["CustomWslDistroDir", "customWslDistroDir"]
+            .iter()
+            .find_map(|key| settings.get(*key)?.as_str())
+            .map(str::trim)
+            .filter(|folder| !folder.is_empty())
+            .map(str::to_owned)
+    };
+    chosen(settings_store)
+        .or_else(|| chosen(settings))
+        .or_else(|| local_app_data.map(|folder| format!(r"{folder}\Docker\wsl")))
+        .or_else(|| system_drive.map(|drive| format!(r"{drive}\")))
+}
+
+/// The bytes free to this account on the volume that holds `folder`.
+#[cfg(target_os = "windows")]
+pub(crate) fn free_space(folder: &str) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let folder = folder.strip_prefix(r"\\?\").unwrap_or(folder);
+    let wide: Vec<u16> = std::ffi::OsStr::new(folder)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free = 0u64;
+    // SAFETY: `wide` is a NUL-terminated path that outlives the call, and `free` is a u64 it may
+    // write; the two totals are not asked for.
+    unsafe {
+        windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            Some(&mut free),
+            None,
+            None,
+        )
+    }
+    .ok()?;
+    Some(free)
 }
 
 #[cfg(test)]
@@ -490,11 +1404,135 @@ mod tests {
     use super::*;
     use crate::test_support::temp_root;
 
+    /// Docker Desktop's disks are where its Disk image location setting puts them, in either
+    /// settings file it has used, and otherwise in `%LOCALAPPDATA%\Docker\wsl`.
+    #[test]
+    fn docker_desktops_disks_are_found_where_its_settings_put_them() {
+        let local = r"C:\Users\Administrator\AppData\Local";
+        // Windows G: nothing set, so the default folder, on C:.
+        let store = r#"{"AutoStart":false,"DisplayedOnboarding":true,"EnableIntegrationWithDefaultWslDistro":false,"SettingsVersion":40}"#;
+        let folder = docker_data_folder(Some(store), None, Some(local), Some("C:")).unwrap();
+        assert_eq!(folder, r"C:\Users\Administrator\AppData\Local\Docker\wsl");
+        assert_eq!(drive_of(&folder).as_deref(), Some("C:"));
+        // Moved to another drive with Disk image location.
+        let moved =
+            r#"{"AutoStart":false,"CustomWslDistroDir":"D:\\DockerDesktop","SettingsVersion":40}"#;
+        let folder = docker_data_folder(Some(moved), None, Some(local), Some("C:")).unwrap();
+        assert_eq!(folder, r"D:\DockerDesktop");
+        assert_eq!(drive_of(&folder).as_deref(), Some("D:"));
+        // A release before settings-store.json, and an empty setting, which is no setting.
+        let older = r#"{"autoStart":false,"customWslDistroDir":"E:\\wsl","settingsVersion":30}"#;
+        assert_eq!(
+            docker_data_folder(None, Some(older), Some(local), Some("C:")).as_deref(),
+            Some(r"E:\wsl")
+        );
+        let empty = r#"{"CustomWslDistroDir":"  "}"#;
+        assert_eq!(
+            docker_data_folder(Some(empty), Some("not json"), Some(local), Some("C:")).as_deref(),
+            Some(r"C:\Users\Administrator\AppData\Local\Docker\wsl")
+        );
+        // No profile folder to go by: the system drive.
+        assert_eq!(
+            docker_data_folder(None, None, None, Some("C:")).as_deref(),
+            Some(r"C:\")
+        );
+        assert_eq!(docker_data_folder(None, None, None, None), None);
+    }
+
+    /// Podman names its machine's WSL distribution as `env.WithPodmanPrefix` does, and WSL records
+    /// its folder with the `\\?\` prefix or without.
+    #[test]
+    fn a_podman_machines_distribution_and_drive_are_named_as_podman_and_wsl_name_them() {
+        assert_eq!(podman_distribution("openbot"), "podman-openbot");
+        assert_eq!(
+            podman_distribution("podman-machine-default"),
+            "podman-machine-default"
+        );
+        for (path, drive) in [
+            (
+                r"\\?\C:\Users\me\.local\share\containers\podman\machine\wsl\wsldist\openbot",
+                Some("C:"),
+            ),
+            (r"d:\podman\wsldist\openbot", Some("D:")),
+            (r"\\server\share\wsldist\openbot", None),
+            ("", None),
+        ] {
+            assert_eq!(drive_of(path).as_deref(), drive, "{path}");
+        }
+    }
+
+    /// The machine's drive is read where WSL keeps it: a distribution's `BasePath` in the person's
+    /// own registry hive, here under a key of this test's own with the shape WSL writes, and the
+    /// free space of the real volume that folder is on.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_podman_machines_drive_is_read_from_the_folder_wsl_recorded() {
+        let registry = format!(r"Software\OpenBot\Tests\Lxss-{}", std::process::id());
+        let folder = temp_root("wsl-distribution");
+        std::fs::create_dir_all(&folder).unwrap();
+        let entry = |id: &str, name: &str, base: &str| {
+            let key = windows_registry::CURRENT_USER
+                .create(format!(r"{registry}\{id}"))
+                .unwrap();
+            key.set_string("DistributionName", name).unwrap();
+            key.set_string("BasePath", base).unwrap();
+            key.set_string("VhdFileName", "ext4.vhdx").unwrap();
+        };
+        entry(
+            "{0d4e1c9a-5f0b-4a57-9d3e-1a2b3c4d5e6f}",
+            "Ubuntu",
+            r"Z:\elsewhere",
+        );
+        entry(
+            "{7c1f2e3d-9a8b-4c5d-8e7f-6a5b4c3d2e1f}",
+            "podman-openbot",
+            &format!(r"\\?\{}", folder.display()),
+        );
+        let found = machine_drive_in(&registry, "podman-openbot");
+        let missing = machine_drive_in(&registry, "podman-other");
+        let _ = windows_registry::CURRENT_USER.remove_tree(&registry);
+        let found = found.expect("the machine's folder and its volume were read");
+        assert_eq!(found.drive, drive_of(&folder.display().to_string()));
+        assert!(found.free > 0, "{found:?}");
+        assert_eq!(missing, None);
+    }
+
+    /// WSL reads `OOBEComplete` as a DWORD under the person's own Lxss key, and opens its welcome
+    /// window while it is missing or 0 (`LXSS_REGISTRY_PATH`, `LXSS_OOBE_COMPLETE_NAME` in
+    /// microsoft/WSL's wslservice.idl). Written here under a key of this test's own, from missing
+    /// and from 0, in the person's real hive.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_wsl_welcome_window_is_marked_shown_where_wsl_reads_it() {
+        assert_eq!(LXSS, r"Software\Microsoft\Windows\CurrentVersion\Lxss");
+        assert_eq!(WSL_WELCOME_SHOWN, "OOBEComplete");
+
+        let registry = format!(r"Software\OpenBot\Tests\LxssWelcome-{}", std::process::id());
+        let fresh = skip_wsl_welcome_in(&registry);
+        let after_fresh = windows_registry::CURRENT_USER
+            .open(&registry)
+            .and_then(|key| key.get_u32(WSL_WELCOME_SHOWN));
+        let reset = windows_registry::CURRENT_USER
+            .create(&registry)
+            .and_then(|key| key.set_u32(WSL_WELCOME_SHOWN, 0));
+        let again = skip_wsl_welcome_in(&registry);
+        let after_reset = windows_registry::CURRENT_USER
+            .open(&registry)
+            .and_then(|key| key.get_u32(WSL_WELCOME_SHOWN));
+        let _ = windows_registry::CURRENT_USER.remove_tree(&registry);
+
+        fresh.expect("the value was written to a key that did not exist");
+        assert_eq!(after_fresh.expect("the value reads back as a DWORD"), 1);
+        reset.expect("the test set the value back to 0");
+        again.expect("the value was written over 0");
+        assert_eq!(after_reset.expect("the value reads back as a DWORD"), 1);
+    }
+
     const PROBE_OUTPUTS: [&str; 6] = [
         "hypervisor=True\nfirmware=False\n",
         "True\n",
-        "True\n",
-        "True\n",
+        "1\n",
+        "1\n",
         "2\n",
         "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2\n",
     ];
@@ -506,12 +1544,15 @@ mod tests {
             assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
             match probe {
                 0 => assert!(args[3].contains("Get-CimInstance Win32_ComputerSystem")),
-                1 => assert!(args[3].contains("WindowsBuiltInRole]::Administrator")),
-                2 => assert!(args[3].contains("-FeatureName Microsoft-Windows-Subsystem-Linux")),
-                3 => assert_eq!(args[3], "$ErrorActionPreference = 'Stop'; \
-                    $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
-                    if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
-                    $state -eq 'Enabled'"),
+                1 => assert!(args[3].contains("S-1-5-32-544")),
+                2 => assert_eq!(
+                    args[3],
+                    optional_feature_probe_command("Microsoft-Windows-Subsystem-Linux")
+                ),
+                3 => assert_eq!(
+                    args[3],
+                    optional_feature_probe_command("VirtualMachinePlatform")
+                ),
                 4 => assert_eq!(args[3], default_wsl_version_probe_command()),
                 _ => unreachable!(),
             }
@@ -535,6 +1576,191 @@ mod tests {
             stdout: stdout.as_bytes().to_vec(),
             stderr: stderr.as_bytes().to_vec(),
         }
+    }
+
+    #[test]
+    fn standard_user_with_working_wsl_does_not_need_elevated_feature_queries() {
+        let result = blocker_with(
+            |program, args| {
+                let command = args.join(" ");
+                let stdout = if command.contains("Get-WindowsOptionalFeature") {
+                    return Ok(probe_output(
+                        1,
+                        "",
+                        "Get-WindowsOptionalFeature : The requested operation requires elevation.",
+                    ));
+                } else if command.contains("Win32_ComputerSystem") {
+                    PROBE_OUTPUTS[0]
+                } else if command.contains("S-1-5-32-544") {
+                    "False"
+                } else if command.contains("Win32_OptionalFeature") {
+                    "1"
+                } else if program == "powershell" && args[3] == default_wsl_version_probe_command()
+                {
+                    "2"
+                } else if program == "wsl.exe" && args == ["--version"] {
+                    PROBE_OUTPUTS[5]
+                } else {
+                    panic!("unexpected standard-user probe: {program} {args:?}");
+                };
+                Ok(probe_output(0, stdout, ""))
+            },
+            || Ok(false),
+        );
+        assert_eq!(result, Ok(None));
+    }
+
+    fn probe_with_modern_wsl_service(
+        outputs: [&str; 6],
+        service: std::io::Result<std::process::Output>,
+    ) -> Result<Option<Blocker>, Problem> {
+        let mut service = Some(service);
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                    return service.take().expect("queried the WSL service twice");
+                }
+                assert_probe_call(probe, program, args);
+                let output = probe_output(0, outputs[probe], "");
+                probe += 1;
+                Ok(output)
+            },
+            || Ok(false),
+        );
+        assert!(service.is_none(), "did not check modern WSL installation");
+        result
+    }
+
+    #[test]
+    fn modern_wsl_does_not_require_the_legacy_component_but_still_needs_vmp_and_a_kernel() {
+        for legacy in ["2", "3"] {
+            for (vmp, version, expected) in [
+                ("1", PROBE_OUTPUTS[5], None),
+                ("2", PROBE_OUTPUTS[5], Some(Blocker::NotAdministrator)),
+                ("3", PROBE_OUTPUTS[5], Some(Blocker::NotAdministrator)),
+                ("1", "WSL version: 2", Some(Blocker::WslNoKernel)),
+            ] {
+                let mut outputs = PROBE_OUTPUTS;
+                outputs[1] = "False";
+                outputs[2] = legacy;
+                outputs[3] = vmp;
+                outputs[5] = version;
+                assert_eq!(
+                    probe_with_modern_wsl_service(outputs, Ok(probe_output(0, "True", ""))),
+                    Ok(expected),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn absent_modern_and_legacy_wsl_returns_install_guidance_for_standard_users() {
+        for legacy in ["2", "3"] {
+            let mut outputs = PROBE_OUTPUTS;
+            outputs[1] = "False";
+            outputs[2] = legacy;
+            assert_eq!(
+                probe_with_modern_wsl_service(outputs, Ok(probe_output(0, "False", ""))),
+                Ok(Some(Blocker::NotAdministrator)),
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_or_malformed_feature_states_are_detection_errors() {
+        for probe in [2, 3] {
+            for state in ["4", "0", "-1", "Enabled", "1\n2", ""] {
+                let error = fail_probe_at(probe, Ok(probe_output(0, state, ""))).unwrap_err();
+                assert!(error.said.contains("feature state"));
+                assert!(error.detail.unwrap().contains(state));
+            }
+        }
+    }
+
+    #[test]
+    fn modern_wsl_service_query_failures_are_not_missing_prerequisites() {
+        let mut outputs = PROBE_OUTPUTS;
+        outputs[1] = "False";
+        outputs[2] = "2";
+        for (failure, diagnostic) in [
+            (
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "service launch denied",
+                )),
+                "service launch denied",
+            ),
+            (
+                Ok(probe_output(1, "False", "service query denied")),
+                "service query denied",
+            ),
+            (
+                Ok(probe_output(0, "", "service returned no answer")),
+                "service returned no answer",
+            ),
+            (Ok(probe_output(0, "unknown", "")), "unknown"),
+        ] {
+            let error = probe_with_modern_wsl_service(outputs, failure).unwrap_err();
+            assert!(error.said.contains("the WSL service"));
+            assert!(error.detail.unwrap().contains(diagnostic));
+        }
+    }
+
+    /// Run explicitly under a normal Windows account. Read both features before blocker() so a
+    /// missing hypervisor cannot make this privilege-boundary check pass without querying them.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires a real Windows standard-user session"]
+    fn native_standard_user_setup_probe() {
+        let run = |command: &str| {
+            crate::quiet::command("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", command])
+                .output()
+        };
+        let elevated = probe_bool(
+            "native probe identity",
+            &probe_text("native probe identity", run(
+                "$ErrorActionPreference = 'Stop'; \
+                 ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+            )).unwrap(),
+        ).unwrap();
+        assert!(!elevated, "run this probe without administrator elevation");
+        println!(
+            "native setup identity: {}",
+            serde_json::json!({"elevated": elevated})
+        );
+        for feature in [
+            "Microsoft-Windows-Subsystem-Linux",
+            "VirtualMachinePlatform",
+        ] {
+            let state = probe_text(feature, run(&optional_feature_probe_command(feature))).unwrap();
+            let enabled = probe_feature_enabled(feature, &state).unwrap();
+            println!(
+                "native setup feature: {}",
+                serde_json::json!({
+                    "feature": feature, "installState": state, "enabled": enabled,
+                })
+            );
+        }
+        let modern_wsl = probe_bool(
+            "native WSL service probe",
+            &probe_text("native WSL service probe", run(modern_wsl_probe_command())).unwrap(),
+        )
+        .unwrap();
+        println!(
+            "native setup service: {}",
+            serde_json::json!({"modernWslInstalled": modern_wsl})
+        );
+        let result = blocker(&|_| {});
+        println!(
+            "native setup result: {}",
+            serde_json::to_string(&result).unwrap()
+        );
+        assert!(
+            result.is_ok(),
+            "normal-user setup detection failed: {result:?}"
+        );
     }
 
     #[derive(Deserialize)]
@@ -711,11 +1937,11 @@ mod tests {
                 } else if args
                     .iter()
                     .any(|arg| arg.contains("VirtualMachinePlatform"))
-                {
-                    "False"
-                } else if program == "powershell" && args[3] == default_wsl_version_probe_command()
+                    || (program == "powershell" && args[3] == default_wsl_version_probe_command())
                 {
                     "2"
+                } else if args.iter().any(|arg| arg.contains("Win32_OptionalFeature")) {
+                    "1"
                 } else if program == "powershell" {
                     "True"
                 } else {
@@ -825,10 +2051,7 @@ mod tests {
                 assert_probe_call(probe, program, args);
                 let mut output = probe_output(0, PROBE_OUTPUTS[probe], "");
                 if probe == 3 {
-                    output.stdout = "True\r\n"
-                        .encode_utf16()
-                        .flat_map(u16::to_le_bytes)
-                        .collect();
+                    output.stdout = "1\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
                 }
                 probe += 1;
                 Ok(output)
@@ -935,8 +2158,8 @@ mod tests {
                 [
                     PROBE_OUTPUTS[0],
                     "True",
-                    "False",
-                    "True",
+                    "2",
+                    "1",
                     PROBE_OUTPUTS[4],
                     PROBE_OUTPUTS[5],
                 ],
@@ -946,30 +2169,23 @@ mod tests {
                 [
                     PROBE_OUTPUTS[0],
                     "False",
-                    "False",
-                    "True",
+                    "2",
+                    "1",
                     PROBE_OUTPUTS[4],
                     PROBE_OUTPUTS[5],
                 ],
                 Some(Blocker::NotAdministrator),
             ),
             (
-                [
-                    PROBE_OUTPUTS[0],
-                    "True",
-                    "True",
-                    "True",
-                    "1",
-                    PROBE_OUTPUTS[5],
-                ],
+                [PROBE_OUTPUTS[0], "True", "1", "1", "1", PROBE_OUTPUTS[5]],
                 Some(Blocker::WslOne),
             ),
             (
                 [
                     PROBE_OUTPUTS[0],
                     "True",
-                    "True",
-                    "True",
+                    "1",
+                    "1",
                     PROBE_OUTPUTS[4],
                     "WSL version: 2",
                 ],
@@ -980,6 +2196,9 @@ mod tests {
             let mut probe = 0;
             let result = blocker_with(
                 |program, args| {
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        return Ok(probe_output(0, "False", ""));
+                    }
                     assert_probe_call(probe, program, args);
                     let output = probe_output(0, outputs[probe], "");
                     probe += 1;
@@ -1092,37 +2311,37 @@ mod tests {
             (
                 "vmp-disabled-admin",
                 "True",
-                "True",
-                "False",
+                "1",
+                "2",
                 Some(Blocker::VirtualMachinePlatformDisabled),
                 4,
             ),
             (
                 "vmp-disabled-standard",
                 "False",
-                "True",
-                "False",
+                "1",
+                "2",
                 Some(Blocker::NotAdministrator),
                 4,
             ),
             (
                 "wsl-absent-admin",
                 "True",
-                "False",
-                "True",
+                "2",
+                "1",
                 Some(Blocker::WslAbsent),
-                3,
+                4,
             ),
             (
                 "wsl-absent-standard",
                 "False",
-                "False",
-                "True",
+                "2",
+                "1",
                 Some(Blocker::NotAdministrator),
-                3,
+                4,
             ),
-            ("healthy-admin", "True", "True", "True", None, 6),
-            ("healthy-standard", "False", "True", "True", None, 6),
+            ("healthy-admin", "True", "1", "1", None, 6),
+            ("healthy-standard", "False", "1", "1", None, 6),
         ] {
             let mut outputs = PROBE_OUTPUTS;
             outputs[1] = elevated;
@@ -1133,6 +2352,10 @@ mod tests {
             let result = blocker_with(
                 |program, args| {
                     let probe = calls.len();
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        calls.push(serde_json::json!({ "program": program, "args": args }));
+                        return child_probe_output("0", "False", "");
+                    }
                     assert_probe_call(probe, program, args);
                     calls.push(serde_json::json!({ "program": program, "args": args }));
                     stages.borrow_mut().push(probe);
@@ -1176,6 +2399,378 @@ mod tests {
         let error = fail_probe_at(0, output).unwrap_err();
         assert!(error.said.contains("Windows virtualization support"));
         assert!(error.detail.unwrap().contains("Could not start probe"));
+    }
+
+    /// Which probe `blocker_with` is running, by what it asks.
+    fn probe_named(program: &str, args: &[&str]) -> &'static str {
+        if program == "wsl.exe" {
+            assert_eq!(args, ["--version"]);
+            return "version";
+        }
+        let command = args[3];
+        if command.contains("Win32_ComputerSystem") {
+            "virtualization"
+        } else if command.contains("S-1-5-32-544") {
+            "administrator"
+        } else if command == optional_feature_probe_command("Microsoft-Windows-Subsystem-Linux") {
+            "wsl"
+        } else if command == modern_wsl_probe_command() {
+            "service"
+        } else if command == optional_feature_probe_command("VirtualMachinePlatform") {
+            "vmp"
+        } else if command == default_wsl_version_probe_command() {
+            "default-version"
+        } else {
+            panic!("unexpected probe: {program} {args:?}")
+        }
+    }
+
+    fn still_running() -> std::io::Result<std::process::Output> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "synthetic probe still running at its limit",
+        ))
+    }
+
+    /// What some probes print, by name; `None` is one still running at its limit.
+    type Said<'a> = &'a [(&'a str, Option<&'a str>)];
+
+    /// `blocker_with` on a machine that is ready apart from what `said` names: each probe's
+    /// stdout, or `None` for one still running at its limit. Answers what it found and which
+    /// probes it ran.
+    fn check_where(said: Said) -> (Result<Option<Blocker>, Problem>, Vec<&'static str>) {
+        let ready = [
+            ("virtualization", "hypervisor=True\nfirmware=False"),
+            ("administrator", "True"),
+            ("wsl", "1"),
+            ("service", "True"),
+            ("vmp", "1"),
+            ("default-version", "2"),
+            (
+                "version",
+                "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2",
+            ),
+        ];
+        let mut asked = Vec::new();
+        let result = blocker_with(
+            |program, args| {
+                let probe = probe_named(program, args);
+                asked.push(probe);
+                let answer = said
+                    .iter()
+                    .find(|(name, _)| *name == probe)
+                    .map(|(_, answer)| *answer)
+                    .unwrap_or_else(|| {
+                        ready
+                            .iter()
+                            .find(|(name, _)| *name == probe)
+                            .map(|(_, out)| *out)
+                    });
+                match answer {
+                    Some(stdout) => Ok(probe_output(0, stdout, "")),
+                    None => still_running(),
+                }
+            },
+            || Ok(false),
+        );
+        (result, asked)
+    }
+
+    /// A probe that runs out of time says nothing about the machine: no blocker the person would be
+    /// sent to fix, and no failed check stopping a launch that would have worked. The rest still
+    /// run.
+    #[test]
+    fn a_probe_that_runs_out_of_time_is_neither_a_blocker_nor_a_failed_check() {
+        for probe in [
+            "virtualization",
+            "administrator",
+            "wsl",
+            "vmp",
+            "default-version",
+            "version",
+        ] {
+            let (found, asked) = check_where(&[(probe, None)]);
+            assert_eq!(found, Ok(None), "{probe} timing out");
+            assert_eq!(
+                asked,
+                [
+                    "virtualization",
+                    "administrator",
+                    "wsl",
+                    "vmp",
+                    "default-version",
+                    "version"
+                ],
+                "the check stopped at {probe} timing out"
+            );
+        }
+        let every_one = [
+            ("virtualization", None),
+            ("administrator", None),
+            ("wsl", None),
+            ("vmp", None),
+            ("default-version", None),
+            ("version", None),
+        ];
+        assert_eq!(check_where(&every_one).0, Ok(None));
+    }
+
+    /// Never hides a real one: what the probes that did answer found is still the answer.
+    #[test]
+    fn a_probe_that_runs_out_of_time_does_not_hide_what_the_others_found() {
+        let cases: [(Said, Blocker); 6] = [
+            (
+                &[("virtualization", None), ("vmp", Some("2"))],
+                Blocker::VirtualMachinePlatformDisabled,
+            ),
+            (
+                &[("vmp", None), ("default-version", Some("1"))],
+                Blocker::WslOne,
+            ),
+            (
+                &[
+                    ("administrator", None),
+                    ("wsl", Some("2")),
+                    ("service", Some("False")),
+                ],
+                // Not knowing the account, the one an administrator's password in the prompt
+                // clears, never "ask somebody else".
+                Blocker::WslAbsent,
+            ),
+            (
+                &[("administrator", None), ("vmp", Some("3"))],
+                Blocker::VirtualMachinePlatformDisabled,
+            ),
+            (
+                &[
+                    ("administrator", Some("False")),
+                    ("wsl", None),
+                    ("vmp", Some("2")),
+                ],
+                Blocker::NotAdministrator,
+            ),
+            (
+                &[
+                    ("default-version", None),
+                    ("version", Some("WSL version: 2")),
+                ],
+                Blocker::WslNoKernel,
+            ),
+        ];
+        for (said, expected) in cases {
+            assert_eq!(check_where(said).0, Ok(Some(expected)), "{said:?}");
+        }
+        // A WSL feature that is off still asks for the service; its silence is not "absent".
+        let (found, asked) = check_where(&[("wsl", Some("2")), ("service", None)]);
+        assert_eq!(found, Ok(None));
+        assert!(asked.contains(&"service"));
+    }
+
+    /**
+    The freeze, on real processes: a `powershell` and a `wsl` that hang whatever they are asked,
+    as the feature probe hung behind Windows's busy servicing, run by the check as `blocker` runs
+    them. Each is stopped at its limit, the check answers "nothing known in the way", the window is
+    told Windows is busy while a feature probe waits, and the second feature probe is not run to
+    wait behind the same servicing. Runs on every platform, Windows CI's "app (windows)" job
+    included.
+    */
+    #[test]
+    fn a_hanging_powershell_is_stopped_and_the_check_says_windows_is_busy() {
+        let cli = crate::test_support::probe_cli("windows-probes-hang");
+        let fake = |name: &str| {
+            let path = cli.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+            std::fs::copy(&cli, &path).unwrap();
+            path
+        };
+        let (powershell, wsl) = (fake("powershell"), fake("wsl"));
+        let heard = std::cell::RefCell::new(Vec::new());
+        let hear = |said: Heard| heard.borrow_mut().push(said);
+        let mut probing = Probing {
+            limits: ProbeLimits {
+                powershell: std::time::Duration::from_millis(500),
+                wsl_version: std::time::Duration::from_millis(300),
+                servicing_busy_after: std::time::Duration::from_millis(100),
+                slow_after: std::time::Duration::from_millis(200),
+            },
+            tell: &hear,
+            servicing_timed_out: false,
+        };
+        let mut asked = Vec::new();
+        let found = blocker_with(
+            |program, args| {
+                asked.push(probe_named(program, args));
+                let binary = if program == "wsl.exe" {
+                    &wsl
+                } else {
+                    &powershell
+                };
+                probing.run(binary.as_os_str(), program, args)
+            },
+            || Ok(false),
+        );
+        assert_eq!(found, Ok(None));
+        assert_eq!(
+            asked,
+            [
+                "virtualization",
+                "administrator",
+                "wsl",
+                "vmp",
+                "default-version",
+                "version"
+            ]
+        );
+        // Windows busy said once, for the WSL feature; the Virtual Machine Platform one was never
+        // started, so it neither waited nor timed out. Every probe that ran is reported as timed
+        // out, by name, after at least its limit.
+        use crate::telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
+        let heard = heard.into_inner();
+        let said: Vec<_> = heard
+            .iter()
+            .map(|said| match *said {
+                Heard::ServicingBusy => None,
+                Heard::Probe { probe, outcome, .. } => Some((probe, outcome)),
+            })
+            .collect();
+        assert_eq!(
+            said,
+            [
+                Some((Probe::Virtualization, Outcome::TimedOut)),
+                Some((Probe::Administrator, Outcome::TimedOut)),
+                None,
+                Some((Probe::WslFeature, Outcome::TimedOut)),
+                Some((Probe::DefaultWslVersion, Outcome::TimedOut)),
+                Some((Probe::WslVersion, Outcome::TimedOut)),
+            ]
+        );
+        for said in &heard {
+            if let Heard::Probe {
+                probe, duration_ms, ..
+            } = said
+            {
+                let limit = if *probe == Probe::WslVersion {
+                    300
+                } else {
+                    500
+                };
+                assert!(*duration_ms >= limit, "{said:?}");
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        for name in ["powershell", "wsl"] {
+            assert!(
+                !cli.with_file_name(format!("{name}-outlived")).exists(),
+                "a {name} probe ran on after its limit"
+            );
+        }
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
+
+    /// A probe that answers, but late, is reported as slow with how long it took; one in good time
+    /// says nothing. On a real process: a `powershell` that takes two seconds, under a slow mark of
+    /// one and a limit with room for a loaded test machine.
+    #[test]
+    fn a_probe_that_answers_late_is_reported_slow_with_its_duration() {
+        use crate::telemetry::{WindowsProbeKind as Probe, WindowsProbeOutcome as Outcome};
+        let cli = crate::test_support::probe_cli("windows-probe-slow");
+        let powershell = cli.with_file_name(format!("powershell{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(&cli, &powershell).unwrap();
+        let heard = std::cell::RefCell::new(Vec::new());
+        let hear = |said: Heard| heard.borrow_mut().push(said);
+        let mut probing = Probing {
+            limits: ProbeLimits {
+                powershell: std::time::Duration::from_secs(60),
+                wsl_version: std::time::Duration::from_secs(60),
+                servicing_busy_after: std::time::Duration::from_secs(60),
+                slow_after: std::time::Duration::from_secs(1),
+            },
+            tell: &hear,
+            servicing_timed_out: false,
+        };
+        let output = probing.run(
+            powershell.as_os_str(),
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "'hypervisor=' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent",
+            ],
+        );
+        assert!(output.unwrap().status.success());
+        let heard = heard.into_inner();
+        let [Heard::Probe {
+            probe: Probe::Virtualization,
+            outcome: Outcome::Slow,
+            duration_ms,
+        }] = heard.as_slice()
+        else {
+            panic!("expected one slow virtualization probe, heard {heard:?}");
+        };
+        assert!(*duration_ms >= 2_000, "took {duration_ms} ms");
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+
+        // The rule itself: in good time, nothing; late, slow; stopped, timed out.
+        let second = std::time::Duration::from_secs(1);
+        assert_eq!(heard_of(Probe::Docker, false, second / 2, second), None);
+        assert_eq!(
+            heard_of(Probe::Docker, false, second * 3, second),
+            Some(Heard::Probe {
+                probe: Probe::Docker,
+                outcome: Outcome::Slow,
+                duration_ms: 3_000
+            })
+        );
+        assert_eq!(
+            heard_of(Probe::WslSystemStart, true, second * 60, second),
+            Some(Heard::Probe {
+                probe: Probe::WslSystemStart,
+                outcome: Outcome::TimedOut,
+                duration_ms: 60_000
+            })
+        );
+    }
+
+    /// Every probe the check runs has its own name in usage data.
+    #[test]
+    fn each_probe_is_named_by_what_it_asks() {
+        use crate::telemetry::WindowsProbeKind as Probe;
+        let mut named = Vec::new();
+        let _ = check_where_naming(&mut named);
+        assert_eq!(
+            named,
+            [
+                Probe::Virtualization,
+                Probe::Administrator,
+                Probe::WslFeature,
+                Probe::WslService,
+                Probe::VirtualMachinePlatformFeature,
+                Probe::DefaultWslVersion,
+                Probe::WslVersion,
+            ]
+        );
+    }
+
+    /// The check on a machine whose WSL feature is off and WSL service is installed, so every
+    /// probe runs, recording what `probe_of` names each.
+    fn check_where_naming(
+        named: &mut Vec<crate::telemetry::WindowsProbeKind>,
+    ) -> Result<Option<Blocker>, Problem> {
+        blocker_with(
+            |program, args| {
+                named.push(probe_of(program, args));
+                let stdout = match probe_named(program, args) {
+                    "virtualization" => "hypervisor=True\nfirmware=False",
+                    "administrator" | "service" => "True",
+                    "wsl" => "2",
+                    "vmp" => "1",
+                    "default-version" => "2",
+                    _ => "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2",
+                };
+                Ok(probe_output(0, stdout, ""))
+            },
+            || Ok(false),
+        )
     }
 
     #[test]
@@ -1271,6 +2866,140 @@ mod tests {
                 "{blocker:?} hides the restart"
             );
         }
+    }
+
+    #[test]
+    fn only_hyper_v_refusing_a_vm_is_missing_nested_virtualization() {
+        assert!(hyper_v_refused(
+            "Please enable the Virtual Machine Platform Windows feature and ensure virtualization \
+             is enabled in the BIOS.\nError code: \
+             Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED"
+        ));
+        assert!(hyper_v_refused(
+            "WslRegisterDistribution failed with error: 0x80370102"
+        ));
+        assert!(!hyper_v_refused("Invalid command line option: --system"));
+        assert!(!hyper_v_refused(""));
+        assert_eq!(Blocker::NestedVirtualizationUnavailable.fix(), None);
+        assert!(!Blocker::NestedVirtualizationUnavailable.ours_to_fix());
+    }
+
+    #[test]
+    fn the_machine_is_named_as_arch_names_it() {
+        assert_eq!(machine_name(0xAA64), Some("aarch64"));
+        assert_eq!(machine_name(0x8664), Some("x86_64"));
+        assert_eq!(
+            machine_name(0x014C),
+            None,
+            "32-bit x86 is not a machine OpenBot runs on"
+        );
+        if !cfg!(target_os = "windows") {
+            assert_eq!(machine_arch(), std::env::consts::ARCH);
+        }
+    }
+
+    #[test]
+    fn every_blocker_but_firmware_has_a_fix_and_only_the_account_setting_skips_the_prompt() {
+        for blocker in [
+            Blocker::WslAbsent,
+            Blocker::WslNoKernel,
+            Blocker::VirtualMachinePlatformDisabled,
+            Blocker::NotAdministrator,
+        ] {
+            let fix = blocker.fix().unwrap();
+            assert!(fix.elevated && fix.restart, "{blocker:?}");
+        }
+        let fix = Blocker::WslOne.fix().unwrap();
+        assert!(!fix.elevated && !fix.restart);
+        assert_eq!(Blocker::VirtualizationDisabled.fix(), None);
+    }
+
+    #[test]
+    fn enabling_wsl_turns_on_both_features_and_never_installs_a_distribution() {
+        assert!(ENABLE_WSL.contains("--install --no-distribution"));
+        assert!(!ENABLE_WSL.contains("wsl.exe --install\n"));
+        assert!(ENABLE_WSL.contains("Microsoft-Windows-Subsystem-Linux"));
+        assert!(ENABLE_WSL.contains("VirtualMachinePlatform"));
+        assert!(
+            ENABLE_WSL.contains("3010"),
+            "a restart-needed DISM exit is success"
+        );
+    }
+
+    #[test]
+    fn the_encoded_script_is_utf16le_base64() {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded("exit 0"))
+            .unwrap();
+        assert_eq!(bytes, b"e\0x\0i\0t\0 \x000\0");
+    }
+
+    #[test]
+    fn the_elevated_launcher_asks_through_runas_and_reports_a_refusal() {
+        let launcher = elevated_launcher("exit 0", Path::new(r"C:\Users\o'brien\fix.txt"));
+        assert!(launcher.contains("-Verb RunAs"));
+        assert!(launcher.contains("-Wait -PassThru"));
+        assert!(launcher.contains("exit 1223"));
+        // The log path is inside the encoded inner script, quoted for PowerShell there.
+        let encoded_inner = launcher
+            .split("'-EncodedCommand','")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .unwrap();
+        use base64::Engine;
+        let inner = base64::engine::general_purpose::STANDARD
+            .decode(encoded_inner)
+            .unwrap();
+        let inner: Vec<u16> = inner
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let inner = String::from_utf16(&inner).unwrap();
+        assert!(inner.contains(r"'C:\Users\o''brien\fix.txt'"), "{inner}");
+    }
+
+    #[test]
+    fn a_fix_says_restart_done_declined_or_failed_with_its_log() {
+        let enable = Blocker::WslAbsent.fix().unwrap();
+        let version = Blocker::WslOne.fix().unwrap();
+        assert_eq!(fixed(enable, Some(0), None, ""), Ok(Fixed::RestartNeeded));
+        assert_eq!(fixed(version, Some(0), None, ""), Ok(Fixed::Done));
+        // Saying no to the prompt is recoverable, not an error: the window asks again.
+        assert_eq!(fixed(enable, Some(DECLINED), None, ""), Ok(Fixed::Declined));
+        let failed = fixed(
+            enable,
+            Some(1),
+            Some("dism.exe could not turn on X".into()),
+            "",
+        )
+        .unwrap_err();
+        assert_eq!(
+            failed.detail.as_deref(),
+            Some("dism.exe could not turn on X")
+        );
+        let failed = fixed(enable, Some(1), None, "boom").unwrap_err();
+        assert!(failed.detail.unwrap().contains("boom"));
+    }
+
+    #[test]
+    fn a_restart_is_pending_only_within_the_boot_that_recorded_it() {
+        let dir = temp_root("winrestart");
+        assert!(!restart_pending(&dir, "20261026120000"));
+        record_restart_needed(&dir, "20261026120000").unwrap();
+        assert!(restart_pending(&dir, "20261026120000"));
+        assert!(
+            restart_pending(&dir, "20261026120000"),
+            "asking does not clear it"
+        );
+        assert!(
+            !restart_pending(&dir, "20261026130500"),
+            "a new boot is the restart"
+        );
+        assert!(!restart_path(&dir).exists(), "and the record is gone");
+        std::fs::write(restart_path(&dir), "{ not json").unwrap();
+        assert!(!restart_pending(&dir, "20261026130500"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

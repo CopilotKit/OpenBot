@@ -1,11 +1,9 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import {
-  type Message,
-  type RunAgentInput,
-  RunAgentInputSchema,
-} from "@ag-ui/core";
+import type { Message, RunAgentInput } from "@ag-ui/core";
+import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { taskReportMessageId } from "@openbot/shared/orchestration";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -18,15 +16,26 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { applyChannelEvent } from "@/lib/channels/use-channel-events";
-import { a2uiProviderOptions, OPENBOT_A2UI_CATALOG } from "@/lib/copilot/a2ui";
+import { generativeUiProviderOptions, OPENBOT_UI } from "@/lib/copilot/a2ui";
 import { queryClient } from "@/query-client";
+import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { answerBotsList, botPath } from "./bots-api";
+import { botComponentsPath, botComponentsResponse } from "./components-api";
 
 type ChannelCache = InfiniteData<ChannelPage>;
-const ActivityRequestSchema = z.object({
-  agentId: z.string().nullable(),
-  at: z.string(),
-  text: z.string(),
-});
+/**
+ * What the app sends to record activity, as the API reads it: the Bot is `botId`. The socket
+ * announces the same activity with the Bot as `agentId`, which is how it is kept here.
+ */
+const ActivityRequestSchema = z
+  .object({
+    botId: z.string().nullable(),
+    at: z.string(),
+    text: z.string(),
+  })
+  .strict()
+  .transform(({ botId, ...rest }) => ({ agentId: botId, ...rest }));
 type ActivityRequest = z.infer<typeof ActivityRequestSchema>;
 const NativeResponse = globalThis.Response;
 const channel: AgentChannel = {
@@ -54,9 +63,9 @@ const local: Message = {
 };
 const broken = { id: "broken", role: "user", content: null };
 const unavailable =
-  "Earlier messages are temporarily unavailable. You can keep using this conversation.";
+  "Couldn't load earlier messages. You can keep using this conversation.";
 const oneHole =
-  "One earlier message could not be read and is not shown. The rest of this conversation is complete.";
+  "One earlier message couldn't be read, so it isn't shown. Everything else is here.";
 let originalFetch: typeof fetch;
 let history: (threadId: string) => Promise<Response>;
 let historyReads: string[];
@@ -64,6 +73,8 @@ let gatewaySnapshot: readonly Message[] = [];
 let runRequests: { path: string; input: RunAgentInput }[] = [];
 let activityRequests: ActivityRequest[] = [];
 let runEvents: (input: RunAgentInput) => unknown[];
+/** A run's response as it streams, when a test holds part of it back. */
+let runStream: ((input: RunAgentInput) => Response) | null = null;
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
 
 function CoreProbe() {
@@ -95,10 +106,19 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
-      if (url.pathname === "/api/plugins/for/refresh-bot")
-        return NativeResponse.json({ skills: [], tools: [] });
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
+      if (url.pathname === botGrantsPath("refresh-bot"))
+        return botGrantsResponse();
+      // What the Bot's runs are offered is read from these, as the server answers them.
+      if (url.pathname === botPath("refresh-bot"))
+        return NativeResponse.json({
+          bot: { id: "refresh-bot", visibility: "public", canManage: true },
+        });
+      if (url.pathname === botComponentsPath("refresh-bot"))
+        return botComponentsResponse();
+      if (url.pathname === MY_CAPABILITIES_PATH)
+        return NativeResponse.json({ capabilities: {}, enforced: false });
       if (url.pathname.endsWith("/info"))
         return NativeResponse.json({
           version: "fixture",
@@ -119,9 +139,13 @@ beforeAll(() => {
           input instanceof Request ? input : new Request(url, init);
         const body = RunAgentInputSchema.parse(await request.json());
         runRequests.push({ path: url.pathname, input: body });
-        return sse(runEvents(body));
+        return runStream ? runStream(body) : sse(runEvents(body));
       }
-      if (/\/api\/channels\/[^/]+\/activity$/.test(url.pathname)) {
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/activity$/.test(
+          url.pathname,
+        )
+      ) {
         const request =
           input instanceof Request ? input : new Request(url, init);
         activityRequests.push(
@@ -129,8 +153,18 @@ beforeAll(() => {
         );
         return new NativeResponse(null, { status: 204 });
       }
-      if (/\/api\/channels\/[^/]+\/busy$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/signal-busy$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
+        return NativeResponse.json({ sessions: [], nextCursor: null });
       const match = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (match) {
         const threadId = match[1];
@@ -157,12 +191,12 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-function tree(selected: AgentChannel, a2uiEnabled = false) {
+function tree(selected: AgentChannel, generativeUi = false) {
   return (
     <QueryClientProvider client={queryClient}>
       <CopilotKitProvider
         runtimeUrl="http://localhost/api/copilotkit"
-        {...a2uiProviderOptions(a2uiEnabled)}
+        {...generativeUiProviderOptions(generativeUi)}
       >
         <CoreProbe />
         <ChannelChat channel={selected} runtimeAgentId="refresh-bot" />
@@ -198,19 +232,20 @@ function mounting(
   read: typeof history = async () => stored([initial]),
   snapshot: readonly Message[] = [],
   cachedActivity: ActivityFixture | null = null,
-  a2uiEnabled = false,
+  generativeUi = false,
 ) {
   historyReads = [];
   gatewaySnapshot = snapshot;
   runRequests = [];
   activityRequests = [];
+  runStream = null;
   runEvents = (input) => [
     { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
     { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
   ];
   history = read;
   cacheChannel(channel, cachedActivity);
-  return render(tree(channel, a2uiEnabled));
+  return render(tree(channel, generativeUi));
 }
 async function mounted() {
   const view = mounting();
@@ -218,22 +253,32 @@ async function mounted() {
   return view;
 }
 
-test("A2UI activity actions run the actual channel agent and thread with edited values", async () => {
-  const activity = {
+/**
+ * A trip form a Bot drew, as its conversation stores it: a committed surface activity whose operations
+ * carry the A2UI version they were written in.
+ */
+function tripForm(version: string) {
+  return {
     id: "channel-trip-form",
     role: "activity",
-    activityType: "a2ui-surface",
+    activityType: "generative-ui-surface",
     content: {
-      a2ui_operations: [
+      surfaceId: "trip",
+      target: "chat",
+      catalogId: OPENBOT_UI.id,
+      status: "ready",
+      rejected: [],
+      operations: [
         {
-          version: "v0.9",
+          version,
           createSurface: {
             surfaceId: "trip",
-            catalogId: OPENBOT_A2UI_CATALOG.id,
+            catalogId: OPENBOT_UI.id,
+            dataModel: { destination: "Paris" },
           },
         },
         {
-          version: "v0.9",
+          version,
           updateComponents: {
             surfaceId: "trip",
             components: [
@@ -246,34 +291,29 @@ test("A2UI activity actions run the actual channel agent and thread with edited 
                 id: "destination",
                 component: "TextField",
                 label: "Destination",
-                value: { path: "/destination" },
+                value: { "@path": "/destination" },
               },
               {
                 id: "confirm",
                 component: "Button",
-                child: "confirm-label",
-                action: {
+                label: "Confirm trip",
+                onClick: {
                   event: {
                     name: "confirm_trip",
-                    context: { destination: { path: "/destination" } },
+                    context: { destination: { "@path": "/destination" } },
                   },
                 },
               },
-              { id: "confirm-label", component: "Text", text: "Confirm trip" },
             ],
-          },
-        },
-        {
-          version: "v0.9",
-          updateDataModel: {
-            surfaceId: "trip",
-            path: "/",
-            value: { destination: "Paris" },
           },
         },
       ],
     },
   } satisfies Message;
+}
+
+test("generated UI actions run the actual channel agent and thread with edited values", async () => {
+  const activity = tripForm("1.0");
   const view = mounting(async () => stored([activity]), [activity], null, true);
   const user = userEvent.setup({ document: view.container.ownerDocument });
   const destination = await view.findByRole("textbox", { name: "Destination" });
@@ -283,19 +323,49 @@ test("A2UI activity actions run the actual channel agent and thread with edited 
   await waitFor(() => expect(runRequests).toHaveLength(1));
   expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
   expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
+  expect(runRequests[0]?.input.messages.at(-1)).toMatchObject({
+    role: "user",
+    content: "Confirm trip\n\ndestination: Kyoto",
+  });
   expect(runRequests[0]?.input.forwardedProps).toMatchObject({
-    a2uiAction: {
-      userAction: {
-        name: "confirm_trip",
-        surfaceId: "trip",
-        sourceComponentId: "confirm",
-        context: { destination: "Kyoto" },
+    copilotkit: {
+      ui: {
+        metadata: {
+          extensions: {
+            copilotkit_transport: "tool",
+            copilotkit_action: {
+              action: {
+                name: "confirm_trip",
+                surfaceId: "trip",
+                sourceComponentId: "confirm",
+                context: { destination: "Kyoto" },
+              },
+            },
+          },
+        },
       },
     },
   });
-  await waitFor(() =>
-    expect(core?.properties).not.toHaveProperty("a2uiAction"),
-  );
+});
+/*
+ * CopilotKit 1.83 wrote A2UI 1.0's version as "v1.0", and every interface a Bot drew on it is stored
+ * that way. 1.84 reads only "1.0" (CopilotKit #8155), so a conversation from before the upgrade lost
+ * its interfaces when it was reopened, and the next run in it took them away again.
+ */
+test("an interface a Bot drew before the upgrade draws when its conversation is reopened, and stays through the next run", async () => {
+  const activity = tripForm("v1.0");
+  const view = mounting(async () => stored([activity]), [activity], null, true);
+  const destination = await view.findByRole("textbox", { name: "Destination" });
+  expect((destination as HTMLInputElement).value).toBe("Paris");
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(view.getByRole("button", { name: "Confirm trip" }));
+  await waitFor(() => expect(runRequests).toHaveLength(1));
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  expect(
+    (view.getByRole("textbox", { name: "Destination" }) as HTMLInputElement)
+      .value,
+  ).toBe("Paris");
 });
 function currentAgent(selected = channel) {
   const agent = core?.getAgent(`channel:${selected.id}`);
@@ -347,7 +417,8 @@ test.each([
       async () => new NativeResponse("failed", { status: 500 }),
       snapshot,
     );
-    await view.findByText(unavailable);
+    // Said once the retries a failed read on opening gets have failed too.
+    await view.findByText(unavailable, {}, { timeout: 6000 });
     if (snapshot.length > 0)
       expect(view.getByText(initial.content)).toBeTruthy();
     const user = userEvent.setup({ document: view.container.ownerDocument });
@@ -672,6 +743,116 @@ test.each([
   },
 );
 
+/*
+ * A task the Bot handed off finishes while the person's own turn is still reaching this tab: the
+ * server says the task's result in the conversation the moment the turn lets go of it, and tells the
+ * roster, before the last of the turn's events has arrived here. The result is in the stored thread,
+ * and it must be on screen once the turn is over, not only after a reload.
+ */
+test("a task's result said while this tab's own turn is still ending stays on screen after the turn ends", async () => {
+  const reply = {
+    id: "orchestrator-reply",
+    role: "assistant",
+    content: "I'll calculate the monthly payment and show the formula.",
+  } satisfies Message;
+  const result = {
+    id: taskReportMessageId("result", "task-loan", "once-loan"),
+    role: "assistant",
+    content: "The monthly payment is $489.15.",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  // The turn's reply streams, and its end is held back until the test lets it go.
+  let finish: () => void = () => {
+    throw new Error("The run never started");
+  };
+  const ended = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  runStream = (input) => {
+    const line = (event: unknown) =>
+      new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+    return new NativeResponse(
+      new ReadableStream({
+        async start(controller) {
+          for (const event of [
+            {
+              type: "RUN_STARTED",
+              threadId: input.threadId,
+              runId: input.runId,
+            },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: reply.id,
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: reply.id,
+              delta: reply.content,
+            },
+            { type: "TEXT_MESSAGE_END", messageId: reply.id },
+          ])
+            controller.enqueue(line(event));
+          await ended;
+          // The endpoint ends its run with the thread as it was sent to it (ag-ui-langgraph does).
+          controller.enqueue(
+            line({
+              type: "MESSAGES_SNAPSHOT",
+              messages: [...input.messages, reply],
+            }),
+          );
+          controller.enqueue(
+            line({
+              type: "RUN_FINISHED",
+              threadId: input.threadId,
+              runId: input.runId,
+            }),
+          );
+          controller.close();
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  };
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Work out the monthly payment on a $25,000 loan.",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(reply.content);
+  const sent = runRequests[0]?.input.messages.at(-1);
+  if (sent?.role !== "user") throw new Error("Missing the person's message");
+
+  // The task's result is in the stored thread after the turn's reply, and the roster hears of it.
+  history = async () => stored([initial, sent, reply, result]);
+  await announce(30, channel, { text: result.content });
+  // Long enough for the read the announcement asks for to have been made and merged.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  // Then the last of the turn reaches this tab, and the tab reports the turn's reply as it ends.
+  await act(async () => {
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await waitFor(() => expect(currentAgent().isRunning).toBe(false));
+  // Every retry of the read the announcement started has had its time.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  });
+
+  expect(view.queryByText(result.content)).not.toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    initial.id,
+    sent.id,
+    reply.id,
+    result.id,
+  ]);
+}, 10000);
+
 test("a ready durable mount adds the newer turn beyond the gateway snapshot", async () => {
   const view = mounting(async () => stored([initial, fresh]), [initial]);
   await view.findByText(fresh.content);
@@ -739,7 +920,14 @@ test.each([false, true])(
   },
 );
 
-test("a stalled mount history read releases the send gate and shows unavailable history", async () => {
+/*
+ * A STALL RELEASES THE SEND GATE AT ONCE, AND IS SAID ONLY ONCE ASKING AGAIN HAS FAILED TOO. The
+ * read on opening gives up after its deadline, and the message waiting behind it goes then, as it
+ * always has. What changed is the notice: a read that was only slow (seen on a link busy with a
+ * 95MB picture) used to say "Couldn't load earlier messages" on its first deadline. It is asked
+ * again the way a refresh is, and the notice comes only when every try has failed.
+ */
+test("a stalled mount history read releases the send gate at once, and says so only after its retries fail", async () => {
   const pending = delayedResponse();
   const view = mounting((_threadId) => pending.promise, [initial]);
   await waitFor(() => expect(historyReads).toHaveLength(1));
@@ -750,8 +938,12 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   );
   await user.click(view.getByRole("button", { name: "Send message" }));
 
-  await view.findByText(unavailable, {}, { timeout: 4000 });
+  // Released by the first read's deadline, as before, and no notice yet: it is being asked again.
   await waitFor(() => expect(runRequests).toHaveLength(1), { timeout: 4000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+
+  await view.findByText(unavailable, {}, { timeout: 12_000 });
+  expect(historyReads.length).toBeGreaterThanOrEqual(4);
   expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
   expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
   expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([initial]);
@@ -765,7 +957,21 @@ test("a stalled mount history read releases the send gate and shows unavailable 
   expect(currentAgent().messages.map((message) => message.id)).not.toContain(
     fresh.id,
   );
-});
+}, 20_000);
+
+test("a mount history read that succeeds on a retry shows its messages and no notice", async () => {
+  let reads = 0;
+  const view = mounting(async () => {
+    reads += 1;
+    return reads === 1
+      ? new NativeResponse("failed", { status: 500 })
+      : stored([initial, fresh]);
+  });
+
+  await view.findByText(fresh.content, {}, { timeout: 6000 });
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(historyReads.length).toBeGreaterThanOrEqual(2);
+}, 10_000);
 
 test("a UI send waits for mount history before adding its message", async () => {
   const pending = delayedResponse();
@@ -829,16 +1035,31 @@ test("a successful same-message refresh is not overwritten by later unavailable 
   await act(async () => currentAgent().addMessage(local));
   const beforeRefresh = historyReads.length;
   let refreshReads = 0;
+  const lastRetry = delayedResponse();
   history = async () => {
     refreshReads += 1;
-    return refreshReads === 1
-      ? stored([initial, broken])
-      : new NativeResponse("failed", { status: 500 });
+    if (refreshReads === 1) return stored([initial, broken]);
+    if (refreshReads === 2)
+      return new NativeResponse("failed", { status: 500 });
+    return lastRetry.promise;
   };
 
   await announce(1);
   await view.findByText(oneHole);
-  await new Promise((resolve) => setTimeout(resolve, 2300));
+  /*
+   * The refresh retries at 0, 750 and 1500 ms after each read, so its last read lands about 2250 ms
+   * after the first. This used to sleep 2300 ms and then count, a margin of about 45 ms: on a busy
+   * runner the retry timers fire late, the sleep ended before the third read, and the count came out
+   * 2. So it waits for the third read itself, then answers it here, inside act, so the failure that
+   * read reports has been handled before the notice is checked.
+   */
+  await waitFor(() => expect(historyReads.length - beforeRefresh).toBe(3), {
+    timeout: 4000,
+  });
+  await act(async () => {
+    lastRetry.resolve(new NativeResponse("failed", { status: 500 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 
   expect(historyReads.length - beforeRefresh).toBe(3);
   expect(view.getByText(oneHole)).toBeTruthy();
@@ -1013,7 +1234,12 @@ test.each([false, true])(
         ? stored([initial])
         : new NativeResponse("failed", { status: 500 }),
     );
-    await view.findByText(prefixPresent ? initial.content : unavailable);
+    // A failed read on opening is said once its retries have failed too.
+    await view.findByText(
+      prefixPresent ? initial.content : unavailable,
+      {},
+      { timeout: 6000 },
+    );
     const user = userEvent.setup({ document: view.container.ownerDocument });
     const editor = view.getByRole("textbox", { name: "Message" });
     await user.type(editor, "Local turn after mount completed");

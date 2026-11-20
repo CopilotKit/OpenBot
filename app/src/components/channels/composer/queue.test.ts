@@ -1,5 +1,5 @@
-import type { Attachment } from "@copilotkit/react-core/v2";
 import { describe, expect, test } from "bun:test";
+import type { Attachment } from "@copilotkit/react-core/v2";
 import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/channels/attachments";
 import type { ComposerDraft } from "./draft";
 import { type QueuedMessage, reduceQueue } from "./queue";
@@ -17,16 +17,8 @@ function draft(
   text: string,
   commandIds: string[] = [],
   attachments: Attachment[] = [],
-  documentIds: string[] = [],
 ): ComposerDraft {
-  return {
-    text,
-    agentId: null,
-    commandIds,
-    documentIds,
-    isEmpty: false,
-    attachments,
-  };
+  return { text, agentId: null, commandIds, isEmpty: false, attachments };
 }
 
 /** Park one message and hand back the queue it produced, which is what every case starts from. */
@@ -36,11 +28,10 @@ function park(
   text: string,
   commandIds: string[] = [],
   attachments: Attachment[] = [],
-  documentIds: string[] = [],
 ): readonly QueuedMessage[] {
   return reduceQueue(queue, {
     busy: true,
-    draft: draft(text, commandIds, attachments, documentIds),
+    draft: draft(text, commandIds, attachments),
     id,
     type: "submit",
   }).queue;
@@ -85,25 +76,6 @@ describe("submitting", () => {
     });
 
     expect(result.run?.commandIds).toEqual(["search", "summarize"]);
-  });
-
-  test("an idle send that empties a queue carries attached documents too", () => {
-    const waiting = park(
-      [],
-      "one",
-      "#Leave Policy what is the notice?",
-      [],
-      [],
-      ["doc-leave"],
-    );
-    const result = reduceQueue(waiting, {
-      busy: false,
-      draft: draft("#Handbook and remote work?", [], [], ["doc-handbook"]),
-      id: "two",
-      type: "submit",
-    });
-
-    expect(result.run?.documentIds).toEqual(["doc-leave", "doc-handbook"]);
   });
 
   test("an idle send keeps its own @mention whether or not anything was parked", () => {
@@ -158,7 +130,6 @@ describe("submitting", () => {
         id: "one",
         text: "no, the other one",
         commandIds: [],
-        documentIds: [],
         attachments: [],
       },
     ]);
@@ -384,13 +355,7 @@ describe("removing", () => {
     const result = reduceQueue(queue, { id: "one", type: "remove" });
 
     expect(result.queue).toEqual([
-      {
-        id: "two",
-        text: "no, the other one",
-        commandIds: [],
-        documentIds: [],
-        attachments: [],
-      },
+      { id: "two", text: "no, the other one", commandIds: [], attachments: [] },
     ]);
   });
 });

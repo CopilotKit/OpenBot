@@ -1,0 +1,643 @@
+/** Operator-owned, digest-pinned Helm promotion; never called by the running application. */
+import { createHash, randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+import { isMap, isScalar, isSeq, parse, parseAllDocuments } from "yaml";
+import {
+  imageParts,
+  PromotionError,
+  type PromotionJournal,
+  type PromotionTarget,
+  type PromotionValues,
+  promotionValues,
+  runPromotion,
+  selectedImage,
+  serverDeployment,
+  verifyDeployment,
+} from "../shared/kubernetes-promotion";
+import {
+  parseReleaseManifest,
+  planUpgrade,
+  type ReleaseManifest,
+  type UpgradePolicy,
+} from "../shared/release-manifest";
+import { atomicJson, type CommandRunner, runCommand } from "./update-local";
+
+export interface KubernetesPromotionOptions {
+  current: ReleaseManifest;
+  candidate: ReleaseManifest;
+  policy: UpgradePolicy;
+  namespace: string;
+  release: string;
+  chart: string;
+  customerValues: string[];
+  outputDirectory: string;
+  backupReference: string;
+  /** Executable and arguments, invoked without a shell after write admission is stopped. */
+  backupCommand?: string[];
+  acknowledgeInterruption?: boolean;
+  timeoutSeconds?: number;
+  intelligenceCapabilities?: string[];
+  run?: CommandRunner;
+}
+const DNS = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
+/** The init container a chart gives its server Deployment when that server applies its own
+ * migrations as it starts: the pod waits for the database, then the server migrates before it
+ * listens. */
+const WAITS_FOR_DATABASE = "wait-for-database";
+/** Requires that the effective target chart migrates the database with the target image, in one of
+ * the two ways a chart does:
+ *
+ * - a guarded `pre-upgrade` Job that runs the target image's `scripts/migrate.ts`; or
+ * - no migrations Job of any kind, and a server Deployment that runs the target image behind a
+ *   `wait-for-database` init container, which is the shape of a chart whose server applies its own
+ *   migrations when it starts.
+ *
+ * A chart with a migrations Job is held to the first: one that is disabled, not a `pre-upgrade`
+ * hook, or runs another image or runner is refused, and so is a chart with neither shape.
+ *
+ * Returns which of the two the chart is, so what is written for an operator or a controller
+ * afterwards names the step that chart really has. */
+async function requireRenderedMigration(
+  options: KubernetesPromotionOptions,
+  values: PromotionValues,
+  previousValues: Record<string, unknown> | undefined,
+): Promise<"job" | "server"> {
+  const directory = mkdtempSync(join(tmpdir(), "openbot-migration-preflight-"));
+  try {
+    const file = join(directory, "release-values.json");
+    atomicJson(file, values);
+    const previous = join(directory, "previous-values.json");
+    if (previousValues) atomicJson(previous, previousValues);
+    const rendered = await (options.run ?? runCommand)(
+      [
+        "helm",
+        "template",
+        options.release,
+        resolve(options.chart),
+        "--namespace",
+        options.namespace,
+        "--is-upgrade",
+        ...(previousValues ? ["--values", previous] : []),
+        ...options.customerValues.flatMap((path) => [
+          "--values",
+          resolve(path),
+        ]),
+        "--values",
+        file,
+      ],
+      { cwd: directory, timeoutMs: (options.timeoutSeconds ?? 300) * 1000 },
+    );
+    const expected = {
+      repository: values.image.repository,
+      digest: values.image.digest,
+    };
+    const documents = parseAllDocuments(rendered);
+    for (const document of documents)
+      if (document.errors.length)
+        throw new Error(
+          "Target chart rendered invalid YAML during migration preflight",
+        );
+    const component = (document: (typeof documents)[number]) =>
+      document.getIn(["metadata", "labels", "app.kubernetes.io/component"]);
+    const runsTargetImage = (container: unknown) => {
+      if (!isMap(container)) return false;
+      const image = container.get("image");
+      if (typeof image !== "string") return false;
+      try {
+        const actual = imageParts(image);
+        return (
+          actual.repository === expected.repository &&
+          actual.digest === expected.digest
+        );
+      } catch {
+        return false;
+      }
+    };
+    const guarded = documents.some((document) => {
+      const hook = document.getIn(["metadata", "annotations", "helm.sh/hook"]);
+      if (
+        document.get("kind") !== "Job" ||
+        typeof hook !== "string" ||
+        !hook
+          .split(",")
+          .map((part) => part.trim())
+          .includes("pre-upgrade") ||
+        document.getIn([
+          "metadata",
+          "labels",
+          "app.kubernetes.io/component",
+        ]) !== "migrations"
+      )
+        return false;
+      const containers = document.getIn([
+        "spec",
+        "template",
+        "spec",
+        "containers",
+      ]);
+      return (
+        isSeq(containers) &&
+        containers.items.some((container) => {
+          if (
+            !isMap(container) ||
+            container.get("workingDir") !== "/app/server"
+          )
+            return false;
+          const image = container.get("image");
+          const command = container.get("command");
+          if (typeof image !== "string" || !isSeq(command)) return false;
+          const actual = imageParts(image);
+          const invocation = command.items
+            .map((part) =>
+              isScalar(part) && typeof part.value === "string"
+                ? part.value
+                : "",
+            )
+            .join("\n");
+          return (
+            actual.repository === expected.repository &&
+            actual.digest === expected.digest &&
+            /(?:^|\n)\s*exec\s+(?:\/usr\/local\/bin\/)?bun\s+scripts\/migrate\.ts(?:\s|$)/.test(
+              invocation,
+            )
+          );
+        })
+      );
+    });
+    if (guarded) return "job";
+    // No Job at all that migrates, by its label or by what it runs. A chart that has one is held to
+    // the guarded Job above, so a disabled or replaced Job is never read as a server that migrates.
+    const anyMigrationJob = documents.some(
+      (document) =>
+        document.get("kind") === "Job" &&
+        (component(document) === "migrations" ||
+          /scripts\/migrate\.ts/.test(String(document))),
+    );
+    const serverMigratesAtStart =
+      !anyMigrationJob &&
+      documents.some((document) => {
+        if (
+          document.get("kind") !== "Deployment" ||
+          component(document) !== "server"
+        )
+          return false;
+        const pod = ["spec", "template", "spec"];
+        const containers = document.getIn([...pod, "containers"]);
+        const initContainers = document.getIn([...pod, "initContainers"]);
+        return (
+          isSeq(containers) &&
+          containers.items.some(runsTargetImage) &&
+          isSeq(initContainers) &&
+          initContainers.items.some(
+            (container) =>
+              isMap(container) && container.get("name") === WAITS_FOR_DATABASE,
+          )
+        );
+      });
+    if (!serverMigratesAtStart)
+      throw new Error(
+        "Required database transition has no guarded pre-upgrade migration Job in the effective target chart, and its server Deployment is not one that applies its own migrations at start (the target image behind a wait-for-database init container, with no migrations Job); migrations must remain enabled",
+      );
+    return "server";
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+/** The image repository the customer chose, if any: a registry mirror set in a values file, or
+ * one set at install (`--set`) that `helm get values` still reports. A repository the previous
+ * promotion pinned from the accepted manifest is this tool's own choice, not the customer's. The
+ * digest stays pinned whichever registry serves it, so a mirror cannot change the bytes. */
+function customerRepository(
+  options: KubernetesPromotionOptions,
+  current: ReleaseManifest,
+  previousValues: Record<string, unknown> | undefined,
+) {
+  const repositoryOf = (values: unknown) => {
+    const image =
+      values && typeof values === "object"
+        ? (values as { image?: unknown }).image
+        : undefined;
+    const repository =
+      image && typeof image === "object"
+        ? (image as { repository?: unknown }).repository
+        : undefined;
+    return typeof repository === "string" && repository.trim()
+      ? repository.trim()
+      : undefined;
+  };
+  let chosen = repositoryOf(previousValues);
+  if (chosen === imageParts(selectedImage(current)).repository)
+    chosen = undefined;
+  for (const path of options.customerValues) {
+    const value = repositoryOf(parse(readFileSync(path, "utf8")));
+    if (value) chosen = value;
+  }
+  return chosen;
+}
+/** `previousValues` is what `helm get values` reports for the live release. Plan and check read no
+ * cluster state, so they leave it out; apply reads it first and plans with it. */
+export async function planKubernetesPromotion(
+  options: KubernetesPromotionOptions,
+  previousValues?: Record<string, unknown>,
+) {
+  const current = parseReleaseManifest(options.current);
+  const candidate = parseReleaseManifest(options.candidate);
+  const common = planUpgrade(
+    {
+      manifest: current,
+      sourceKind: "stock",
+      launcherApi: 1,
+      configSchema: current.compatibility.configSchema,
+      extensionApi: current.compatibility.extensionApi,
+      intelligenceCapabilities:
+        options.intelligenceCapabilities ??
+        current.compatibility.intelligenceCapabilities,
+    },
+    candidate,
+    options.policy,
+  );
+  const reasons = [...common.reasons];
+  let image = { repository: "", tag: candidate.version, digest: "" };
+  let mirror: string | undefined;
+  try {
+    image = { ...imageParts(selectedImage(candidate)), tag: candidate.version };
+    selectedImage(current);
+    if (options.customerValues.every((path) => existsSync(path))) {
+      mirror = customerRepository(options, current, previousValues);
+      if (mirror) image.repository = mirror;
+    }
+  } catch (error) {
+    reasons.push(error instanceof Error ? error.message : String(error));
+  }
+  if (
+    !DNS.test(options.namespace) ||
+    options.namespace.length > 63 ||
+    !DNS.test(options.release) ||
+    options.release.length > 53
+  )
+    reasons.push(
+      "Explicit valid namespace and Helm release names are required",
+    );
+  const chart = candidate.artifacts.chart;
+  if (!chart) reasons.push("Candidate manifest has no pinned chart artifact");
+  else if (!existsSync(options.chart))
+    reasons.push("Pinned chart archive is missing");
+  else if (
+    createHash("sha256").update(readFileSync(options.chart)).digest("hex") !==
+    chart.sha256
+  )
+    reasons.push("Pinned chart checksum does not match candidate manifest");
+  if (
+    !options.customerValues.length ||
+    options.customerValues.some((path) => !existsSync(path))
+  )
+    reasons.push(
+      "Explicit existing customer values files are required; defaults/reuse-values are not a customer configuration backup",
+    );
+  if (!options.backupReference.trim())
+    reasons.push("A database backup reference is required");
+  if (
+    (candidate.upgrade.requiresDowntime ||
+      !candidate.compatibility.database.rollbackCompatible) &&
+    !options.backupCommand?.length
+  )
+    reasons.push(
+      "A backup command is required for a fresh backup after maintenance quiescence",
+    );
+  if (
+    !Number.isInteger(options.timeoutSeconds ?? 300) ||
+    (options.timeoutSeconds ?? 300) < 1 ||
+    (options.timeoutSeconds ?? 300) > 3600
+  )
+    reasons.push("Timeout must be an integer between 1 and 3600 seconds");
+  const values: PromotionValues = promotionValues(candidate, image);
+  // How the target chart migrates the database: a guarded pre-upgrade Job, the server itself as it
+  // starts, or not at all, because this promotion leaves the database where it is.
+  let migration: MigrationStep = "none";
+  if (
+    !reasons.length &&
+    current.compatibility.database.to !== candidate.compatibility.database.to
+  ) {
+    try {
+      migration = await requireRenderedMigration(
+        options,
+        values,
+        previousValues,
+      );
+    } catch (error) {
+      reasons.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return {
+    ...common,
+    allowed: reasons.length === 0,
+    reasons,
+    values,
+    mirror,
+    migration,
+  };
+}
+/** What migrates the database in a promotion: the target chart's guarded pre-upgrade Job, its
+ * server as it starts, or nothing, when the database does not change. */
+export type MigrationStep = "job" | "server" | "none";
+/** Where to look when a promotion stops after Helm started, by what was migrating. */
+function recoveryAdvice(migration: MigrationStep) {
+  const inspect =
+    migration === "job"
+      ? "Inspect the migration Job and rollout."
+      : migration === "server"
+        ? "This chart has no migration Job: its server applies the migrations as it starts. Inspect the server pods' logs and the rollout."
+        : "This release declares no database change. Inspect the rollout.";
+  return `No automatic Helm/database rollback. ${inspect} Restore only a matching database/configuration backup, or restart previous code only if declared compatible with resulting schema.`;
+}
+/** The ordering a GitOps controller must keep, for the migration step the target chart has. */
+function gitOpsOrdering(
+  options: KubernetesPromotionOptions,
+  migration: MigrationStep,
+) {
+  const migrate =
+    migration === "job"
+      ? "3. Run the target image's guarded migration Job and require successful completion before replacing server replicas. Preserve existing database advisory locking and migration-history refusal.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout, then verify image digest and release annotations."
+      : migration === "server"
+        ? "3. Run no migration Job: this chart has none. Its server applies the migrations itself as it starts, behind the `wait-for-database` init container, before it listens, and the first replica to start applies them all under the database's advisory lock.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout. A server that is ready has migrated; one that cannot migrate never becomes ready, so require readiness before accepting. Then verify image digest and release annotations."
+        : "3. Run no migration: this release declares no database change.\n4. Apply the pinned server/computer workloads and wait for readiness and rollout, then verify image digest and release annotations.";
+  const hooks =
+    migration === "job"
+      ? "Helm's existing pre-upgrade hook supplies step 3 only when Helm owns execution. A renderer/controller that ignores Helm hooks must define its own ordered migration phase. First installation with bundled PostgreSQL intentionally uses an ordinary migration Job; it must not be converted into a pre-install hook."
+      : migration === "server"
+        ? "There is no Helm hook to run or to reproduce: a renderer/controller that ignores Helm hooks loses nothing. Do not add a migration Job of your own; two migrators would only contend for the same lock."
+        : "There is no migration phase to order in this promotion.";
+  return `# Proposed OpenBot promotion\n\nStatus: proposed; no cluster was changed.\n\n1. Verify chart archive SHA-256 ${options.candidate.artifacts.chart?.sha256}; keep customer values and Secret references separate.\n2. For maintenance transitions, stop write admission and scheduled API dispatch, wait for old work to finish or explicitly interrupt it, then create the matching backup (${options.backupReference}).\n${migrate}\n5. Resume routines and perform the customer browser/graph workflow before accepting the promotion.\n\n${hooks} No Argo CD or Flux execution integration is claimed by these generated files. A Git revert does not undo database changes.\n`;
+}
+function prepareOutput(options: KubernetesPromotionOptions) {
+  if (!isAbsolute(options.outputDirectory))
+    throw new Error("Promotion output directory must be absolute");
+  mkdirSync(options.outputDirectory, { recursive: true, mode: 0o700 });
+}
+function pendingJournal(options: KubernetesPromotionOptions) {
+  const path = join(options.outputDirectory, "promotion-journal.json");
+  if (existsSync(path)) {
+    const previous: { phase?: string } = JSON.parse(readFileSync(path, "utf8"));
+    // `failed` means the release was put back exactly as it was before this tool changed it.
+    if (previous.phase !== "accepted" && previous.phase !== "failed")
+      throw new Error(
+        "An interrupted promotion requires operator recovery; inspect promotion-journal.json",
+      );
+  }
+}
+/** The release's user-supplied values, as `helm get values` reports them (`null` when none). */
+async function releaseValues(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  cwd: string,
+) {
+  const value: unknown = JSON.parse(
+    await run(
+      [
+        "helm",
+        "get",
+        "values",
+        options.release,
+        "--namespace",
+        options.namespace,
+        "--output",
+        "json",
+      ],
+      { cwd },
+    ),
+  );
+  if (value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("helm get values did not return a values object");
+  return value as Record<string, unknown>;
+}
+/** Whether Helm applies this release server-side. Helm 4 records `applyMethod: "ssa"` for releases
+ * it installed that way; Helm 3 has only client-side apply. Under server-side apply, the CronJob
+ * suspension and scale-to-zero this tool makes are owned by kubectl, and an upgrade that declares
+ * those fields stops on a field-manager conflict after the pre-upgrade migration has run. */
+async function appliesServerSide(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+  cwd: string,
+) {
+  const version = (
+    await run(["helm", "version", "--template", "{{.Version}}"], { cwd })
+  ).trim();
+  if (Number(version.match(/^v(\d+)\./)?.[1] ?? 0) < 4) return false;
+  const metadata: { applyMethod?: string } = JSON.parse(
+    await run(
+      [
+        "helm",
+        "get",
+        "metadata",
+        options.release,
+        "--namespace",
+        options.namespace,
+        "--output",
+        "json",
+      ],
+      { cwd },
+    ),
+  );
+  return metadata.applyMethod === "ssa";
+}
+/** CronJobs whose `spec.suspend` the release's own manifest declares. Helm sets those from values
+ * on every upgrade (`routines.suspend`); every other CronJob keeps whatever the cluster holds. */
+async function declaredSuspension(
+  options: KubernetesPromotionOptions,
+  run: CommandRunner,
+) {
+  const manifest = await run(
+    [
+      "helm",
+      "get",
+      "manifest",
+      options.release,
+      "--namespace",
+      options.namespace,
+    ],
+    { cwd: options.outputDirectory },
+  );
+  const names = new Set<string>();
+  for (const document of parseAllDocuments(manifest)) {
+    if (document.errors.length)
+      throw new Error("Helm release manifest is not valid YAML");
+    const spec = document.get("spec");
+    const name = document.getIn(["metadata", "name"]);
+    if (
+      document.get("kind") === "CronJob" &&
+      typeof name === "string" &&
+      isMap(spec) &&
+      spec.has("suspend")
+    )
+      names.add(name);
+  }
+  return names;
+}
+export async function promoteKubernetes(
+  options: KubernetesPromotionOptions,
+): Promise<PromotionJournal> {
+  if (!options.acknowledgeInterruption)
+    throw new Error(
+      "Explicitly acknowledge interruption before live promotion",
+    );
+  const run = options.run ?? runCommand;
+  // Reads only, up to the lock. A refusal here changes nothing and records nothing, so it leaves no
+  // journal behind to block the next attempt.
+  pendingJournal(options);
+  const previousValues = await releaseValues(options, run, process.cwd());
+  const plan = await planKubernetesPromotion(options, previousValues);
+  if (!plan.allowed) throw new Error(plan.reasons.join("; "));
+  const before = await serverDeployment(
+    {
+      namespace: options.namespace,
+      release: options.release,
+      cwd: process.cwd(),
+      timeoutSeconds: options.timeoutSeconds ?? 300,
+    },
+    run,
+  );
+  verifyDeployment(before, options.current, false, plan.mirror);
+  const serverSide = await appliesServerSide(options, run, process.cwd());
+  prepareOutput(options);
+  const lock = join(options.outputDirectory, ".promotion.lock");
+  mkdirSync(lock, { mode: 0o700 });
+  const target: PromotionTarget = {
+    namespace: options.namespace,
+    release: options.release,
+    cwd: options.outputDirectory,
+    timeoutSeconds: options.timeoutSeconds ?? 300,
+  };
+  const timeout = `${target.timeoutSeconds}s`;
+  const journal: PromotionJournal = {
+    operation: randomUUID(),
+    phase: "prepared",
+    fromVersion: plan.fromVersion,
+    toVersion: plan.toVersion,
+    namespace: options.namespace,
+    release: options.release,
+    backupReference: options.backupReference,
+    databaseMayHaveChanged: false,
+    recovery: recoveryAdvice(plan.migration),
+  };
+  const valuesFile = join(options.outputDirectory, "release-values.json");
+  const previousValuesFile = join(
+    options.outputDirectory,
+    "previous-values.json",
+  );
+  try {
+    return await runPromotion({
+      target,
+      run,
+      candidate: options.candidate,
+      journal,
+      before,
+      mirror: plan.mirror,
+      save: (value) =>
+        atomicJson(
+          join(options.outputDirectory, "promotion-journal.json"),
+          value,
+        ),
+      prepare: () => {
+        atomicJson(
+          join(options.outputDirectory, "previous-release.json"),
+          options.current,
+        );
+        atomicJson(previousValuesFile, previousValues);
+        atomicJson(valuesFile, plan.values);
+      },
+      backup: async () => {
+        if (!options.backupCommand?.length)
+          throw new Error("Missing backup command after quiescence");
+        await run(options.backupCommand, {
+          cwd: options.outputDirectory,
+          timeoutMs: target.timeoutSeconds * 1000,
+        });
+      },
+      // Later files win: the release's current values, then the customer's files, then the pinned
+      // image and identity. So a value set with `--set` at install survives, and the new chart's own
+      // defaults still apply to anything nobody set (what `--reset-then-reuse-values` does).
+      apply: async () => {
+        await run(
+          [
+            "helm",
+            "upgrade",
+            options.release,
+            resolve(options.chart),
+            "--namespace",
+            options.namespace,
+            "--values",
+            previousValuesFile,
+            ...options.customerValues.flatMap((path) => [
+              "--values",
+              resolve(path),
+            ]),
+            "--values",
+            valuesFile,
+            // What client-side apply does anyway: the chart's declared values win over this tool's
+            // own maintenance changes (suspension, scale to zero) and anything else that edited them.
+            ...(serverSide ? ["--force-conflicts"] : []),
+            "--wait",
+            "--wait-for-jobs",
+            "--timeout",
+            timeout,
+          ],
+          {
+            cwd: options.outputDirectory,
+            timeoutMs: target.timeoutSeconds * 1000 + 30_000,
+          },
+        );
+      },
+      declaredSuspension: () => declaredSuspension(options, run),
+      // Helm --wait waits for chart workload readiness, and for the migration Job of a chart that
+      // has one. Additional customer workflow acceptance remains the operator's responsibility and
+      // is not implied by this record.
+      accepted: () =>
+        atomicJson(
+          join(options.outputDirectory, "accepted-release.json"),
+          options.candidate,
+        ),
+    });
+  } catch (error) {
+    if (!(error instanceof PromotionError)) throw error;
+    throw new Error(
+      `${journal.error}. Promotion ${journal.phase === "failed" ? "was undone; the release is as it was before" : "requires operator recovery"}; see ${join(options.outputDirectory, "promotion-journal.json")}`,
+    );
+  } finally {
+    rmSync(lock, { recursive: true });
+  }
+}
+
+/** Review artifacts only. A GitOps controller must keep the ordering written for it, which names a
+ * migration Job only for a target chart that has one. */
+export async function writeGitOpsPromotion(
+  options: KubernetesPromotionOptions,
+) {
+  const plan = await planKubernetesPromotion(options);
+  if (!plan.allowed) throw new Error(plan.reasons.join("; "));
+  prepareOutput(options);
+  atomicJson(join(options.outputDirectory, "release-values.json"), plan.values);
+  atomicJson(
+    join(options.outputDirectory, "proposed-release.json"),
+    options.candidate,
+  );
+  writeFileSync(
+    join(options.outputDirectory, "ORDERING.md"),
+    gitOpsOrdering(options, plan.migration),
+    { mode: 0o600 },
+  );
+  return {
+    phase: "proposed" as const,
+    values: join(options.outputDirectory, "release-values.json"),
+    ordering: join(options.outputDirectory, "ORDERING.md"),
+  };
+}

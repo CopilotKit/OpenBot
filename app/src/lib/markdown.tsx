@@ -4,13 +4,35 @@ import {
   IconPresentation,
   IconTable,
 } from "@tabler/icons-react";
-import type { ComponentProps } from "react";
+import { useRouter } from "@tanstack/react-router";
+import {
+  type ComponentProps,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
+import {
+  type CodeHighlighterPlugin,
+  defaultRemarkPlugins,
+  type MathPlugin,
+  type PluginConfig,
+  Streamdown,
+  type StreamdownProps,
+} from "streamdown";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
+import { attachmentAddress } from "@/lib/channels/attachments";
+import { hasMaths, withMathDelimiters } from "@/lib/maths";
+import {
+  NO_SLACK_NAMES,
+  remarkSlackMentions,
+  type SlackNames,
+} from "@/lib/slack/mentions";
 
 /**
  * Shared markdown rendering for Bot prose and tool results.
  *
  * Links open in a new tab with `noreferrer` because content can come from a model or remote MCP
- * server.
+ * server. A link to a page of the app itself, such as a task thread, opens in place.
  */
 
 /**
@@ -69,8 +91,109 @@ export function documentChipKind(href: string | undefined) {
   return null;
 }
 
+/**
+ * The app's own address a link names, as a path, or null for a link that leaves the app.
+ *
+ * A Bot links to one of its task threads by the path the app opens it at (`/channel/…`), and may
+ * write it as a full address on this origin. Either is a page of the app, not somewhere else.
+ */
+export function inAppPath(
+  href: string | undefined,
+  origin = typeof window === "undefined" ? undefined : window.location.origin,
+): string | null {
+  if (!href) return null;
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+  if (!origin) return null;
+  try {
+    const url = new URL(href);
+    return url.origin === origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A link to a page of the app, opened in place the way the app's own links open. Sent to a new tab
+ * it opened a second window inside OpenBot Desktop, and lost the conversation the person was in.
+ * A modified click still does what the browser does with it.
+ */
+function AppLink({
+  path,
+  children,
+  // Streamdown hands every link a new tab; a page of the app keeps the window it is in.
+  target: _target,
+  rel: _rel,
+  ...rest
+}: ComponentProps<"a"> & { path: string }) {
+  const router = useRouter({ warn: false });
+  return (
+    <a
+      {...rest}
+      className="underline underline-offset-2 hover:no-underline"
+      href={path}
+      onClick={(event) => {
+        if (
+          !router ||
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        event.preventDefault();
+        void router.navigate({ to: path });
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * The address a link to a stored file downloads it from, or null for a link that is not one.
+ *
+ * A Bot that sends a file names it in its words, linked to the form a message stores
+ * (`/api/attachments/<id>`, from the send's answer), or now and then to the API's own address. Read
+ * as a page of the app, a click asked the router for it, found no such page and landed on home, so
+ * the person never got the file from the words (found by the end-to-end pass). It is the file, from
+ * the conversation's own address, the one the card's Download button uses.
+ */
+export function fileAddress(path: string): string | null {
+  if (path.startsWith(storedAttachmentUrl(""))) return attachmentAddress(path);
+  return /^\/api\/v2\/organizations\/[^/]+\/attachments\/[^/?#]+/.test(path)
+    ? path
+    : null;
+}
+
 export const markdownComponents = {
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
+    const path = inAppPath(href);
+    const file = path === null ? null : fileAddress(path);
+    if (file !== null)
+      return (
+        <a
+          {...rest}
+          className="underline underline-offset-2 hover:no-underline"
+          // The server names the file; a download, so it never replaces the conversation.
+          download
+          href={file}
+          rel={undefined}
+          target={undefined}
+        >
+          {children}
+        </a>
+      );
+    // Any other address under /api is the server's, not a page: the router has nothing to open.
+    if (path !== null && !path.startsWith("/api/"))
+      return (
+        <AppLink {...rest} path={path}>
+          {children}
+        </AppLink>
+      );
     const kind = documentChipKind(href);
 
     if (kind) {
@@ -113,3 +236,217 @@ export const markdownComponents = {
     );
   },
 };
+
+type Highlighted = Parameters<
+  NonNullable<Parameters<CodeHighlighterPlugin["highlight"]>[1]>
+>[0];
+
+/** [light, dark]: Streamdown colours each token with both and OpenBot's `.dark` class picks one. */
+const CODE_THEMES: ["github-light", "github-dark"] = [
+  "github-light",
+  "github-dark",
+];
+
+let codePlugin: Promise<CodeHighlighterPlugin> | undefined;
+
+/** Streamdown's code plugin, fetched the first time a code block is drawn and kept from then on. */
+function loadCodePlugin(): Promise<CodeHighlighterPlugin> {
+  codePlugin ??= import("@streamdown/code").then(({ createCodePlugin }) =>
+    createCodePlugin({ themes: CODE_THEMES }),
+  );
+  return codePlugin;
+}
+
+let loadedCodePlugin: CodeHighlighterPlugin | undefined;
+
+/**
+ * Syntax highlighting for fenced code, through Streamdown's own code plugin (Shiki), on every surface
+ * that draws a Bot's markdown, so a code block follows the theme switch without being redrawn.
+ *
+ * LOADED WITH THE FIRST CODE BLOCK, NOT WITH THE CHAT. `@streamdown/code` imports Shiki's full entry
+ * and its JavaScript regex engine at the top, so importing it here statically put Shiki's core in the
+ * chunk every conversation loads, highlighted code or not. Shiki's grammars and themes were already
+ * separate chunks, fetched per language. This stands in for the plugin with the same interface,
+ * answers "not ready yet" to the first code block (Streamdown draws the plain code and waits for the
+ * callback, exactly as it does while a grammar loads) and hands every call on once the plugin is in.
+ */
+export const markdownPlugins: { code: CodeHighlighterPlugin } = {
+  code: {
+    name: "shiki",
+    type: "code-highlighter",
+    getThemes: () => CODE_THEMES,
+    supportsLanguage: (language) =>
+      loadedCodePlugin?.supportsLanguage(language) ?? true,
+    getSupportedLanguages: () =>
+      loadedCodePlugin?.getSupportedLanguages() ?? [],
+    highlight(options, callback) {
+      if (loadedCodePlugin)
+        return loadedCodePlugin.highlight(options, callback);
+      loadCodePlugin()
+        .then((plugin) => {
+          loadedCodePlugin = plugin;
+          const highlighted: Highlighted | null = plugin.highlight(
+            options,
+            callback,
+          );
+          if (highlighted) callback?.(highlighted);
+        })
+        .catch((error: unknown) => {
+          // The code stays drawn, unhighlighted; say why rather than leave it plain for no reason.
+          console.error("Couldn't load syntax highlighting:", error);
+          codePlugin = undefined;
+        });
+      return null;
+    },
+  },
+};
+
+/** The part of a markdown tree this reads: a node, its text if it is text, and what it contains. */
+type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[] };
+
+const LINE_ENDING = /\r\n|\r|\n/;
+
+/**
+ * Every line ending inside running text becomes a line break, the way a chat shows what was typed.
+ *
+ * Only `text` nodes are split. Fenced and inline code, and raw HTML, keep their text in `value` with
+ * no children, so their line endings are never touched; a line ending inside a list item, a quote, a
+ * link or emphasis is a break where the Bot put it.
+ */
+function breakLineEndings(node: MarkdownNode) {
+  if (!node.children) return;
+  node.children = node.children.flatMap((child) => {
+    if (
+      child.type !== "text" ||
+      !child.value ||
+      !LINE_ENDING.test(child.value)
+    ) {
+      breakLineEndings(child);
+      return [child];
+    }
+    return child.value
+      .split(LINE_ENDING)
+      .flatMap((line, index): MarkdownNode[] => [
+        ...(index > 0 ? [{ type: "break" }] : []),
+        ...(line ? [{ type: "text", value: line }] : []),
+      ]);
+  });
+}
+
+/**
+ * The remark plugins for a Bot's reply in a conversation: Streamdown's own, a single line ending
+ * drawn as a line break, and Slack's mention markup shown as names (`lib/slack/mentions.ts`).
+ *
+ * WHY. Markdown reads one line ending as a space and wants a blank line or two trailing spaces for a
+ * new line. A Bot asked for something "one per line" writes `Red\nGreen\nBlue` and the reader saw
+ * "Red Green Blue", while their own message beside it keeps every line they typed. In a chat a line
+ * ending is a line ending. Streamdown has no setting for it; its docs point at `remark-breaks`, whose
+ * last release was September 2023, so this is the same transform written here in a dozen lines.
+ *
+ * ONLY FOR REPLIES. A document, a SKILL.md or a tool's answer is markdown written to be read as
+ * markdown, where a wrapped line is meant to join the line before it, and keeps Streamdown's
+ * defaults. One array per set of Slack names, so Streamdown sees the same plugins on every render
+ * while the conversation's names are the same.
+ */
+const replyPlugins = new WeakMap<
+  SlackNames,
+  NonNullable<StreamdownProps["remarkPlugins"]>
+>();
+
+export function replyRemarkPluginsFor(
+  names: SlackNames,
+): NonNullable<StreamdownProps["remarkPlugins"]> {
+  let plugins = replyPlugins.get(names);
+  if (!plugins) {
+    plugins = [
+      ...Object.values(defaultRemarkPlugins),
+      () => (tree: MarkdownNode) => breakLineEndings(tree),
+      [remarkSlackMentions, { names: [...names] }],
+    ];
+    replyPlugins.set(names, plugins);
+  }
+  return plugins;
+}
+
+/** A reply with no conversation's Slack names to hand: mentions still never show as ids. */
+export const replyRemarkPlugins = replyRemarkPluginsFor(NO_SLACK_NAMES);
+
+let mathPlugin: MathPlugin | undefined;
+let mathLoad: Promise<void> | undefined;
+const mathListeners = new Set<() => void>();
+
+/** Streamdown's maths plugin and KaTeX's stylesheet, fetched the first time a formula is drawn. */
+function loadMathPlugin() {
+  mathLoad ??= import("@/lib/math-plugin")
+    .then(({ math }) => {
+      mathPlugin = math;
+      for (const listener of mathListeners) listener();
+    })
+    .catch((error: unknown) => {
+      // The formula stays drawn as its source; say why rather than leave it so for no reason.
+      console.error("Couldn't load maths rendering:", error);
+      mathLoad = undefined;
+    });
+  return mathLoad;
+}
+
+function onMathPlugin(listener: () => void) {
+  mathListeners.add(listener);
+  return () => {
+    mathListeners.delete(listener);
+  };
+}
+
+const currentMathPlugin = () => mathPlugin;
+
+/** One plugin set per set the caller passes, so Streamdown sees the same object on every render. */
+const withMath = new WeakMap<PluginConfig, PluginConfig>();
+const NO_PLUGINS: PluginConfig = {};
+
+function pluginsWithMath(
+  plugins: PluginConfig | undefined,
+  math: MathPlugin | undefined,
+): PluginConfig | undefined {
+  if (!math) return plugins;
+  const base = plugins ?? NO_PLUGINS;
+  let all = withMath.get(base);
+  if (!all) {
+    all = { ...base, math };
+    withMath.set(base, all);
+  }
+  return all;
+}
+
+/**
+ * Streamdown, for a Bot's words wherever they are drawn, with its maths drawn as formulas.
+ *
+ * Takes everything Streamdown takes. The markdown has its `\( \)` and `\[ \]` written in the `$$`
+ * the maths plugin reads (`lib/maths.ts`), and the plugin is added to the caller's plugins.
+ *
+ * LOADED WITH THE FIRST FORMULA, NOT WITH THE CHAT, as the code plugin is. KaTeX and its stylesheet
+ * are most of the weight of drawing maths, and most conversations have none. The first formula is
+ * drawn as its source for the moment the plugin takes to arrive, then as a formula; every one after
+ * that draws as a formula from the start. Once in, the plugin stays with every surface, so a reply
+ * that grows a formula as it streams keeps the same plugins.
+ */
+export function BotMarkdown({
+  children,
+  plugins,
+  ...props
+}: Omit<StreamdownProps, "children"> & { children: string }) {
+  const markdown = useMemo(() => withMathDelimiters(children), [children]);
+  const wantsMaths = hasMaths(markdown);
+  const math = useSyncExternalStore(
+    onMathPlugin,
+    currentMathPlugin,
+    currentMathPlugin,
+  );
+  useEffect(() => {
+    if (wantsMaths && !math) void loadMathPlugin();
+  }, [wantsMaths, math]);
+  return (
+    <Streamdown {...props} plugins={pluginsWithMath(plugins, math)}>
+      {markdown}
+    </Streamdown>
+  );
+}

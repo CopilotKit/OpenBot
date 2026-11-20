@@ -1,0 +1,156 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { UserPreferences } from "@openbot/shared/user-preferences";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { MessageListPreference } from "@/components/settings/message-list-preference";
+import { authKeys } from "@/lib/auth/queries";
+import {
+  saveUserPreferencesMutationOptions,
+  userPreferencesQueryOptions,
+} from "@/lib/settings/message-list";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
+
+const originalFetch = globalThis.fetch;
+const clients: QueryClient[] = [];
+let response: () => Promise<Response>;
+let requests: { path: string; method: string; body: unknown }[];
+beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
+beforeEach(() => {
+  requests = [];
+  response = async () =>
+    preferencesResponse({ preferences: { messageListEmphasis: "agent" } });
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        path: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body,
+      });
+      return response();
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+});
+afterEach(() => {
+  cleanup();
+  for (const client of clients) client.clear();
+  clients.length = 0;
+  globalThis.fetch = originalFetch;
+});
+afterAll(() => GlobalRegistrator.unregister());
+
+function setup() {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+      mutations: { retry: false },
+    },
+  });
+  clients.push(client);
+  client.setQueryData(authKeys.currentUser(), {
+    id: "alice",
+    email: "alice@example.com",
+    role: "user",
+    onboarding: null,
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <MessageListPreference />
+    </QueryClientProvider>,
+  );
+  return { client, view };
+}
+
+test("loads preferences from the account and renders the saved emphasis", async () => {
+  const { view } = setup();
+  const agent = await view.findByText("General Assistant");
+  expect(agent.className).toContain("text-sm");
+  expect(requests).toEqual([
+    { path: PREFERENCES_PATH, method: "GET", body: undefined },
+  ]);
+});
+
+test("shows loading and read errors without enabling a save", async () => {
+  const pending = Promise.withResolvers<Response>();
+  response = () => pending.promise;
+  const { view } = setup();
+  expect(view.getByRole("combobox")).toHaveProperty("disabled", true);
+  expect(view.queryByText("General Assistant")).toBeNull();
+  pending.resolve(
+    Response.json({ error: "Storage unavailable" }, { status: 503 }),
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Storage unavailable",
+  );
+  expect(view.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+test("successful writes update only the current account cache; failures preserve saved values", async () => {
+  const { client, view } = setup();
+  await view.findByText("General Assistant");
+  const bobKey = userPreferencesQueryOptions("bob").queryKey;
+  client.setQueryData(bobKey, {
+    messageListEmphasis: "agent",
+    selfHostBannerDismissed: false,
+    dismissedNotices: [],
+    narration: null,
+    skin: "opendots",
+    proactive: "on",
+  });
+  const mutation = client
+    .getMutationCache()
+    .build(client, saveUserPreferencesMutationOptions(client, "alice"));
+  response = async () =>
+    preferencesResponse({
+      preferences: {
+        messageListEmphasis: "thread",
+        selfHostBannerDismissed: false,
+        dismissedNotices: [],
+        narration: null,
+        skin: "openbot",
+        proactive: "on",
+      },
+    });
+  await mutation.execute({ messageListEmphasis: "thread" });
+  await waitFor(() =>
+    expect(view.getByText("Plan next week").className).toContain("text-sm"),
+  );
+  expect(requests.at(-1)).toEqual({
+    path: PREFERENCES_PATH,
+    method: "PATCH",
+    body: JSON.stringify({ messageListEmphasis: "thread" }),
+  });
+  expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
+    messageListEmphasis: "agent",
+    selfHostBannerDismissed: false,
+    dismissedNotices: [],
+    narration: null,
+    skin: "opendots",
+    proactive: "on",
+  });
+  response = async () =>
+    Response.json({ error: "Could not save" }, { status: 500 });
+  await expect(
+    mutation.execute({ messageListEmphasis: "agent" }),
+  ).rejects.toThrow("Could not save");
+  expect(
+    client.getQueryData<UserPreferences>(
+      userPreferencesQueryOptions("alice").queryKey,
+    ),
+  ).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+    dismissedNotices: [],
+    narration: null,
+    skin: "openbot",
+    proactive: "on",
+  });
+});

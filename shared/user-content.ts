@@ -10,8 +10,8 @@
  *
  * ONE DECLARATION FOR BOTH BOTS, for the reason `bot-prompt.ts` gives for `NO_ANSWER_CAME`. The two
  * shapes returned are the ones OpenAI's chat completions take, and LangChain's OpenAI, Anthropic and
- * Google converters read the same two blocks, so one answer serves `agent-bot` and `agent-langgraph`
- * alike and the two cannot drift.
+ * Google converters read the same two blocks, so one answer serves every Bot alike and they cannot
+ * drift.
  *
  * A part neither shape can carry is NAMED, not dropped, which is the rule `resultText` in
  * `server/src/plugins/mcp.ts` follows for a tool result: a model told "[audio]" can say something was

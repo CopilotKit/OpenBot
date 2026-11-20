@@ -1,11 +1,18 @@
-import type { AttachmentsConfig } from "@copilotkit/react-core/v2";
+import type { Attachment, AttachmentsConfig } from "@copilotkit/react-core/v2";
 import {
-  ACCEPTED_IMAGE_MIME,
-  ACCEPTED_TEXT_MIME,
+  deleteAttachment,
+  uploadConversationAttachment,
+} from "@/lib/api/generated/conversations/conversations";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import {
+  ACCEPTED_FILE_TYPES,
+  type AttachmentLimits,
   attachmentUrl,
-  MAX_IMAGE_BYTES,
+  classifyAttachment,
+  largestAttachmentBytes,
 } from "@/lib/channels/attachments";
-import { apiFetch } from "@/lib/client";
+import { ClientError } from "@/lib/client";
+import { newId } from "@/lib/new-id";
 
 /**
  * Uploads a picked file to this deployment and hands the composer a link to it, never the bytes.
@@ -34,9 +41,8 @@ type UploadedAttachment = {
 /**
  * The SDK's `onUpload`, scoped to one channel.
  *
- * `apiFetch` rather than `client()` from `@/lib/client`: `client()` JSON-stringifies its
- * body and sets a JSON content type, neither of which can carry a multipart upload. `apiFetch`
- * is still the one door that attaches the browser identity.
+ * `fetch` directly rather than `client()` from `@/lib/client`: `client()` JSON-stringifies its
+ * body and sets a JSON content type, neither of which can carry a multipart upload.
  *
  * Supplying this is what keeps the bytes out of browser state: with `onUpload` set, the SDK never
  * calls its own `readFileAsBase64` and never retains the `File` it was handed, so no copy of the
@@ -49,46 +55,30 @@ export function uploadToChannel(
   uploadGroup: string,
 ): (file: File) => Promise<AttachmentUploadResult> {
   return async (file: File): Promise<AttachmentUploadResult> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    /*
-     * WHICH COMPOSER STAGED IT, so the server's cap counts the set this composer can see.
-     *
-     * The cap is per message. The composer counts what is on its own screen; without this field the
-     * server counted every unsent row this person had in this channel, which is not the same set
-     * the moment anything leaves a row behind — a closed tab, a stopped run, a removed queued
-     * message. The client would then accept a pick the server refused with a 409 naming files that
-     * were on nobody's screen, and eight such orphans locked uploads in that channel until the
-     * sweeper's window expired. Sending the group is what makes the two sides count the same rows.
-     */
-    formData.append("uploadGroup", uploadGroup);
-
-    const response = await apiFetch(`/api/channels/${channelId}/attachments`, {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    });
-
-    /*
-     * READ ONCE, FOR EITHER OUTCOME, AND NEVER TRUSTED.
-     *
-     * The refusal path has been careful since a body that was not JSON put "Failed to parse JSON"
-     * on screen as the reason a file was rejected. The success path was not: it went straight to
-     * `as UploadedAttachment`, which is a cast and not a check, so the same malformed body threw a
-     * raw `SyntaxError` that the SDK reported as the refusal — and a body that parsed but carried
-     * no `id` was worse, because it succeeded: `attachmentUrl(undefined)` became a chip pointing at
-     * `/api/attachments/undefined`, Send unlocked, and the message went out carrying a link to no
-     * attachment. Both halves of one response are held to the same standard here.
-     */
-    const body: unknown = await response.json().catch(() => undefined);
     // Named after the file rather than left empty, for every way this can go wrong. It is the only
     // sentence anybody gets: the composer keeps the string verbatim and shows it as the reason.
-    const couldNotUpload = new Error(`Could not upload "${file.name}".`);
-
-    if (!response.ok) {
+    const couldNotUpload = new Error(
+      `Couldn't upload "${file.name}". Try again.`,
+    );
+    let body: unknown;
+    try {
+      body = await uploadConversationAttachment(
+        organizationId(),
+        channelId,
+        { file, uploadGroup },
+        { "Idempotency-Key": idempotencyKey() },
+        // What is said when the server sent no sentence of its own, a proxy's error page included.
+        { fallback: couldNotUpload.message },
+      );
+    } catch (error) {
       // The server phrases refusals in the product's voice — naming the mime type or the limit
       // that was actually hit — so its sentence is preferred whenever it has really sent one.
-      throw refusalIn(body) ?? couldNotUpload;
+      throw (
+        (error instanceof ClientError &&
+          error.status < 500 &&
+          refusalIn({ error: error.message })) ||
+        couldNotUpload
+      );
     }
 
     if (!isUploadedAttachment(body)) {
@@ -157,20 +147,14 @@ function isUploadedAttachment(body: unknown): body is UploadedAttachment {
  * the media types alone therefore greys out, in the dialog, exactly the files this composer went
  * to some trouble to accept everywhere else. `matchesAcceptFilter` and every browser's dialog both
  * read a leading-dot entry as a filename suffix, so the two doors now agree.
+ *
+ * Built from the one list of files OpenBot takes (`ACCEPTED_FILE_TYPES`): every type and every
+ * extension that claims it, so a type added there is offered here with nothing else to change.
  */
-export const FILE_PICKER_ACCEPT = [
-  ...ACCEPTED_IMAGE_MIME,
-  ...ACCEPTED_TEXT_MIME,
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".txt",
-  ".md",
-  ".csv",
-  ".json",
-].join(",");
+export const FILE_PICKER_ACCEPT = ACCEPTED_FILE_TYPES.flatMap((type) => [
+  type.mimeType,
+  ...type.extensions.map((extension) => `.${extension}`),
+]).join(",");
 
 /**
  * `AttachmentsConfig` for one channel's composer.
@@ -203,13 +187,13 @@ export const FILE_PICKER_ACCEPT = [
  * not — and phrases its refusals for a person. The narrow list is kept where it is honest about
  * being a hint: `FILE_PICKER_ACCEPT`, above, on the file dialog.
  *
- * `maxSize` is `MAX_IMAGE_BYTES`, the larger of the two ceilings: the SDK config has only one
- * number for every kind of file. The tighter `MAX_FILE_BYTES` limit for text attachments is
- * enforced by our own pre-check ahead of upload, and again by the server on arrival — which is
- * the authority either way, so letting a text file past this one number costs nothing. It is left
- * in place, unlike `accept`, because it can only ever agree with the screen: the loosest thing
- * `screenPickedFiles` passes is a file of exactly `MAX_IMAGE_BYTES`, so this backstop cannot fire
- * on a file we accepted.
+ * `maxSize` is the largest of the server's limits (`largestAttachmentBytes`): the SDK config has
+ * only one number for every kind of file. A tighter limit for one kind (text, on a server that keeps
+ * 1MB for it) is enforced by our own pre-check ahead of upload, and again by the server on arrival,
+ * which is the authority either way, so letting a text file past this one number costs nothing. It
+ * is left in place, unlike `accept`, because it can only ever agree with the screen: the loosest
+ * thing `screenPickedFiles` passes is a file of exactly that size, given the same limits, so this
+ * backstop cannot fire on a file we accepted.
  */
 export function attachmentsConfigFor(
   channelId: string,
@@ -233,14 +217,35 @@ export function attachmentsConfigFor(
    * about. Reporting the row and reconciling afterwards needs no such correlation.
    */
   onUploaded: (attachmentId: string) => void,
+  /** The limits `screenPickedFiles` screened against, so the two agree. */
+  limits: AttachmentLimits,
+  /**
+   * Each object URL made for a picture's chip, so the composer can revoke it once the chip has
+   * gone. See {@link previewUrlOf}.
+   */
+  onPreview: (previewUrl: string) => void = () => {},
 ): AttachmentsConfig {
   const upload = uploadToChannel(channelId, uploadGroup);
   return {
     enabled: true,
     accept: "*/*",
-    maxSize: MAX_IMAGE_BYTES,
+    maxSize: largestAttachmentBytes(limits),
     onUpload: async (file) => {
-      const uploaded = await upload(file);
+      const answer = await upload(file);
+      /*
+       * A PICTURE'S CHIP IS DRAWN FROM THE FILE ON THIS DEVICE. Drawn from the server's address, the
+       * browser downloaded the whole file again straight after uploading it, to draw an 80px square,
+       * and pictures go up to 100MB. Only for a file the server read as a picture.
+       */
+      let uploaded = answer;
+      if (answer.mimeType && classifyAttachment(answer.mimeType) === "image") {
+        const previewUrl = URL.createObjectURL(file);
+        onPreview(previewUrl);
+        uploaded = {
+          ...answer,
+          metadata: { ...answer.metadata, previewUrl },
+        };
+      }
       const rowId = stagedRowId(uploaded);
       /*
        * `uploadToChannel` has already refused any answer without a non-empty `id`
@@ -257,6 +262,133 @@ export function attachmentsConfigFor(
     },
     onUploadFailed,
   };
+}
+
+/**
+ * `AttachmentsConfig` for a composer whose conversation does not exist yet: `/channel/new` and the
+ * home screen, where the first message is what creates the conversation.
+ *
+ * NOTHING IS UPLOADED HERE, because an upload belongs to a conversation and there is none to give
+ * it. The picked file is held in this tab instead, on the attachment's own metadata, and
+ * `uploadHeldFiles` sends it once the first message has made the conversation. Holding the file,
+ * and not creating the conversation at the first pick, is what keeps an abandoned screen clean:
+ * somebody who attaches a file and walks away leaves no empty conversation in their sidebar and no
+ * row on the server counting against their limit until the sweeper finds it a day later.
+ *
+ * The chip's preview is an object URL onto the file, never its bytes as base64 in React state.
+ * `onHeld` reports each one so the composer can revoke it once the chip has gone.
+ *
+ * Every file still reaches this through `screenPickedFiles` first, so kind, size and the per-message
+ * cap are refused here in the same words as in a conversation. The server is still the authority:
+ * it sniffs the bytes when `uploadHeldFiles` sends them, and its refusal comes back to the composer
+ * with the draft.
+ */
+export function heldAttachmentsConfig(
+  onUploadFailed: (error: AttachmentUploadError) => void,
+  onHeld: (previewUrl: string) => void,
+  /** The limits `screenPickedFiles` screened against, so the two agree. */
+  limits: AttachmentLimits,
+): AttachmentsConfig {
+  return {
+    enabled: true,
+    accept: "*/*",
+    maxSize: largestAttachmentBytes(limits),
+    onUpload: async (file) => {
+      const previewUrl = URL.createObjectURL(file);
+      onHeld(previewUrl);
+      return {
+        type: "url",
+        value: previewUrl,
+        metadata: { heldFile: file, filename: file.name },
+      };
+    },
+    onUploadFailed,
+  };
+}
+
+/** The object URL a picture's chip is drawn from, when this tab has the file. */
+export function previewUrlOf(
+  carrier: { metadata?: unknown } | undefined,
+): string | undefined {
+  const metadata = carrier?.metadata as { previewUrl?: unknown } | undefined;
+  return typeof metadata?.previewUrl === "string" && metadata.previewUrl
+    ? metadata.previewUrl
+    : undefined;
+}
+
+/** The file a held composer is keeping for an attachment, or `undefined` for a stored one. */
+export function heldFileOf(
+  carrier: { metadata?: unknown } | undefined,
+): File | undefined {
+  const metadata = carrier?.metadata as { heldFile?: unknown } | undefined;
+  return metadata?.heldFile instanceof File ? metadata.heldFile : undefined;
+}
+
+/**
+ * Send the files a held composer kept, now that the first message has created the conversation.
+ *
+ * Each comes back as the conversation's own composer would have made it: a `url` source naming the
+ * stored row with the type the server sniffed, and `attachmentId` on its metadata. So the first
+ * message is sent, stamped and drawn exactly like every later one (`toMessageContent` in
+ * `channel-chat.tsx`). An attachment that already names a stored row is passed through untouched.
+ *
+ * ALL OR NOTHING. When one file is refused, the rows that did land are deleted before the refusal
+ * is thrown, and the deletes are awaited: the caller discards the conversation next, and a row
+ * whose conversation has gone can no longer be deleted by anybody but the sweeper. The draft goes
+ * back to the composer with its files, and the reason is the server's own sentence naming the file
+ * (`uploadToChannel`).
+ */
+export async function uploadHeldFiles(
+  channelId: string,
+  attachments: readonly Attachment[],
+): Promise<Attachment[]> {
+  // One group for one message: the set the server's per-message cap counts.
+  const upload = uploadToChannel(channelId, newId());
+  const created: string[] = [];
+  const settled = await Promise.allSettled(
+    attachments.map(async (attachment): Promise<Attachment> => {
+      const file = heldFileOf(attachment);
+      if (!file) return attachment;
+      const { metadata, ...source } = await upload(file);
+      const sent = { ...attachment, source, metadata };
+      const rowId = stagedRowId(sent);
+      if (rowId !== undefined) created.push(rowId);
+      return sent;
+    }),
+  );
+  const refused = settled.find((outcome) => outcome.status === "rejected");
+  if (refused) {
+    await Promise.all(created.map(discardStagedAttachment));
+    throw refused.reason;
+  }
+  return settled.map(
+    (outcome) => (outcome as PromiseFulfilledResult<Attachment>).value,
+  );
+}
+
+/**
+ * GIVE BACK A STAGED ROW NOTHING WILL SEND: a chip removed from the strip, or a file uploaded for a
+ * first message that was then refused.
+ *
+ * `removeAttachment` only filters client state, so until this existed, attach-then-change-your-mind
+ * left the row staged with `attachedAt IS NULL` for good. The upload handler counts exactly those
+ * rows per person per channel and refuses the ninth with "You already have 8 attachments waiting to
+ * send in this channel." — naming files that are on nobody's screen, with no way back.
+ *
+ * BEST-EFFORT, AND DELIBERATELY UNINSPECTED. The chip is gone from the strip before this is called,
+ * because that is what the person asked for; making that wait on a round trip, or reporting what
+ * comes back, would put an error in front of somebody for a request they never made. There are two
+ * such answers — 404 for a non-uploader, 409 for an attachment already sent — and neither is
+ * actionable. `cull-staged-attachments.ts` is the backstop for whatever this misses. It resolves
+ * either way, so a caller that has to wait for it can.
+ */
+export function discardStagedAttachment(attachmentId: string): Promise<void> {
+  return deleteAttachment(organizationId(), attachmentId, {
+    "Idempotency-Key": idempotencyKey(),
+  }).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 /**

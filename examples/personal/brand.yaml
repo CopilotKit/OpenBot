@@ -1,0 +1,7 @@
+tenant:
+  # Keep package ownership stable when Desktop switches from the team edition.
+  id: openbot
+  # What this package was called up to v0.3.1. A personal edition set up then keeps its Bots,
+  # conversations and deployment name. See `formerTenantIds` in server/src/tenant-package.ts.
+  former_ids: [personal]
+  product_name: OpenBot

@@ -1,0 +1,271 @@
+{
+  "source": "Google Chrome 156.0.8078.47 (headless, macOS), 2026-10-21: webkitSpeechRecognition with continuous and interimResults on, lang en-US, every event logged with its milliseconds since the page started listening. The voice was macOS say reading \"I am opening the expenses page. [2.5 s pause] Now I add the receipt from the taxi ride.\", played into the recognition as a MediaStreamTrack. Each result is [transcript, isFinal, confidence]. Recorded for the app branch (app/tests/browser-narration.fixture.ts, TWO_PHRASES).",
+  "events": [
+    {
+      "type": "start",
+      "at": 210
+    },
+    {
+      "type": "audiostart",
+      "at": 221
+    },
+    {
+      "type": "soundstart",
+      "at": 861
+    },
+    {
+      "type": "speechstart",
+      "at": 861
+    },
+    {
+      "type": "result",
+      "at": 1161,
+      "resultIndex": 0,
+      "results": [["I am", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 1354,
+      "resultIndex": 0,
+      "results": [["I am open", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 1447,
+      "resultIndex": 0,
+      "results": [["I am opening", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 1567,
+      "resultIndex": 0,
+      "results": [["I am opening the", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 1690,
+      "resultIndex": 0,
+      "results": [["I am", false, 0.9], [" opening the", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 1863,
+      "resultIndex": 0,
+      "results": [["I am", false, 0.9], [" opening the EXP", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 2052,
+      "resultIndex": 0,
+      "results": [["I am opening", false, 0.9], [" the EXP", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 2109,
+      "resultIndex": 0,
+      "results": [["I am opening", false, 0.9], [" the expens", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 2198,
+      "resultIndex": 0,
+      "results": [["I am opening the", false, 0.9], [" expens", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 2228,
+      "resultIndex": 0,
+      "results": [["I am opening the", false, 0.9], [" expenses", false, 0.01]]
+    },
+    {
+      "type": "result",
+      "at": 2495,
+      "resultIndex": 0,
+      "results": [
+        ["I am opening the", false, 0.9],
+        [" expenses page", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 2812,
+      "resultIndex": 0,
+      "results": [
+        ["I am opening the expenses", false, 0.9],
+        [" page", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 3177,
+      "resultIndex": 0,
+      "results": [["I am opening the expenses page", true, 0.972]]
+    },
+    {
+      "type": "result",
+      "at": 5379,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 5677,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 5929,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6060,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now", false, 0.9],
+        [" I add", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6091,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now", false, 0.9],
+        [" I add the", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6278,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now", false, 0.9],
+        [" I add the rece", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6303,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I", false, 0.9],
+        [" add the receipt", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6434,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I", false, 0.9],
+        [" add the receipt from", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6488,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add", false, 0.9],
+        [" the receipt from", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6523,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add", false, 0.9],
+        [" the receipt from the", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6635,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the", false, 0.9],
+        [" receipt from the", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6878,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the receipt", false, 0.9],
+        [" from the tax", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 6991,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the receipt from", false, 0.9],
+        [" the tax", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 7117,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the receipt from the", false, 0.9],
+        [" taxi", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 7265,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the receipt from the", false, 0.9],
+        [" taxi ride", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 7701,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the receipt from the taxi", false, 0.9],
+        [" ride", false, 0.01]
+      ]
+    },
+    {
+      "type": "result",
+      "at": 7919,
+      "resultIndex": 1,
+      "results": [
+        ["I am opening the expenses page", true, 0.972],
+        [" now I add the receipt from the taxi ride", true, 0.969]
+      ]
+    }
+  ]
+}

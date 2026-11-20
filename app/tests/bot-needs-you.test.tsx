@@ -1,0 +1,359 @@
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import type { ReactNode } from "react";
+import { BotNeedsYou } from "@/components/needs-you/board";
+import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
+import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH, TASKS_PATH } from "./conversations-api";
+import { CHECK_IN_ITEMS_PATH, pathOf } from "./schedules-api";
+import { settleReactWork } from "./settle-react-work";
+
+/**
+ * The top of a Bot's page: what that Bot is waiting on the person for, decided right there, and what
+ * its check-ins found.
+ */
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+const request = (
+  id: string,
+  botId: string,
+  behaviour: "ask" | "hand_off" = "ask",
+) => ({
+  id,
+  status: "pending",
+  createdAt: "2026-10-09T10:00:00Z",
+  action: {
+    botId,
+    toolRef: "computer_click",
+    effect: "write",
+    scope: "shop.example",
+    threadId: "thread",
+    args: { element: "Pay now" },
+    target: {},
+    policy: {
+      behaviour,
+      source: "rule",
+      reason: behaviour === "hand_off" ? "Paying is done by you." : "Asked.",
+    },
+  },
+});
+
+const suggestion = (id: string, agentId: string, title: string) => ({
+  id,
+  botId: agentId,
+  checkInId: "p1",
+  status: "open" as const,
+  deliveredAt: null,
+  resolvedAt: null,
+  title,
+  detail: "",
+  sourceApp: null,
+  sourceRef: null,
+  sourceLink: null,
+  pingId: null,
+  createdAt: "2026-10-09T10:00:00Z",
+});
+
+let inbox: Record<string, unknown> = {};
+let found = [
+  suggestion("s1", "expenses", "Chase the March invoice"),
+  suggestion("s2", "knowledge", "Archive old pages"),
+];
+afterEach(() => {
+  found = [
+    suggestion("s1", "expenses", "Chase the March invoice"),
+    suggestion("s2", "knowledge", "Archive old pages"),
+  ];
+});
+const sent: { path: string; method: string; body: unknown }[] = [];
+function serving() {
+  sent.length = 0;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method && init.method !== "GET") {
+      sent.push({
+        path: url,
+        method: init.method,
+        body: init.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return approvalWriteResponse(input, init) ?? Response.json({ ok: true });
+    }
+    {
+      const approvals = approvalInboxResponse(url, inbox);
+      if (approvals) return approvals;
+    }
+    if (pathOf(url) === CHECK_IN_ITEMS_PATH)
+      return Response.json({ checkInItems: found, nextCursor: null });
+    if (url.split("?")[0] === TASKS_PATH)
+      return Response.json({ tasks: [], nextCursor: null });
+    if (url.split("?")[0] === CONVERSATIONS_PATH)
+      return Response.json({ conversations: [], nextCursor: null });
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "expenses", name: "Expenses" },
+          { id: "knowledge", name: "Knowledge" },
+        ],
+      }) ?? Response.json({})
+    );
+  }) as unknown as typeof fetch;
+}
+
+function draw(node: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>{node}</QueryClientProvider>,
+  );
+}
+
+const base = {
+  enabled: true,
+  rules: [],
+  teamRules: [],
+};
+
+test("the target of a waiting action is shown whole, however long", async () => {
+  const long = request("r1", "expenses");
+  long.action.scope =
+    "https://checkout.example/carts/0f8e2a4c-9b1d-4f6e-a3c7-5d2e8b1f9a04/pay";
+  inbox = { ...base, requests: [long], questions: [] };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  const scope = await view.findByText(long.action.scope);
+  expect(scope.className).toContain("line-clamp-none");
+  expect(scope.className).toContain("break-all");
+});
+
+test("only what this Bot waits on is shown, and it can be decided here", async () => {
+  inbox = {
+    ...base,
+    requests: [request("r1", "expenses"), request("r2", "knowledge")],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+      {
+        id: "q2",
+        botId: "knowledge",
+        threadId: "thread",
+        question: "Which wiki?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  expect(await view.findByText("Needs you")).toBeTruthy();
+  expect(view.getByText(/Which card\?/)).toBeTruthy();
+  expect(view.queryByText(/Which wiki\?/)).toBeNull();
+  expect(view.getAllByRole("button", { name: "Allow" })).toHaveLength(1);
+  // Always allow here waits in the row's menu.
+  expect(view.getByRole("button", { name: /^More for / })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Deny" })).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "Allow" }));
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/v2/organizations/default/people/me/approvals/r1/decide",
+      method: "POST",
+      body: { decision: "allow_once" },
+    }),
+  );
+  // A question is answered in a dialog with the whole question in it.
+  fireEvent.click(view.getByRole("button", { name: "Answer" }));
+  const dialog = await view.findByRole("dialog");
+  expect(within(dialog).getByText("Which card?")).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", { name: "Send answer" }),
+  ).toBeTruthy();
+});
+
+test("a question is answered in the conversation it was asked in", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        channelId: "c1",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => <BotNeedsYou agentId="expenses" />,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/channel/$channelId",
+        component: () => <p>The conversation</p>,
+      }),
+    ]),
+  });
+  const view = render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await view.findByRole("button", { name: "Answer" }));
+  await view.findByText("The conversation");
+  expect(router.state.location.pathname).toBe("/channel/c1");
+  expect(view.queryByRole("dialog")).toBeNull();
+});
+
+test("a question can be put down without answering it", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  fireEvent.click(
+    await view.findByRole("button", { name: "Dismiss Which card?" }),
+  );
+  await waitFor(() =>
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        path: "/api/v2/organizations/default/people/me/questions/q1/dismiss",
+        method: "POST",
+      }),
+    ),
+  );
+});
+
+test("a hand-off is marked done by the person, never allowed on their behalf", async () => {
+  inbox = {
+    ...base,
+    requests: [request("r1", "expenses", "hand_off")],
+    questions: [],
+  };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  await view.findByText(/Handed to you: Paying/);
+  expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "I did it myself" }));
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/v2/organizations/default/people/me/approvals/r1/decide",
+      method: "POST",
+      body: { decision: "handled" },
+    }),
+  );
+});
+
+test("with nothing waiting on the person, the section is not drawn", async () => {
+  inbox = { ...base, requests: [request("r2", "knowledge")], questions: [] };
+  found = [suggestion("s2", "knowledge", "Archive old pages")];
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(view.queryByText("Needs you")).toBeNull();
+});
+
+test("only this Bot's suggestions are shown", async () => {
+  inbox = { ...base, requests: [], questions: [] };
+  serving();
+  const view = draw(<SuggestionsInbox agentId="expenses" />);
+  expect(await view.findByText(/Chase the March invoice/)).toBeTruthy();
+  expect(view.queryByText(/Archive old pages/)).toBeNull();
+});
+
+test("a question asked during a hand-off is on the page of the Bot whose conversation it is", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "knowledge",
+        conversationBotId: "expenses",
+        threadId: "thread",
+        question: "Which ledger?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const handedOn = draw(<BotNeedsYou agentId="expenses" />);
+  expect(await handedOn.findByText(/Which ledger\?/)).toBeTruthy();
+  cleanup();
+  const asked = draw(<BotNeedsYou agentId="knowledge" />);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(asked.queryByText(/Which ledger\?/)).toBeNull();
+});
+
+test("with only a question waiting, Needs you says nothing about approvals and has one heading", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  await view.findByText(/Which card\?/);
+  expect(view.queryByText("No actions need your approval.")).toBeNull();
+  expect(view.queryByText("Waiting for you")).toBeNull();
+});

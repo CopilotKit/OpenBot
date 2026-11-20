@@ -1,12 +1,14 @@
 # Mastra, as a Bot. Bun and Mastra's own server, because Mastra serves its AG-UI route itself
 # rather than handing back a handler to mount.
-FROM oven/bun:1.3-alpine
+FROM oven/bun:1.4-alpine
 
 WORKDIR /app
-COPY agent-mastra/package.json ./
-RUN bun install
+COPY agent-mastra/package.json agent-mastra/bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY shared/listen-port.ts /shared/listen-port.ts
+COPY shared/model-providers.ts /shared/model-providers.ts
+COPY shared/model-providers.json /shared/model-providers.json
 COPY agent-mastra/src ./src
 
 # Built at image time, not at start: `mastra start` runs a bundle, and building on every container

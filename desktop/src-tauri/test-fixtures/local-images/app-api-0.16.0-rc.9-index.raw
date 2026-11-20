@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:3a68d8567335f56c168c36b53059c5dd4dfe23c2edbf4d9251e9ed3170dfacd8",
+      "size": 2582,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:7a586c51e16004343d7dbab513da2e12cf727fe022f75e5a9b8b36f1eb3c3b8f",
+      "size": 2582,
+      "platform": {
+        "architecture": "arm64",
+        "os": "linux"
+      }
+    }
+  ],
+  "annotations": {
+    "org.opencontainers.image.revision": "48a38638d0a3a6266e748e6c96161cd49fd594e6",
+    "org.opencontainers.image.source": "https://github.com/CopilotKit/Intelligence",
+    "org.opencontainers.image.title": "app-api",
+    "org.opencontainers.image.version": "0.16.0-rc.9"
+  }
+}

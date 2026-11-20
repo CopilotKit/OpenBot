@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { componentListQueryOptions } from "@/lib/components/queries";
+import { galleryComponent } from "@/lib/copilot/gallery-registry";
 
 /** The same way back from every state this route can be in. */
 const BACK = {
@@ -78,7 +79,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components gallery">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Could not load components.
+          Couldn't load components. Try again in a moment.
         </p>
       </PageShell>
     );
@@ -96,15 +97,14 @@ function RouteComponent() {
     return (
       <PageShell
         backButton={BACK}
-        description="Nothing here answers to that name."
+        description="There's no component with that name."
         title="No such component"
       >
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">
           <EmptyHeader>
             <EmptyTitle>{name}</EmptyTitle>
             <EmptyDescription className="text-pretty">
-              It may have been withdrawn, or this deployment may no longer ship
-              it.
+              It may have been removed or unpublished.
             </EmptyDescription>
           </EmptyHeader>
           <Button
@@ -122,7 +122,12 @@ function RouteComponent() {
   return (
     <PageShell
       backButton={BACK}
-      description={component.publishedDescription ?? undefined}
+      // What it shows, in the person's words; see the gallery's own page for why not the model's.
+      description={
+        galleryComponent(component.name)?.summary ??
+        component.publishedDescription ??
+        undefined
+      }
       title={component.title}
     >
       <div className="relative mt-8 aspect-[2/1] overflow-hidden rounded-lg border border-border bg-card">

@@ -1,0 +1,197 @@
+{
+  "name": "reload",
+  "transport": "sse",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 57,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"c03206e6-2853-42cf-9197-bfbd51f655d7\",\"role\":\"user\",\"content\":\"Name three oceans, separated by commas. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 70,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"c03206e6-2853-42cf-9197-bfbd51f655d7\",\"role\":\"user\",\"content\":\"Name three oceans, separated by commas. Call no tools.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\n"
+        },
+        {
+          "at": 882,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\"Atlantic\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\" Ocean\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\",\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\" Pacific\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\" Ocean\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\",\"}\n\n"
+        },
+        {
+          "at": 887,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\" Indian\"}\n\n"
+        },
+        {
+          "at": 900,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\" Ocean\"}\n\n"
+        },
+        {
+          "at": 1102,
+          "text": "data: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":245,\"outputTokens\":10,\"totalTokens\":255,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 1104,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 1513,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/connect\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"f6a2fab3-a212-49e7-a451-8c54c198f6ef\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[]}}",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "chunks": [
+        {
+          "at": 1515,
+          "text": "data: {\"type\":\"RUN_STARTED\",\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"protocolVersion\":\"1.0\",\"input\":{\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"protocolVersion\":\"1.0\",\"state\":{},\"messages\":[{\"id\":\"c03206e6-2853-42cf-9197-bfbd51f655d7\",\"role\":\"user\",\"content\":\"Name three oceans, separated by commas. Call no tools.\"}],\"tools\":[],\"context\":[],\"forwardedProps\":{}}}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\",\"delta\":\"Atlantic Ocean, Pacific Ocean, Indian Ocean\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_END\",\"messageId\":\"msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"metadata\":{\"finishReason\":\"stop\"},\"threadId\":\"aeed5ddd-d219-4fde-975b-535e13bd7e86\",\"runId\":\"bb9f07ba-97e9-45d8-86bd-dea18346e6e2\",\"usage\":[{\"provider\":\"openai.responses\",\"model\":\"gpt-4.1-mini\",\"inputTokens\":245,\"outputTokens\":10,\"totalTokens\":255,\"reasoningTokens\":0,\"cachedInputTokens\":0}]}\n\n"
+        }
+      ],
+      "end": {
+        "at": 1515,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [],
+  "sink": [
+    {
+      "trajectoryId": "7573bb83-3c25-4278-819a-198e328da343",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539582324
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "c03206e6-2853-42cf-9197-bfbd51f655d7",
+            "runId": null,
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 54,
+            "text": "Name three oceans, separated by commas. Call no tools.",
+            "seq": 2
+          },
+          "timestamp": 1792539582377
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "bb9f07ba-97e9-45d8-86bd-dea18346e6e2",
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792539582395
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb",
+            "runId": "bb9f07ba-97e9-45d8-86bd-dea18346e6e2",
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 43,
+            "text": "Atlantic Ocean, Pacific Ocean, Indian Ocean",
+            "seq": 4
+          },
+          "timestamp": 1792539583427
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "bb9f07ba-97e9-45d8-86bd-dea18346e6e2",
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792539583427
+        }
+      ],
+      "dropped": 0
+    }
+  ],
+  "replaySink": [
+    {
+      "trajectoryId": "1a6e7157-0729-4bcb-a134-9db080eb4861",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539583781
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "bb9f07ba-97e9-45d8-86bd-dea18346e6e2",
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "seq": 2
+          },
+          "timestamp": 1792539583839
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_089cc6583f7283ee006ad7fbbf2dd887d0b93998261a0c9bbb",
+            "runId": "bb9f07ba-97e9-45d8-86bd-dea18346e6e2",
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 43,
+            "text": "Atlantic Ocean, Pacific Ocean, Indian Ocean",
+            "seq": 3
+          },
+          "timestamp": 1792539583839
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "bb9f07ba-97e9-45d8-86bd-dea18346e6e2",
+            "threadId": "aeed5ddd-d219-4fde-975b-535e13bd7e86",
+            "agentId": "default",
+            "seq": 4
+          },
+          "timestamp": 1792539583839
+        }
+      ],
+      "dropped": 0
+    }
+  ],
+  "replayFromAt": 1458
+}

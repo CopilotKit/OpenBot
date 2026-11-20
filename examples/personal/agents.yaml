@@ -1,0 +1,57 @@
+# The personal edition's package: one person on their own machine, and one Bot to start with.
+#
+# Built-in, so it runs inside the server on the model in model.yaml and needs no Bot process of its
+# own. More Bots are made from `/bots`, or in a conversation with this one.
+agents:
+  - id: personal-assistant
+    name: Personal Assistant
+    # The subtitle under its name says what runs it, truthfully: OpenBot itself, on the model in
+    # model.yaml.
+    title: Powered by OpenBot
+    role_description: Help with email, your calendar, research, planning and everyday errands.
+    avatar_seed: personal-assistant
+    type: built-in
+    # What the model reads, and what the person edits on the Setup page, so it stays inside that
+    # page's 1,000-character limit. OpenBot's own prompt already tells every Bot how to work; this
+    # says who it works for and the few habits that make an assistant finish what it was asked.
+    #
+    # It used to say "ask when something is ambiguous rather than guessing", which made it stop to
+    # ask about choices it could have made and said it made, and "ask the person to sign in, and
+    # wait for them", which contradicted the platform's own rule: a sign-in is handed over with a
+    # tool call, never asked for in a sentence. `synchronizeTenantPackage` replaces either earlier
+    # wording on a starter that still carries it word for word.
+    #
+    # It used to repeat OpenBot's own push to act ("do the work, not a description of it", "make
+    # the sensible choice and keep going"), so a Bot heard it three times and treated "are you able
+    # to...?" as "go and do it". How to work and when to ask are OpenBot's prompt's job, said once
+    # there; this keeps what is particular to an assistant.
+    system_prompt: >-
+      You are a personal assistant for one person. You take everyday work off their hands: email,
+      calendar, research, planning and errands. When they ask you to do something, do it; when
+      they ask whether you can, answer and offer. When you send, buy, delete or post something,
+      say exactly what it is; OpenBot asks the person before it happens, so you do not need to.
+      Never type a password or a code yourself: when a site needs one, hand the browser to the
+      person with the tool for that, and carry on once they hand it back. Keep replies short: lead
+      with the answer, and end with anything you could not confirm.
+    # `bot-creator` offers the tools that make another Bot in a conversation, and `skill-creator` the
+    # tools that turn an interview into a saved skill. Both are defined in skills.yaml.
+    skills:
+      - bot-creator
+      - skill-creator
+
+  # The Bot somebody picked in OpenBot Desktop's setup, as in the fintech package.
+  #
+  # ONE ROW, AND IT EXISTS ONLY ONCE SOMETHING IS PICKED. A Bot whose endpoint interpolates to
+  # nothing is dropped by the loader, so this row removes itself until the desktop writes an address;
+  # `scripts/start.sh` writes none. The kind is interpolated rather than written, so a server that
+  # predates `remote-mastra` still loads this file unless somebody picks Mastra.
+  - id: picked-harness
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    # What runs it, rather than its name again under its name.
+    title: Powered by ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
+    endpoint: ${PICKED_HARNESS_URL:-}
+    # Which agent on that server, for a Mastra roster. Blank means the only one there.
+    remote_agent_id: ${PICKED_HARNESS_AGENT_ID:-}

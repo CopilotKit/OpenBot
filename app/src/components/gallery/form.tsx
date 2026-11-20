@@ -1,3 +1,4 @@
+import type { DecisionToolName } from "@openbot/shared/decision-tools";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -80,7 +81,7 @@ export function FormCard(props: Record<string, unknown>) {
     return (
       <GalleryFrame title="Preparing your form…">
         <p className="text-sm text-muted-foreground">
-          The assistant is putting the questions together.
+          The Bot is putting the questions together.
         </p>
       </GalleryFrame>
     );
@@ -138,7 +139,7 @@ function InvalidForm({
       <p role="alert" className="text-sm text-muted-foreground">
         {returned
           ? "The form had invalid questions. The Bot can send a corrected form."
-          : "The form has invalid questions and could not be displayed."}
+          : "The form has invalid questions, so it can't be shown."}
       </p>
       {failed && (
         <Button className="mt-3" size="sm" onClick={() => void returnToBot()}>
@@ -365,7 +366,7 @@ function FormEntry({
           })}
           {failure && (
             <p role="alert" className="text-sm text-destructive">
-              Your answers could not be sent. Try again.
+              Couldn't send your answers. Try again.
             </p>
           )}
           <div className="flex justify-end border-t border-border pt-3">
@@ -381,9 +382,11 @@ function FormEntry({
 
 export const GALLERY: GalleryComponent[] = [
   {
-    name: "askForm",
+    name: "askForm" satisfies DecisionToolName,
     title: "Form",
     kind: "decision",
+    summary:
+      "Asks you to fill in a short form. The Bot waits for your answers.",
     description:
       "Ask the person to fill in a short form and WAIT for their answers. Use when several related details are needed together. Provide up to eight labeled text, email, number, select, or textarea fields with unique IDs. Mark required fields and give options for selects. Never request passwords or secrets. The result has status submitted and values keyed by field ID; numbers are returned as numbers and blank optional fields are omitted.",
     parameters: FormCardArgs,
@@ -392,7 +395,7 @@ export const GALLERY: GalleryComponent[] = [
       status: "executing",
       args: {
         title: "Plan your next project",
-        description: "A few details to prepare a useful first draft.",
+        description: "Provide a few details to help prepare your first draft.",
         fields: [
           { id: "team", label: "Team name", type: "text", required: true },
           { id: "email", label: "Work email", type: "email", required: true },

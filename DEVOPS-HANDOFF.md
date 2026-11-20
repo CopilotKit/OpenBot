@@ -1,115 +1,140 @@
-# AgentForce — build and run
+# AgentForce — OpenBot 1.1 handoff
 
 Repo: `https://github.com/DESCASIO/agentforce`  
+Branch: `cursor/openbot-1.1-agentforce`  
+Started from: CopilotKit OpenBot `upstream/main` at `f75f9911` (package version **1.1.0**)  
 Local checkout: `plugiq-agentforce`  
-Runtime: **Bun 1.3+**. One container image for deploy.
+Runtime: **Bun 1.4+** (`packageManager`: `bun@1.4.3`)
+
+This branch is the AgentForce product layer on current OpenBot. It is **not** a replay of the September server fork. Hosted/testing deploy remains on `main` until you deliberately switch; a normal merge of this branch into `main` would conflict across the deleted `server/` tree.
+
+**Do not cut over production until Product Engineer sidecar is proven locally** (ticket → PRs on both `PE_REPOS`). One DevOps cutover after that.
+
+---
+
+## What this tree is
+
+| Piece | Where it lives |
+| ----- | -------------- |
+| Tenant identity | `examples/fintech/brand.yaml` — `tenant.id: plugiq-agentforce`, `tenant.product_name: PlugiQ AgentForce` |
+| Bots / channels / skills | Fintech package + Descasio wording; includes `implement-a-ticket` skill (points people at `/product-engineer`) |
+| API + Bot computers | Published image `ghcr.io/copilotkit/openbot:v1.1.0` (pin via `OPENBOT_BACKEND_TAG`) |
+| App UI | Built from this checkout (`bun run generate:app-config` reads `brand.yaml`); includes `/product-engineer` |
+| Product Engineer | **Sidecar** `product-engineer-sidecar/` + library `product-engineer-loop/` — **not** inside the OpenBot image |
+
+There is **no** in-image mount for PE. Coding credentials stay on the sidecar.
 
 ---
 
 ## Local (developers)
 
-Needs Docker, Bun, and a `.env` copied from `.env.example`.
+Needs Docker, Bun **1.4.3**, and a `.env` copied from `.env.example`.
 
 ```sh
 bun install
 bash scripts/start.sh
+# In a second terminal, with CURSOR_API_KEY, LINEAR_API_KEY, PE_REPOS set in .env:
+bun run dev:pe
+bun run dev   # Vite proxies /api/product-engineer → :3020
 ```
 
-| Service | URL                   |
-| ------- | --------------------- |
-| App     | http://localhost:3010 |
-| API     | http://localhost:3001 |
+| Service | URL |
+| ------- | --- |
+| App | http://localhost:3010 |
+| API | http://localhost:3001 |
+| Product Engineer sidecar | http://localhost:3020/health |
 
-Stop: `bash scripts/stop.sh`
+Stop OpenBot: `bash scripts/stop.sh`. Stop PE with Ctrl-C in its terminal.
 
-App + API only (no Docker bots/computers):
+Compose PE only:
 
 ```sh
-bun run dev
+docker compose --env-file backend-images.env --env-file .env --profile pe up -d product-engineer
 ```
 
 ---
 
-## Build
+## Deploy image (ECS) — OpenBot
 
-From the repo root:
+Do **not** `docker build -f Dockerfile` from this checkout for the OpenBot API. The deploy workflow [`.github/workflows/deploy-ecs.yml`](.github/workflows/deploy-ecs.yml):
 
-```sh
-bun install
-bun run build
-```
+1. Runs on **push to `main`** (rely on required PR checks before merge)
+2. Pulls **`ghcr.io/copilotkit/openbot:v1.1.0`** (`linux/arm64`)
+3. Pushes that image to ECR
+4. Points the ECS task definition at the ECR **digest**
+5. Runs the image `migrate` command, then updates the ECS service
 
-Deployable image (this is the one to ship):
+There is **no** LangGraph companion build in this workflow (`LANGGRAPH_*` removed). Risk Analyst stays omitted unless `MANAGED_AGENT_AG_UI_URL` points at a reachable Bot.
 
-```sh
-docker build -t agentforce .
-```
-
-Published upstream image (if you are not building our tree): `ghcr.io/copilotkit/openbot` — **linux/amd64 only**. For our fork, build from this repo and push to our registry.
+Until this branch becomes the default line, hosted/testing continues to follow whatever is on `main`.
 
 ---
 
-## Run the container
+## Product Engineer sidecar (ECS cutover sketch)
 
-One process, **port 3001**. Pass the same env you would use locally.
+Add a **second** ECS service (or extra container) built from `product-engineer-sidecar/Dockerfile`. Keep the OpenBot task on the published image digest.
 
-```sh
-# External Postgres (preferred)
-docker run -p 3001:3001 --env-file .env agentforce
+| Variable | Notes |
+| -------- | ----- |
+| `CURSOR_API_KEY` | [cursor.com/dashboard/api](https://cursor.com/dashboard/api) — not Integrations |
+| `LINEAR_API_KEY` | Linear API key for ticket intake (separate from Composio) |
+| `PE_REPOS` | Comma-separated GitHub URLs (frontend + backend) the Cursor account can access |
+| `PE_STARTING_REF` | Optional starting branch/ref |
+| `PE_MODEL` | Default `composer-2.5` |
+| `PE_SIDECAR_TOKEN` | Recommended in prod; require `Authorization: Bearer …` |
+| `PE_RUNS_DIR` | Persist on a volume (`/data/runs`) |
 
-# Or Postgres inside the container
-docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on \
-  -v agentforce-data:/var/lib/postgresql \
-  agentforce
-```
+**Ingress:** route `/api/product-engineer/*` to the sidecar (ALB path rule or reverse proxy). The app calls that path same-origin; without the route, PE 404s on the OpenBot container.
 
-Mount `/var/lib/postgresql` (the parent), not `/var/lib/postgresql/data`.
+**App build:** production must serve an app build from this branch (includes `/product-engineer`). If the fleet only serves the app baked into `ghcr.io/copilotkit/openbot:v1.1.0`, add PE UI via your existing app-dist story or rebuild/serve this checkout’s `app` dist.
 
-Migrations, external DB (do this as a release step, not at API start):
+**Orgs:** set `OPENBOT_MULTIPLE_ORGANIZATIONS=true` when enabling company signup/invites ([docs/configuration.md](docs/configuration.md)).
 
-```sh
-docker run --rm --env-file .env --entrypoint sh agentforce \
-  -c "cd /app/server && bun scripts/migrate.ts"
-```
-
-`--entrypoint sh` is required. Without it the image boots the whole server, then migrates.
+**Cutover loss vs September `main`:** custom Documents CRUD and in-process PE/Linear plugins go away; PE returns via this sidecar.
 
 ---
 
-## Env the container will not start without
+## Required env (OpenBot container)
 
-| Variable                                                                      | Notes                                                                                                                                                                                                                                                                                                                        |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                                                | Postgres with the `vector` extension. Skip if `EMBEDDED_POSTGRES=on`. For RDS/managed DB use `?sslmode=require` on the URL; both the Bun SQL pool and postgres.js clients enable TLS from that setting (see `server/src/db/client.ts` and `server/src/db/postgres-js.ts`). Optional: `DATABASE_SSL=require` also forces TLS. |
-| `KEY_ENCRYPTION_KEY`                                                          | `openssl rand -base64 32`. The example key is refused in production                                                                                                                                                                                                                                                          |
-| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence (`cpk-...` key)                                                                                                                                                                                                                                                                                      |
-| `OPENAI_API_KEY`                                                              | or whichever model provider you configured                                                                                                                                                                                                                                                                                   |
-| Auth                                                                          | Google / Microsoft / Okta **or** `OPENBOT_SINGLE_USER=true`                                                                                                                                                                                                                                                                  |
+| Variable | Notes |
+| -------- | ----- |
+| `DATABASE_URL` | Postgres. Prefer `?sslmode=require` for RDS/managed DB. Use the published image’s own DB client — **do not** port the September `postgres-js.ts` TLS fork. Skip if `EMBEDDED_POSTGRES=on`. |
+| `KEY_ENCRYPTION_KEY` | `openssl rand -base64 32`. Example key refused in production |
+| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, Intelligence key | CopilotKit Intelligence (`CPK_INTELLIGENCE_API_KEY` / legacy `INTELLIGENCE_API_KEY`) |
+| Model key | e.g. `OPENAI_API_KEY` |
+| Auth | Google / Microsoft / Okta **or** `OPENBOT_SINGLE_USER=true` |
 
-We are currently running **without OAuth**: `OPENBOT_SINGLE_USER=true`. Put TLS in front of any shared URL.
+Leave `MANAGED_AGENT_AG_UI_URL` unset unless a Bot is reachable from the container.
 
-Leave `MANAGED_AGENT_AG_UI_URL` unset in the container unless a Bot is actually reachable from it. The laptop default `http://localhost:4201/ag-ui` will break a deploy.
-
-### Linear (chat + Product Engineer)
-
-| Variable         | Purpose                                                                                                                                                                                                                                                                                             |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LINEAR_API_KEY` | Workspace API key from [Linear settings](https://linear.app/settings/api). Enables **chat** tools (`list_linear_issues`, `create_linear_issue`, etc.) on bots when the fintech package is loaded. Same key is also required for **Product Engineer** together with `CURSOR_API_KEY` and `PE_REPOS`. |
-| `LINEAR_TEAM_ID` | Optional default team UUID for `create_linear_issue` when the model does not pass `teamId`.                                                                                                                                                                                                         |
-
-**Assign to me** in chat assigns to the **Linear user that owns the API key**, not necessarily the person typing in AgentForce. Per-user Linear OAuth remains available via Composio if you need that model.
-
-On first boot with tenant `plugiq-agentforce`, the server seeds `agentforce-linear` grants for all package bots when `LINEAR_API_KEY` is set.
+Migrations: the published server applies schema changes when it starts; the ECS job also runs `migrate` as a release step.
 
 ---
 
-## What is not in the image
+## Linear
 
-- **Supervisor** (per-Bot computers). Needs a Docker socket. Without it, every Bot shares one browser.
-- **Routines worker.** Schedule `bun scripts/fire-routines.ts` from `/app/server` (same env + `SERVER_INTERNAL_URL` and `WORKER_SHARED_SECRET`).
-- **Staged-attachment sweep.** Schedule `bun scripts/cull-staged-attachments.ts` from `/app/server` (needs `DATABASE_URL` only). Helm runs this hourly.
+| Path | Role |
+| ---- | ---- |
+| **PE sidecar `LINEAR_API_KEY`** | Ticket intake for Product Engineer (required for `/product-engineer`) |
+| **Composio Linear** | Chat tools for people who connect Linear under `/connections` |
 
-Kubernetes: Helm chart is `charts/openbot/`. Full notes: `docs/deployment.md`.
+Composio alone does **not** open multi-repo Cursor PRs.
 
-**Size:** 2 GB RAM minimum, 4 GB recommended. Do not set shared memory; Chromium uses `/tmp`.
+Full Composio procedure: [docs/plugins/composio.md](docs/plugins/composio.md).
+
+---
+
+## Still not ported from September `main`
+
+- `server/src/plugins/builtin-linear.ts` and its tests (use Composio + PE `LINEAR_API_KEY`)
+- Migrations `0040`–`0043`, documents, learning container, browser-identity app patches
+- The custom Postgres TLS client
+- In-process Bot MCP tools for PE (chat skill `implement-a-ticket` directs to the page; HTTP tools can be added later as a custom MCP on the sidecar)
+
+---
+
+## Pointers
+
+- PE sidecar: [product-engineer-sidecar/README.md](product-engineer-sidecar/README.md)
+- Loop / CLI: [product-engineer-loop/README.md](product-engineer-loop/README.md)
+- Deployment shape of the published image: [docs/deployment.md](docs/deployment.md)
+- Image tag contract: [backend-images.env](backend-images.env)

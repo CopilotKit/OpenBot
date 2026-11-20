@@ -9,7 +9,12 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { attachmentPath, problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * A CHIP REMOVED WHILE ITS UPLOAD IS STILL IN THE AIR, WHICH USED TO LEAVE A ROW NOBODY COULD SEE.
@@ -69,6 +74,8 @@ beforeEach(() => {
   deletes = [];
   held = [];
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     if (init?.method === "DELETE") {
       deletes.push(path);
       return new Response(null, { status: 204 });
@@ -86,6 +93,7 @@ beforeEach(() => {
         id: `row-${file.name}`,
         name: file.name,
         mimeType: "text/plain",
+        sizeBytes: file.size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -126,15 +134,15 @@ test("a chip removed mid-upload gives its row back once the upload lands", async
   // And now it does exist, with no chip left to stand for it — so it goes back rather than sitting
   // out the sweeper's 24-hour window counting against this channel's cap.
   await waitFor(() =>
-    expect(deletes).toEqual(["/api/attachments/row-notes.txt"]),
+    expect(deletes).toEqual([attachmentPath("row-notes.txt")]),
   );
 });
 
-test("only the removed one is given back when two uploads are in the air", async () => {
+test("only the removed one is given back when two files are pending", async () => {
   /*
-   * The half a reconciler gets wrong. Two uploads are in flight at once — two drops, two
-   * concurrent `processFiles` calls, since the SDK's own loop is sequential within one call — and
-   * only one chip is removed. Giving back both, or giving back the wrong one, would leave a live
+   * The half a reconciler gets wrong. Two files are pending across separate drops and only one
+   * chip is removed. The SDK shares its default single upload slot across batches, so the second
+   * upload starts once the first settles. Giving back both, or the wrong one, would leave a live
    * chip on the strip pointing at a row that has just been deleted: a message sent carrying a link
    * to nothing, which is worse than the leak.
    */
@@ -152,9 +160,13 @@ test("only the removed one is given back when two uploads are in the air", async
 
   fireEvent.click(view.getByLabelText("Remove gone.txt"));
   releaseUploads();
+  // The kept file was queued behind the removed file. Let its actual upload finish as well;
+  // reconciliation intentionally waits until no attachments are uploading.
+  await waitFor(() => expect(held).toHaveLength(1));
+  releaseUploads();
 
   await waitFor(() =>
-    expect(deletes).toEqual(["/api/attachments/row-gone.txt"]),
+    expect(deletes).toEqual([attachmentPath("row-gone.txt")]),
   );
   // The one nobody touched is still on the strip, and still owns its row.
   expect(view.queryByLabelText("Remove kept.txt")).not.toBeNull();

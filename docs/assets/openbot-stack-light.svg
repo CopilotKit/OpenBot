@@ -1,0 +1,309 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="88 -18 915 835" width="1098" height="1002" fill="none" role="img" aria-labelledby="stack-title stack-desc">
+  <title id="stack-title">OpenBot: your workspace, your stack</title>
+  <desc id="stack-desc">An exploded stack with an OpenBot workspace, built-in or AG-UI agents, your models, MCP tools, modular MCP and sandbox capabilities, and your infrastructure. Deploy on a laptop or Kubernetes with Helm. The workspace provides enterprise governance and controls.</desc>
+  <!-- Adapted from CopilotKit/openbot.co src/components/composable-stack.tsx. Self-contained SVG; no external assets or fonts. -->
+  <rect x="88" y="-18" width="915" height="835" rx="12" fill="#ffffff" />
+  <defs>
+    <radialGradient id="wash">
+      <stop offset="0" stop-color="#7d62c6" stop-opacity=".045" />
+      <stop offset="1" stop-color="#7d62c6" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <ellipse cx="475" cy="440" rx="400" ry="390" fill="url(#wash)" />
+  <g stroke="#bcafe3" stroke-width="1" stroke-dasharray="3 6" opacity=".65">
+    <line x1="280" y1="0" x2="280" y2="575" />
+    <line x1="552" y1="102.4" x2="552" y2="677.4" />
+    <line x1="377.75" y1="168" x2="377.75" y2="743" />
+    <line x1="105.75" y1="65.6" x2="105.75" y2="640.6" />
+  </g>
+  <g stroke="#bcafe3" stroke-width="1" stroke-linejoin="round">
+    <g>
+      <polygon points="552,677.4 377.75,743 377.75,755 552,689.4" fill="#e2dcef" />
+      <polygon points="105.75,640.6 377.75,743 377.75,755 105.75,652.6" fill="#eeebf8" />
+      <polygon points="280,575 552,677.4 377.75,743 105.75,640.6" fill="#f9f7fc" />
+      <g opacity=".23">
+        <line x1="314" y1="587.8" x2="139.75" y2="653.4" />
+        <line x1="348" y1="600.6" x2="173.75" y2="666.2" />
+        <line x1="382" y1="613.4" x2="207.75" y2="679" />
+        <line x1="416" y1="626.2" x2="241.75" y2="691.8" />
+        <line x1="450" y1="639" x2="275.75" y2="704.6" />
+        <line x1="484" y1="651.8" x2="309.75" y2="717.4" />
+        <line x1="518" y1="664.6" x2="343.75" y2="730.2" />
+      </g>
+    </g>
+    <g>
+      <polygon points="552,597.4 495.9,618.52 495.9,628.52 552,607.4" fill="#dcd5ee" />
+      <polygon points="223.9,516.12 495.9,618.52 495.9,628.52 223.9,526.12" fill="#ebe6f6" />
+      <polygon points="280,495 552,597.4 495.9,618.52 223.9,516.12" fill="#ffffff" />
+      <g stroke-width="1.4" stroke-dasharray=".1 3.4" stroke-linecap="round">
+        <line x1="348" y1="520.6" x2="291.9" y2="541.72" />
+        <line x1="416" y1="546.2" x2="359.9" y2="567.32" />
+        <line x1="484" y1="571.8" x2="427.9" y2="592.92" />
+      </g>
+      <text x="245.15" y="503" dy=".35em" text-anchor="end" fill="#5d566b" stroke="none" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="1">MCP HUB</text>
+      <g transform="matrix(.85 .32 -.85 .32 285.95 518.36) rotate(-45) scale(.84)">
+        <text x="0" y="0" dy=".35em" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#5d566b" stroke="none">Your hub</text>
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 353.95 543.96) rotate(-45) scale(.84)">
+        <text x="0" y="0" dy=".35em" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#5d566b" stroke="none">Your tools</text>
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 421.95 569.56) rotate(-45) scale(.84)">
+        <text x="0" y="0" dy=".35em" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#5d566b" stroke="none">MCP</text>
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 489.95 595.16) rotate(-45) scale(.84)">
+        <ellipse cx="-9" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+        <ellipse cx="0" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+        <ellipse cx="9" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+      </g>
+    </g>
+    <g>
+      <polygon points="484,623 427.9,644.12 427.9,654.12 484,633" fill="#dcd5ee" />
+      <polygon points="155.9,541.72 427.9,644.12 427.9,654.12 155.9,551.72" fill="#ebe6f6" />
+      <polygon points="212,520.6 484,623 427.9,644.12 155.9,541.72" fill="#ffffff" />
+      <g stroke-width="1.4" stroke-dasharray=".1 3.4" stroke-linecap="round">
+        <line x1="280" y1="546.2" x2="223.9" y2="567.32" />
+        <line x1="348" y1="571.8" x2="291.9" y2="592.92" />
+        <line x1="416" y1="597.4" x2="359.9" y2="618.52" />
+      </g>
+      <text x="177.15" y="528.6" dy=".35em" text-anchor="end" fill="#5d566b" stroke="none" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="1">SANDBOX</text>
+      <g transform="matrix(.85 .32 -.85 .32 217.95 543.96) rotate(-45) scale(.84)">
+        <text x="0" y="0" dy=".35em" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#5d566b" stroke="none">Docker</text>
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 285.95 569.56) rotate(-45) scale(.84)">
+        <text x="0" y="0" dy=".35em" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#5d566b" stroke="none">gVisor</text>
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 353.95 595.16) rotate(-45) scale(.84)">
+        <text x="0" y="0" dy=".35em" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" fill="#5d566b" stroke="none">Your K8s</text>
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 421.95 620.76) rotate(-45) scale(.84)">
+        <ellipse cx="-9" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+        <ellipse cx="0" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+        <ellipse cx="9" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+      </g>
+    </g>
+    <g stroke-dasharray="4 4" opacity=".6">
+      <polygon points="416,648.6 377.75,663 377.75,670 416,655.6" fill="none" />
+      <polygon points="105.75,560.6 377.75,663 377.75,670 105.75,567.6" fill="none" />
+      <polygon points="144,546.2 416,648.6 377.75,663 105.75,560.6" fill="#ffffff" />
+      <g stroke-width="1.4" stroke-dasharray=".1 3.4" stroke-linecap="round">
+        <line x1="212" y1="571.8" x2="173.75" y2="586.2" />
+        <line x1="280" y1="597.4" x2="241.75" y2="611.8" />
+        <line x1="348" y1="623" x2="309.75" y2="637.4" />
+      </g>
+      <g transform="matrix(.85 .32 -.85 .32 226.875 591.8) rotate(-45) scale(.84)">
+        <ellipse cx="-9" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+        <ellipse cx="0" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+        <ellipse cx="9" cy="0" rx="2.3" ry="4" fill="#5d566b" stroke="none" opacity=".7" />
+      </g>
+    </g>
+    <g transform="translate(0 -235)">
+      <polygon points="552,337.4 377.75,403 377.75,426 552,360.4" fill="#66519e" />
+      <polygon points="105.75,300.6 377.75,403 377.75,426 105.75,323.6" fill="#af9ed6" />
+      <polygon points="280,235 552,337.4 377.75,403 105.75,300.6" fill="#f1ecfb" />
+      <g transform="matrix(.85 .32 -.85 .32 280 235)" stroke="none">
+        <rect x="6" y="6" width="308" height="193" rx="6" fill="#f7f4ff" />
+        <rect x="7" y="7" width="70" height="191" rx="5" fill="#e2d9f5" />
+        <circle cx="23" cy="27" r="7" fill="#8465b4" />
+        <path d="M36 27h27 M19 56h39 M19 75h29 M19 94h36" stroke="#ab96c9" stroke-width="5" stroke-linecap="round" />
+        <rect x="93" y="24" width="66" height="8" rx="4" fill="#886cab" />
+        <rect x="92" y="55" width="207" height="36" rx="6" fill="#eee8f8" stroke="#d9cdea" />
+        <circle cx="110" cy="73" r="8" fill="#9173b8" />
+        <rect x="127" y="66" width="72" height="5" rx="2.5" fill="#9b82b7" />
+        <rect x="127" y="77" width="116" height="3" rx="1.5" fill="#c6b8d8" />
+        <rect x="92" y="100" width="207" height="36" rx="6" fill="#eee8f8" stroke="#d9cdea" />
+        <circle cx="110" cy="118" r="8" fill="#b89cd6" />
+        <rect x="127" y="111" width="89" height="5" rx="2.5" fill="#9b82b7" />
+        <rect x="127" y="122" width="116" height="3" rx="1.5" fill="#c6b8d8" />
+        <rect x="92" y="145" width="207" height="36" rx="6" fill="#eee8f8" stroke="#d9cdea" />
+        <circle cx="110" cy="163" r="8" fill="#a38ac3" />
+        <rect x="127" y="156" width="62" height="5" rx="2.5" fill="#9b82b7" />
+        <rect x="127" y="167" width="116" height="3" rx="1.5" fill="#c6b8d8" />
+      </g>
+      <circle cx="139.75" cy="324.4" r="2" fill="#fff" stroke="none" opacity=".65" />
+      <circle cx="156.75" cy="330.8" r="2" fill="#fff" stroke="none" opacity=".65" />
+      <circle cx="173.75" cy="337.2" r="2" fill="#fff" stroke="none" opacity=".65" />
+      <circle cx="190.75" cy="343.6" r="2" fill="#fff" stroke="none" opacity=".65" />
+      <circle cx="207.75" cy="350.0" r="2" fill="#fff" stroke="none" opacity=".65" />
+    </g>
+    <g transform="translate(0 158)">
+      <g transform="translate(0 -10)">
+        <polygon points="349.7,94.76 209.45,147.56 209.45,166.56 349.7,113.76" fill="#999fc8" />
+        <polygon points="132.95,118.76 209.45,147.56 209.45,166.56 132.95,137.76" fill="#a7b4ce" />
+        <polygon points="273.2,65.96 349.7,94.76 209.45,147.56 132.95,118.76" fill="#e0f4ec" />
+        <g transform="matrix(.85 .32 -.85 .32 241 106)" stroke="#21172f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M-7 -9 L-15 0 L-7 9 M7 -9 L15 0 L7 9 M3 -12 L-3 12" />
+        </g>
+      </g>
+      <g>
+        <polygon points="438.95,141.36 298.7,194.16 298.7,213.16 438.95,160.36" fill="#dcd5ee" />
+        <polygon points="222.2,165.36 298.7,194.16 298.7,213.16 222.2,184.36" fill="#ebe6f6" />
+        <polygon points="362.45,112.56 438.95,141.36 298.7,194.16 222.2,165.36" fill="#ffffff" />
+        <g transform="matrix(.85 .32 -.85 .32 331 153)" stroke="#7d62c6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="-10" y="-10" width="20" height="20" rx="1" />
+          <rect x="-4" y="-4" width="8" height="8" />
+          <path d="M-5 -15v5 M5 -15v5 M-5 10v5 M5 10v5 M-15 -5h5 M-15 5h5 M10 -5h5 M10 5h5" />
+        </g>
+      </g>
+      <g>
+        <polygon points="528.2,187.96 387.95,240.76 387.95,259.76 528.2,206.96" fill="#dcd5ee" />
+        <polygon points="311.45,211.96 387.95,240.76 387.95,259.76 311.45,230.96" fill="#ebe6f6" />
+        <polygon points="451.7,159.16 528.2,187.96 387.95,240.76 311.45,211.96" fill="#ffffff" />
+        <g transform="matrix(.85 .32 -.85 .32 420 199)" stroke="#7d62c6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M-18 0h7 M11 0h7 M-10 -6v12 M10 -6v12 M-10 -5h7a5 5 0 0 1 0 10h-7 M10 -5H3a5 5 0 0 0 0 10h7 M-4 -10v-4 M4 -10v-4 M-4 10v4 M4 10v4" />
+        </g>
+      </g>
+    </g>
+  </g>
+  <g stroke="#bcafe3" stroke-width="1" font-family="Arial, Helvetica, sans-serif">
+    <path d="M549 107 h12 L571 39 H580" />
+    <circle cx="549" cy="107" r="3" fill="#7d62c6" stroke="none" />
+    <svg viewBox="0 0 256 256" width="29" height="29" fill="none" x="592" y="25">
+      <title>OpenBot orb</title>
+      <defs>
+        <radialGradient id="g0" gradientUnits="userSpaceOnUse" cx="186.880" cy="128.000" r="89.600">
+          <stop offset="0" stop-color="#0ad7ed" stop-opacity="0.8500" />
+          <stop offset="1" stop-color="#0ad7ed" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g1" gradientUnits="userSpaceOnUse" cx="69.120" cy="245.760" r="230.400" gradientTransform="translate(69.120 245.760) rotate(0.000) scale(1 0.35714) translate(-69.120 -245.760)">
+          <stop offset="0" stop-color="#ff95d5" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#ff95d5" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g2" gradientUnits="userSpaceOnUse" cx="69.120" cy="98.560" r="166.400" gradientTransform="translate(69.120 98.560) rotate(135.000) scale(1 0.35714) translate(-69.120 -98.560)">
+          <stop offset="0" stop-color="#ebd7f9" stop-opacity="0.7000" />
+          <stop offset="1" stop-color="#ebd7f9" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g3" gradientUnits="userSpaceOnUse" cx="157.440" cy="128.000" r="89.600" gradientTransform="translate(157.440 128.000) rotate(135.000) scale(1 0.58824) translate(-157.440 -128.000)">
+          <stop offset="0" stop-color="#42e5f1" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#42e5f1" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g4" gradientUnits="userSpaceOnUse" cx="98.560" cy="186.880" r="64.000" gradientTransform="translate(98.560 186.880) rotate(45.000) scale(1 0.58824) translate(-98.560 -186.880)">
+          <stop offset="0" stop-color="#f9d4ff" stop-opacity="0.7000" />
+          <stop offset="1" stop-color="#f9d4ff" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g5" gradientUnits="userSpaceOnUse" cx="245.760" cy="-19.200" r="230.400" gradientTransform="translate(245.760 -19.200) rotate(90.000) scale(1 0.58824) translate(-245.760 19.200)">
+          <stop offset="0" stop-color="#8a3dd3" stop-opacity="0.3000" />
+          <stop offset="1" stop-color="#8a3dd3" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g6" gradientUnits="userSpaceOnUse" cx="39.680" cy="275.200" r="166.400" gradientTransform="translate(39.680 275.200) rotate(0.000) scale(1 0.35714) translate(-39.680 -275.200)">
+          <stop offset="0" stop-color="#8481a8" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#8481a8" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g7" gradientUnits="userSpaceOnUse" cx="98.560" cy="98.560" r="64.000" gradientTransform="translate(98.560 98.560) rotate(135.000) scale(1 0.58824) translate(-98.560 -98.560)">
+          <stop offset="0" stop-color="#ceffff" stop-opacity="0.5000" />
+          <stop offset="1" stop-color="#ceffff" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g8" gradientUnits="userSpaceOnUse" cx="39.680" cy="69.120" r="121.600" gradientTransform="translate(39.680 69.120) rotate(90.000) scale(1 0.35714) translate(-39.680 -69.120)">
+          <stop offset="0" stop-color="#b4c8ef" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#b4c8ef" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g9" gradientUnits="userSpaceOnUse" cx="69.120" cy="216.320" r="121.600" gradientTransform="translate(69.120 216.320) rotate(45.000) scale(1 0.35714) translate(-69.120 -216.320)">
+          <stop offset="0" stop-color="#e69cdc" stop-opacity="0.5000" />
+          <stop offset="1" stop-color="#e69cdc" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g10" gradientUnits="userSpaceOnUse" cx="128.000" cy="157.440" r="64.000" gradientTransform="translate(128.000 157.440) rotate(45.000) scale(1 0.58824) translate(-128.000 -157.440)">
+          <stop offset="0" stop-color="#4afffe" stop-opacity="0.3000" />
+          <stop offset="1" stop-color="#4afffe" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g11" gradientUnits="userSpaceOnUse" cx="157.440" cy="-19.200" r="121.600" gradientTransform="translate(157.440 -19.200) rotate(135.000) scale(1 0.58824) translate(-157.440 19.200)">
+          <stop offset="0" stop-color="#d59cef" stop-opacity="0.5000" />
+          <stop offset="1" stop-color="#d59cef" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g12" gradientUnits="userSpaceOnUse" cx="275.200" cy="275.200" r="166.400" gradientTransform="translate(275.200 275.200) rotate(90.000) scale(1 0.58824) translate(-275.200 -275.200)">
+          <stop offset="0" stop-color="#b6a3cc" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#b6a3cc" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g13" gradientUnits="userSpaceOnUse" cx="186.880" cy="69.120" r="64.000" gradientTransform="translate(186.880 69.120) rotate(45.000) scale(1 0.58824) translate(-186.880 -69.120)">
+          <stop offset="0" stop-color="#41a8e9" stop-opacity="0.3000" />
+          <stop offset="1" stop-color="#41a8e9" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g14" gradientUnits="userSpaceOnUse" cx="157.440" cy="216.320" r="44.800" gradientTransform="translate(157.440 216.320) rotate(0.000) scale(1 0.58824) translate(-157.440 -216.320)">
+          <stop offset="0" stop-color="#ffc8ff" stop-opacity="0.3000" />
+          <stop offset="1" stop-color="#ffc8ff" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g15" gradientUnits="userSpaceOnUse" cx="128.000" cy="98.560" r="64.000" gradientTransform="translate(128.000 98.560) rotate(135.000) scale(1 0.35714) translate(-128.000 -98.560)">
+          <stop offset="0" stop-color="#9dffff" stop-opacity="0.3000" />
+          <stop offset="1" stop-color="#9dffff" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g16" gradientUnits="userSpaceOnUse" cx="157.440" cy="128.000" r="44.800">
+          <stop offset="0" stop-color="#36e7ed" stop-opacity="0.7000" />
+          <stop offset="1" stop-color="#36e7ed" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g17" gradientUnits="userSpaceOnUse" cx="98.560" cy="157.440" r="44.800" gradientTransform="translate(98.560 157.440) rotate(90.000) scale(1 0.58824) translate(-98.560 -157.440)">
+          <stop offset="0" stop-color="#b2edf2" stop-opacity="0.5000" />
+          <stop offset="1" stop-color="#b2edf2" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g18" gradientUnits="userSpaceOnUse" cx="245.760" cy="39.680" r="121.600" gradientTransform="translate(245.760 39.680) rotate(45.000) scale(1 0.35714) translate(-245.760 -39.680)">
+          <stop offset="0" stop-color="#abf9f3" stop-opacity="0.7000" />
+          <stop offset="1" stop-color="#abf9f3" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g19" gradientUnits="userSpaceOnUse" cx="-19.200" cy="128.000" r="89.600" gradientTransform="translate(-19.200 128.000) rotate(0.000) scale(1 0.58824) translate(19.200 -128.000)">
+          <stop offset="0" stop-color="#97b7dd" stop-opacity="0.5000" />
+          <stop offset="1" stop-color="#97b7dd" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g20" gradientUnits="userSpaceOnUse" cx="69.120" cy="-19.200" r="166.400" gradientTransform="translate(69.120 -19.200) rotate(135.000) scale(1 0.35714) translate(-69.120 19.200)">
+          <stop offset="0" stop-color="#d0d7f4" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#d0d7f4" stop-opacity="0.0000" />
+        </radialGradient>
+        <radialGradient id="g21" gradientUnits="userSpaceOnUse" cx="128.000" cy="275.200" r="166.400" gradientTransform="translate(128.000 275.200) rotate(0.000) scale(1 0.35714) translate(-128.000 -275.200)">
+          <stop offset="0" stop-color="#cd92c6" stop-opacity="1.0000" />
+          <stop offset="1" stop-color="#cd92c6" stop-opacity="0.0000" />
+        </radialGradient>
+      </defs>
+      <g>
+        <circle cx="128.0" cy="128.0" r="128.0" fill="#9fc5eb" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g0)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g1)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g2)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g3)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g4)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g5)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g6)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g7)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g8)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g9)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g10)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g11)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g12)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g13)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g14)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g15)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g16)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g17)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g18)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g19)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g20)" />
+        <circle cx="128.0" cy="128.0" r="128.0" fill="url(#g21)" />
+        <circle cx="128.0" cy="128.0" r="127.500" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1" />
+      </g>
+    </svg>
+    <text x="630" y="48" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">OpenBot workspace</text>
+    <text x="592" y="77" fill="#5d566b" stroke="none" font-size="20">Federates agents to your users</text>
+    <text x="592" y="104" fill="#5d566b" stroke="none" font-size="20">With a great user experience</text>
+    <text x="592" y="131" fill="#5d566b" stroke="none" font-size="20">Enterprise governance &amp; controls</text>
+    <path d="M344 244 h24 L402 198 H580" />
+    <circle cx="344" cy="244" r="3" fill="#7d62c6" stroke="none" />
+    <text x="592" y="207" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Your agents</text>
+    <text x="592" y="236" fill="#5d566b" stroke="none" font-size="20">Built-in Bots in OpenBot, or</text>
+    <text x="592" y="263" fill="#5d566b" stroke="none" font-size="20">any agent execution platform</text>
+    <text x="592" y="290" fill="#5d566b" stroke="none" font-size="20">connected through AG-UI.</text>
+    <path d="M432 301 h112 L578 357 H580" />
+    <circle cx="432" cy="301" r="3" fill="#7d62c6" stroke="none" />
+    <text x="592" y="366" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Your models</text>
+    <text x="592" y="395" fill="#5d566b" stroke="none" font-size="20">Your choice of provider</text>
+    <path d="M522 359 h24 L580 462 H580" />
+    <circle cx="522" cy="359" r="3" fill="#7d62c6" stroke="none" />
+    <text x="592" y="471" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Your tools</text>
+    <text x="592" y="500" fill="#5d566b" stroke="none" font-size="20">Connected via MCP</text>
+    <path d="M550 600 h14 L574 567 H580" />
+    <circle cx="550" cy="600" r="3" fill="#7d62c6" stroke="none" />
+    <text x="592" y="576" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Modular lanes</text>
+    <text x="592" y="605" fill="#5d566b" stroke="none" font-size="20">MCP hubs, sandboxes, and more.</text>
+    <text x="592" y="632" fill="#5d566b" stroke="none" font-size="20">Great defaults, or plug in your own</text>
+    <text x="592" y="659" fill="#5d566b" stroke="none" font-size="20">where you want control</text>
+    <path d="M550 680 h14 L574 726 H580" />
+    <circle cx="550" cy="680" r="3" fill="#7d62c6" stroke="none" />
+    <text x="592" y="735" fill="#21172f" stroke="none" font-size="26" font-weight="600" letter-spacing="-.4">Your infrastructure</text>
+    <text x="592" y="764" fill="#5d566b" stroke="none" font-size="20">Your laptop · Kubernetes + Helm</text>
+    <text x="592" y="791" fill="#5d566b" stroke="none" font-size="20">AWS · Azure · Google Cloud</text>
+  </g>
+</svg>

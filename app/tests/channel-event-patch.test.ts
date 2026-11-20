@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { ChannelPage, ChannelSummary } from "../src/lib/channels/queries";
+import type {
+  AgentChannel,
+  ChannelPage,
+  ChannelSummary,
+} from "../src/lib/channels/queries";
 import {
   applyChannelEvent,
+  applyChannelWork,
   type ChannelActivityEvent,
 } from "../src/lib/channels/use-channel-events";
 
@@ -226,6 +231,121 @@ describe("a busy signal", () => {
 });
 
 /**
+ * What the channel is waiting on, carried whole on every busy event and alone on a settle.
+ *
+ * Replaced rather than merged, so the newest event is the answer and a retried hop never shows
+ * twice. The sidebar lights from it as well as from `busy`, so a hop still running after a turn
+ * ended keeps the row lit.
+ */
+describe("a work list", () => {
+  const work = [
+    {
+      kind: "handoff" as const,
+      key: "hop-1",
+      botId: "ana",
+      botName: "Ana",
+      since: "2026-10-26T10:00:00.000Z",
+    },
+  ];
+
+  test("rides on a busy event and patches only the busy flag and the list", () => {
+    const data = cache([
+      channel("a", { lastMessage: "Said something." }),
+      channel("b"),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "a", busy: true, work }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]).toEqual({
+      ...(data.pages[0]?.channels[0] as ChannelSummary),
+      busy: true,
+      work,
+    });
+  });
+
+  test("a settle replaces the list and leaves the busy flag as it was", () => {
+    const patched = applyChannelEvent(
+      cache([channel("a", { busy: true, work })]),
+      event({ channelId: "a", work: [] }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]?.busy).toBe(true);
+    expect(patched.pages[0]?.channels[0]?.work).toEqual([]);
+  });
+
+  test("the same list again changes nothing", () => {
+    const data = cache([channel("a", { busy: true, work })]);
+
+    expect(
+      applyChannelEvent(
+        data,
+        event({ channelId: "a", busy: true, work: [...work] }),
+      ),
+    ).toBe(data);
+  });
+
+  test("an older list arriving late does not undo a newer one", () => {
+    const settled = applyChannelEvent(
+      cache([channel("a", { busy: true, work })]),
+      event({
+        channelId: "a",
+        work: [],
+        workAt: "2026-10-26T10:00:02.000000Z",
+      }),
+    );
+    if (settled === "unknown") throw new Error("expected a patch");
+
+    const late = applyChannelEvent(
+      settled,
+      event({
+        channelId: "a",
+        busy: false,
+        work,
+        workAt: "2026-10-26T10:00:01.000000Z",
+      }),
+    );
+
+    if (late === "unknown") throw new Error("expected a patch");
+    // The busy flag still moves; the list read before the settle is ignored.
+    expect(late.pages[0]?.channels[0]?.busy).toBe(false);
+    expect(late.pages[0]?.channels[0]?.work).toEqual([]);
+  });
+
+  test("the open conversation's read ignores an older list too", () => {
+    const held: AgentChannel = {
+      id: "a",
+      name: "A",
+      agentIds: [],
+      threadId: "thread-a",
+      active: true,
+      lastMessageAt: null,
+      work: [],
+      workAt: "2026-10-26T10:00:02.000000Z",
+    };
+
+    expect(
+      applyChannelWork(
+        held,
+        event({ channelId: "a", work, workAt: "2026-10-26T10:00:01.000000Z" }),
+      ),
+    ).toBe(held);
+    expect(
+      applyChannelWork(
+        held,
+        event({ channelId: "a", work, workAt: "2026-10-26T10:00:03.000000Z" }),
+      )?.work,
+    ).toEqual(work);
+  });
+});
+
+/**
  * A conversation the server has just named.
  *
  * Written by a sweep some seconds after the message that prompted it, so it arrives on its own long
@@ -284,5 +404,43 @@ describe("a summary", () => {
         event({ channelId: "a", summary: "Expense categories" }),
       ),
     ).toBe(data);
+  });
+});
+
+/**
+ * A person's first words, the row's name until it has a summary.
+ *
+ * Announced on its own, and possibly for a message the server found stale as the last message (a
+ * person's line reported after the Bot's reply), so it must not carry its null preview onto the row.
+ */
+describe("an opening", () => {
+  test("patches only the opening, leaving the Bot's reply and the order alone", () => {
+    const data = cache([
+      channel("recent", { lastMessageAt: "2024-04-02T00:00:00.000Z" }),
+      channel("a", {
+        lastMessage: "The latest stable kubectl release is v1.37.2.",
+        lastMessageAt: "2024-04-01T00:00:00.000Z",
+        lastMessageAgentId: "agent-1",
+      }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({
+        channelId: "a",
+        opening: "Find the latest released version of kubectl",
+      }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels.map((row) => row.id)).toEqual([
+      "recent",
+      "a",
+    ]);
+    expect(patched.pages[0]?.channels[1]).toEqual({
+      ...(data.pages[0]?.channels[1] as ChannelSummary),
+      opening: "Find the latest released version of kubectl",
+    });
   });
 });

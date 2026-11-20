@@ -11,6 +11,7 @@ docs/plans/
 .env
 .env.*
 !.env.example
+!.env.personal.example
 # Per-Bot egress proxies. Carries credentials in the URL, like .env does.
 egress.env
 # No trailing slash, deliberately. With one, this pattern matches a DIRECTORY only, and a symlink
@@ -41,12 +42,21 @@ charts/*/charts/
 # The environments are here for the same reason and are the more expensive mistake: `.venv` is
 # hundreds of megabytes of platform-specific binaries that would be useless to anybody who cloned
 # them. `uv` makes `.venv` and the older tooling makes `venv`, and both spellings are in use across
-# these packages.
+# these packages. CI gives each Python Bot an environment named after it — `.venv-adk`,
+# `.venv-antigravity` — and running those same commands locally leaves them in the tree, so the
+# suffixed spelling is ignored too.
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
 venv/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# The Recorder extension's signing key never enters the repository (Decision 9).
+extension/**/*.pem
+
+# The folder scripts/start.sh mounts into the server's container for a model sign-in file.
+.openbot/

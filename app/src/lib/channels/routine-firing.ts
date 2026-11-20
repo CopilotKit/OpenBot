@@ -5,4 +5,4 @@
  * once. This file exists so the browser code keeps importing through `@/`, and so the path to
  * `shared/` is written down once rather than in every renderer.
  */
-export { readFiring } from "../../../../shared/routine-firing";
+export { readFiring } from "@openbot/shared/routine-firing";

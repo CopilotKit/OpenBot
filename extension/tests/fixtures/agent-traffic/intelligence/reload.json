@@ -1,0 +1,868 @@
+{
+  "name": "reload",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 107,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"c7a614d3-30b8-421a-bf04-dabe8aa50112\",\"runId\":\"6bf37379-8515-4028-ad00-b7134924bd19\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"e3455955-980a-48f0-be63-1ea002b7dc66\",\"role\":\"user\",\"content\":\"Name three oceans, separated by commas. Call no tools.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 188,
+          "text": "{\"threadId\":\"c7a614d3-30b8-421a-bf04-dabe8aa50112\",\"runId\":\"6bf37379-8515-4028-ad00-b7134924bd19\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:c7a614d3-30b8-421a-bf04-dabe8aa50112\"}}"
+        }
+      ],
+      "end": {
+        "at": 188,
+        "outcome": "complete"
+      }
+    },
+    {
+      "at": 3039,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/connect\",\"params\":{\"agentId\":\"default\"},\"body\":{\"threadId\":\"c7a614d3-30b8-421a-bf04-dabe8aa50112\",\"runId\":\"2e9818b1-a3bb-4cf3-89cf-61cb54eb155b\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[],\"lastSeenEventId\":null}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 3044,
+          "text": "{\"threadId\":\"c7a614d3-30b8-421a-bf04-dabe8aa50112\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:c7a614d3-30b8-421a-bf04-dabe8aa50112\"}}"
+        }
+      ],
+      "end": {
+        "at": 3044,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 191,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19"
+      }
+    },
+    {
+      "at": 253,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Name three oceans, separated by commas. Call no tools.",
+              "id": "e3455955-980a-48f0-be63-1ea002b7dc66",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+          "state": {},
+          "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "51c8da48-ac8f-4134-8700-f7c3961190ed",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15baf-46ea-793d-b8fe-aa8360739f22"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 256,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "replay_complete"
+    },
+    {
+      "at": 1018,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "6487cf6b-f834-4a78-b30a-3ba23fd01d93",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15baf-4a20-79a5-a779-0e5da7116c4a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 1018,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "Pacific",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "65980a4e-e733-4d65-b7b9-4b512dce3609",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15baf-4a20-7d25-9191-8b01bbbd4f51"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1019,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Ocean",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "bf61b156-8813-4105-947b-949a7cd712e1",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15baf-4a20-7104-ac9b-f6a0614d3c62"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1051,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "2f9e0245-8bc4-46d9-8b2c-9d8f457804d1",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15baf-4a41-7f76-81aa-98515b914e22"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1051,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Atlantic",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "d52983e7-66d9-4bee-9a86-c489ee4e1d42",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15baf-4a41-7ea2-8abc-5086dfb2eade"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1051,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Ocean",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "e6e5d57a-805a-4963-bf3b-7c185ee27b99",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15baf-4a41-7277-a948-6988f11ed20b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1051,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "ddaf1d47-4425-4aad-8852-609fb3286cf5",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15baf-4a41-7a8e-a5a5-ed99d2c42f85"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1095,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Indian",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "3f993ebd-4e88-420e-ad22-632c2ecee792",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15baf-4a6d-7784-9d0c-2d785580367d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1095,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Ocean",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "fb213c88-10e1-49a1-8120-3a5d706e1563",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15baf-4a6e-7243-91d1-3268f97cdbf9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1426,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "5b9a4de5-2956-419d-b3c1-6e8fd558aeb3",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15baf-4bb8-7c01-bb43-356173370ce5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 1426,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "561389bf-a9ff-4a4b-b5ec-a4f2eec92ffd",
+          "cpki_event_seq": 12,
+          "cpki_ingested": "01a15baf-4bb8-7e30-9635-159b09f6ce38",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 245,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 10,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 255
+          }
+        ]
+      }
+    },
+    {
+      "at": 1427,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "phx_leave"
+    },
+    {
+      "at": 3049,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "connect",
+        "last_seen_event_id": null
+      }
+    },
+    {
+      "at": 3061,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Name three oceans, separated by commas. Call no tools.",
+              "id": "e3455955-980a-48f0-be63-1ea002b7dc66",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+          "state": {},
+          "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "51c8da48-ac8f-4134-8700-f7c3961190ed",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15baf-46ea-793d-b8fe-aa8360739f22"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 3061,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "6487cf6b-f834-4a78-b30a-3ba23fd01d93",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15baf-4a20-79a5-a779-0e5da7116c4a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 3061,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "Pacific",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "65980a4e-e733-4d65-b7b9-4b512dce3609",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15baf-4a20-7d25-9191-8b01bbbd4f51"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3061,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Ocean",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "bf61b156-8813-4105-947b-949a7cd712e1",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15baf-4a20-7104-ac9b-f6a0614d3c62"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3061,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "2f9e0245-8bc4-46d9-8b2c-9d8f457804d1",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15baf-4a41-7f76-81aa-98515b914e22"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3061,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Atlantic",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "d52983e7-66d9-4bee-9a86-c489ee4e1d42",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15baf-4a41-7ea2-8abc-5086dfb2eade"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Ocean",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "e6e5d57a-805a-4963-bf3b-7c185ee27b99",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15baf-4a41-7277-a948-6988f11ed20b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "ddaf1d47-4425-4aad-8852-609fb3286cf5",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15baf-4a41-7a8e-a5a5-ed99d2c42f85"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Indian",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "3f993ebd-4e88-420e-ad22-632c2ecee792",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15baf-4a6d-7784-9d0c-2d785580367d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Ocean",
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "fb213c88-10e1-49a1-8120-3a5d706e1563",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15baf-4a6e-7243-91d1-3268f97cdbf9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+        "metadata": {
+          "cpki_event_id": "5b9a4de5-2956-419d-b3c1-6e8fd558aeb3",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15baf-4bb8-7c01-bb43-356173370ce5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "561389bf-a9ff-4a4b-b5ec-a4f2eec92ffd",
+          "cpki_event_seq": 12,
+          "cpki_ingested": "01a15baf-4bb8-7e30-9635-159b09f6ce38",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "run_id": "6bf37379-8515-4028-ad00-b7134924bd19",
+        "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "thread_id": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 245,
+            "model": "gpt-4.1-mini",
+            "outputTokens": 10,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 255
+          }
+        ]
+      }
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "replay_complete"
+    },
+    {
+      "at": 3062,
+      "socket": 2,
+      "direction": "in",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "stream_idle"
+    },
+    {
+      "at": 3063,
+      "socket": 2,
+      "direction": "out",
+      "joinRef": "5",
+      "topic": "thread:c7a614d3-30b8-421a-bf04-dabe8aa50112",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "fe345290-429d-47f6-a88a-b86fa04ef7da",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539575853
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "e3455955-980a-48f0-be63-1ea002b7dc66",
+            "runId": null,
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "role": "user",
+            "textLength": 54,
+            "text": "Name three oceans, separated by commas. Call no tools.",
+            "seq": 2
+          },
+          "timestamp": 1792539575957
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "seq": 3
+          },
+          "timestamp": 1792539576108
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+            "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 43,
+            "text": "Pacific Ocean, Atlantic Ocean, Indian Ocean",
+            "seq": 4
+          },
+          "timestamp": 1792539577278
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "seq": 5
+          },
+          "timestamp": 1792539577279
+        }
+      ],
+      "dropped": 0
+    }
+  ],
+  "replaySink": [
+    {
+      "trajectoryId": "ed6a0982-24c9-4274-89d0-87bda171a19f",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792539578836
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "seq": 2
+          },
+          "timestamp": 1792539578913
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_0587ec55f2a91fbc006ad7fbb8d8b887d08b91b3a21a2b47c2",
+            "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "role": "assistant",
+            "textLength": 43,
+            "text": "Pacific Ocean, Atlantic Ocean, Indian Ocean",
+            "seq": 3
+          },
+          "timestamp": 1792539578914
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "6bf37379-8515-4028-ad00-b7134924bd19",
+            "threadId": "c7a614d3-30b8-421a-bf04-dabe8aa50112",
+            "agentId": "default",
+            "seq": 4
+          },
+          "timestamp": 1792539578914
+        }
+      ],
+      "dropped": 0
+    }
+  ],
+  "replayFromAt": 2984
+}

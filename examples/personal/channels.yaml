@@ -1,0 +1,6 @@
+channels:
+  - id: personal-assistant
+    name: Personal Assistant
+    description: Ask for help with anything in your day.
+    permitted_agents: [personal-assistant]
+    allowed_groups: [all]

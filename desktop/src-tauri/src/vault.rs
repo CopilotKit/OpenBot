@@ -27,26 +27,32 @@ a generated token looks exactly like a random string of settings. Anything not n
 setting and goes in the file where somebody can read it.
 */
 pub fn is_secret(key: &str) -> bool {
-    matches!(
-        key,
-        // Somebody's own credentials, pasted or signed in for.
-        "INTELLIGENCE_API_KEY"
-            | "OPENAI_API_KEY"
-            | "ANTHROPIC_API_KEY"
-            | "CLAUDE_CODE_OAUTH_TOKEN"
-            // Retired, and still swept up: a machine that ran an older version has one of these.
-            | "CHATGPT_OAUTH_TOKEN"
-            // Generated here, and no less a credential for it. These are what the services prove
-            // themselves to each other with, and what a Bot's computer is driven with.
-            | "MANAGED_AGENT_TOKEN"
-            | "AGENT_TOOL_TOKEN"
-            | "COMPUTER_TOKEN"
-            | "SUPERVISOR_TOKEN"
-            | "WORKER_SHARED_SECRET"
-            | "KEY_ENCRYPTION_KEY"
-            | crate::saved_intent::COMPATIBLE_CREDENTIAL
-    )
+    SECRETS.contains(&key)
 }
+
+/// Every credential by name: what `is_secret` answers from, and what Restart reads back.
+pub const SECRETS: [&str; 16] = [
+    // Somebody's own credentials, pasted or signed in for.
+    "INTELLIGENCE_API_KEY",
+    "CPK_INTELLIGENCE_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    // Retired, and still swept up: a machine that ran an older version has one of these.
+    "CHATGPT_OAUTH_TOKEN",
+    // Generated here, and no less a credential for it. These are what the services prove
+    // themselves to each other with, and what a Bot's computer is driven with.
+    "MANAGED_AGENT_TOKEN",
+    crate::ai_connection::GATEWAY_TOKEN,
+    crate::learning_model::TOKEN,
+    "AGENT_TOOL_TOKEN",
+    "COMPUTER_TOKEN",
+    "SUPERVISOR_TOKEN",
+    "WORKER_SHARED_SECRET",
+    "KEY_ENCRYPTION_KEY",
+    crate::install_token::NAME,
+    crate::saved_intent::COMPATIBLE_CREDENTIAL,
+];
 
 /// Split what a run produced into what the file may hold and what it may not.
 pub fn split(
@@ -765,9 +771,24 @@ fn remove_secret_file(path: &Path) -> Result<(), Problem> {
     }
 }
 
+/// Whether a secret is stored, read from the file's presence alone and creating nothing. Reading one on Windows starts
+/// PowerShell, too slow for a check that only asks whether there is one (the Recorder host's ping).
+pub fn stored(root: &Path, name: &str) -> bool {
+    let extension = if cfg!(target_os = "windows") {
+        "dpapi"
+    } else {
+        "secret"
+    };
+    root.join(VAULT_DIR)
+        .join(format!("{name}.{extension}"))
+        .is_file()
+}
+
+const VAULT_DIR: &str = ".secrets";
+
 /// Where the platforms that keep a file keep it. Created owner-only, not merely written so.
 pub(crate) fn vault_dir(root: &Path) -> Result<PathBuf, Problem> {
-    let dir = root.join(".secrets");
+    let dir = root.join(VAULT_DIR);
     let prepare = || -> std::io::Result<()> {
         match require_credential_directory(&dir) {
             Ok(()) => Ok(()),
@@ -1451,6 +1472,7 @@ mod tests {
     fn every_credential_is_named_and_nothing_else_is() {
         for key in [
             "INTELLIGENCE_API_KEY",
+            "CPK_INTELLIGENCE_API_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
@@ -1475,6 +1497,7 @@ mod tests {
             "SERVER_PORT",
             "DATABASE_URL",
             "TRUSTED_ORIGINS",
+            "OPENBOT_PUBLIC_URL",
             "CHATGPT_AUTH_FILE",
         ] {
             assert!(

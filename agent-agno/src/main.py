@@ -5,31 +5,76 @@ is the whole dependency and `AGUIApp` is the whole integration. Nothing of the p
 here, which is the rule.
 """
 
+import hmac
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from agno.agent import Agent
-from agno.db.in_memory import InMemoryDb
 from agno.models.litellm import LiteLLM
 from agno.os import AgentOS
 from agno.os.interfaces.agui import AGUI
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from .conversation import PausedRunsDb, add_run_context
+from .conversation import install as answer_from_the_whole_thread
+
 TOKEN_HEADER = "x-openbot-agent-token"
 
 
 def _model_id() -> str:
-    """`provider/model`, which is how litellm addresses one and how OpenBot stores the choice."""
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-5.5").strip()
-    return model if "/" in model else f"{provider}/{model}"
+    """`provider/model`, which is how litellm addresses one and how OpenBot stores the choice.
 
+    The model half is whatever the endpoint publishes, slashes included. litellm takes the first
+    path component as the provider and sends the rest as the model name, so a name that already
+    contains a slash still needs the chosen provider in front: `qwen/qwen3-8b` on an
+    OpenAI-compatible endpoint is `openai/qwen/qwen3-8b`, and `openai/gpt-5.6-terra` is
+    `openai/openai/gpt-5.6-terra`. Treating a slash as "already a provider" dropped the prefix,
+    and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
+    or sent only the second half to the endpoint.
+    """
+    settings = bot_settings("agent-agno")
+    provider = settings.provider
+    model = settings.model
+    return f"{provider}/{model}"
+
+
+def _sampling() -> dict:
+    """The sampling parameters Agno sends, as the chosen provider's API takes them.
+
+    Agno sends `temperature=0.7` and `top_p=1.0` on every request. A `top_p` of 1.0 keeps every
+    token, which is what Anthropic's Messages API does when none is sent, and Claude 4.5 and 4.6 refuse a
+    request that names both ("`temperature` and `top_p` cannot both be specified for this model").
+    Leaving `top_p` out keeps the temperature this Bot has always run at. Claude models that take no
+    sampling parameters at all lose the temperature too, through `drop_params` below. Every other
+    provider is sent what it was sent before.
+    """
+    if bot_settings("agent-agno").provider == "anthropic":
+        return {"top_p": None}
+    return {}
+
+
+# Before the app is built: Agno's AG-UI router would otherwise send the model only the newest line.
+answer_from_the_whole_thread(_model_id())
 
 agent = Agent(
     # In memory, because a Bot's history lives in OpenBot's database and not in the harness. Two
-    # places remembering the same conversation is how they come to disagree.
-    db=InMemoryDb(),
-    model=LiteLLM(id=_model_id()),
+    # places remembering the same conversation is how they come to disagree. The server sends all
+    # of it on every run, and `conversation.py` is what hands it to the model. The store holds only
+    # a run that is waiting for a client tool's result, which is what the router resumes from.
+    db=PausedRunsDb(),
+    pre_hooks=[add_run_context],
+    # `drop_params`, because Agno sends a temperature and a `top_p` on every request and LiteLLM
+    # refuses both for a reasoning model, the default `gpt-5.5` among them: every run on an OpenAI
+    # key failed before it reached OpenAI. A parameter a model does not take is dropped instead,
+    # for this one client, as the LlamaIndex Bot does.
+    model=LiteLLM(id=_model_id(), request_params={"drop_params": True}, **_sampling()),
     # No role, goal or backstory invented on somebody's behalf. A Bot answers the question it is
     # asked, and anybody who wants a persona sets one in OpenBot where the rest of them live.
     instructions="Answer the question you are asked, briefly and correctly.",
@@ -49,7 +94,7 @@ async def refuse_without_the_server_token(request: Request, call_next):
         expected = (os.environ.get("MANAGED_AGENT_TOKEN") or "").strip()
         offered = (request.headers.get(TOKEN_HEADER) or "").strip()
         # Unset means unconfigured, not open.
-        if not expected or offered != expected:
+        if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
             return JSONResponse({"error": "unauthorised"}, status_code=401)
     return await call_next(request)
 

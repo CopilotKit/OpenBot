@@ -44,6 +44,13 @@ pub enum Credential {
     /// *subscription* only ever buys its own vendor's models, and this is the row where the
     /// subscription path exists.
     Anthropic,
+    /// Google, and only Google.
+    ///
+    /// Separate from `AnyProvider` because Antigravity's bundled harness requires a Gemini key
+    /// wherever its base url points — the SDK's own README is explicit about it. Offered as
+    /// "any provider you already have", it would install against an OpenAI-only deployment and
+    /// answer nothing, which is the failure `webCreate` exists to prevent on the web side.
+    Google,
     /// The person's own endpoint. Nothing is installed and no key is ours to ask for.
     TheirEndpoint,
 }
@@ -59,6 +66,11 @@ path that speaks that vendor's subscription auth. Anthropic's is the Claude Agen
 `CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the Codex model, which the LangGraph AG-UI image selects from
 the token store.
 
+A ChatGPT plan runs on the TypeScript LangGraph Bot, like every other sign-in but the Claude plan,
+and that Bot sends its model calls to the Python LangGraph image, which holds the Codex transport.
+So a ChatGPT-plan installation keeps the Python image running beside its Bot: see
+`crate::plan::CHATGPT_PLAN_SERVICE`.
+
 MEASURED, on the screen built to catch it: signing in to a Claude plan and keeping the default Bot
 produced a stack that came up clean and a Bot whose own log said "Missing credentials. Please pass
 an `api_key`". The last screen showed the failure, which is what it is for, but the person had done
@@ -69,8 +81,46 @@ Nobody is asked to know this. The plan picks the Bot that can use it.
 pub fn speaking_for(provider: &str) -> Option<&'static str> {
     match provider {
         "anthropic" => Some("claude-agent-sdk"),
-        "openai" => Some("langgraph"),
+        "openai" => Some(DEFAULT_HARNESS),
         _ => None,
+    }
+}
+
+/**
+The Bot a start runs, from the Bot the window asked for and the credential the model screen chose.
+
+A plan chooses its own Bot, because only one Bot can spend it (see `speaking_for`). Anything else
+is a key or a provider sign-in, where the Bot and the model are independent and the window's choice
+stands.
+*/
+pub fn for_credential(
+    credential: &crate::env::ModelCredential,
+    chosen: Option<HarnessChoice>,
+) -> Option<HarnessChoice> {
+    let plan = match credential {
+        crate::env::ModelCredential::ClaudePlan { .. } => speaking_for("anthropic"),
+        crate::env::ModelCredential::ChatGptPlan { .. } => speaking_for("openai"),
+        _ => return chosen,
+    };
+    plan.map(|id| HarnessChoice {
+        id: id.into(),
+        agent_url: None,
+    })
+}
+
+/**
+The id an installation's saved choice means in this release.
+
+`langgraph` was the default Bot until the TypeScript LangGraph Bot replaced it. The setup window
+has no picker: it installs the default, and a plan re-points it. So an installation that saved
+`langgraph` either took the default or was on a ChatGPT plan, and both now run on the default.
+Moved here, where the image is resolved, so Install pulls the image Start then runs, and the
+installation's Bot (`picked-harness` in the package) keeps its id and its threads.
+*/
+fn current_id(id: &str) -> &str {
+    match id {
+        "langgraph" => DEFAULT_HARNESS,
+        other => other,
     }
 }
 
@@ -130,6 +180,10 @@ fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
     }
 }
 
+/// The Bot a first setup installs, as the setup window names it (`DEFAULT_HARNESS` in
+/// desktop/src/harness.ts). The early downloads pull its images before Install is clicked.
+pub const DEFAULT_HARNESS: &str = "langgraph-ts";
+
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
 /// because each misleads alone.
 ///
@@ -148,168 +202,63 @@ fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
 /// `registerCopilotKit` in the harness amounted to: that route serves the CopilotKit Runtime
 /// protocol, not AG-UI, and a run reached it and came back asking for a `method` field.
 pub fn catalogue() -> Vec<Harness> {
-    // Marks are vendored under the row's own id, so a row finds its own without a second mapping.
-    // The three with none are named here rather than discovered at draw time, because a missing
-    // file and a brand with no mark are different things and only one of them is a bug.
-    const UNMARKED: [&str; 3] = ["agno", "ag2", "langroid"];
     /*
-     * The directory is given, not derived from the id, and that is deliberate.
+     * Read from `shared/harnesses.json`, the one file every language reads, rather than written
+     * here. The web app's New Bot dialog names the same frameworks, and a second copy of this list
+     * would drift — which matters more than for most lists, because this one carries other
+     * companies' trade marks and the rules in `shared/marks/README.md` about what may be drawn for
+     * them.
      *
-     * A release publishes `openbot-<directory>`, taken from the Dockerfile paths in the tree, so
-     * the image name belongs to the directory and not to whatever this list calls the row. Derived
-     * from the id it was wrong for every row — `openbot-harness-crewai` against a published
-     * `openbot-agent-crewai` — and wrong twice for the four whose id does not match their folder.
-     * A picker that names an image nobody publishes fails at the pull, on a first run, with nothing
-     * on screen to say why. `every_image_is_one_a_release_publishes` holds it.
+     * Baked in with `include_str!` rather than read at runtime: the setup window draws before it
+     * has a working directory it can rely on, and a catalogue that can fail to load is a catalogue
+     * that can leave the picker empty on a first run with nothing on screen to say why.
      */
-    let ours = |id: &str,
-                directory: &str,
-                port: u16,
-                run_path: &str,
-                name: &str,
-                summary: &str,
-                maintainer: Maintainer| Harness {
-        id: id.into(),
-        name: name.into(),
-        summary: summary.into(),
-        // The manifest's own key, which is the directory the image is built from. `openbot-` is
-        // the published repository's prefix and belongs to the reference, not to this name.
-        image: Some(directory.to_string()),
-        port: Some(port),
-        health_path: Some("/health".into()),
-        run_path: run_path.into(),
-        credential: Credential::AnyProvider,
-        maintainer,
-        mark: (!UNMARKED.contains(&id)).then(|| id.to_string()),
-    };
+    #[derive(Deserialize)]
+    struct CatalogFile {
+        harnesses: Vec<CatalogRow>,
+    }
 
-    vec![
-        ours(
-            "crewai",
-            "agent-crewai",
-            4202,
-            "",
-            "CrewAI",
-            "Crews of agents with roles and tasks.",
-            Maintainer::Partnership,
-        ),
-        ours(
-            "llamaindex",
-            "agent-llamaindex",
-            4204,
-            "/run",
-            "LlamaIndex",
-            "Agents built around your own documents.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "agno",
-            "agent-agno",
-            4203,
-            "/agui",
-            "Agno",
-            "Fast, small, and multi-modal.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "langgraph",
-            "agent-langgraph-agui",
-            4206,
-            "",
-            "LangGraph",
-            "Graphs you can change, from LangChain.",
-            Maintainer::Partnership,
-        ),
-        ours(
-            "google-adk",
-            "agent-adk",
-            4208,
-            "",
-            "Google ADK",
-            "Google's agent kit. Gemini first, any model after.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "pydantic-ai",
-            "agent-pydantic-ai",
-            4205,
-            "",
-            "Pydantic AI",
-            "Typed agents, validated in and out.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "microsoft-agent-framework",
-            "agent-microsoft",
-            4211,
-            "",
-            "Microsoft Agent Framework",
-            "Microsoft's, model-agnostic by design.",
-            Maintainer::FirstParty,
-        ),
-        Harness {
-            id: "claude-agent-sdk".into(),
-            name: "Claude Agent SDK".into(),
-            summary: "Anthropic's own. The one that takes a Claude plan instead of a key.".into(),
-            image: Some("agent-claude-sdk".into()),
-            port: Some(4212),
-            health_path: Some("/health".into()),
-            run_path: String::new(),
-            credential: Credential::Anthropic,
-            maintainer: Maintainer::Community,
-            mark: Some("claude-agent-sdk".into()),
-        },
-        ours(
-            "strands",
-            "agent-strands",
-            4207,
-            "",
-            "AWS Strands",
-            "Amazon's. Bedrock first, any model after.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "ag2",
-            "agent-ag2",
-            4210,
-            "",
-            "AG2",
-            "The AutoGen line, continued.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "langroid",
-            "agent-langroid",
-            4209,
-            "",
-            "Langroid",
-            "Multi-agent, deliberately small.",
-            Maintainer::Community,
-        ),
-        ours(
-            "mastra",
-            "agent-mastra",
-            4213,
-            "",
-            "Mastra",
-            "TypeScript agents, with their own server.",
-            Maintainer::Partnership,
-        ),
-        Harness {
-            id: "byo-url".into(),
-            name: "An agent you already run".into(),
-            summary: "Give its address. It is proved with a real AG-UI run before it is saved."
-                .into(),
-            image: None,
-            port: None,
-            health_path: None,
-            run_path: String::new(),
-            credential: Credential::TheirEndpoint,
-            maintainer: Maintainer::Community,
-            // Stands for whatever the person already runs, so no vendor's mark is honest here.
-            mark: None,
-        },
-    ]
+    /*
+     * Its own struct rather than deserializing `Harness` directly, because the two shapes differ on
+     * purpose. The file is camelCase, which is what the web app reads; `Harness` is snake_case,
+     * which is what the Tauri command has always sent `desktop/src/HarnessPicker.tsx`. Renaming
+     * `Harness` to match the file would change that wire format for a UI that declares
+     * `health_path`. Unknown keys — `_readme`, and the web-only `webSummary` and `webCreate` — are
+     * ignored by serde, which is what lets the web app add a field without touching this.
+     */
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CatalogRow {
+        id: String,
+        name: String,
+        summary: String,
+        image: Option<String>,
+        port: Option<u16>,
+        health_path: Option<String>,
+        run_path: String,
+        credential: Credential,
+        maintainer: Maintainer,
+        mark: Option<String>,
+    }
+
+    let file: CatalogFile = serde_json::from_str(include_str!("../../../shared/harnesses.json"))
+        .expect("shared/harnesses.json is baked in at build time and must parse");
+
+    file.harnesses
+        .into_iter()
+        .map(|row| Harness {
+            id: row.id,
+            name: row.name,
+            summary: row.summary,
+            image: row.image,
+            health_path: row.health_path,
+            run_path: row.run_path,
+            port: row.port,
+            credential: row.credential,
+            maintainer: row.maintainer,
+            mark: row.mark,
+        })
+        .collect()
 }
 
 /**
@@ -333,7 +282,7 @@ pub fn picked(
     let Some(choice) = choice else {
         return Ok(None);
     };
-    let id = choice.id.trim();
+    let id = current_id(choice.id.trim());
     if id.is_empty() {
         return Ok(None);
     };
@@ -399,6 +348,138 @@ where
 #[cfg(test)]
 mod tests {
     use crate::test_support::temp_root;
+
+    /// The window installs this Bot on Install's click, and the early downloads pull its images
+    /// before that click: the two must name the same one.
+    #[test]
+    fn the_default_bot_is_the_one_the_setup_window_installs() {
+        let window = include_str!("../../src/harness.ts");
+        assert!(
+            window.contains(&format!("DEFAULT_HARNESS = \"{}\"", super::DEFAULT_HARNESS)),
+            "desktop/src/harness.ts DEFAULT_HARNESS must equal harness::DEFAULT_HARNESS"
+        );
+        assert!(super::catalogue()
+            .iter()
+            .any(|row| row.id == super::DEFAULT_HARNESS && row.image.is_some()));
+    }
+
+    /// The default Bot is the TypeScript LangGraph image, replacing the Python one rather than
+    /// running beside it.
+    #[test]
+    fn the_default_bot_is_the_typescript_langgraph_image() {
+        let root = deployment_naming_everything("default-ts");
+        let row = catalogue()
+            .into_iter()
+            .find(|row| row.id == DEFAULT_HARNESS)
+            .expect("the default Bot is in the catalogue");
+        assert_eq!(row.id, "langgraph-ts");
+        assert_eq!(row.image.as_deref(), Some("agent-langgraph-ts"));
+        assert_eq!(row.port, Some(4215));
+        assert_eq!(row.health_path.as_deref(), Some("/health"));
+        let crate::env::PickedHarness::Installed {
+            image,
+            port,
+            run_path,
+            ..
+        } = picked(Some(&choice(DEFAULT_HARNESS)), &root)
+            .expect("refused")
+            .expect("nothing")
+        else {
+            panic!("the default Bot installs an image");
+        };
+        assert_eq!(
+            image,
+            "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc"
+        );
+        assert_eq!(port, 4215);
+        assert_eq!(run_path, "");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn installed_image(root: &std::path::Path, chosen: Option<HarnessChoice>) -> String {
+        match picked(chosen.as_ref(), root).expect("refused") {
+            Some(crate::env::PickedHarness::Installed { image, .. }) => image,
+            other => panic!("expected an installed Bot, got {other:?}"),
+        }
+    }
+
+    /**
+    Which image each sign-in runs its Bot on.
+
+    A Claude plan can only be spent through the Claude Agent SDK. Every other sign-in runs the
+    TypeScript LangGraph Bot: an API key and a Gemini sign-in reach their provider directly, and a
+    ChatGPT plan's Bot sends its model calls on to the Python image, which keeps running for it
+    (`crate::env` writes the address, `crate::stack::selected_services` starts it).
+    */
+    #[test]
+    fn each_sign_in_runs_the_bot_its_routing_names() {
+        use crate::env::ModelCredential;
+        let root = deployment_naming_everything("sign-ins");
+        let default = Some(choice(DEFAULT_HARNESS));
+        let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
+        for (credential, image) in [
+            (
+                ModelCredential::OpenAi {
+                    api_key: "sk-test".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::Anthropic {
+                    api_key: "sk-ant-test".into(),
+                },
+                ts,
+            ),
+            (
+                ModelCredential::ProviderOAuth {
+                    provider: "google".into(),
+                    path: "/openbot/model-oauth.json".into(),
+                    proxy_token: "proxy".into(),
+                    model: "gemini-3-pro".into(),
+                },
+                ts,
+            ),
+            (ModelCredential::ChatGptPlan { store: "{}".into() }, ts),
+            (
+                ModelCredential::ClaudePlan {
+                    token: "plan".into(),
+                },
+                "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:abc",
+            ),
+        ] {
+            assert_eq!(
+                installed_image(&root, for_credential(&credential, default.clone())),
+                image,
+                "{credential:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An installation from before this release saved `langgraph`, the Python image, as its Bot.
+    /// It moves to the TypeScript image on its next Install and Start, whatever it signs in with.
+    #[test]
+    fn an_installation_that_saved_the_python_default_moves_to_the_typescript_one() {
+        use crate::env::ModelCredential;
+        let root = deployment_naming_everything("saved-python");
+        let saved = Some(choice("langgraph"));
+        let ts = "ghcr.io/copilotkit/openbot-agent-langgraph-ts@sha256:abc";
+        // Install, which has no credential and pulls what the saved choice resolves to.
+        assert_eq!(installed_image(&root, saved.clone()), ts);
+        for credential in [
+            ModelCredential::OpenAi {
+                api_key: "sk-test".into(),
+            },
+            ModelCredential::ChatGptPlan { store: "{}".into() },
+        ] {
+            assert_eq!(
+                installed_image(&root, for_credential(&credential, saved.clone())),
+                ts,
+                "{credential:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// Both plans name a Bot that exists and can actually use them.
     #[test]
@@ -607,7 +688,7 @@ mod tests {
             Some(&choice("crewai")),
             || async {
                 write_crewai_manifest(&root);
-                crate::deployment::record(&root, "v9.9.9")
+                crate::deployment::record(&root, "v9.9.9", false)
                     .map_err(|error| format!("could not record deployment: {error}"))
             },
         ));
@@ -879,7 +960,7 @@ mod tests {
         for harness in catalogue() {
             let Some(mark) = harness.mark else { continue };
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../src/marks")
+                .join("../../shared/marks")
                 .join(format!("{mark}.svg"));
             assert!(
                 path.exists(),
@@ -889,17 +970,18 @@ mod tests {
         }
     }
 
-    /// The unmarked rows are the three brands with no mark in any maintained set. If a fourth
-    /// appears, somebody dropped a mark rather than a brand losing one, and that is worth stopping
-    /// for.
+    /// Every harness the picker runs an image for carries a mark. AG2, Agno and Langroid were the
+    /// last three without one, until their own repositories supplied them (see shared/marks). An
+    /// unmarked row appearing now means somebody dropped a mark rather than a brand lacking one, and
+    /// that is worth stopping for.
     #[test]
-    fn only_the_three_brands_without_a_mark_are_unmarked() {
+    fn every_harness_with_an_image_carries_a_mark() {
         let unmarked: Vec<String> = catalogue()
             .into_iter()
             .filter(|h| h.mark.is_none() && h.image.is_some())
             .map(|h| h.id)
             .collect();
-        assert_eq!(unmarked, vec!["agno", "ag2", "langroid"]);
+        assert!(unmarked.is_empty(), "unmarked harnesses: {unmarked:?}");
     }
 
     /// Mastra is offered, and the row is the assertion that the bridge on OpenBot's side works.

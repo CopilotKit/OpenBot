@@ -591,6 +591,12 @@
           "markdownDescription": "Enables the default_window_icon command without any pre-configured scope."
         },
         {
+          "description": "Enables the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:allow-exit",
+          "markdownDescription": "Enables the exit command without any pre-configured scope."
+        },
+        {
           "description": "Enables the fetch_data_store_identifiers command without any pre-configured scope.",
           "type": "string",
           "const": "core:app:allow-fetch-data-store-identifiers",
@@ -679,6 +685,12 @@
           "type": "string",
           "const": "core:app:deny-default-window-icon",
           "markdownDescription": "Denies the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:deny-exit",
+          "markdownDescription": "Denies the exit command without any pre-configured scope."
         },
         {
           "description": "Denies the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -1941,6 +1953,12 @@
           "markdownDescription": "Enables the set_fullscreen command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:allow-set-fullscreen-on-monitor",
+          "markdownDescription": "Enables the set_fullscreen_on_monitor command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_icon command without any pre-configured scope.",
           "type": "string",
           "const": "core:window:allow-set-icon",
@@ -2409,6 +2427,12 @@
           "markdownDescription": "Denies the set_fullscreen command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:deny-set-fullscreen-on-monitor",
+          "markdownDescription": "Denies the set_fullscreen_on_monitor command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_icon command without any pre-configured scope.",
           "type": "string",
           "const": "core:window:deny-set-icon",
@@ -2571,6 +2595,60 @@
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
         },
         {
+          "description": "Allows reading the opened deep link via the get_current command\n#### This default permission set includes:\n\n- `allow-get-current`",
+          "type": "string",
+          "const": "deep-link:default",
+          "markdownDescription": "Allows reading the opened deep link via the get_current command\n#### This default permission set includes:\n\n- `allow-get-current`"
+        },
+        {
+          "description": "Enables the get_current command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-get-current",
+          "markdownDescription": "Enables the get_current command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_registered command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-is-registered",
+          "markdownDescription": "Enables the is_registered command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-register",
+          "markdownDescription": "Enables the register command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the unregister command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-unregister",
+          "markdownDescription": "Enables the unregister command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_current command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-get-current",
+          "markdownDescription": "Denies the get_current command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_registered command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-is-registered",
+          "markdownDescription": "Denies the is_registered command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-register",
+          "markdownDescription": "Denies the register command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the unregister command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-unregister",
+          "markdownDescription": "Denies the unregister command without any pre-configured scope."
+        },
+        {
           "description": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`",
           "type": "string",
           "const": "dialog:default",
@@ -2635,6 +2713,666 @@
           "type": "string",
           "const": "dialog:deny-save",
           "markdownDescription": "Denies the save command without any pre-configured scope."
+        },
+        {
+          "description": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`",
+          "type": "string",
+          "const": "log:default",
+          "markdownDescription": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`"
+        },
+        {
+          "description": "Enables the log command without any pre-configured scope.",
+          "type": "string",
+          "const": "log:allow-log",
+          "markdownDescription": "Enables the log command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the log command without any pre-configured scope.",
+          "type": "string",
+          "const": "log:deny-log",
+          "markdownDescription": "Denies the log command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`",
+          "type": "string",
+          "const": "notification:default",
+          "markdownDescription": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`"
+        },
+        {
+          "description": "Enables the batch command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-batch",
+          "markdownDescription": "Enables the batch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-cancel",
+          "markdownDescription": "Enables the cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-check-permissions",
+          "markdownDescription": "Enables the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-create-channel",
+          "markdownDescription": "Enables the create_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-delete-channel",
+          "markdownDescription": "Enables the delete_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-get-active",
+          "markdownDescription": "Enables the get_active command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pending command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-get-pending",
+          "markdownDescription": "Enables the get_pending command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_permission_granted command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-is-permission-granted",
+          "markdownDescription": "Enables the is_permission_granted command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-list-channels",
+          "markdownDescription": "Enables the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-notify",
+          "markdownDescription": "Enables the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the permission_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-permission-state",
+          "markdownDescription": "Enables the permission_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_action_types command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-register-action-types",
+          "markdownDescription": "Enables the register_action_types command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-register-listener",
+          "markdownDescription": "Enables the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-remove-active",
+          "markdownDescription": "Enables the remove_active command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-remove-listener",
+          "markdownDescription": "Enables the remove_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-request-permission",
+          "markdownDescription": "Enables the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-show",
+          "markdownDescription": "Enables the show command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-batch",
+          "markdownDescription": "Denies the batch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-cancel",
+          "markdownDescription": "Denies the cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-check-permissions",
+          "markdownDescription": "Denies the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-create-channel",
+          "markdownDescription": "Denies the create_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-delete-channel",
+          "markdownDescription": "Denies the delete_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-get-active",
+          "markdownDescription": "Denies the get_active command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pending command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-get-pending",
+          "markdownDescription": "Denies the get_pending command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_permission_granted command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-is-permission-granted",
+          "markdownDescription": "Denies the is_permission_granted command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-list-channels",
+          "markdownDescription": "Denies the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-notify",
+          "markdownDescription": "Denies the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the permission_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-permission-state",
+          "markdownDescription": "Denies the permission_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_action_types command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-register-action-types",
+          "markdownDescription": "Denies the register_action_types command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-register-listener",
+          "markdownDescription": "Denies the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-remove-active",
+          "markdownDescription": "Denies the remove_active command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-remove-listener",
+          "markdownDescription": "Denies the remove_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-request-permission",
+          "markdownDescription": "Denies the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-show",
+          "markdownDescription": "Denies the show command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-ai-connection",
+          "markdownDescription": "Enables the ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ai_providers command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-ai-providers",
+          "markdownDescription": "Enables the ai_providers command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the appearance command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-appearance",
+          "markdownDescription": "Enables the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the begin_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-begin-plan-sign-in",
+          "markdownDescription": "Enables the begin_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the begin_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-begin-provider-sign-in",
+          "markdownDescription": "Enables the begin_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-cancel-plan-sign-in",
+          "markdownDescription": "Enables the cancel_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-cancel-provider-sign-in",
+          "markdownDescription": "Enables the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the change_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-change-ai-connection",
+          "markdownDescription": "Enables the change_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the change_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-change-connection",
+          "markdownDescription": "Enables the change_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the check_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-check-update",
+          "markdownDescription": "Enables the check_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-connection",
+          "markdownDescription": "Enables the connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the dismiss_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-dismiss-update",
+          "markdownDescription": "Enables the dismiss_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the finish_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-finish-plan-sign-in",
+          "markdownDescription": "Enables the finish_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the finish_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-finish-provider-sign-in",
+          "markdownDescription": "Enables the finish_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-install-update",
+          "markdownDescription": "Enables the install_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the intelligence command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-intelligence",
+          "markdownDescription": "Enables the intelligence command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-notify",
+          "markdownDescription": "Enables the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-open-logs",
+          "markdownDescription": "Enables the open_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the prepare_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-prepare-ai-connection",
+          "markdownDescription": "Enables the prepare_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the quit command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-quit",
+          "markdownDescription": "Enables the quit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restart command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-restart",
+          "markdownDescription": "Enables the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_organization command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-organization",
+          "markdownDescription": "Enables the set_organization command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-usage-data",
+          "markdownDescription": "Enables the set_usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the settle_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-settle-ai-connection",
+          "markdownDescription": "Enables the settle_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-sign-out",
+          "markdownDescription": "Enables the sign_out command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_abort command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-abort",
+          "markdownDescription": "Enables the speech_abort command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-available",
+          "markdownDescription": "Enables the speech_available command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-start",
+          "markdownDescription": "Enables the speech_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the speech_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-speech-stop",
+          "markdownDescription": "Enables the speech_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the status command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-status",
+          "markdownDescription": "Enables the status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-stop",
+          "markdownDescription": "Enables the stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_offer command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-update-offer",
+          "markdownDescription": "Enables the update_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-usage-data",
+          "markdownDescription": "Enables the usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-zoom",
+          "markdownDescription": "Enables the zoom command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-ai-connection",
+          "markdownDescription": "Denies the ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ai_providers command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-ai-providers",
+          "markdownDescription": "Denies the ai_providers command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the appearance command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-appearance",
+          "markdownDescription": "Denies the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the begin_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-begin-plan-sign-in",
+          "markdownDescription": "Denies the begin_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the begin_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-begin-provider-sign-in",
+          "markdownDescription": "Denies the begin_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-cancel-plan-sign-in",
+          "markdownDescription": "Denies the cancel_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-cancel-provider-sign-in",
+          "markdownDescription": "Denies the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the change_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-change-ai-connection",
+          "markdownDescription": "Denies the change_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the change_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-change-connection",
+          "markdownDescription": "Denies the change_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-check-update",
+          "markdownDescription": "Denies the check_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-connection",
+          "markdownDescription": "Denies the connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dismiss_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-dismiss-update",
+          "markdownDescription": "Denies the dismiss_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the finish_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-finish-plan-sign-in",
+          "markdownDescription": "Denies the finish_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the finish_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-finish-provider-sign-in",
+          "markdownDescription": "Denies the finish_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-install-update",
+          "markdownDescription": "Denies the install_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the intelligence command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-intelligence",
+          "markdownDescription": "Denies the intelligence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-notify",
+          "markdownDescription": "Denies the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-open-logs",
+          "markdownDescription": "Denies the open_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the prepare_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-prepare-ai-connection",
+          "markdownDescription": "Denies the prepare_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the quit command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-quit",
+          "markdownDescription": "Denies the quit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restart command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-restart",
+          "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_organization command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-organization",
+          "markdownDescription": "Denies the set_organization command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-usage-data",
+          "markdownDescription": "Denies the set_usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the settle_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-settle-ai-connection",
+          "markdownDescription": "Denies the settle_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-sign-out",
+          "markdownDescription": "Denies the sign_out command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_abort command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-abort",
+          "markdownDescription": "Denies the speech_abort command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-available",
+          "markdownDescription": "Denies the speech_available command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-start",
+          "markdownDescription": "Denies the speech_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the speech_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-speech-stop",
+          "markdownDescription": "Denies the speech_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the status command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-status",
+          "markdownDescription": "Denies the status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-stop",
+          "markdownDescription": "Denies the stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_offer command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-update-offer",
+          "markdownDescription": "Denies the update_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-usage-data",
+          "markdownDescription": "Denies the usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-zoom",
+          "markdownDescription": "Denies the zoom command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:allow-open",
+          "markdownDescription": "Enables the open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:allow-watch",
+          "markdownDescription": "Enables the watch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:deny-open",
+          "markdownDescription": "Denies the open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-intelligence:deny-watch",
+          "markdownDescription": "Denies the watch command without any pre-configured scope."
         },
         {
           "description": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`",
@@ -2749,6 +3487,102 @@
           "type": "string",
           "const": "shell:deny-stdin-write",
           "markdownDescription": "Denies the stdin_write command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures which kind of\nupdater functions are exposed to the frontend.\n\n#### Granted Permissions\n\nThe full workflow from checking for updates to installing them\nis enabled.\n\n\n#### This default permission set includes:\n\n- `allow-check`\n- `allow-download`\n- `allow-install`\n- `allow-download-and-install`",
+          "type": "string",
+          "const": "updater:default",
+          "markdownDescription": "This permission set configures which kind of\nupdater functions are exposed to the frontend.\n\n#### Granted Permissions\n\nThe full workflow from checking for updates to installing them\nis enabled.\n\n\n#### This default permission set includes:\n\n- `allow-check`\n- `allow-download`\n- `allow-install`\n- `allow-download-and-install`"
+        },
+        {
+          "description": "Enables the check command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-check",
+          "markdownDescription": "Enables the check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-download",
+          "markdownDescription": "Enables the download command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_and_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-download-and-install",
+          "markdownDescription": "Enables the download_and_install command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-install",
+          "markdownDescription": "Enables the install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-check",
+          "markdownDescription": "Denies the check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-download",
+          "markdownDescription": "Denies the download command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_and_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-download-and-install",
+          "markdownDescription": "Denies the download_and_install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-install",
+          "markdownDescription": "Denies the install command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`",
+          "type": "string",
+          "const": "window-state:default",
+          "markdownDescription": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`"
+        },
+        {
+          "description": "Enables the filename command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-filename",
+          "markdownDescription": "Enables the filename command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-restore-state",
+          "markdownDescription": "Enables the restore_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-save-window-state",
+          "markdownDescription": "Enables the save_window_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the filename command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-filename",
+          "markdownDescription": "Denies the filename command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-restore-state",
+          "markdownDescription": "Denies the restore_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-save-window-state",
+          "markdownDescription": "Denies the save_window_state command without any pre-configured scope."
         }
       ]
     },

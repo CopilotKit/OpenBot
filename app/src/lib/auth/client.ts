@@ -1,8 +1,17 @@
 import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
+import { withClientName } from "@/lib/client";
 import type { AuthProviderId } from "./queries";
 
-export const authClient = createAuthClient({ plugins: [ssoClient()] });
+export const authClient = createAuthClient({
+  plugins: [ssoClient()],
+  fetchOptions: {
+    // The page's fetch at the time of each call, as every other request in the app uses it, rather
+    // than the one there was when this module loaded. Naming this app, as every request does.
+    customFetchImpl: (input, init) =>
+      fetch(input, { ...init, headers: withClientName(init?.headers) }),
+  },
+});
 
 /** What each provider is called on the button, since none of them are called by their id. */
 const PROVIDER_NAMES: Record<AuthProviderId, string> = {
@@ -36,11 +45,12 @@ export async function signInWith(
     callbackURL: string;
   }) => Promise<SocialResult> = (input) =>
     authClient.signIn.social(input as never) as Promise<SocialResult>,
+  // Where the browser returns to. Defaults to the origin, which is what every caller without
+  // somewhere particular to resume has always got. Same origin as the app, so Better Auth's
+  // trusted-origin check treats it as it treated the bare origin.
+  callbackURL: string = window.location.origin,
 ) {
-  const result = await start({
-    provider,
-    callbackURL: window.location.origin,
-  });
+  const result = await start({ provider, callbackURL });
 
   if (result.error) {
     // Naming the provider matters more with three buttons than it did with one: "Could not start
@@ -72,8 +82,9 @@ export async function signInWithEmailDomain(
         signIn: { sso: (i: unknown) => Promise<SocialResult> };
       }
     ).signIn.sso(input),
+  callbackURL: string = window.location.origin,
 ) {
-  const result = await start({ email, callbackURL: window.location.origin });
+  const result = await start({ email, callbackURL });
 
   if (result.error) {
     throw new Error(

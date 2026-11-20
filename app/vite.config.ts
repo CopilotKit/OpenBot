@@ -1,17 +1,22 @@
 import { readFileSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { listenPort } from "@openbot/shared/listen-port";
+import { appListenHosts, isLoopbackHost } from "@openbot/shared/this-machine";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
-import { listenPort } from "../shared/listen-port";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 /*
  * Announce the server's port to the two runtimes that serve the app through Vite, and to no other.
  *
  * The dev server and the desktop's `vite preview` serve the app on APP_PORT and proxy `/api` to the
- * server, but under bun that proxy cannot carry a WebSocket (oven-sh/bun#24127), so the app's
- * sockets address the server directly on this port. `socketUrl` reads it off `window`.
+ * server. Under the bun this was written on that proxy could not carry a WebSocket
+ * (oven-sh/bun#24127), so the app's own sockets address the server directly on this port, and
+ * still do. `socketUrl` reads it off `window`. The proxy does carry one on the bun this repository
+ * now pins, which the Intelligence gateway's socket relies on (`serving.proxy` below, and
+ * tests/dev-proxy-socket.test.ts).
  *
  * It is deliberately kept OUT of the built HTML. In production the server serves that same HTML on
  * its own origin and answers the upgrade there, so the socket is same-origin; a baked port would
@@ -74,6 +79,49 @@ const apiPort = listenPort(process.env.SERVER_PORT, 3001);
 if (!apiPort.ok) {
   throw new Error(apiPort.reason.replace(/^PORT /, "SERVER_PORT "));
 }
+const pePort = listenPort(process.env.PE_PORT, 3020);
+if (!pePort.ok) {
+  throw new Error(pePort.reason.replace(/^PORT /, "PE_PORT "));
+}
+
+/**
+ * Only this machine, unless the deployment names an address beyond it (`appListenHosts`).
+ *
+ * The dev server passes `/api` to the server from this machine, and a single-user server admits a
+ * caller from this machine as its administrator, so a dev server anybody on the network could open
+ * handed them that. Refused here rather than by listening on one loopback, because Vite takes one
+ * address and both loopbacks have to answer (see `serving`). Read from the root `.env` as well as the
+ * environment, as the server reads it.
+ */
+export function thisMachineOnly(
+  environment: Record<string, string | undefined>,
+): Plugin {
+  const beyond = appListenHosts(environment)[0] === "::";
+  const refuseOthers = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    next: () => void,
+  ) => {
+    if (beyond || isLoopbackHost(request.socket.remoteAddress ?? "")) {
+      next();
+      return;
+    }
+    response.statusCode = 403;
+    response.setHeader("content-type", "text/plain; charset=utf-8");
+    response.end(
+      "This OpenBot only answers on the computer it runs on. Open it there.",
+    );
+  };
+  return {
+    name: "openbot-this-machine-only",
+    configureServer(server) {
+      server.middlewares.use(refuseOthers);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(refuseOthers);
+    },
+  };
+}
 
 const serving = {
   // Both loopbacks, which is what `::` gets you: Node opens a dual-stack socket, so 127.0.0.1 and
@@ -85,16 +133,113 @@ const serving = {
   port: appPort.port,
   strictPort: true,
   proxy: {
+    /*
+     * Product Engineer lives in product-engineer-sidecar (not the published OpenBot image).
+     * Match this path before the catch-all `/api` proxy so Vite does not send PE calls to :3001.
+     */
+    "/api/product-engineer": {
+      target: `http://localhost:${pePort.port}`,
+      changeOrigin: true,
+    },
     "/api": {
       target: `http://localhost:${apiPort.port}`,
+      /*
+       * Sockets too. The server hands a client the CopilotKit Intelligence gateway's socket as a
+       * path on OpenBot's own address (`/api/intelligence/client`), and the page resolves a path
+       * against itself, which here is this dev server. Without the upgrade carried on, that socket
+       * is answered with the app's HTML and every conversation waits on it. The app's own sockets
+       * still name the server's port (`announceServerPort` above), so nothing else changes route.
+       */
+      ws: true,
     },
   },
 };
 
+type RouteSplitGroupings = Array<
+  Array<
+    "component" | "pendingComponent" | "errorComponent" | "notFoundComponent"
+  >
+>;
+
+const componentRouteSplit: RouteSplitGroupings = [["component"]];
+
+export function selectedRouteSplitBehavior({
+  routeId,
+}: {
+  routeId: string;
+}): RouteSplitGroupings | undefined {
+  if (routeId === "/" || routeId.startsWith("/__root")) {
+    return undefined;
+  }
+  return componentRouteSplit;
+}
+
+export const routeCodeSplittingOptions = {
+  defaultBehavior: [],
+  splitBehavior: selectedRouteSplitBehavior,
+};
+
+function normalizedModuleId(id: string): string {
+  return id.replaceAll("\\", "/");
+}
+
+function routeComponentSplitPath(id: string): string | undefined {
+  const normalized = normalizedModuleId(id);
+  const [filePath, query = ""] = normalized.split("?");
+  if (new URLSearchParams(query).get("tsr-split") !== "component") {
+    return undefined;
+  }
+  const routesMarker = "/src/routes/";
+  const routesIndex = filePath.lastIndexOf(routesMarker);
+  if (routesIndex === -1) {
+    return undefined;
+  }
+  return filePath.slice(routesIndex + routesMarker.length);
+}
+
+export function selectOpenBotManualChunk(id: string): string | undefined {
+  const routePath = routeComponentSplitPath(id);
+  if (!routePath) {
+    return undefined;
+  }
+  if (routePath === "sign.tsx") {
+    return "route-sign";
+  }
+  if (
+    routePath === "_authed.tsx" ||
+    routePath === "_authed/_app.tsx" ||
+    routePath.startsWith("_authed/_app/channel/")
+  ) {
+    return "route-chat-core";
+  }
+  if (routePath.startsWith("_authed/admin/")) {
+    return "route-admin";
+  }
+  if (routePath.startsWith("_authed/settings/")) {
+    return "route-settings";
+  }
+  if (
+    routePath.startsWith("_authed/_app/") ||
+    routePath === "_authed/onboarding.tsx"
+  ) {
+    return "route-app-secondary";
+  }
+  return undefined;
+}
+
+export const routeBuildRollupOutputOptions = {
+  onlyExplicitManualChunks: true,
+  manualChunks: selectOpenBotManualChunk,
+};
+
 export default defineConfig({
   plugins: [
+    thisMachineOnly(loadEnv("", path.resolve(__dirname, ".."), "")),
     announceServerPort(apiPort.port),
-    tanstackRouter(),
+    tanstackRouter({
+      autoCodeSplitting: true,
+      codeSplittingOptions: routeCodeSplittingOptions,
+    }),
     react(),
     tailwindcss(),
   ],
@@ -106,6 +251,21 @@ export default defineConfig({
     // dedupe keeps Vite on the v2 copy declared in app/package.json.
     dedupe: ["@bufbuild/protobuf"],
   },
+  /*
+   * The release this build is made for, which an error report from the app carries
+   * (lib/error-reporting.tsx). An image built for a release sets OPENBOT_BUILD_VERSION; any other
+   * build leaves it empty, and the report then says no version.
+   */
+  define: {
+    __OPENBOT_APP_VERSION__: JSON.stringify(
+      process.env.OPENBOT_BUILD_VERSION ?? "",
+    ),
+  },
   server: serving,
   preview: serving,
+  build: {
+    rollupOptions: {
+      output: routeBuildRollupOutputOptions,
+    },
+  },
 });

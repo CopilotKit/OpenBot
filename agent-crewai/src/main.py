@@ -2,17 +2,24 @@
 
 The third harness in the box, and the first built the way every one after it will be: the AG-UI
 integration that CrewAI's own ecosystem publishes, mounted on FastAPI, with nothing of the protocol
-written here. `agent-bot` and `agent-langgraph` speak AG-UI by hand because they predate the rule
-that we do not write adapters. This one imports `ag_ui_crewai` and stops.
+written here: we do not write adapters. This one imports `ag_ui_crewai` and stops.
 
 The contract with the rest of OpenBot is the same one the other Bots meet, and it is small:
 serve AG-UI on a port, answer `/health`, and refuse anybody who does not carry the server's token.
 """
 
+import hmac
 import os
+import sys
 from collections.abc import Mapping
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 import ag_ui_crewai.endpoint as crewai_endpoint
 from ag_ui.core import Message, Tool
@@ -37,10 +44,19 @@ def _model() -> str:
     `BOT_PROVIDER` and `BOT_MODEL` are set by the shell from the model screen. litellm addresses a
     model as `provider/model`, and it reads that provider's key from the environment itself, which
     is why nothing here touches a key.
+
+    The model half is whatever the endpoint publishes, slashes included. litellm takes the first
+    path component as the provider and sends the rest as the model name, so a name that already
+    contains a slash still needs the chosen provider in front: `qwen/qwen3-8b` on an
+    OpenAI-compatible endpoint is `openai/qwen/qwen3-8b`, and `openai/gpt-5.6-terra` is
+    `openai/openai/gpt-5.6-terra`. Treating a slash as "already a provider" dropped the prefix,
+    and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
+    or sent only the second half to the endpoint.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
-    model = (os.environ.get("BOT_MODEL") or "").strip() or "gpt-5.5"
-    return model if "/" in model else f"{provider}/{model}"
+    settings = bot_settings("agent-crewai")
+    provider = settings.provider
+    model = settings.model
+    return f"{provider}/{model}"
 
 
 _PROVIDER_MESSAGE_FIELDS = {
@@ -175,7 +191,7 @@ async def refuse_without_the_server_token(request: Request, call_next):
         offered = (request.headers.get(TOKEN_HEADER) or "").strip()
         # An unset token means unconfigured, not open. A Bot that answers anybody because nobody
         # set a secret is the failure this check exists for.
-        if not expected or offered != expected:
+        if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
             return JSONResponse({"error": "unauthorised"}, status_code=401)
     return await call_next(request)
 

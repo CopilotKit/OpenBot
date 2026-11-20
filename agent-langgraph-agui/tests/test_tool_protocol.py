@@ -7,9 +7,10 @@ server is deterministic; these checks are protocol regressions, not live bot pro
 import asyncio
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 from uuid import uuid4
 
 import httpx
@@ -82,6 +83,29 @@ def boundary(monkeypatch):
                 )
                 return
             captured["model"].append(body)
+            if refusal := captured.get("model_refusal"):
+                # A provider's own refusal, status and body exactly as it answers.
+                status, answer = refusal
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(answer).encode())
+                return
+            if status := captured.get("model_status"):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "error": {
+                                "message": "controlled provider refusal",
+                                "type": "authentication_error",
+                            }
+                        }
+                    ).encode()
+                )
+                return
             messages = body["messages"]
             user = next(m["content"] for m in reversed(messages) if m["role"] == "user")
             names = user.split(",")
@@ -229,6 +253,295 @@ async def run_protocol(body, *, allow_error=False):
     return events
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,expected", [(401, True), (403, True), (400, False)])
+async def test_only_provider_auth_status_emits_model_refresh_code(
+    boundary, status, expected
+):
+    boundary["model_status"] = status
+    events = await run_protocol(run_input([]), allow_error=True)
+    errors = [event for event in events if event["type"] == "RUN_ERROR"]
+    assert errors
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    assert (errors[-1].get("code") == "OPENBOT_MODEL_AUTH_REQUIRED") is expected
+    if not expected:
+        # Any other refusal ends the run in the provider's own words.
+        assert "controlled provider refusal" in errors[-1]["message"]
+
+
+# OpenAI's answer to a run offered 202 tools, captured from its API on 2026-11-07. Seen on OpenBot
+# Desktop as "Error code: 400 - Invalid 'tools': array too long. …" in red under the person's message.
+OPENAI_TOO_MANY_TOOLS = (
+    400,
+    {
+        "error": {
+            "message": "Invalid 'tools': array too long. Expected an array with maximum length "
+            "128, but got an array with length 202 instead.",
+            "type": "invalid_request_error",
+            "param": "tools",
+            "code": "array_above_max_length",
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+async def test_a_provider_refusal_is_marked_as_one_for_the_server_to_say_in_words(boundary):
+    boundary["model_refusal"] = OPENAI_TOO_MANY_TOOLS
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    # The provider's words, which the server keeps for its log and reads to notice a retired model,
+    # marked as a refusal so it tells the person in words (server/src/agents/provider-refusal.ts).
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert events[-1]["message"] == (
+        "Error code: 400 - Invalid 'tools': array too long. Expected an array with maximum "
+        "length 128, but got an array with length 202 instead."
+    )
+
+
+# The providers' own billing refusals: xAI's and OpenAI's captured from their APIs on 2026-11-05
+# (the xAI team id zeroed), Anthropic's as its API answers it.
+XAI_SPENDING_LIMIT = (
+    403,
+    {
+        "code": "permission-denied",
+        "error": "Your team 00000000-0000-0000-0000-000000000000 has either used all available "
+        "credits or reached its monthly spending limit. To continue making API requests, please "
+        "purchase more credits or raise your spending limit.",
+    },
+)
+OPENAI_NO_CREDITS = (
+    429,
+    {
+        "error": {
+            "message": "You have no credits remaining. Add credits to continue using the API at "
+            "https://platform.openai.com/settings/organization/billing/.",
+            "type": "insufficient_quota",
+            "param": None,
+            "code": "credit_balance_exhausted",
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal,said",
+    [
+        (XAI_SPENDING_LIMIT, "has either used all available credits"),
+        (OPENAI_NO_CREDITS, "You have no credits remaining"),
+    ],
+)
+async def test_a_provider_out_of_credit_is_told_as_that_never_as_sign_in_again(
+    boundary, refusal, said
+):
+    boundary["model_refusal"] = refusal
+    events = await run_protocol(run_input([]), allow_error=True)
+    errors = [event for event in events if event["type"] == "RUN_ERROR"]
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    message = errors[-1]["message"]
+    assert "Sign in" not in message
+    assert errors[-1].get("code") == "OPENBOT_MODEL_BILLING"
+    assert "out of credit or has reached its spending limit" in message
+    assert said in message
+
+
+# OpenBot's sign-in proxy answering for Google, as it passes on Google's own refusals: Google's
+# words (captured with a free-tier Gemini sign-in on 2026-11-17), and the kind of refusal as `type`.
+GEMINI_SIGN_IN_QUOTA = (
+    429,
+    {
+        "error": {
+            "message": "You exceeded your current quota, please check your plan and billing "
+            "details. For more information on this error, head to: "
+            "https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head "
+            "to: https://ai.dev/rate-limit. Quota exceeded for metric… Please retry in "
+            "9h10m18.213644379s.",
+            "type": "rate_limit",
+            "code": "RESOURCE_EXHAUSTED",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_BUSY = (
+    503,
+    {
+        "error": {
+            "message": "This model is currently experiencing high demand. Spikes in demand are "
+            "usually temporary. Please try again later.",
+            "type": "server_error",
+            "code": "UNAVAILABLE",
+            "param": None,
+        }
+    },
+)
+GEMINI_SIGN_IN_RETIRED = (
+    404,
+    {
+        "error": {
+            "message": "This model models/gemini-2.5-flash is no longer available to new users. "
+            "Please update your code to use models/gemini-3.8-flash for the latest features and "
+            "improvements. We recommend you to use the Interactions API "
+            "(https://aistudio.google.com/docs/get-started).",
+            "type": "model_not_found",
+            "code": "NOT_FOUND",
+            "param": None,
+        }
+    },
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal,category",
+    [
+        (GEMINI_SIGN_IN_QUOTA, "rate_limit"),
+        (GEMINI_SIGN_IN_BUSY, "server_error"),
+        (GEMINI_SIGN_IN_RETIRED, "model_not_found"),
+    ],
+)
+async def test_a_sign_in_refusal_keeps_google_words_and_the_kind_it_names(
+    boundary, refusal, category
+):
+    """Found on OpenBot Desktop signed in with Gemini: "ping" got no answer anybody could read.
+
+    The run ends with Google's own words and the kind the sign-in proxy named, as `errorCategory`,
+    for the server to say. Google's free-tier quota is a limit that resets, never out of credit,
+    however much its words mention billing.
+    """
+    boundary["model_refusal"] = refusal
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    status, body = refusal
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert events[-1]["message"] == f"Error code: {status} - {body['error']['message']}"
+    assert events[-1]["metadata"] == {"errorCategory": category}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_type_that_is_not_a_category_sends_none(boundary):
+    boundary["model_refusal"] = OPENAI_TOO_MANY_TOOLS
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["code"] == "OPENBOT_MODEL_REFUSED"
+    assert not events[-1].get("metadata")
+
+
+def closed_port():
+    """A loopback port with nothing listening on it."""
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_a_model_address_with_nothing_listening_is_told_as_unreachable(
+    boundary, monkeypatch
+):
+    """Seen on OpenBot Desktop: an OpenAI-compatible base URL at host.docker.internal:48123 with
+    nothing listening. The harness log said `openai.APIConnectionError` ("All connection attempts
+    failed") and the person read only "The Bot stopped before it finished answering. Try again.",
+    which says nothing about the model or where to change it."""
+    port = closed_port()
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://synthetic-user:synthetic-secret@127.0.0.1:{port}/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR", "every run ends with a terminal event"
+    # Coded, so the server says it with the step that fits its edition.
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        f"OpenBot couldn't reach the AI model at 127.0.0.1:{port}. "
+        "Check that it's running and the address is right."
+    )
+    # The address is host and port only: never the credentials or the path a URL can carry.
+    assert "synthetic-secret" not in json.dumps(events)
+    assert not boundary["model"], "nothing answered, so nothing was asked"
+
+
+@pytest.mark.asyncio
+async def test_a_model_host_that_does_not_exist_is_told_the_same_way(boundary, monkeypatch):
+    # `.invalid` never resolves (RFC 2606), so this is a DNS failure and never leaves the machine.
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openbot-model.invalid:48123/v1")
+    events = await run_protocol(run_input([]), allow_error=True)
+    assert events[-1]["type"] == "RUN_ERROR"
+    assert events[-1]["code"] == "OPENBOT_MODEL_UNREACHABLE"
+    assert events[-1]["message"] == (
+        "OpenBot couldn't reach the AI model at openbot-model.invalid:48123. "
+        "Check that it's running and the address is right."
+    )
+
+
+def test_a_model_that_never_answers_in_time_is_unreachable_too():
+    """A timeout is the third way an address can't be reached, and is told the same way."""
+    import openai
+
+    from src.tool_runtime import model_address, model_unreachable
+
+    request = httpx.Request("POST", "http://10.0.0.7:8080/v1/chat/completions")
+    timeout = openai.APITimeoutError(request=request)
+    assert model_unreachable(timeout)
+    assert model_address(timeout) == "10.0.0.7:8080"
+    # A provider that answered, with whatever status, is not unreachable: it said something.
+    refusal = openai.APIStatusError(
+        "Error code: 503", response=httpx.Response(503, request=request), body=None
+    )
+    assert not model_unreachable(refusal)
+
+
+def test_the_provider_is_named_by_who_serves_the_model(monkeypatch):
+    from src.tool_runtime import provider_name
+
+    for base, model, name in [
+        ("https://api.x.ai/v1", "grok-4.7", "xAI"),
+        ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.8-flash", "Google"),
+        ("http://host.docker.internal:3001/api/model-provider/v1", "grok-4.7", "xAI"),
+        ("", "gpt-6.1-terra", "OpenAI"),
+    ]:
+        monkeypatch.delenv("CHATGPT_AUTH_FILE", raising=False)
+        monkeypatch.setenv("BOT_PROVIDER", "openai")
+        monkeypatch.setenv("BOT_MODEL", model)
+        if base:
+            monkeypatch.setenv("OPENAI_BASE_URL", base)
+        else:
+            monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        assert provider_name() == name
+    monkeypatch.setenv("BOT_PROVIDER", "anthropic")
+    assert provider_name() == "Anthropic"
+
+
+def test_anthropic_credit_balance_refusal_is_billing():
+    import anthropic
+
+    from src.tool_runtime import billing_refusal
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    body = {
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": "Your credit balance is too low to access the Anthropic API. Please go "
+            "to Plans & Billing to upgrade or purchase credits.",
+        },
+    }
+    error = anthropic.BadRequestError(
+        "Error code: 400", response=httpx.Response(400, request=request, json=body), body=body
+    )
+    message = billing_refusal(error)
+    assert message and "Your credit balance is too low" in message
+    # A refusal for anything else keeps its own handling.
+    other = {"type": "error", "error": {"type": "invalid_request_error", "message": "bad tool"}}
+    assert (
+        billing_refusal(
+            anthropic.BadRequestError(
+                "Error code: 400",
+                response=httpx.Response(400, request=request, json=other),
+                body=other,
+            )
+        )
+        is None
+    )
+
+
 def snapshot(events):
     return next(
         e["messages"] for e in reversed(events) if e["type"] == "MESSAGES_SNAPSHOT"
@@ -239,14 +552,16 @@ def snapshot(events):
 async def test_a2ui_catalog_context_reaches_model_without_entering_history(boundary):
     body = run_input(
         [],
-        messages=[{
-            "id": "context-request", "role": "user", "content": "Draw a trip card"
-        }],
+        messages=[
+            {"id": "context-request", "role": "user", "content": "Draw a trip card"}
+        ],
     )
-    catalog = json.dumps({
-        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json",
-        "components": {"Card": {"properties": {"component": {"const": "Card"}}}},
-    })
+    catalog = json.dumps(
+        {
+            "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json",
+            "components": {"Card": {"properties": {"component": {"const": "Card"}}}},
+        }
+    )
     body["context"] = [
         {
             "description": (
@@ -264,8 +579,7 @@ async def test_a2ui_catalog_context_reaches_model_without_entering_history(bound
     events = await run_protocol(body)
     model_messages = boundary["model"][0]["messages"]
     system = [
-        message["content"] for message in model_messages
-        if message["role"] == "system"
+        message["content"] for message in model_messages if message["role"] == "system"
     ]
     assert any(catalog in content for content in system)
     assert any("Actions use event.name." in content for content in system)
@@ -281,10 +595,12 @@ async def test_a2ui_catalog_context_reaches_model_without_entering_history(bound
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["computer_navigate", "computer_run_command"])
+@pytest.mark.parametrize("name", ["computer_navigate", "computer_run_command", "copilotkit_load_skill", "copilotkit_read_skill_file"])
 async def test_surface_tool_calls_end_then_consume_actual_client_result(boundary, name):
     body = run_input([name])
+    body["context"] = [{"description": "OpenBot learned skills", "value": "LEARNED_CATALOG_MARKER"}]
     first = await run_protocol(body)
+    assert "LEARNED_CATALOG_MARKER" in json.dumps(boundary["model"][0]["messages"])
     assert [t["function"]["name"] for t in boundary["model"][0].get("tools", [])] == [
         name
     ]
@@ -403,13 +719,55 @@ async def test_http_refusal_is_not_reported_as_tool_success(boundary):
 async def test_http_refusal_tells_the_model_the_deployments_reason(
     boundary, status, reply, expected
 ):
-    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`. The
-    # TypeScript LangGraph Bot passes that reason on (`agent-langgraph/src/tool-answer.ts`); without
-    # it the model knows only a status code, and cannot tell the person why or repair its call.
+    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`, and
+    # the harness passes that reason on: without it the model knows only a status code, and cannot
+    # tell the person why or repair its call.
     boundary["callback_status"] = status
     boundary["callback_body"] = reply
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
     assert boundary["model"][-1]["messages"][-1]["content"] == expected
+
+
+@pytest.mark.asyncio
+async def test_computer_calls_made_together_run_one_at_a_time_in_order(boundary):
+    # A model that calls tools in parallel sends a form's fields in one step. A Bot has one browser,
+    # and side by side the fields took the focus from each other; a click could overtake the typing.
+    names = ["computer_type", "computer_click", "computer_key", "granted_lookup"]
+    computer = names[:3]
+    running = {"now": 0, "most": 0}
+    spans = {}
+    lock = Lock()
+
+    def authorize(body, _token):
+        started = time.monotonic()
+        with lock:
+            if body["name"] in computer:
+                running["now"] += 1
+                running["most"] = max(running["most"], running["now"])
+        # Long enough that calls sent together would overlap.
+        time.sleep(0.15)
+        with lock:
+            if body["name"] in computer:
+                running["now"] -= 1
+            spans[body["name"]] = (started, time.monotonic())
+        return 200
+
+    boundary["callback_authorize"] = authorize
+    events = await run_protocol(run_input(names, deployment=names))
+    called = [each["body"]["name"] for each in boundary["callback"]]
+    assert [name for name in called if name in computer] == computer
+    assert running["most"] == 1
+    # Everything else still runs beside them: the lookup overlaps the computer's calls rather than waiting for them.
+    lookup_start, lookup_end = spans["granted_lookup"]
+    assert any(
+        start < lookup_end and lookup_start < end
+        for name, (start, end) in spans.items()
+        if name in computer
+    )
+    # The model reads each answer against the call it made, in the order it made them.
+    assert [
+        m["toolCallId"] for m in snapshot(events) if m.get("role") == "tool"
+    ] == ["call-" + name for name in names]
 
 
 @pytest.mark.asyncio
@@ -445,15 +803,19 @@ async def test_concurrent_requests_keep_tool_ownership_and_assertions_separate(
 
 
 @pytest.mark.asyncio
-async def test_undeclared_model_tool_is_refused_without_callback(boundary):
+async def test_undeclared_model_tool_is_handed_back_without_callback(boundary):
+    """A call to a tool this run was not offered is never run here, and never ends the run in an
+    error: it is handed back for the caller to answer, as a call the surface owns is."""
     boundary["force_call"] = "undeclared_tool"
     events = await run_protocol(
         run_input(["granted_lookup"], deployment=["granted_lookup", "undeclared_tool"]),
         allow_error=True,
     )
-    assert any(
-        e["type"] == "RUN_ERROR" and "not offered" in e["message"] for e in events
-    )
+    assert not any(e["type"] == "RUN_ERROR" for e in events)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert [
+        e["toolCallName"] for e in events if e["type"] == "TOOL_CALL_START"
+    ] == ["undeclared_tool"]
     assert boundary["callback"] == []
 
 
@@ -603,3 +965,12 @@ async def test_chatgpt_plan_sdk_emits_both_surface_calls_and_consumes_results(
     assert all("public marker 43" in part["output"] for part in results)
     assert "Both client results: public marker 43" in json.dumps(snapshot(second))
     assert "synthetic-access" not in json.dumps(first + second)
+    # Streamed owners and final history must describe the same messages. A
+    # Responses API metadata-only chunk has the provider ID before text/tools.
+    for events in (first, second):
+        final_ids = {message["id"] for message in snapshot(events)}
+        for event in events:
+            if event["type"] == "TEXT_MESSAGE_START":
+                assert event["messageId"] in final_ids
+            elif event["type"] == "TOOL_CALL_START":
+                assert event["parentMessageId"] in final_ids

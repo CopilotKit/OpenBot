@@ -1,35 +1,67 @@
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { SECRET_FIELD_BY_REF } from "@openbot/shared/computer-control";
+import {
+  SEND_FILE_NO_CONVERSATION,
+  SEND_FILE_TOOL,
+  SEND_FILE_TOOL_DESCRIPTION,
+} from "@openbot/shared/send-file";
 import { z } from "zod";
+import { SentFileCard } from "@/components/channels/sent-file-card";
 import { ToolLine } from "@/components/channels/tool-line";
-import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
-import { tryClient } from "@/lib/client";
-import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
+import { HelpRequestCard } from "@/components/computer/help-request-card";
+import {
+  commandStatus,
+  TerminalBlock,
+} from "@/components/computer/terminal-block";
+import { reportBotDecline } from "@/lib/api/generated/bots/bots";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
+import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
-import { useActiveBotHolder } from "./active-bot";
-import { reportComputerActivity } from "./computer-activity";
+import {
+  runBrowserRead,
+  runHelpRequest,
+  runNavigation,
+} from "@/lib/computers/handoff";
+import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
+import { sentFileOf } from "@/lib/computers/sent-file";
+import {
+  type ToolCallContext,
+  useActiveBotHolder,
+  useBotOfCall,
+} from "./active-bot";
+import { useFrontendTool } from "./approval-tools";
+import { type OfferRule, useOfferedTo } from "./bot-offer";
+import {
+  offeredBrowser,
+  offeredComputer,
+  offeredDrivable,
+  offeredNavigate,
+} from "./computer-available";
 
 /**
  * Frontend registrations for computer tools, including inline rendering and policy-refusal display.
  */
 
+export type { ToolOutcome } from "@/lib/computers/call";
 /** What every computer call returns to the model: either the result, or a reason it did not happen. */
-export type ToolOutcome = Record<string, unknown> & { ok: boolean };
+export { callComputer } from "@/lib/computers/call";
 
 /**
- * Human-assistance wait window. Long enough for a user to return, finite so the run can unblock.
+ * Secret-entry wait window. Browser takeovers use server-authoritative request state instead.
  */
-const WAIT_FOR_PERSON_MS = 10 * 60_000;
+const WAIT_FOR_SECRET_MS = 10 * 60_000;
 
 /** How often the waiting handler asks whether the person has answered yet. */
 const WAIT_POLL_MS = 1_000;
 
-/** Hold the tool call open until the human control/secret prompt is answered, cancelled, or expires. */
-async function waitForPerson(
+/** Hold the secret-entry call open until its masked prompt is answered, cancelled, or expires. */
+async function waitForSecret(
   botId: string,
   done: (state: ControlState) => boolean,
   signal: AbortSignal | undefined,
-  giveUpAfterMs = WAIT_FOR_PERSON_MS,
+  giveUpAfterMs = WAIT_FOR_SECRET_MS,
 ): Promise<"answered" | "gave up" | "cancelled"> {
   const deadline = Date.now() + giveUpAfterMs;
   while (Date.now() < deadline) {
@@ -42,68 +74,6 @@ async function waitForPerson(
   return "gave up";
 }
 
-/**
- * Exported for the test that covers what a Bot is told when a call is refused.
- *
- * The distinctions this draws from a status and a body decide the model's next step, and they are
- * drawn nowhere else, so they are worth pinning without standing up the tool registrations and the
- * runtime around them.
- */
-export async function callComputer(
-  botId: string,
-  path: string,
-  /*
-   * A body, not a `RequestInit`. The client serialises it, so a caller that stringified first would
-   * send a JSON string of a JSON string — which is what happened, briefly, when this moved over.
-   */
-  init?: { method?: string; body?: unknown },
-  signal?: AbortSignal,
-): Promise<ToolOutcome> {
-  // Announce before the call so the screen can open while the action is running.
-  reportComputerActivity(botId);
-  let response: Response;
-  try {
-    response = await tryClient(`/api/computers/${botId}${path}`, {
-      method: init?.method,
-      body: init?.body,
-      // Abort cancels the request and prevents later actions, but cannot undo browser work already executing.
-      signal,
-    });
-  } catch (error) {
-    // An abort is a stopped run, not a computer failure.
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return { ok: false, reason: "Stopped.", stopped: true };
-    }
-    return {
-      ok: false,
-      reason: "The assistant's computer could not be reached.",
-    };
-  }
-
-  const body = (await response.json().catch(() => null)) as Record<
-    string,
-    unknown
-  > | null;
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      reason: (body?.error as string) ?? "That did not work.",
-      // Preserve refusal/stale-ref/control distinctions for the model's next step.
-      ...(response.status === 403
-        ? { refused: true, rule: body?.rule ?? null }
-        : {}),
-      ...(response.status === 409
-        ? body?.humanHasControl === true
-          ? { humanHasControl: true }
-          : { staleRefs: true }
-        : {}),
-    };
-  }
-
-  return { ok: true, ...(body ?? {}) };
-}
-
 /** What a computer tool's render can read back out of its own result. */
 type ComputerOutcome = {
   ok?: boolean;
@@ -111,8 +81,14 @@ type ComputerOutcome = {
   humanHasControl?: boolean;
   entries?: unknown[];
   refused?: boolean;
+  /** Handed to the person, who did it themselves. Done, and not by the Bot. */
+  doneByPerson?: boolean;
+  /** The person said no to it. */
+  declined?: boolean;
   reason?: string;
   staleRefs?: boolean;
+  /** The computer was still starting and the call was not performed. */
+  starting?: boolean;
   elements?: unknown[];
   element?: { role?: string; name?: string };
   /** What a shell call reports back, so the line can show the output rather than only the command. */
@@ -132,61 +108,15 @@ type ComputerOutcome = {
 };
 
 /**
- * What a call printed, as text a person can read.
+ * Read the SDK-render result string so the transcript can distinguish success, refusal, failure and
+ * a step the person did themselves.
  *
- * One helper because the three surfaces this feeds all want the same thing and shape it differently:
- * a command has `stdout` and `stderr`, a file read has `contents`, a listing has `entries`. A refusal
- * carries only its reason, and that is the most useful thing on the line.
- *
- * Never guesses. Something with none of those fields gives an empty string, and the pane says the
- * call printed nothing rather than inventing a summary.
- */
-export function outputOf(result: ToolOutcome): string {
-  if (result.refused === true || result.ok === false) {
-    return typeof result.reason === "string" ? result.reason : "";
-  }
-
-  // `text`, which is what the read route answers with. Not `contents`: that is the name on the way
-  // in, and reading it back gave an empty pane for a file the Bot had just read out loud.
-  if (typeof result.text === "string") return result.text;
-
-  if (Array.isArray(result.entries)) {
-    return result.entries
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") return String(entry);
-        const { path, kind, bytes } = entry as Record<string, unknown>;
-        const label = String(path ?? "");
-        // A trailing slash for a folder, the way a terminal marks one, so a listing of a workspace
-        // full of folders does not read as a list of extensionless files.
-        if (kind === "folder") return `${label}/`;
-        return typeof bytes === "number" ? `${label}  ${bytes} bytes` : label;
-      })
-      .join("\n");
-  }
-
-  const stdout = typeof result.stdout === "string" ? result.stdout : "";
-  const stderr = typeof result.stderr === "string" ? result.stderr : "";
-  // Both, in the order a terminal shows them, and labelled only when there is something on stderr:
-  // most commands write nothing there and a permanent empty heading is noise.
-  return stderr ? `${stdout}${stdout ? "\n" : ""}${stderr}` : stdout;
-}
-
-/**
- * Parse the SDK-render result string so the transcript can distinguish success, refusal, and failure.
+ * The Activity pane's reader, so the line and the pane beside it say the same thing. This one read a
+ * sentence (the server's answer for a step that was declined or not carried out) as an empty success,
+ * and the line said "Ran a command ... It printed nothing." beside a pane that said "You declined it."
  */
 function outcomeOf(result: string | undefined): ComputerOutcome {
-  if (!result) return {};
-  try {
-    const parsed = JSON.parse(result) as unknown;
-    return parsed && typeof parsed === "object"
-      ? (parsed as ComputerOutcome)
-      : {};
-  } catch {
-    // Runtime stringifies thrown handlers as "Error: <message>".
-    return result.startsWith("Error:")
-      ? { ok: false, reason: result.slice("Error:".length).trim() }
-      : {};
-  }
+  return (readOutcome(result) ?? {}) as ComputerOutcome;
 }
 
 /**
@@ -208,135 +138,255 @@ function labelOf(result: string | undefined): string | undefined {
  */
 function ActionLine({
   label,
+  attempted,
   detail,
   running,
   refused,
   failed,
+  failedLabel,
+  notYet,
+  byYou,
 }: {
   label: string;
+  /** What was tried, said when the step was refused. See `ToolLine`. */
+  attempted?: string;
+  /** What a failed step says instead of "<label>, didn't work". See `ToolLine`. */
+  failedLabel?: string;
   detail?: string;
   running?: boolean;
   /** A policy or a boundary said no. Final: nothing the Bot does differently will help. */
   refused?: boolean;
   /** It was permitted and did not work. A different request might. */
   failed?: boolean;
+  /** The computer was still starting, so nothing was done yet. See `stillStarting`. */
+  notYet?: boolean;
+  /** It was handed to the person, who did it themselves. See `ToolLine`. */
+  byYou?: boolean;
 }) {
   return (
     <ToolLine
-      detail={detail}
+      attempted={attempted}
+      byYou={byYou}
+      detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
+      failedLabel={failedLabel}
       label={label}
+      notYet={notYet}
       refused={refused}
       running={running}
     />
   );
 }
 
-/** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
-function didNotWork(outcome: ComputerOutcome): boolean {
-  return outcome.ok === false && outcome.refused !== true;
+/** What a line says about a call that waited on a computer still starting. */
+const STILL_STARTING_DETAIL = "The computer is still starting.";
+
+/**
+ * What a refused step's line says after its words: what it was aimed at, then why it did not
+ * happen, as one phrase ("notes.txt · You declined it."). The target alone hid the reason; the reason
+ * alone hid which file or field it was.
+ */
+function refusedDetail(target: string | undefined, outcome: ComputerOutcome) {
+  const reason = outcomeForPerson(String(outcome.reason ?? ""));
+  return [target, reason].filter(Boolean).join(" · ");
 }
 
+/**
+ * A file that was not sent: the server's sentence already names the file ("budget.xlsx can't be
+ * sent. ..."), so the line leads with it rather than saying the name twice in a narrow column.
+ */
+function sendRefusedDetail(path: string | undefined, outcome: ComputerOutcome) {
+  const reason = outcomeForPerson(String(outcome.reason ?? ""));
+  const name = path?.split("/").pop();
+  return name && reason.includes(name) ? reason : refusedDetail(path, outcome);
+}
+
+/** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
+function didNotWork(outcome: ComputerOutcome): boolean {
+  return (
+    outcome.ok === false &&
+    outcome.refused !== true &&
+    outcome.starting !== true
+  );
+}
+
+/**
+ * Whether a call came back because the computer was still starting, and so did nothing.
+ *
+ * Not a failure, and not drawn as one. A cold start can outlast the server's wait, and when it does
+ * the call is turned away before anything reaches the computer. Drawn as "didn't work" in amber, it
+ * read as a broken computer during the one minute every first start takes.
+ */
+function stillStarting(outcome: ComputerOutcome): boolean {
+  return outcome.ok === false && outcome.starting === true;
+}
+
+/** Whether the step was handed to the person and they did it themselves, so the Bot did not. */
+function byPerson(outcome: ComputerOutcome): boolean {
+  return outcome.doneByPerson === true;
+}
+
+/** The site a navigation was asked to open, as its line names it: "x.com", not the whole address. */
+function siteOf(url: unknown): string | undefined {
+  if (typeof url !== "string" || !url.trim()) return undefined;
+  try {
+    return new URL(url.trim()).hostname.replace(/^www\./, "") || url.trim();
+  } catch {
+    return url.trim();
+  }
+}
+
+/**
+ * A navigation in the conversation: the screen while it runs, and the page it opened once it is over.
+ *
+ * ONE LINE, NOT A SCREEN, FOR A NAVIGATION THAT OPENED NOTHING. Refused by a boundary, failed,
+ * stopped, or turned away by a computer still starting, it has no page to show, and its screen used
+ * to stay on as a grey box the width of the conversation saying only "This turn did not open a page."
+ * It is drawn as every other step that did not happen is drawn: "Blocked: Open x.com", in the words
+ * and colours of the lines around it. A step with nothing to report yet, such as one held for the
+ * person's approval, draws nothing here: its approval card says what it is waiting for.
+ */
+function NavigationStep({
+  computerId,
+  url,
+  result,
+  status,
+  toolCallId,
+}: {
+  computerId: string;
+  /** The address the Bot asked for, as it wrote it. */
+  url: unknown;
+  result: string | undefined;
+  status: string;
+  toolCallId: string | undefined;
+}) {
+  /*
+   * A RESULT IS WHAT MAKES A TURN OVER, not the status.
+   *
+   * A restored tool call arrives with its result already in hand and a status that is briefly
+   * something other than complete, so keying on the status alone made every reopened turn look
+   * like one still running: the tile polled the live screen, put today's page under yesterday's
+   * answer, and only then restored the frame it should have shown from the start.
+   */
+  const finished = status === "complete" || result !== undefined;
+  const said = finished ? readOutcome(result) : null;
+  const outcome = (said ?? {}) as ComputerOutcome;
+  /*
+   * The page this turn left open, so reopening the conversation shows what it browsed rather than
+   * what the Bot has open now. Only once the turn is finished: while it runs, the live frames are
+   * its own.
+   */
+  const page =
+    typeof outcome.url === "string"
+      ? {
+          url: outcome.url,
+          ...(typeof outcome.title === "string"
+            ? { title: outcome.title }
+            : {}),
+        }
+      : undefined;
+
+  if (finished && !page) {
+    if (!said) return null;
+    return (
+      <ActionLine
+        label="Opened"
+        attempted="Open"
+        /*
+         * The site alone, even for a refusal. The Bot's answer right after says why it could not go,
+         * and a boundary's reason is the sentence written for the model, rule and all.
+         */
+        detail={siteOf(url)}
+        refused={outcome.refused === true}
+        failed={didNotWork(outcome)}
+        notYet={stillStarting(outcome)}
+        byYou={byPerson(outcome)}
+      />
+    );
+  }
+
+  return (
+    <div className="my-2">
+      <ComputerView
+        computerId={computerId}
+        active={!finished}
+        /*
+         * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it had a
+         * page, so a navigation that was refused, failed or stopped never settled: it kept polling
+         * the live screen under a turn that was over, and offered control of it.
+         */
+        finished={finished}
+        {...(page ? { page } : {})}
+        {...(toolCallId ? { toolCallId } : {})}
+      />
+    </div>
+  );
+}
+
+/**
+ * Who is offered each computer tool: a Bot this person may drive, as far as this deployment's
+ * switches allow. Not offered to a Team Bot's teammates, nor where a switch would refuse it; see
+ * `computerToolsOffered`. Asked of the Bot whose run it is, never the one on screen (`bot-offer.ts`).
+ */
+const OFFERED: Readonly<Record<string, OfferRule>> = {
+  computer_navigate: offeredNavigate,
+  computer_read: offeredBrowser,
+  computer_snapshot: offeredBrowser,
+  computer_type: offeredBrowser,
+  computer_click: offeredBrowser,
+  computer_key: offeredBrowser,
+  computer_request_secret: offeredBrowser,
+  // Audit bookkeeping rather than a computer action, so it answers only the first question.
+  report_refusal: offeredDrivable,
+  computer_request_help: offeredBrowser,
+  computer_list_files: offeredComputer,
+  computer_read_file: offeredComputer,
+  computer_run_command: offeredComputer,
+  computer_write_file: offeredComputer,
+  [SEND_FILE_TOOL]: offeredComputer,
+  computer_scroll: offeredBrowser,
+};
+
 export function ComputerTools() {
+  /*
+   * WHOSE COMPUTER, ASKED TWO WAYS. A handler acts for the Bot that made the call, which a turn the
+   * person walked away from keeps making while another screen, or another Bot, is in front of them;
+   * acting on the screen's Bot there opened pages and ran commands on the wrong computer. A renderer
+   * draws a call in the conversation on screen, whose Bot is the screen's, so it reads the holder.
+   */
+  const botOf = useBotOfCall();
   const bot = useActiveBotHolder();
+  useOfferedTo(OFFERED);
 
   useFrontendTool({
     name: "computer_navigate",
     description:
-      "Open a web page on your own computer so the person can watch. Use this when asked to look " +
-      "at, visit, open or check a website. Returns the page title and its readable text, so answer " +
-      "from what comes back rather than telling the person to go and look.",
+      "Open a web page on your own computer so the person can watch. Use this when asked to open, " +
+      "visit or read a particular website. It is not a web search: never open a search engine with " +
+      "it to look something up. Returns the page title and its readable text, so answer from what " +
+      "comes back rather than telling the person to go and look.",
     parameters: z.object({
       url: z.string().describe("Full web address to open, including https://"),
     }),
     handler: async (
       { url }: { url: string },
       // Context is optional in the SDK.
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+      { signal, toolCall, agent }: ToolCallContext = {},
     ) => {
-      const computerId = bot.current;
-      const result = await callComputer(
-        computerId,
-        "/navigate",
-        {
-          method: "POST",
-          /*
-           * Which turn is asking, so the server can file the picture under it.
-           *
-           * The handler's context carries the tool call, which is worth saying because assuming it
-           * did not is how the frame ended up keyed on the page instead: two visits to one address
-           * then collided, and resolving that by letting the newer win made a past turn's picture
-           * change under the person reading it.
-           */
-          body: { url, ...(toolCall?.id ? { toolCallId: toolCall.id } : {}) },
-        },
-        signal,
-      );
-      /*
-       * This Bot has a page of its own now, so the pane may default to the screen.
-       *
-       * Until it does, the screen shows whatever the shared computer had open last, which may be
-       * another Bot's page from an hour ago. Captioning that as this Bot's screen is confidently
-       * wrong, and worse than showing nothing.
-       */
+      const computerId = botOf(agent);
+      const result = await runNavigation(computerId, url, toolCall?.id, signal);
       if (result.ok) noteBrowsed(computerId);
-      return result.ok
-        ? {
-            ok: true,
-            title: result.title,
-            url: result.url,
-            text: result.text,
-            truncated: result.truncated,
-          }
-        : result;
+      return result;
     },
-    render: ({ result, status, toolCallId }) => {
-      /*
-       * The page this turn left open, so reopening the conversation shows what it browsed rather
-       * than what the Bot has open now. Only once the turn is finished: while it runs, the live
-       * frames are its own.
-       */
-      /*
-       * A RESULT IS WHAT MAKES A TURN OVER, not the status.
-       *
-       * A restored tool call arrives with its result already in hand and a status that is briefly
-       * something other than complete, so keying on the status alone made every reopened turn look
-       * like one still running: the tile polled the live screen, put today's page under yesterday's
-       * answer, and only then restored the frame it should have shown from the start.
-       */
-      const finished = status === "complete" || result !== undefined;
-      const outcome = finished ? outcomeOf(result) : {};
-      const page =
-        typeof outcome.url === "string"
-          ? {
-              url: outcome.url,
-              ...(typeof outcome.title === "string"
-                ? { title: outcome.title }
-                : {}),
-            }
-          : undefined;
-      return (
-        <div className="my-2">
-          <ComputerView
-            computerId={bot.current}
-            active={!finished}
-            /*
-             * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it
-             * had a page, so a navigation that was refused, failed or stopped never settled: it kept
-             * polling the live screen under a turn that was over, and offered control of it. Those
-             * are the turns most worth freezing, because the thing on screen has nothing to do with
-             * what the person is reading.
-             */
-            finished={finished}
-            {...(page ? { page } : {})}
-            {...(toolCallId ? { toolCallId } : {})}
-          />
-        </div>
-      );
-    },
+    render: ({ args, result, status, toolCallId }) => (
+      <NavigationStep
+        computerId={bot.current}
+        url={args?.url}
+        result={result}
+        status={status}
+        toolCallId={toolCallId}
+      />
+    ),
   });
 
   useFrontendTool({
@@ -345,7 +395,10 @@ export function ComputerTools() {
       "Read the page currently open on your computer, without opening anything. Use this after you " +
       "click something that changes the page, such as submitting a form, to find out what it now says.",
     parameters: z.object({}),
-    handler: async () => callComputer(bot.current, "/read"),
+    handler: async (
+      _input: Record<string, never>,
+      { signal, toolCall, agent }: ToolCallContext = {},
+    ) => runBrowserRead(botOf(agent), "/read", toolCall?.id, signal),
     render: () => null,
   });
 
@@ -357,8 +410,10 @@ export function ComputerTools() {
       "use the refs it returns. Always send back the snapshotId it gives you. If an action reports " +
       "that your refs are stale, the page changed: call this again and use the new refs.",
     parameters: z.object({}),
-    handler: async () =>
-      callComputer(bot.current, "/snapshot", { method: "POST" }),
+    handler: async (
+      _input: Record<string, never>,
+      { signal, toolCall, agent }: ToolCallContext = {},
+    ) => runBrowserRead(botOf(agent), "/snapshot", toolCall?.id, signal),
     // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -401,10 +456,10 @@ export function ComputerTools() {
         text: string;
         submit?: boolean;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/type",
         {
           method: "POST",
@@ -416,13 +471,20 @@ export function ComputerTools() {
       <ActionLine
         running={status !== "complete"}
         label="Filled in"
-        detail={
+        attempted="Fill in"
+        detail={(() => {
           // Never show typed values; identify only the target field.
-          labelOf(result) ??
-          (typeof args?.ref === "string" ? args.ref : undefined)
-        }
+          const field =
+            labelOf(result) ??
+            (typeof args?.ref === "string" ? args.ref : undefined);
+          return outcomeOf(result).refused === true
+            ? refusedDetail(field, outcomeOf(result))
+            : field;
+        })()}
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });
@@ -442,10 +504,10 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/click",
         {
           method: "POST",
@@ -459,15 +521,18 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           label="Clicked"
+          attempted="Click"
           detail={
-            // Show refusal reason instead of an internal element ref.
+            // A refusal names the element only by the label the server resolved, never its ref.
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? refusedDetail(labelOf(result), outcome)
               : (labelOf(result) ??
                 (typeof args?.ref === "string" ? args.ref : undefined))
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -492,10 +557,10 @@ export function ComputerTools() {
         ref?: string;
         snapshotId?: number;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/key",
         {
           method: "POST",
@@ -507,9 +572,21 @@ export function ComputerTools() {
       <ActionLine
         running={status !== "complete"}
         label="Pressed"
-        detail={typeof args?.key === "string" ? args.key : undefined}
+        attempted="Press"
+        detail={
+          outcomeOf(result).refused === true
+            ? refusedDetail(
+                typeof args?.key === "string" ? args.key : undefined,
+                outcomeOf(result),
+              )
+            : typeof args?.key === "string"
+              ? args.key
+              : undefined
+        }
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });
@@ -517,12 +594,14 @@ export function ComputerTools() {
   useFrontendTool({
     name: "computer_request_secret",
     description:
-      "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
-      "Focus the field first with computer_click, then call this with the ref of that field and a " +
-      "short label for what you need. They type it into a masked box that goes straight to the page. " +
+      "Ask the person for a single value you must not be told: a password, a one-time code, a card number. " +
+      `${SECRET_FIELD_BY_REF} Add a short label for what you need. ` +
+      "They type it into a masked box that goes straight to the page. " +
       "You will never see the value, and you must not ask for it any other way. Prefer this over a " +
-      "full takeover when you only need one field filled in. The value is only TYPED into the field: " +
-      "if the form needs submitting, do that yourself afterwards with computer_click.",
+      "full takeover when you only need one field filled in, unless the person asked to type it " +
+      "themselves or to take over the browser: then call computer_request_help instead. The value is " +
+      "only TYPED into the field: if the form needs submitting, do that yourself afterwards with " +
+      "computer_click.",
     parameters: z.object({
       label: z
         .string()
@@ -538,9 +617,9 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
-      const botId = bot.current;
+      const botId = botOf(agent);
       const asked = await callComputer(
         botId,
         "/control/secret",
@@ -552,21 +631,20 @@ export function ComputerTools() {
       );
       if (!asked.ok) return asked;
 
-      // Completion is `secretWanted` clearing; the value never returns to the model.
-      const outcome = await waitForPerson(
+      // Over when this request is, and answered only if the computer says its value was typed
+      // (`secretAnswer`). The value never returns to the model.
+      const id =
+        typeof asked.secretId === "string" ? asked.secretId : undefined;
+      const seen: { last: ControlState | null } = { last: null };
+      const outcome = await waitForSecret(
         botId,
-        (state) => state.secretWanted === undefined,
+        (state) => {
+          seen.last = state;
+          return secretRequestOver(id, state);
+        },
         signal,
       );
-      return {
-        ok: true,
-        result:
-          outcome === "answered"
-            ? `The person has entered ${input.label} into the field. It was typed straight into the page and you were not told what it is.`
-            : outcome === "cancelled"
-              ? "The request was cancelled."
-              : `Nobody entered ${input.label}. Do not ask for it another way.`,
-      };
+      return secretAnswer(input.label, id, outcome, seen.last);
     },
     // Rendered by ComputerView as a masked prompt.
     render: () => null,
@@ -592,16 +670,20 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string; request?: string },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) => {
       try {
-        const response = await tryClient(
-          `/api/agents/${encodeURIComponent(bot.current)}/declined`,
-          { method: "POST", body: input, signal },
+        await reportBotDecline(
+          organizationId(),
+          botOf(agent),
+          {
+            reason: input.reason,
+            ...(input.request !== undefined ? { request: input.request } : {}),
+          },
+          { "Idempotency-Key": idempotencyKey() },
+          { signal },
         );
-        return response.ok
-          ? "Recorded. Now tell the person what you decided and why."
-          : "That could not be recorded. Tell the person what you decided anyway.";
+        return "Recorded. Now tell the person what you decided and why.";
       } catch {
         // Audit bookkeeping must not prevent the Bot from answering.
         return "That could not be recorded. Tell the person what you decided anyway.";
@@ -619,7 +701,9 @@ export function ComputerTools() {
       "Use this INSTEAD of giving up, and instead of ever asking them to type a password to you. " +
       "This call is the only thing that reaches them: until you make it they are not looking at the " +
       "page and have no way to help, so saying you need them to sign in, or asking whether they would " +
-      "like to proceed, hands over nothing and leaves the page where it is.",
+      "like to proceed, hands over nothing and leaves the page where it is. " +
+      "Also call this whenever the person asks to take over the browser, or to type a password or " +
+      "anything else into it themselves: they are asking for the browser, not for computer_request_secret.",
     parameters: z.object({
       reason: z
         .string()
@@ -629,38 +713,17 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string },
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
-      const botId = bot.current;
-      const asked = await callComputer(
-        botId,
-        "/control/request",
-        {
-          method: "POST",
-          body: input,
-        },
-        signal,
-      );
-      if (!asked.ok) return asked;
-
-      // Resolved when the wheel is back with the Bot and no help request remains outstanding.
-      const outcome = await waitForPerson(
-        botId,
-        (state) => state.holder === "bot" && !state.requested,
-        signal,
-      );
-      return {
-        ok: true,
-        result:
-          outcome === "answered"
-            ? "The person has finished and handed control back. Take a fresh snapshot: the page may have changed while they were driving."
-            : outcome === "cancelled"
-              ? "The request was cancelled."
-              : "Nobody took control. Say what you still need rather than trying to do it yourself.",
-      };
-    },
-    // Rendered by ComputerView as the take-the-wheel prompt.
-    render: () => null,
+      { signal, toolCall, agent }: ToolCallContext = {},
+    ) => runHelpRequest(botOf(agent), input.reason, toolCall?.id, signal),
+    // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
+    render: ({ args, result, toolCallId }) => (
+      <HelpRequestCard
+        botId={bot.current}
+        reason={typeof args?.reason === "string" ? args.reason : undefined}
+        result={result}
+        toolCallId={toolCallId}
+      />
+    ),
   });
 
   useFrontendTool({
@@ -675,20 +738,15 @@ export function ComputerTools() {
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
-    handler: async (input: { path?: string }) => {
-      const computerId = bot.current;
-      const result = await callComputer(computerId, "/files/list", {
+    // Activity is read from the conversation this answer lands in: see `useConversationActivity`.
+    handler: async (
+      input: { path?: string },
+      { agent }: ToolCallContext = {},
+    ) =>
+      callComputer(botOf(agent), "/files/list", {
         method: "POST",
         body: input ?? {},
-      });
-      recordActivity(computerId, {
-        kind: "list_files",
-        subject: input?.path ?? "the workspace",
-        output: outputOf(result),
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
+      }),
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
       const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
@@ -696,15 +754,20 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           label="Listed files"
+          attempted="List files"
           detail={
             outcome.refused === true || didNotWork(outcome)
-              ? String(outcome.reason ?? "")
-              : entries.length
-                ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
-                : "nothing saved yet"
+              ? outcomeForPerson(String(outcome.reason ?? ""))
+              : byPerson(outcome)
+                ? undefined
+                : entries.length
+                  ? `${entries.length} item${entries.length === 1 ? "" : "s"} in the workspace`
+                  : "nothing saved yet"
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -721,35 +784,32 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }) => {
-      const computerId = bot.current;
-      const result = await callComputer(computerId, "/files/read", {
+    handler: async (input: { path: string }, { agent }: ToolCallContext = {}) =>
+      callComputer(botOf(agent), "/files/read", {
         method: "POST",
         body: input,
-      });
-      recordActivity(computerId, {
-        kind: "read_file",
-        subject: input.path,
-        output: outputOf(result),
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
+      }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
           running={status !== "complete"}
           label="Read file"
+          attempted="Read file"
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? refusedDetail(
+                  typeof args?.path === "string" ? args.path : undefined,
+                  outcome,
+                )
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -763,79 +823,76 @@ export function ComputerTools() {
       "directory is your workspace, so paths are relative to it and files you write here are the " +
       "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
       "truncated from the start, and a command that runs too long is stopped. " +
-      "You are not the root user, so anything that writes outside your workspace needs sudo, " +
-      "which asks for no password: installing a package is " +
-      "`sudo apt-get update && sudo apt-get install -y <package>`. If sudo is refused, this " +
-      "computer does not grant it, so say so rather than retrying.",
+      "Installed: Python 3 (`python3`) with pip, openpyxl, pandas, python-docx, python-pptx, " +
+      "matplotlib, pypdf, pdfplumber and reportlab; Node.js and Bun; curl, unzip and the usual " +
+      "Linux tools. There is no LibreOffice, so nothing here calculates spreadsheet formulas: " +
+      "write them with openpyxl and Excel or Google Sheets calculates them when the file is " +
+      "opened. `pip install <package>` adds a Python package. " +
+      "For package installation, check `id -u` first. As root (0), use " +
+      "`apt-get update && apt-get install -y <package>` directly; otherwise use " +
+      "`sudo openbot-apt update && sudo openbot-apt install <package>`, which takes package " +
+      "names and nothing else, not `sudo apt-get`. If installation is refused, say so rather " +
+      "than retrying.",
     parameters: z.object({
       command: z
         .string()
-        .describe("The command to run, such as: sudo apt-get install -y jq"),
+        .describe(
+          "The command to run, such as: apt-get install -y jq (as root)",
+        ),
     }),
+    /*
+     * NOT WHERE ACTIVITY IS RECORDED, though it once was. A command is a change, and the approval
+     * wrapper sends a change to the server's gate without calling this at all: the gate runs it and
+     * answers, or runs it after a person allows it and continues the conversation itself. Recorded
+     * here, the pane beside the screen stayed empty while a Bot ran command after command. Every one
+     * of those paths ends with the answer in the conversation, which is what the pane reads; see
+     * `useConversationActivity`.
+     */
     handler: async (
       input: { command: string },
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
-      const computerId = bot.current;
-      const result = await callComputer(
-        computerId,
+      { signal, agent }: ToolCallContext = {},
+    ) =>
+      callComputer(
+        botOf(agent),
         "/exec",
         { method: "POST", body: input },
         signal,
-      );
-      /*
-       * Recorded here rather than in `render`, which runs again on every re-render and would append
-       * the same command each time. This is the only place that runs once per call and has both the
-       * command and what it printed.
-       */
-      recordActivity(computerId, {
-        kind: "command",
-        subject: input.command,
-        output: outputOf(result),
-        ...(typeof result.exitCode === "number"
-          ? { exitCode: result.exitCode }
-          : {}),
-        ...(result.refused === true ? { refused: true } : {}),
-        ...(result.truncated === true ? { truncated: true } : {}),
-        ...(result.timedOut === true ? { timedOut: true } : {}),
-      });
-      return result;
-    },
+      ),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       /*
-       * The command on the line, its output behind the chevron.
-       *
-       * The line stays one line, because a transcript of a Bot working through twenty commands is
-       * unreadable if each one dumps a screenful. But the output has to be reachable: this ran on a
-       * machine holding somebody's logins, and "take the model's word for what it printed" is not an
-       * answer. The pane beside the screen shows the same thing without expanding anything.
+       * A terminal block: the prompt and the command, the end of what it printed (the rest folds
+       * away), and how it exited, clicking through to the live terminal in the Computer panel. This
+       * ran on a machine holding somebody's logins, so what it printed is always reachable here
+       * rather than taken on the model's word.
        */
-      const printed = outputOf(outcome as ToolOutcome);
-      const exit = typeof outcome.exitCode === "number" ? outcome.exitCode : 0;
+      const byYou = byPerson(outcome);
+      const refused = outcome.refused === true;
       return (
-        <ToolLine
-          running={status !== "complete"}
-          label="Ran a command"
-          detail={
-            outcome.refused === true
-              ? String(outcome.reason ?? "")
-              : typeof args?.command === "string"
-                ? args.command
-                : undefined
+        <TerminalBlock
+          command={typeof args?.command === "string" ? args.command : ""}
+          computerId={bot.current}
+          output={
+            refused
+              ? outcomeForPerson(String(outcome.reason ?? ""))
+              : stillStarting(outcome)
+                ? STILL_STARTING_DETAIL
+                : outputOf(outcome as ToolOutcome)
           }
-          refused={outcome.refused === true}
-          failed={didNotWork(outcome) || exit !== 0}
-        >
-          {status === "complete" ? (
-            <CommandOutput
-              output={printed}
-              exitCode={exit}
-              truncated={outcome.truncated === true}
-              timedOut={outcome.timedOut === true}
-            />
-          ) : null}
-        </ToolLine>
+          status={commandStatus({
+            running: status !== "complete",
+            starting: stillStarting(outcome),
+            refused,
+            declined: outcome.declined === true,
+            byYou,
+            ...(typeof outcome.exitCode === "number"
+              ? { exitCode: outcome.exitCode }
+              : {}),
+            timedOut: outcome.timedOut === true,
+            failed: didNotWork(outcome),
+          })}
+          truncated={outcome.truncated === true}
+        />
       );
     },
   });
@@ -858,50 +915,91 @@ export function ComputerTools() {
         .optional()
         .describe("Add to the end of the file instead of replacing it"),
     }),
-    handler: async (input: {
-      path: string;
-      contents: string;
-      append?: boolean;
-    }) => {
-      const computerId = bot.current;
-      const result = await callComputer(computerId, "/files/write", {
+    handler: async (
+      input: {
+        path: string;
+        contents: string;
+        append?: boolean;
+      },
+      { agent }: ToolCallContext = {},
+    ) =>
+      callComputer(botOf(agent), "/files/write", {
         method: "POST",
         body: input,
-      });
-      /*
-       * The path and the size, never the contents. A Bot may well be saving something it was told in
-       * confidence, and the write route declines to echo it back for exactly that reason; putting it
-       * in a pane would undo that.
-       */
-      recordActivity(computerId, {
-        kind: "write_file",
-        subject: input.path,
-        output:
-          result.refused === true
-            ? outputOf(result)
-            : typeof result.bytes === "number"
-              ? `${result.bytes} bytes${input.append === true ? ", appended" : ""}`
-              : "",
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
+      }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
           running={status !== "complete"}
-          label={args?.append === true ? "Added to file" : "Saved file"}
+          // The words the approval card and Activity use for the same action.
+          label={args?.append === true ? "Added to a file" : "Saved a file"}
+          attempted={args?.append === true ? "Add to a file" : "Save a file"}
+          // Not "Saved a file, didn't work": nothing was saved, so the line says so.
+          failedLabel={
+            args?.append === true
+              ? "Didn't add to a file"
+              : "Didn't save a file"
+          }
           // Show the path, never file contents.
           detail={
             outcome.refused === true
-              ? String(outcome.reason ?? "")
+              ? refusedDetail(
+                  typeof args?.path === "string" ? args.path : undefined,
+                  outcome,
+                )
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
+        />
+      );
+    },
+  });
+
+  useFrontendTool({
+    name: SEND_FILE_TOOL,
+    description: SEND_FILE_TOOL_DESCRIPTION,
+    parameters: z.object({
+      path: z
+        .string()
+        .describe(
+          "Path of the file relative to your workspace, such as reports/august.pdf",
+        ),
+    }),
+    /*
+     * NEVER CALLED IN A CONVERSATION. Sending a file is in the approval wrapper's `writes`, so it
+     * always goes to the server's gate with the conversation: the server pulls the file through the
+     * governed download, stores it in this conversation and answers with it. This answers only a
+     * surface with no conversation to send a file into.
+     */
+    handler: async () => ({ ok: false, reason: SEND_FILE_NO_CONVERSATION }),
+    render: ({ args, result, status }) => {
+      const sent = sentFileOf(readOutcome(result));
+      if (sent) return <SentFileCard file={sent} />;
+      const outcome = outcomeOf(result);
+      const path = typeof args?.path === "string" ? args.path : undefined;
+      const finished = status === "complete" || result !== undefined;
+      return (
+        <ActionLine
+          running={!finished}
+          label={finished ? "Sent a file" : "Sending a file"}
+          attempted="Send a file"
+          // Not "Sent a file, didn't work": nothing arrived, so the line says so.
+          failedLabel="Didn't send a file"
+          detail={
+            outcome.refused === true || didNotWork(outcome)
+              ? sendRefusedDetail(path, outcome)
+              : path
+          }
+          refused={outcome.refused === true}
+          failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
         />
       );
     },
@@ -919,10 +1017,10 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { deltaY?: number },
-      { signal }: { signal?: AbortSignal } = {},
+      { signal, agent }: ToolCallContext = {},
     ) =>
       callComputer(
-        bot.current,
+        botOf(agent),
         "/scroll",
         {
           method: "POST",
@@ -934,8 +1032,11 @@ export function ComputerTools() {
       <ActionLine
         running={status !== "complete"}
         label="Scrolled"
+        attempted="Scroll"
         refused={outcomeOf(result).refused === true}
         failed={didNotWork(outcomeOf(result))}
+        notYet={stillStarting(outcomeOf(result))}
+        byYou={byPerson(outcomeOf(result))}
       />
     ),
   });

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
-import { Badge, GalleryFrame, type Tone } from "./frame";
+import { Badge, FigureLink, GalleryFrame, type Tone } from "./frame";
+import { GalleryMarkdown } from "./markdown";
+import { byPosition } from "./positions";
 
 const tone = z
   .enum(["neutral", "positive", "caution", "negative"])
@@ -43,11 +45,14 @@ export function RecordCard({
       title={title}
     >
       <dl className="grid grid-cols-[minmax(0,10rem)_1fr] gap-x-4 gap-y-2 text-sm">
-        {fields.map((field) => (
-          <div className="contents" key={field.label}>
+        {byPosition(fields).map(({ item: field, key }) => (
+          // Keyed by position: a label is still being typed while the card draws.
+          <div className="contents" key={key}>
             <dt className="truncate text-muted-foreground">{field.label}</dt>
             {/* Field values wrap because truncation can hide the reported data. */}
-            <dd className="min-w-0 break-words">{field.value}</dd>
+            <dd className="min-w-0 break-words">
+              <GalleryMarkdown>{field.value}</GalleryMarkdown>
+            </dd>
           </div>
         ))}
       </dl>
@@ -70,6 +75,12 @@ export const MetricsCardProps = z.object({
           .optional()
           .describe("The movement, e.g. '+12% on last month'"),
         changeTone: tone.optional(),
+        link: z
+          .string()
+          .optional()
+          .describe(
+            "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+          ),
       }),
     )
     .max(6)
@@ -85,8 +96,12 @@ export function MetricsCard({
   return (
     <GalleryFrame caption={caption} title={title}>
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-        {metrics.map((metric) => (
-          <div key={metric.label}>
+        {byPosition(metrics).map(({ item: metric, key }) => (
+          <FigureLink
+            href={metric.link}
+            key={key}
+            name={`${metric.label}: ${metric.value}`}
+          >
             <p className="truncate text-xs text-muted-foreground">
               {metric.label}
             </p>
@@ -98,7 +113,7 @@ export function MetricsCard({
                 <Badge tone={metric.changeTone as Tone}>{metric.change}</Badge>
               </p>
             ) : null}
-          </div>
+          </FigureLink>
         ))}
       </div>
     </GalleryFrame>
@@ -112,14 +127,14 @@ export const ChecklistCardProps = z.object({
     .array(
       z.object({
         text: z.string(),
-        done: z.boolean().describe("Whether this one is already finished"),
+        done: z.boolean().describe("Whether this task is already finished"),
         note: z
           .string()
           .optional()
           .describe("A short aside, e.g. who it is waiting on"),
       }),
     )
-    .describe("The items, in the order they should be done"),
+    .describe("The tasks, in the order they should be done"),
 });
 
 /**
@@ -148,8 +163,8 @@ export function ChecklistCard({
       title={title}
     >
       <ul className="space-y-2">
-        {items.map((item) => (
-          <li className="flex items-start gap-2.5 text-sm" key={item.text}>
+        {byPosition(items).map(({ item, key }) => (
+          <li className="flex items-start gap-2.5 text-sm" key={key}>
             <span
               aria-hidden="true"
               className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px] ${
@@ -160,20 +175,22 @@ export function ChecklistCard({
             >
               {item.done ? "✓" : ""}
             </span>
-            <span className="min-w-0">
-              <span
-                className={
-                  item.done ? "text-muted-foreground line-through" : ""
-                }
-              >
-                {item.text}
-              </span>
-              {item.note ? (
-                <span className="block text-xs text-muted-foreground">
-                  {item.note}
+            {/*
+             * Done is the tick and a muted line, never a line through it. A strike reads as deleted,
+             * and a list whose every item is finished was drawn as an answer crossed out.
+             */}
+            <div className="min-w-0">
+              <div className={item.done ? "text-muted-foreground" : ""}>
+                <span className="sr-only">
+                  {item.done ? "Done: " : "To do: "}
                 </span>
-              ) : null}
-            </span>
+                <GalleryMarkdown>{item.text}</GalleryMarkdown>
+              </div>
+              {/* Inline code in a reply is a fixed text-sm, which stood taller than this smaller line. */}
+              <GalleryMarkdown className="text-xs text-muted-foreground [&_code]:text-xs">
+                {item.note}
+              </GalleryMarkdown>
+            </div>
           </li>
         ))}
       </ul>
@@ -191,28 +208,47 @@ export const NoticeCardProps = z.object({
     .describe("Supporting points, if there are any"),
 });
 
+/**
+ * The words on a notice's badge. The tone picks the badge's colour and is never its text: a notice
+ * drawn with `tone: "positive"` read "positive", a styling value shown to the person. Neutral has no
+ * badge, and so has a tone still arriving while the card draws.
+ */
+function noticeBadge(tone: string | undefined): string | null {
+  switch (tone) {
+    case "positive":
+      return "Good news";
+    case "caution":
+      return "Heads up";
+    case "negative":
+      return "Problem";
+    default:
+      return null;
+  }
+}
+
 export function NoticeCard({
   title,
   body,
   tone: noticeTone,
   points,
 }: Partial<z.infer<typeof NoticeCardProps>>) {
+  const badge = noticeBadge(noticeTone);
   return (
     <GalleryFrame
-      action={
-        noticeTone && noticeTone !== "neutral" ? (
-          <Badge tone={noticeTone}>{noticeTone}</Badge>
-        ) : undefined
-      }
+      action={badge ? <Badge tone={noticeTone}>{badge}</Badge> : undefined}
       title={title}
     >
-      <p className="text-sm">{body}</p>
+      <GalleryMarkdown className="text-sm">{body}</GalleryMarkdown>
       {points?.length ? (
         <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-          {points.map((entry) => (
-            <li className="flex gap-2" key={entry}>
+          {byPosition(points).map(({ item: entry, key }) => (
+            // A point that is itself a list keeps only its own markers and indent, not a dot beside it.
+            <li
+              className="flex gap-2 [&:has(>div>:is(ol,ul):first-child)>span]:hidden [&>div>:is(ol,ul)]:pl-0"
+              key={key}
+            >
               <span aria-hidden="true">·</span>
-              <span className="min-w-0">{entry}</span>
+              <GalleryMarkdown className="min-w-0">{entry}</GalleryMarkdown>
             </li>
           ))}
         </ul>
@@ -226,8 +262,10 @@ export const GALLERY: GalleryComponent[] = [
     name: "showRecord",
     title: "Record",
     kind: "card",
+    summary:
+      "Shows one thing and its details, such as an order, a person or a ticket.",
     description:
-      "Show one thing and its fields, an order, a person, a ticket. Use instead of describing a record in prose.",
+      "Show one thing and its fields, an order, a person, a ticket. Use when there are several fields worth reading side by side; a fact or two about it belong in a Markdown reply.",
     parameters: RecordCardProps,
     Component: RecordCard as GalleryComponent["Component"],
     preview: {
@@ -246,8 +284,9 @@ export const GALLERY: GalleryComponent[] = [
     name: "showMetrics",
     title: "Headline figures",
     kind: "card",
+    summary: "Shows up to six headline figures and how each one has changed.",
     description:
-      "Show up to six headline figures, each with an optional movement. Use for a summary somebody reads at a glance.",
+      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary. A figure may link to the page it came from, such as the record or the report, when you have that address; never make one up.",
     parameters: MetricsCardProps,
     Component: MetricsCard as GalleryComponent["Component"],
     preview: {
@@ -274,8 +313,10 @@ export const GALLERY: GalleryComponent[] = [
     name: "showChecklist",
     title: "Checklist",
     kind: "card",
+    summary:
+      "Shows the steps of a piece of work and which ones are done, such as a release plan.",
     description:
-      "Show a list of things and which are done. Reporting only, the person cannot tick these, so do not use it to ask for anything.",
+      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations and ordinary lists of points belong in a Markdown reply. The person cannot tick these here, so do not use it to ask for anything.",
     parameters: ChecklistCardProps,
     Component: ChecklistCard as GalleryComponent["Component"],
     preview: {
@@ -292,8 +333,10 @@ export const GALLERY: GalleryComponent[] = [
     name: "showNotice",
     title: "Notice",
     kind: "card",
+    summary:
+      "Shows a headline with a short explanation and a few supporting points.",
     description:
-      "Show a headline, a short explanation and optional supporting points. Use instead of writing several paragraphs of prose.",
+      "Show a distinct actionable alert needing the person's attention, such as a failed scheduled task requiring intervention or a new issue blocking their work. Also use when the person explicitly asks for a notice card. Answer ordinary questions, explanations, summaries, recommendations and short lists directly in Markdown, including important emails or deadlines. Importance, a caveat or several paragraphs alone does not justify a notice. Do not use this to wrap or repeat a routine answer. Body and supporting points support Markdown.",
     parameters: NoticeCardProps,
     Component: NoticeCard as GalleryComponent["Component"],
     preview: {

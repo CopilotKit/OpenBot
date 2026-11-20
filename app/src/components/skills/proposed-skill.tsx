@@ -38,6 +38,11 @@ export type ProposedSkillCardProps = {
   /** The recorded answer, once there is one. Completed cards show it instead of controls. */
   result?: string;
   save: (values: SkillFormValues) => Promise<void>;
+  /**
+   * The personal edition, where a saved skill is on every Bot already (the server grants it), so
+   * there is no "Put it on a Bot" step to point at.
+   */
+  personal?: boolean;
 };
 
 export function ProposedSkillCard({
@@ -46,6 +51,7 @@ export function ProposedSkillCard({
   respond,
   result,
   save,
+  personal = false,
 }: ProposedSkillCardProps) {
   const [sending, setSending] = useState<"save" | "decline" | null>(null);
   /**
@@ -64,7 +70,7 @@ export function ProposedSkillCard({
         title={titleFor(args.slug, replaces)}
       >
         <p className="text-sm">{result}</p>
-        {args.slug && wasSaved(result) ? (
+        {args.slug && wasSaved(result) && !personal ? (
           <PutItOnABot slug={args.slug} />
         ) : null}
       </GalleryFrame>
@@ -94,7 +100,7 @@ export function ProposedSkillCard({
       // Left on the card with the buttons still live. See `refusal` above.
       setSending(null);
       setRefusal(
-        cause instanceof Error ? cause.message : "The skill was not saved.",
+        cause instanceof Error ? cause.message : "Couldn't save the skill.",
       );
       return;
     }
@@ -112,7 +118,7 @@ export function ProposedSkillCard({
       caption={
         replaces
           ? `This replaces ${replaces.title}, which is ${replaces.ownership}.`
-          : "Nothing is saved until you press the button."
+          : "Nothing is saved until you say so."
       }
       title={titleFor(values.slug, replaces)}
     >
@@ -145,8 +151,8 @@ export function ProposedSkillCard({
 
       {values.tools.length > 0 ? (
         <p className="mt-2 text-muted-foreground text-xs">
-          Naming a tool grants nothing. A Bot is offered these only if an
-          administrator has already granted them to it.
+          Naming a tool doesn't give access. A Bot can only use these if it
+          already has them.
         </p>
       ) : null}
 
@@ -156,7 +162,15 @@ export function ProposedSkillCard({
         </p>
       ) : null}
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex justify-end gap-2">
+        <Button
+          disabled={Boolean(sending)}
+          onClick={() => void decline()}
+          size="sm"
+          variant="outline"
+        >
+          {sending === "decline" ? "…" : "Don't save"}
+        </Button>
         <Button
           disabled={Boolean(sending)}
           onClick={() => void create()}
@@ -167,14 +181,6 @@ export function ProposedSkillCard({
             : replaces
               ? "Replace it"
               : "Create it"}
-        </Button>
-        <Button
-          disabled={Boolean(sending)}
-          onClick={() => void decline()}
-          size="sm"
-          variant="outline"
-        >
-          {sending === "decline" ? "…" : "Don't save"}
         </Button>
       </div>
     </GalleryFrame>
@@ -236,8 +242,8 @@ function Unwritable({
       title="Skill"
     >
       <p className="text-sm">
-        The Bot's draft was not a valid skill, so nothing was saved. It has been
-        told what to fix.
+        The Bot's draft wasn't a valid skill. Nothing was saved, and the Bot
+        knows what to fix.
       </p>
     </GalleryFrame>
   );

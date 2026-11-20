@@ -1,0 +1,1000 @@
+{
+  "description": "End-to-end run 3 (2026-10-21, real Chrome, OpenBot's own chat on 127.0.0.1:7410, its CopilotKit runtime in Intelligence mode): the person asked the General Assistant a question from OpenBot's home composer. `agentId` is the Bot the page ran (POST /api/copilotkit/agent/general-assistant/run). `received` is what Intelligence's socket delivered on thread:<threadId> for that run, exactly as Intelligence stored it (cpki.run_events, event_seq 1 and 2): its RUN_STARTED, whose `input` is the page's whole RunAgentInput (OpenBot's 39 frontend tools and its 5 context entries, the A2UI component schema among them, about 95 KiB), then the RUN_ERROR this environment's missing model credential ended it with. The Recorder stored that RUN_STARTED as row 011 of the run's Trajectory cut to 23 characters a string, its threadId and runId and tool names among them.",
+  "agentId": "general-assistant",
+  "received": [
+    {
+      "type": "RUN_STARTED",
+      "input": {
+        "runId": "83415767-f1f1-40a9-b2ba-d4fc3e43f625",
+        "state": {},
+        "tools": [
+          {
+            "name": "generateSandboxedUi",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "css": { "type": "string" },
+                "html": { "type": "string" },
+                "jsFunctions": { "type": "string" },
+                "initialHeight": { "type": "number" },
+                "jsExpressions": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "placeholderMessages": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            },
+            "description": "Generate sandboxed UI. IMPORTANT: The generated code runs in a sandboxed iframe WITHOUT same-origin access. Do NOT use localStorage, sessionStorage, document.cookie, IndexedDB, or fetch/XMLHttpRequest to same-origin URLs. To communicate with the host application, use Websandbox.connection.remote.<functionName>(args) which returns a Promise.\n\nYou CAN use external libraries from CDNs by including <script> or <link> tags in the HTML <head> (e.g., Chart.js, D3, Three.js, x-data-spreadsheet, etc.). CDN resources load normally inside the sandbox.\n\nPARAMETER ORDER IS CRITICAL — generate parameters in exactly this order:\n1. initialHeight + placeholderMessages (shown to user while generating)\n2. css (all styles FIRST — the user sees a placeholder until CSS is complete)\n3. html (streams in live — the user watches the UI build as HTML is generated)\n4. jsFunctions (reusable helper functions)\n5. jsExpressions (applied one-by-one — the user sees each expression take effect)\n\nINITIALIZATION CONTRACT: jsFunctions and jsExpressions run after the final HTML DOM is ready, in both live generation and saved-thread replay. Define reusable functions in jsFunctions, then initialize the UI directly in the first jsExpressions entry (for example, initializeCalculator()). Attach click/keyboard handlers and set initial display values there. Do NOT wait for DOMContentLoaded, window.onload, or the load event in jsFunctions or jsExpressions: these events may already have fired. Each expression is executed once per rendered sandbox; later expressions must not repeat initialization or reattach the same handlers. Keep initialization self-contained so a new sandbox can reconstruct the UI when a saved thread is opened. If a library loads asynchronously, initialize from its explicit load promise instead of waiting for document readiness.\n\nINTERACTION CONTRACT: Every visible interactive control needs a working handler, including controls created during initialization. If the handlers are supplied through jsFunctions/jsExpressions, initialize them in the first expression; if supplied by an inline HTML script, ensure it runs when the final sandbox mounts and replays. Every user action must update the visible UI to reflect its completed result, including success and error paths. Changing a JavaScript variable alone does not update the DOM. After changing state, call the rendering function or update the displayed element directly. When delegating clicks from a parent element, resolve the clicked control with closest('button') so clicks on nested labels and values work. For a calculator, pressing = must replace the visible expression with the computed answer; metric shortcuts must visibly insert their values. Trace each button handler through its final display update before emitting the tool call."
+          },
+          {
+            "name": "computer_navigate",
+            "parameters": {
+              "type": "object",
+              "required": ["url"],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "Full web address to open, including https://"
+                }
+              }
+            },
+            "description": "Open a web page on your own computer so the person can watch. Use this when asked to look at, visit, open or check a website. Returns the page title and its readable text, so answer from what comes back rather than telling the person to go and look."
+          },
+          {
+            "name": "computer_read",
+            "parameters": { "type": "object", "properties": {} },
+            "description": "Read the page currently open on your computer, without opening anything. Use this after you click something that changes the page, such as submitting a form, to find out what it now says."
+          },
+          {
+            "name": "computer_snapshot",
+            "parameters": { "type": "object", "properties": {} },
+            "description": "List the things on the current page you can act on: fields, buttons, links and checkboxes, each with a ref, its label and its current value. Call this BEFORE clicking or typing, and use the refs it returns. Always send back the snapshotId it gives you. If an action reports that your refs are stale, the page changed: call this again and use the new refs."
+          },
+          {
+            "name": "computer_type",
+            "parameters": {
+              "type": "object",
+              "required": ["ref", "snapshotId", "text"],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "description": "Ref of the field, from your most recent snapshot"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "The text to enter"
+                },
+                "submit": {
+                  "type": "boolean",
+                  "description": "Press Enter after typing, to submit a single-field form"
+                },
+                "snapshotId": {
+                  "type": "number",
+                  "description": "The snapshotId that ref came from"
+                }
+              }
+            },
+            "description": "Enter text into a field on the page. Give the ref of the field from your most recent snapshot and the snapshotId it came from. This replaces whatever the field already contains. Set submit to true to press Enter afterwards."
+          },
+          {
+            "name": "computer_click",
+            "parameters": {
+              "type": "object",
+              "required": ["ref", "snapshotId"],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "description": "Ref of the element to click, from your most recent snapshot"
+                },
+                "snapshotId": {
+                  "type": "number",
+                  "description": "The snapshotId that ref came from"
+                }
+              }
+            },
+            "description": "Click something on the page: a button, a link, a checkbox or a radio option. Give the ref from your most recent snapshot and the snapshotId it came from."
+          },
+          {
+            "name": "computer_key",
+            "parameters": {
+              "type": "object",
+              "required": ["key"],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Key name, such as Enter, Tab or Escape"
+                },
+                "ref": {
+                  "type": "string",
+                  "description": "Optional ref to press the key on"
+                },
+                "snapshotId": {
+                  "type": "number",
+                  "description": "The snapshotId the ref came from, required if ref is given"
+                }
+              }
+            },
+            "description": "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field is focused, or omit the ref to press it on the page."
+          },
+          {
+            "name": "computer_request_secret",
+            "parameters": {
+              "type": "object",
+              "required": ["label", "ref", "snapshotId"],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "description": "Ref of the field it goes in, from your most recent snapshot"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "What you need, in a few words, e.g. 'the code sent to your phone'"
+                },
+                "snapshotId": {
+                  "type": "number",
+                  "description": "The snapshotId that ref came from"
+                }
+              }
+            },
+            "description": "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. Focus the field first with computer_click, then call this with the ref of that field and a short label for what you need. They type it into a masked box that goes straight to the page. You will never see the value, and you must not ask for it any other way. Prefer this over a full takeover when you only need one field filled in. The value is only TYPED into the field: if the form needs submitting, do that yourself afterwards with computer_click."
+          },
+          {
+            "name": "report_refusal",
+            "parameters": {
+              "type": "object",
+              "required": ["reason"],
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "description": "Why you declined, in one sentence and in your own words"
+                },
+                "request": {
+                  "type": "string",
+                  "description": "What you were asked to do, in a few words"
+                }
+              }
+            },
+            "description": "Record that you DECLINED something you were asked to do, because it looked unsafe, was outside what you are for, or you judged you should not. Call this whenever you say no to a request, in addition to telling the person. It changes nothing about your answer; it exists so an administrator can see what this Bot is being asked to do. Do not call it when you simply could not do something, only when you chose not to."
+          },
+          {
+            "name": "computer_request_help",
+            "parameters": {
+              "type": "object",
+              "required": ["reason"],
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "description": "What you need the person to do, in one sentence, e.g. 'This page is asking for a code sent to your phone.'"
+                }
+              }
+            },
+            "description": "Ask the person to take control of your computer and do something you cannot: sign in, enter a password or a one-time code, or clear a CAPTCHA. Say specifically what you need done. They will drive the browser themselves and hand it back, and you carry on in the same session. Use this INSTEAD of giving up, and instead of ever asking them to type a password to you. This call is the only thing that reaches them: until you make it they are not looking at the page and have no way to help, so saying you need them to sign in, or asking whether they would like to proceed, hands over nothing and leaves the page where it is."
+          },
+          {
+            "name": "computer_list_files",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Optional folder to list. Omit for the whole workspace."
+                }
+              }
+            },
+            "description": "List what is in your workspace: every file and folder you have saved, with sizes. Call this FIRST when you are asked what files you have, or before reading a file whose exact name you are not sure of. Never guess a filename."
+          },
+          {
+            "name": "computer_read_file",
+            "parameters": {
+              "type": "object",
+              "required": ["path"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path relative to your workspace, such as notes.md"
+                }
+              }
+            },
+            "description": "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, such as notes.md or reports/august.csv. Your workspace survives between conversations, so use this to pick up notes you made before."
+          },
+          {
+            "name": "computer_run_command",
+            "parameters": {
+              "type": "object",
+              "required": ["command"],
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "The command to run, such as: sudo apt-get install -y jq"
+                }
+              }
+            },
+            "description": "Run a shell command on your own computer. Use this for anything the browser cannot do: installing a tool you need, processing a file you saved, running a script. The working directory is your workspace, so paths are relative to it and files you write here are the same ones the file tools see. Commands run in bash, so pipes and && work. Long output is truncated from the start, and a command that runs too long is stopped. You are not the root user, so anything that writes outside your workspace needs sudo, which asks for no password: installing a package is `sudo apt-get update && sudo apt-get install -y <package>`. If sudo is refused, this computer does not grant it, so say so rather than retrying."
+          },
+          {
+            "name": "computer_write_file",
+            "parameters": {
+              "type": "object",
+              "required": ["path", "contents"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path relative to your workspace, such as reports/august.csv"
+                },
+                "append": {
+                  "type": "boolean",
+                  "description": "Add to the end of the file instead of replacing it"
+                },
+                "contents": {
+                  "type": "string",
+                  "description": "The text to save"
+                }
+              }
+            },
+            "description": "Save a file in your own workspace so you still have it later. Paths are relative to your workspace and folders are created as needed. Set append to true to add to the end of an existing file rather than replacing it. Text only."
+          },
+          {
+            "name": "computer_scroll",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "deltaY": {
+                  "type": "number",
+                  "description": "Pixels to scroll; positive is down. Defaults to 600."
+                }
+              }
+            },
+            "description": "Scroll the page down, or up with a negative amount, to bring more of a long page into view."
+          },
+          {
+            "name": "computer_request_sign_in",
+            "parameters": {
+              "type": "object",
+              "required": ["site"],
+              "properties": {
+                "site": {
+                  "type": "string",
+                  "description": "The website's address, e.g. https://example.com"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why you need to be signed in, in a few words"
+                }
+              }
+            },
+            "description": "Ask the person you work for to sign you in to a website. They get a private sign-in form outside this conversation (or take over the browser), and their login is typed straight into your browser by the computer. You never see the username, password or code, and must never ask for them any other way. Open the site's sign-in page first, then call this with the site's address. This turn pauses until they answer; you are then told only whether it worked."
+          },
+          {
+            "name": "list_skills",
+            "parameters": { "type": "object", "properties": {} },
+            "description": "The skills that already exist in this deployment, one line each, with whose each one is. Read this before writing a skill: a slug is an identity, so reusing one replaces that skill, and a slug that is not the person's own cannot be replaced at all."
+          },
+          {
+            "name": "read_skill",
+            "parameters": {
+              "type": "object",
+              "required": ["slug"],
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "description": "The skill's `/` command, without the slash, as list_skills spells it."
+                }
+              }
+            },
+            "description": "One existing skill in full, including its instructions. Use this when improving a skill rather than writing a new one — never rewrite an instruction you have not read."
+          },
+          {
+            "name": "list_skill_tools",
+            "parameters": { "type": "object", "properties": {} },
+            "description": "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets is always the intersection of what the skill names with what the Bot was granted — so a skill may name tools for a connector this Bot does not hold yet."
+          },
+          {
+            "name": "save_skill",
+            "parameters": {
+              "type": "object",
+              "required": ["slug", "title", "instructions"],
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "description": "The `/` command, in lower-case letters, numbers and hyphens: `check-a-claim`, not `Check A Claim`. 2 to 40 characters. This is the skill's identity — reusing one that already exists replaces that skill."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "What the skill is called in the menu, in a few words of sentence case: `Check a claim against a source`. Up to 120 characters."
+                },
+                "tools": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "The tools the skill needs, as `serverId/toolName` refs from list_skill_tools. This is a declaration, not a grant: naming a tool cannot make it callable, and a skill naming a tool its Bot does not hold simply loads nothing. Omit for a skill that is only prose."
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "One line under the title, saying what invoking it will do. Up to 200 characters. Omit only if the title already says everything."
+                },
+                "instructions": {
+                  "type": "string",
+                  "description": "The instruction the Bot follows when somebody invokes this skill, written as directions to the Bot in the imperative. Say what to do, in what order, what to do when a step turns up nothing, and what the answer should contain. Explain why a step matters rather than only naming it. Do not describe the skill in the third person, and do not address the person invoking it."
+                }
+              }
+            },
+            "description": "Put a finished skill in front of the person to save. They see the command, the title and the whole instruction, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the skill says — not to check your draft."
+          },
+          {
+            "name": "list_bots",
+            "parameters": { "type": "object", "properties": {} },
+            "description": "The coworkers that already exist here, one line each, with whose each one is and where it runs. Read this before proposing a coworker: the most expensive mistake this job can make is rebuilding one somebody already maintains."
+          },
+          {
+            "name": "read_bot",
+            "parameters": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The coworker's name, as list_bots spells it."
+                }
+              }
+            },
+            "description": "One existing coworker in full, including the standing instructions it runs on. Use this when somebody asks for one like an existing coworker — never paraphrase a role description you have not read."
+          },
+          {
+            "name": "list_bot_skills",
+            "parameters": { "type": "object", "properties": {} },
+            "description": "The skills that could be put on a new coworker, by slug. Putting a skill on a coworker is the only capability the card grants: a skill is an instruction, so one naming a tool the coworker was not granted simply loads nothing."
+          },
+          {
+            "name": "save_bot",
+            "parameters": {
+              "type": "object",
+              "required": ["name", "title", "roleDescription"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "What the coworker is called, as a person would say it: `Renewal Desk`, not `renewal_desk_bot`. Up to 80 characters."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "The job it does, the way a job title reads: `Accounts Receivable`, `Support Operations`. Up to 120 characters. This is given to the model on every turn, so it is part of what the coworker is rather than a label."
+                },
+                "skills": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Slugs of skills that already exist here to put on this coworker, from list_bot_skills, without the slash. This is the only capability the card grants, and it grants nothing else: no connector, no tool and no address. Omit for a coworker that is only its instructions, which is most of them."
+                },
+                "roleDescription": {
+                  "type": "string",
+                  "description": "The coworker's standing instructions, written as directions to it in the imperative, up to 1000 characters. Say what it does, what it must not conclude, and what it says when the evidence is thin. This text is given to a model on every turn in every channel, so write the rules that should always hold rather than a description of the coworker in the third person. Do not address the person talking to it."
+                }
+              }
+            },
+            "description": "Put a finished coworker in front of the person to create. They see its name, its job, the whole of its standing instructions and the skills it will hold, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the coworker will be told to do — not to check your draft."
+          },
+          {
+            "name": "askApproval",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "summary"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "What is being approved, in a few words"
+                },
+                "details": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "properties": {
+                      "label": { "type": "string" },
+                      "value": { "type": "string" }
+                    }
+                  },
+                  "description": "The facts they need in order to decide, e.g. amount, vendor, date"
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "What the person is agreeing to, in one or two sentences"
+                },
+                "rejectLabel": {
+                  "type": "string",
+                  "description": "Defaults to Decline"
+                },
+                "approveLabel": {
+                  "type": "string",
+                  "description": "Defaults to Approve"
+                }
+              }
+            },
+            "description": "Ask the person to approve or decline something, and WAIT for their answer. Use before doing anything you cannot undo, spending money, sending a message, changing a record. You are given their decision and any reason they typed."
+          },
+          {
+            "name": "askChoice",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "options"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "The question being asked"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "label"],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "What comes back to you when this one is picked"
+                      },
+                      "label": { "type": "string" },
+                      "description": { "type": "string" }
+                    }
+                  },
+                  "description": "The options, in the order they should be offered"
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "Any context the person needs to choose"
+                }
+              }
+            },
+            "description": "Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose."
+          },
+          {
+            "name": "askForm",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "fields"],
+              "properties": {
+                "title": { "type": "string", "maxLength": 120, "minLength": 1 },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "label", "type"],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,47}$",
+                        "description": "Unique key returned with the answer"
+                      },
+                      "max": {
+                        "type": "number",
+                        "description": "Maximum for a number field"
+                      },
+                      "min": {
+                        "type": "number",
+                        "description": "Minimum for a number field"
+                      },
+                      "help": { "type": "string", "maxLength": 250 },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "email",
+                          "number",
+                          "select",
+                          "textarea"
+                        ],
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "minLength": 1
+                        },
+                        "maxItems": 20,
+                        "minItems": 1,
+                        "description": "Required for select fields"
+                      },
+                      "required": { "type": "boolean" }
+                    }
+                  },
+                  "maxItems": 8,
+                  "minItems": 1
+                },
+                "description": { "type": "string", "maxLength": 500 },
+                "submitLabel": {
+                  "type": "string",
+                  "maxLength": 40,
+                  "minLength": 1
+                }
+              }
+            },
+            "description": "Ask the person to fill in a short form and WAIT for their answers. Use when several related details are needed together. Provide up to eight labeled text, email, number, select, or textarea fields with unique IDs. Mark required fields and give options for selects. Never request passwords or secrets. The result has status submitted and values keyed by field ID; numbers are returned as numbers and blank optional fields are omitted."
+          },
+          {
+            "name": "showActivityReport",
+            "parameters": {
+              "type": "object",
+              "required": ["report"],
+              "properties": {
+                "days": {
+                  "type": "number",
+                  "description": "For the activity report: how many days back to count. Defaults to 7"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "A heading for the report, in a few words"
+                },
+                "report": {
+                  "enum": ["activity", "refusals"],
+                  "type": "string",
+                  "description": "Which report to show: 'activity' for how much each Bot has done, 'refusals' for what this deployment recently refused"
+                }
+              }
+            },
+            "description": "Show what this deployment has actually been doing, read from its own records rather than from anything you know. Use for 'what have the Bots been up to' and 'what has been refused'. You choose the report and the period; the figures are read for you and you will not see them."
+          },
+          {
+            "name": "showAreaChart",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "labels", "series"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "A short title for the chart"
+                },
+                "labels": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "The x axis, e.g. months"
+                },
+                "series": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "values"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "What this line is called"
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "One value per label, in the same order"
+                      }
+                    }
+                  },
+                  "description": "One line per series"
+                },
+                "caption": {
+                  "type": "string",
+                  "description": "One line under the title saying what the reader should take from it"
+                }
+              }
+            },
+            "description": "The same as showLineChart with the area under each line filled. Use for volume or accumulation rather than for a rate."
+          },
+          {
+            "name": "showBarChart",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "points"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "A short title for the chart"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "What this point is called, e.g. a month or a team"
+                      },
+                      "value": { "type": "number", "description": "Its value" }
+                    }
+                  },
+                  "description": "One bar per point, in the order they should appear"
+                },
+                "caption": {
+                  "type": "string",
+                  "description": "One line under the title saying what the reader should take from it"
+                }
+              }
+            },
+            "description": "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart."
+          },
+          {
+            "name": "showChecklist",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "items"],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["text", "done"],
+                    "properties": {
+                      "done": {
+                        "type": "boolean",
+                        "description": "Whether this one is already finished"
+                      },
+                      "note": {
+                        "type": "string",
+                        "description": "A short aside, e.g. who it is waiting on"
+                      },
+                      "text": { "type": "string" }
+                    }
+                  },
+                  "description": "The items, in the order they should be done"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "What this list is"
+                },
+                "caption": { "type": "string" }
+              }
+            },
+            "description": "Show a list of things and which are done. Reporting only, the person cannot tick these, so do not use it to ask for anything."
+          },
+          {
+            "name": "showLineChart",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "labels", "series"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "A short title for the chart"
+                },
+                "labels": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "The x axis, e.g. months"
+                },
+                "series": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "values"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "What this line is called"
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "One value per label, in the same order"
+                      }
+                    }
+                  },
+                  "description": "One line per series"
+                },
+                "caption": {
+                  "type": "string",
+                  "description": "One line under the title saying what the reader should take from it"
+                }
+              }
+            },
+            "description": "Show one or more series over an ordered axis, usually time. Every series must have one value per label."
+          },
+          {
+            "name": "showMetrics",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "metrics"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "What these figures are about"
+                },
+                "caption": { "type": "string" },
+                "metrics": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "properties": {
+                      "label": { "type": "string" },
+                      "value": {
+                        "type": "string",
+                        "description": "Already formatted, including any unit or currency"
+                      },
+                      "change": {
+                        "type": "string",
+                        "description": "The movement, e.g. '+12% on last month'"
+                      },
+                      "changeTone": {
+                        "enum": ["neutral", "positive", "caution", "negative"],
+                        "type": "string",
+                        "description": "How this reads at a glance. Use negative and caution sparingly, for a refusal, a breach or a failure, not for anything merely notable"
+                      }
+                    }
+                  },
+                  "maxItems": 6,
+                  "description": "Up to six figures. More than that wanted a table"
+                }
+              }
+            },
+            "description": "Show up to six headline figures, each with an optional movement. Use for a summary somebody reads at a glance."
+          },
+          {
+            "name": "showNotice",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "body"],
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "description": "The explanation, in one or two sentences"
+                },
+                "tone": {
+                  "enum": ["neutral", "positive", "caution", "negative"],
+                  "type": "string",
+                  "description": "How this reads at a glance. Use negative and caution sparingly, for a refusal, a breach or a failure, not for anything merely notable"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "The headline, in a few words"
+                },
+                "points": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Supporting points, if there are any"
+                }
+              }
+            },
+            "description": "Show a headline, a short explanation and optional supporting points. Use instead of writing several paragraphs of prose."
+          },
+          {
+            "name": "showPieChart",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "points"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "A short title for the chart"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "What this point is called, e.g. a month or a team"
+                      },
+                      "value": { "type": "number", "description": "Its value" }
+                    }
+                  },
+                  "description": "One slice per point. Values are summed to make the whole"
+                },
+                "caption": {
+                  "type": "string",
+                  "description": "One line under the title saying what the reader should take from it"
+                }
+              }
+            },
+            "description": "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices."
+          },
+          {
+            "name": "showProgress",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "points"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "A short title for the chart"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "value", "target"],
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "What this point is called, e.g. a month or a team"
+                      },
+                      "value": { "type": "number", "description": "Its value" },
+                      "target": {
+                        "type": "number",
+                        "description": "What the value is measured against"
+                      }
+                    }
+                  },
+                  "description": "One row per thing being tracked"
+                },
+                "caption": {
+                  "type": "string",
+                  "description": "One line under the title saying what the reader should take from it"
+                }
+              }
+            },
+            "description": "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned."
+          },
+          {
+            "name": "showQuote",
+            "parameters": {
+              "type": "object",
+              "required": ["quote", "attribution"],
+              "properties": {
+                "quote": {
+                  "type": "string",
+                  "description": "The quotation itself, without surrounding quote marks"
+                },
+                "context": {
+                  "type": "string",
+                  "description": "One short line of context: where it is from, or why it matters here"
+                },
+                "attribution": {
+                  "type": "string",
+                  "description": "Who said or wrote it, e.g. 'Grace Hopper' or 'the 2026 annual report'"
+                }
+              }
+            },
+            "description": "Show a quotation with its attribution. Use when the exact words matter, something a person said, or a line from a document you were given."
+          },
+          {
+            "name": "showRecord",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "fields"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "What this record is, e.g. a person or an order"
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "value"],
+                    "properties": {
+                      "label": { "type": "string" },
+                      "value": {
+                        "type": "string",
+                        "description": "Already formatted for a person to read"
+                      }
+                    }
+                  },
+                  "description": "The fields, in the order they should be read"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "A short status word, e.g. Approved"
+                },
+                "subtitle": {
+                  "type": "string",
+                  "description": "One line of context under the title"
+                },
+                "statusTone": {
+                  "enum": ["neutral", "positive", "caution", "negative"],
+                  "type": "string",
+                  "description": "How this reads at a glance. Use negative and caution sparingly, for a refusal, a breach or a failure, not for anything merely notable"
+                }
+              }
+            },
+            "description": "Show one thing and its fields, an order, a person, a ticket. Use instead of describing a record in prose."
+          },
+          {
+            "name": "showTable",
+            "parameters": {
+              "type": "object",
+              "required": ["title", "columns", "rows"],
+              "properties": {
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["cells"],
+                    "properties": {
+                      "cells": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            { "type": "string", "maxLength": 2000 },
+                            { "type": "number" }
+                          ]
+                        },
+                        "maxItems": 8,
+                        "minItems": 1
+                      }
+                    }
+                  },
+                  "maxItems": 100,
+                  "description": "One cell per column. Use numbers for numeric sorting; strings for formatted values."
+                },
+                "title": { "type": "string", "maxLength": 120, "minLength": 1 },
+                "caption": { "type": "string", "maxLength": 500 },
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "minLength": 1
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "description": "Unique column labels, in display order"
+                }
+              }
+            },
+            "description": "Show a sortable table to compare records, plans, or other structured facts. Supply up to eight columns and 100 rows, with exactly one cell per column. Use numbers for quantities so sorting is numeric. Show only data you have; do not invent rows."
+          }
+        ],
+        "context": [
+          {
+            "value": "Available A2UI catalog:\n- https://a2ui.org/specification/v0_9/basic_catalog.json (basic catalog)",
+            "description": "A2UI catalog capabilities: available catalog IDs and custom component definitions the client can render."
+          },
+          {
+            "value": "{\"catalogId\":\"https://a2ui.org/specification/v0_9/basic_catalog.json\",\"components\":{\"Text\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Text\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"text\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The text content to display. While simple Markdown formatting is supported (i.e. without HTML, images, or links), utilizing dedicated UI components is generally preferred for a richer and more structured presentation.\"},\"variant\":{\"type\":\"string\",\"enum\":[\"h1\",\"h2\",\"h3\",\"h4\",\"h5\",\"caption\",\"body\"],\"default\":\"body\",\"description\":\"A hint for the base text style.\"}},\"required\":[\"component\",\"text\"]}]},\"Image\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Image\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"url\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The URL of the image to display.\"},\"description\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The accessibility description of the image.\"},\"fit\":{\"type\":\"string\",\"enum\":[\"contain\",\"cover\",\"fill\",\"none\",\"scaleDown\"],\"default\":\"fill\",\"description\":\"Specifies how the image should be resized to fit its container. This corresponds to the CSS 'object-fit' property.\"},\"variant\":{\"type\":\"string\",\"enum\":[\"icon\",\"avatar\",\"smallFeature\",\"mediumFeature\",\"largeFeature\",\"header\"],\"default\":\"mediumFeature\",\"description\":\"A hint for the image size and style.\"}},\"required\":[\"component\",\"url\"]}]},\"Icon\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Icon\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"name\":{\"anyOf\":[{\"type\":\"string\",\"enum\":[\"accountCircle\",\"add\",\"arrowBack\",\"arrowForward\",\"attachFile\",\"calendarToday\",\"call\",\"camera\",\"check\",\"close\",\"delete\",\"download\",\"edit\",\"event\",\"error\",\"fastForward\",\"favorite\",\"favoriteOff\",\"folder\",\"help\",\"home\",\"info\",\"locationOn\",\"lock\",\"lockOpen\",\"mail\",\"menu\",\"moreVert\",\"moreHoriz\",\"notificationsOff\",\"notifications\",\"pause\",\"payment\",\"person\",\"phone\",\"photo\",\"play\",\"print\",\"refresh\",\"rewind\",\"search\",\"send\",\"settings\",\"share\",\"shoppingCart\",\"skipNext\",\"skipPrevious\",\"star\",\"starHalf\",\"starOff\",\"stop\",\"upload\",\"visibility\",\"visibilityOff\",\"volumeDown\",\"volumeMute\",\"volumeOff\",\"volumeUp\",\"warning\"]},{\"type\":\"object\",\"properties\":{\"svgPath\":{\"type\":\"string\",\"description\":\"Custom SVG path data\"}},\"required\":[\"svgPath\"],\"additionalProperties\":false},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false}],\"description\":\"The name of the icon to display.\"}},\"required\":[\"component\",\"name\"]}]},\"Video\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Video\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"url\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The URL of the video to display.\"}},\"required\":[\"component\",\"url\"]}]},\"AudioPlayer\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"AudioPlayer\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"url\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The URL of the audio to be played.\"},\"description\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"A description of the audio, such as a title or summary.\"}},\"required\":[\"component\",\"url\"]}]},\"Row\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Row\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"children\":{\"anyOf\":[{\"type\":\"array\",\"items\":{\"type\":\"string\",\"description\":\"REF:common_types.json#/$defs/ComponentId|The unique identifier for a component.\"},\"description\":\"A static list of child component IDs.\"},{\"type\":\"object\",\"properties\":{\"componentId\":{\"$ref\":\"#/properties/children/anyOf/0/items\"},\"path\":{\"type\":\"string\",\"description\":\"The path to the list of component property objects in the data model.\"}},\"required\":[\"componentId\",\"path\"],\"additionalProperties\":false,\"description\":\"A template for generating a dynamic list of children.\"}],\"description\":\"Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list. Children cannot be defined inline, they must be referred to by ID.\"},\"justify\":{\"type\":\"string\",\"enum\":[\"center\",\"end\",\"spaceAround\",\"spaceBetween\",\"spaceEvenly\",\"start\",\"stretch\"],\"default\":\"start\",\"description\":\"Defines the arrangement of children along the main axis (horizontally). Use 'spaceBetween' to push items to the edges, or 'start'/'end'/'center' to pack them together.\"},\"align\":{\"type\":\"string\",\"enum\":[\"start\",\"center\",\"end\",\"stretch\"],\"default\":\"stretch\",\"description\":\"Defines the alignment of children along the cross axis (vertically). This is similar to the CSS 'align-items' property, but uses camelCase values (e.g., 'start').\"}},\"required\":[\"component\",\"children\"]}]},\"Column\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Column\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"children\":{\"anyOf\":[{\"type\":\"array\",\"items\":{\"type\":\"string\",\"description\":\"REF:common_types.json#/$defs/ComponentId|The unique identifier for a component.\"},\"description\":\"A static list of child component IDs.\"},{\"type\":\"object\",\"properties\":{\"componentId\":{\"$ref\":\"#/properties/children/anyOf/0/items\"},\"path\":{\"type\":\"string\",\"description\":\"The path to the list of component property objects in the data model.\"}},\"required\":[\"componentId\",\"path\"],\"additionalProperties\":false,\"description\":\"A template for generating a dynamic list of children.\"}],\"description\":\"Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list. Children cannot be defined inline, they must be referred to by ID.\"},\"justify\":{\"type\":\"string\",\"enum\":[\"start\",\"center\",\"end\",\"spaceBetween\",\"spaceAround\",\"spaceEvenly\",\"stretch\"],\"default\":\"start\",\"description\":\"Defines the arrangement of children along the main axis (vertically). Use 'spaceBetween' to push items to the edges (e.g. header at top, footer at bottom), or 'start'/'end'/'center' to pack them together.\"},\"align\":{\"type\":\"string\",\"enum\":[\"center\",\"end\",\"start\",\"stretch\"],\"default\":\"stretch\",\"description\":\"Defines the alignment of children along the cross axis (horizontally). This is similar to the CSS 'align-items' property.\"}},\"required\":[\"component\",\"children\"]}]},\"List\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"List\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"children\":{\"anyOf\":[{\"type\":\"array\",\"items\":{\"type\":\"string\",\"description\":\"REF:common_types.json#/$defs/ComponentId|The unique identifier for a component.\"},\"description\":\"A static list of child component IDs.\"},{\"type\":\"object\",\"properties\":{\"componentId\":{\"$ref\":\"#/properties/children/anyOf/0/items\"},\"path\":{\"type\":\"string\",\"description\":\"The path to the list of component property objects in the data model.\"}},\"required\":[\"componentId\",\"path\"],\"additionalProperties\":false,\"description\":\"A template for generating a dynamic list of children.\"}],\"description\":\"Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list.\"},\"direction\":{\"type\":\"string\",\"enum\":[\"vertical\",\"horizontal\"],\"default\":\"vertical\",\"description\":\"The direction in which the list items are laid out.\"},\"align\":{\"type\":\"string\",\"enum\":[\"start\",\"center\",\"end\",\"stretch\"],\"default\":\"stretch\",\"description\":\"Defines the alignment of children along the cross axis.\"},\"listStyle\":{\"type\":\"string\",\"enum\":[\"ordered\",\"unordered\",\"none\"],\"description\":\"The style of the list (ordered, unordered, or none).\"}},\"required\":[\"component\",\"children\"]}]},\"Card\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Card\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"child\":{\"type\":\"string\",\"description\":\"The ID of the single child component to be rendered inside the card. To display multiple elements, you MUST wrap them in a layout component (like Column or Row) and pass that container's ID here. Do NOT pass multiple IDs or a non-existent ID. Do NOT define the child component inline.\"}},\"required\":[\"component\",\"child\"]}]},\"Tabs\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Tabs\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"tabs\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The tab title.\"},\"child\":{\"type\":\"string\",\"description\":\"The ID of the child component. Do NOT define the component inline.\"}},\"required\":[\"title\",\"child\"],\"additionalProperties\":false},\"minItems\":1,\"description\":\"An array of objects, where each object defines a tab with a title and a child component.\"}},\"required\":[\"component\",\"tabs\"]}]},\"Divider\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Divider\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"axis\":{\"type\":\"string\",\"enum\":[\"horizontal\",\"vertical\"],\"default\":\"horizontal\",\"description\":\"The orientation of the divider.\"}},\"required\":[\"component\"]}]},\"Modal\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Modal\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"trigger\":{\"type\":\"string\",\"description\":\"The ID of the component that opens the modal when interacted with (e.g., a button). Do NOT define the component inline.\"},\"content\":{\"type\":\"string\",\"description\":\"The ID of the component to be displayed inside the modal. Do NOT define the component inline.\"}},\"required\":[\"component\",\"trigger\",\"content\"]}]},\"Button\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Button\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"child\":{\"type\":\"string\",\"description\":\"The ID of the child component. Use a 'Text' component for a labeled button. Only use an 'Icon' if the requirements explicitly ask for an icon-only button. Do NOT define the child component inline.\"},\"variant\":{\"type\":\"string\",\"enum\":[\"default\",\"primary\",\"borderless\"],\"default\":\"default\",\"description\":\"A hint for the button style. If omitted, a default button style is used. 'primary' indicates this is the main call-to-action button. 'borderless' means the button has no visual border or background, making its child content appear like a clickable link.\"},\"action\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"event\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"context\":{\"type\":\"object\",\"additionalProperties\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"},{\"type\":\"boolean\"},{\"type\":\"array\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicValue|A value that can be a literal, a path, or a function call returning any type.\"}}},\"required\":[\"name\"],\"additionalProperties\":false}},\"required\":[\"event\"],\"additionalProperties\":false,\"description\":\"Triggers a server-side event.\"},{\"type\":\"object\",\"properties\":{\"functionCall\":{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}},\"required\":[\"functionCall\"],\"additionalProperties\":false,\"description\":\"Executes a local client-side function.\"}],\"description\":\"REF:common_types.json#/$defs/Action\"},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"condition\":{\"anyOf\":[{\"type\":\"boolean\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicBoolean|A boolean value that can be a literal, a path, or a function call returning a boolean.\"},\"message\":{\"type\":\"string\",\"description\":\"The error message to display if the check fails.\"}},\"required\":[\"condition\",\"message\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/CheckRule|A check rule consisting of a condition and an error message.\"},\"description\":\"A list of checks to perform.\"}},\"required\":[\"component\",\"child\",\"action\"]}]},\"TextField\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"TextField\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"label\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The text label for the input field.\"},\"value\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The value of the text field.\"},\"variant\":{\"type\":\"string\",\"enum\":[\"longText\",\"number\",\"shortText\",\"obscured\"],\"default\":\"shortText\",\"description\":\"The type of input field to display.\"},\"validationRegexp\":{\"type\":\"string\",\"description\":\"A regular expression used for client-side validation of the input.\"},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"condition\":{\"anyOf\":[{\"type\":\"boolean\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicBoolean|A boolean value that can be a literal, a path, or a function call returning a boolean.\"},\"message\":{\"type\":\"string\",\"description\":\"The error message to display if the check fails.\"}},\"required\":[\"condition\",\"message\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/CheckRule|A check rule consisting of a condition and an error message.\"},\"description\":\"A list of checks to perform.\"}},\"required\":[\"component\",\"label\"]}]},\"CheckBox\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"CheckBox\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"label\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The text to display next to the checkbox.\"},\"value\":{\"anyOf\":[{\"type\":\"boolean\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The current state of the checkbox (true for checked, false for unchecked).\"},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"condition\":{\"anyOf\":[{\"$ref\":\"#/properties/value/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicBoolean|A boolean value that can be a literal, a path, or a function call returning a boolean.\"},\"message\":{\"type\":\"string\",\"description\":\"The error message to display if the check fails.\"}},\"required\":[\"condition\",\"message\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/CheckRule|A check rule consisting of a condition and an error message.\"},\"description\":\"A list of checks to perform.\"}},\"required\":[\"component\",\"label\",\"value\"]}]},\"ChoicePicker\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"ChoicePicker\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"label\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The label for the group of options.\"},\"variant\":{\"type\":\"string\",\"enum\":[\"multipleSelection\",\"mutuallyExclusive\"],\"default\":\"mutuallyExclusive\",\"description\":\"A hint for how the choice picker should be displayed and behave.\"},\"options\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The text to display for this option.\"},\"value\":{\"type\":\"string\",\"description\":\"The stable value associated with this option.\"}},\"required\":[\"label\",\"value\"],\"additionalProperties\":false},\"description\":\"The list of available options to choose from.\"},\"value\":{\"anyOf\":[{\"type\":\"array\",\"items\":{\"type\":\"string\"}},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The list of currently selected values. This should be bound to a string array in the data model.\"},\"displayStyle\":{\"type\":\"string\",\"enum\":[\"checkbox\",\"chips\"],\"default\":\"checkbox\",\"description\":\"The display style of the component.\"},\"filterable\":{\"type\":\"boolean\",\"default\":false,\"description\":\"If true, displays a search input to filter the options.\"},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"condition\":{\"anyOf\":[{\"type\":\"boolean\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicBoolean|A boolean value that can be a literal, a path, or a function call returning a boolean.\"},\"message\":{\"type\":\"string\",\"description\":\"The error message to display if the check fails.\"}},\"required\":[\"condition\",\"message\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/CheckRule|A check rule consisting of a condition and an error message.\"},\"description\":\"A list of checks to perform.\"}},\"required\":[\"component\",\"options\",\"value\"]}]},\"Slider\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"Slider\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"label\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The label for the slider.\"},\"min\":{\"type\":\"number\",\"default\":0,\"description\":\"The minimum value of the slider.\"},\"max\":{\"type\":\"number\",\"description\":\"The maximum value of the slider.\"},\"step\":{\"type\":\"number\",\"description\":\"The granularity or step size of the slider.\"},\"value\":{\"anyOf\":[{\"type\":\"number\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The current value of the slider.\"},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"condition\":{\"anyOf\":[{\"type\":\"boolean\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicBoolean|A boolean value that can be a literal, a path, or a function call returning a boolean.\"},\"message\":{\"type\":\"string\",\"description\":\"The error message to display if the check fails.\"}},\"required\":[\"condition\",\"message\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/CheckRule|A check rule consisting of a condition and an error message.\"},\"description\":\"A list of checks to perform.\"}},\"required\":[\"component\",\"max\",\"value\"]}]},\"DateTimeInput\":{\"allOf\":[{\"$ref\":\"common_types.json#/$defs/ComponentCommon\"},{\"properties\":{\"component\":{\"const\":\"DateTimeInput\"},\"accessibility\":{\"type\":\"object\",\"properties\":{\"label\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"A JSON Pointer path to a value in the data model.\"}},\"required\":[\"path\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/DataBinding|A JSON Pointer path to a value in the data model.\"},{\"type\":\"object\",\"properties\":{\"call\":{\"type\":\"string\",\"description\":\"The name of the function to call.\"},\"args\":{\"type\":\"object\",\"additionalProperties\":{},\"description\":\"Arguments passed to the function.\"},\"returnType\":{\"type\":\"string\",\"enum\":[\"string\",\"number\",\"boolean\",\"array\",\"object\",\"any\",\"void\"],\"default\":\"boolean\"}},\"required\":[\"call\",\"args\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/FunctionCall|Invokes a named function on the client.\"}],\"description\":\"REF:common_types.json#/$defs/DynamicString|A short string used by assistive technologies to convey the purpose of an element.\"},\"description\":{\"$ref\":\"#/properties/accessibility/properties/label\",\"description\":\"REF:common_types.json#/$defs/DynamicString|Additional information provided by assistive technologies about an element.\"}},\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/AccessibilityAttributes|Attributes to enhance accessibility.\"},\"weight\":{\"type\":\"number\",\"description\":\"The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Note: this may ONLY be set when the component is a direct descendant of a Row or Column.\"},\"value\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The selected date and/or time value in ISO 8601 format. If not yet set, initialize with an empty string.\"},\"enableDate\":{\"type\":\"boolean\",\"default\":false,\"description\":\"If true, allows the user to select a date.\"},\"enableTime\":{\"type\":\"boolean\",\"default\":false,\"description\":\"If true, allows the user to select a time.\"},\"min\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label\"},{\"type\":\"string\",\"format\":\"date\"},{\"type\":\"string\",\"format\":\"time\"},{\"type\":\"string\",\"format\":\"date-time\"}],\"description\":\"The minimum allowed date/time in ISO 8601 format.\"},\"max\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label\"},{\"type\":\"string\",\"format\":\"date\"},{\"type\":\"string\",\"format\":\"time\"},{\"type\":\"string\",\"format\":\"date-time\"}],\"description\":\"The maximum allowed date/time in ISO 8601 format.\"},\"label\":{\"anyOf\":[{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/0\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"The text label for the input field.\"},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"condition\":{\"anyOf\":[{\"type\":\"boolean\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/1\"},{\"$ref\":\"#/properties/accessibility/properties/label/anyOf/2\"}],\"description\":\"REF:common_types.json#/$defs/DynamicBoolean|A boolean value that can be a literal, a path, or a function call returning a boolean.\"},\"message\":{\"type\":\"string\",\"description\":\"The error message to display if the check fails.\"}},\"required\":[\"condition\",\"message\"],\"additionalProperties\":false,\"description\":\"REF:common_types.json#/$defs/CheckRule|A check rule consisting of a condition and an error message.\"},\"description\":\"A list of checks to perform.\"}},\"required\":[\"component\",\"value\"]}]}}}",
+            "description": "A2UI Component Schema — available components for generating UI surfaces. Use these component names and properties when creating A2UI operations."
+          },
+          {
+            "value": "Generate A2UI v0.9 JSON.\n\n## A2UI Protocol Instructions\n\nA2UI (Agent to UI) is a protocol for rendering rich UI surfaces from agent responses.\n\nCRITICAL: You MUST call the render_a2ui tool with ALL of these arguments:\n- surfaceId: A unique ID for the surface (e.g. \"product-comparison\")\n- components: REQUIRED — the A2UI component array. NEVER omit this. Only use\n  components listed in the Available Components schema provided as context.\n- data: OPTIONAL — a JSON object written to the root of the surface data model.\n  Use for pre-filling form values or providing data for path-bound components.\n- every component must have the \"component\" field specifying the component type.\n  ONLY use component names from the Available Components schema — do NOT invent\n  component names or use names not in the schema.\n\nCOMPONENT ID RULES:\n- Exactly one component MUST have id=\"root\". This is the surface's entry\n  point — the renderer begins at \"root\" and walks the child/children tree\n  from there. Every other component must be reachable from \"root\". If no\n  component has id=\"root\", the surface renders an empty loading placeholder\n  and none of your components will be shown.\n- Every component ID must be unique within the surface.\n- A component MUST NOT reference itself as child/children. This causes a\n  circular dependency error. For example, if a component has id=\"avatar\",\n  its child must be a DIFFERENT id (e.g. \"avatar-img\"), never \"avatar\".\n- The child/children tree must be a DAG — no cycles allowed.\n\nREPEATING CONTENT (TEMPLATES):\nTo repeat a component for each item in an array, use the structural children format:\n  children: { componentId: \"card-id\", path: \"/items\" }\nThis tells the renderer to create one instance of \"card-id\" per item in the \"/items\" array.\n\nPATH RULES FOR TEMPLATES:\nComponents inside a repeating template use RELATIVE paths (no leading slash).\nThe path is resolved relative to each array item automatically.\nIf a container has children: { componentId: \"card\", path: \"/items\" } and each item\nhas a key \"name\", use { \"path\": \"name\" } (NO leading slash — relative to item).\nCRITICAL: Do NOT use \"/name\" (absolute) inside templates — use \"name\" (relative).\nThe container's path (\"/items\") uses a leading slash (absolute), but all\ncomponents INSIDE the template use paths WITHOUT leading slash.\n\nCOMPONENT VALUES — DEFAULT RULE:\nUse inline literal values for ALL component properties. Pass strings, numbers,\narrays, and objects directly on the component. Do NOT use { \"path\": \"...\" }\nobjects unless the property's schema explicitly allows it (see exception below).\nCRITICAL: USING { \"path\": \"...\" } ON A PROPERTY THAT DOES NOT DECLARE PATH\nSUPPORT IN ITS SCHEMA WILL CAUSE A RUNTIME CRASH AND BREAK THE ENTIRE UI.\nALWAYS CHECK THE COMPONENT SCHEMA FIRST — IF THE PROPERTY ONLY ACCEPTS A\nPLAIN TYPE, YOU MUST USE A LITERAL VALUE.\nVERY IMPORTANT: THE APPLICATION WILL BREAK IF YOU DO NOT FOLLOW THIS RULE!\n\nFor example, a chart's \"data\" must always be an inline array:\n  \"data\": [{\"label\": \"Jan\", \"value\": 100}, {\"label\": \"Feb\", \"value\": 200}]\nA metric's \"value\" must always be an inline string:\n  \"value\": \"$1,200\"\n\nPATH BINDING EXCEPTION — SCHEMA-DRIVEN:\nA few properties accept { \"path\": \"/some/path\" } as an alternative to a literal\nvalue. You can identify these in the Available Components schema: the property\nwill list BOTH a literal type AND an object-with-path option. If a property only\nshows a single type (string, number, array, etc.), it does NOT support path\nbinding — use a literal value only.\n\nPath binding is typically used for editable form inputs so the client can write\nuser input back to the data model. When building forms:\n- Bind input \"value\" to a data model path: \"value\": { \"path\": \"/form/name\" }\n- Pre-fill via the \"data\" tool argument: \"data\": { \"form\": { \"name\": \"Alice\" } }\n- Capture values on submit via button action context:\n    \"action\": { \"event\": { \"name\": \"submit\", \"context\": { \"name\": { \"path\": \"/form/name\" } } } }\n\nREPEATING CONTENT uses a structural children format (not the same as value binding):\n  children: { componentId: \"card-id\", path: \"/items\" }\nComponents inside templates use RELATIVE paths (no leading slash): { \"path\": \"name\" }.",
+            "description": "A2UI generation guidelines — protocol rules, tool arguments, path rules, data model format, and form/two-way-binding instructions."
+          },
+          {
+            "value": "Create polished, visually appealing interfaces. ONLY use components listed in the\nAvailable Components schema — do NOT use component names that are not in the schema.\n\nDesign principles:\n- Create clear visual hierarchy within cards and layouts.\n- Keep cards clean — avoid clutter. Whitespace is good.\n- Use consistent surfaceIds (lowercase, hyphenated).\n- NEVER use the same ID for a component and its child — this creates a\n  circular dependency. E.g. if id=\"avatar\", child must NOT be \"avatar\".\n- For side-by-side comparisons, use a container with structural children\n  (children: { componentId, path }) to repeat a card template per data item.\n- Include images when relevant (logos, icons, product photos):\n  - Prefer company logos via Google favicons: https://www.google.com/s2/favicons?domain=example.com&sz=128\n  - Do NOT invent Unsplash photo-IDs — they will 404. Only use real, known URLs.\n- For buttons: action MUST use this exact nested format:\n    \"action\": { \"event\": { \"name\": \"myAction\", \"context\": { \"key\": \"value\" } } }\n  The \"event\" key holds an OBJECT with \"name\" (required) and \"context\" (optional).\n  Do NOT use a flat format like {\"event\": \"name\"} — \"event\" must be an object.\n- For forms: check the component schema — if an input's \"value\" property\n  supports path binding, use it for editable fields. The submit button's\n  action context should reference the same paths to capture user input.\n\nUse the SAME surfaceId as the main surface. Match action names to button action event names.",
+            "description": "A2UI design guidelines — visual design rules, component hierarchy tips, and action handler patterns."
+          },
+          {
+            "value": "You are generating a self-contained interface that renders inside a sandboxed iframe in OpenBot's chat transcript. It must look like it belongs to OpenBot, not like a widget from somewhere else.\n\nPALETTE. OpenBot is neutral by design. Use greys for structure and reserve colour for meaning.\n- Light: background #fafafa, surface #ffffff, text #0a0a0a, muted text #636363, border #e5e5e5.\n- Dark: background #0a0a0a, surface #171717, text #fafafa, muted text #a1a1a1, border rgba(255,255,255,0.10).\n- Only two accents, and only when they carry meaning: #e7000b destructive and #009689 success in light, #ff6467 and #00bba7 in dark.\n- Never introduce a brand hue, gradient, or coloured header. A purple or blue accent is wrong here.\n\nCHARTS. Series colours are steps of grey, not a rainbow: #d4d4d4, #737373, #525252, #404040, #262626. Distinguish series by ordering, direct labels, and shape rather than by hue. If a series means \"bad\", the destructive red is allowed for that one series.\n\nTYPE. font-family: Inter, ui-sans-serif, system-ui, sans-serif. Body 14px/1.5. Headings 15-16px, weight 600, no letter-spacing tricks. Numerals in tables and metrics: font-variant-numeric: tabular-nums.\n\nSHAPE AND SPACING. border-radius: 0.55rem on cards and controls, 0.375rem on small chips. 1px solid borders, never a drop shadow for elevation. Pad containers 12-16px. Space stacked blocks 8-12px.\n\nDARK MODE IS REQUIRED. Define the light palette first, then override inside @media (prefers-color-scheme: dark). Set an explicit background and colour on body — the iframe paints on nothing, so a transparent body shows through wrongly.\n\nLAYOUT. Assume a narrow column: roughly 320-680px wide, inside a chat message. Design for the narrow case first and let it grow. Never set a fixed pixel width on the outermost element; use max-width: 100%, flexbox or grid, and box-sizing: border-box everywhere. Anything wide — a table, a chart, a code block — scrolls inside its own container with overflow-x: auto. The page itself must never scroll sideways.\n\nHONESTY ABOUT DATA. You have no access to this deployment's data. Every number you render is one you were given or one you made up, so never present an invented figure as a reading from OpenBot. If you are illustrating rather than reporting, label it as an example on the interface itself.\n\nMECHANICS.\n- Keep it self-contained: inline the CSS and the JS. CDN <script> and <link> tags do load, so Chart.js, D3 and similar are available when a chart genuinely needs them; prefer plain SVG or CSS for anything simple.\n- No network calls to this deployment. The iframe has no session and no same-origin access; a fetch to /api will fail.\n- Guard every read of browser storage in try/catch. It throws outright in some contexts.\n- Interactive controls need a visible focus ring, real button elements, and hit targets of at least 32px.\n- Prefer one clear interface over a dashboard of panels. A single legible chart beats four cramped ones.",
+            "description": "Design guidelines for the generateSandboxedUi tool. Follow these when building UI."
+          }
+        ],
+        "messages": [
+          {
+            "id": "a36b297e-675d-4f7b-ab90-e79f91177284",
+            "role": "user",
+            "content": "Hi! In one short sentence, what is 2 plus 2?"
+          }
+        ],
+        "threadId": "55569917-dab5-8e4e-b466-b94f6639ec27",
+        "forwardedProps": { "a2uiCatalogAvailable": true },
+        "protocolVersion": "1.0"
+      },
+      "runId": "83415767-f1f1-40a9-b2ba-d4fc3e43f625",
+      "run_id": "83415767-f1f1-40a9-b2ba-d4fc3e43f625",
+      "metadata": {
+        "cpki_event_id": "edb3fab0-5634-4645-9ed8-1c4e7c50c329",
+        "cpki_ingested": "01a15c1d-cf99-7b2e-960e-37c96b3286a3",
+        "cpki_event_seq": 1
+      },
+      "threadId": "55569917-dab5-8e4e-b466-b94f6639ec27",
+      "thread_id": "55569917-dab5-8e4e-b466-b94f6639ec27",
+      "project_id": 1,
+      "organization_id": "casa-de-erlang"
+    },
+    {
+      "type": "RUN_ERROR",
+      "runId": "83415767-f1f1-40a9-b2ba-d4fc3e43f625",
+      "run_id": "83415767-f1f1-40a9-b2ba-d4fc3e43f625",
+      "message": "Model credential is not configured for General Assistant. Add the package credential or set OPENAI_API_KEY.",
+      "metadata": {
+        "cpki_event_id": "f222d54a-22d8-424c-a0fe-2423fd38d6ba",
+        "cpki_ingested": "01a15c1d-cf99-7a25-8929-732be01b6b47",
+        "cpki_event_seq": 2
+      },
+      "threadId": "55569917-dab5-8e4e-b466-b94f6639ec27",
+      "thread_id": "55569917-dab5-8e4e-b466-b94f6639ec27",
+      "project_id": 1,
+      "organization_id": "casa-de-erlang"
+    }
+  ]
+}

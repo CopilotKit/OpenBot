@@ -1,19 +1,31 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
+import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useFittedWidth } from "@/components/browser/fitted-window";
 import {
-  type ControlState,
-  readControl,
-  releaseControl,
-  supplySecret,
-  takeControl,
-} from "@/lib/computers/control";
+  botBrowserKeys,
+  botBrowserStateQueryOptions,
+} from "@/lib/bot-browser/queries";
+import { botsReason, supplySecret } from "@/lib/computers/control";
+import {
+  type ComputerState,
+  computerStatusQueryOptions,
+} from "@/lib/computers/queries";
 import {
   readPageFrame,
   readScreenshot,
+  startComputer,
   type Screenshot,
 } from "@/lib/computers/screen";
+import { useComputerControl } from "@/lib/computers/use-control";
+import { queryClient } from "@/query-client";
 import { ChannelAvatar } from "../channels/avatar";
-import { LiveScreen } from "./live-screen";
+import { BotBrowserBar, BotRecordPanel } from "./bot-browser";
+import { ComputerControlButton } from "./computer-controls";
+import { LiveScreen, type LiveScreenHandle } from "./live-screen";
+import { useElementVisible, usePageVisible } from "./preview-visibility";
 
 /** Explicit blank-browser URLs use placeholder artwork; missing URL fields are treated as real pages. */
 function isBlankBrowser(shot: Screenshot): boolean {
@@ -28,6 +40,25 @@ function hostOf(url: string): string {
     return new URL(url).host;
   } catch {
     return url;
+  }
+}
+
+/** An address as an address bar draws it: the site, the rest of the address after it, and whether it is secure. */
+function addressParts(
+  url: string,
+): { host: string; rest: string; secure: boolean } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
+    const rest = `${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}`;
+    return {
+      host: parsed.host,
+      rest,
+      secure: parsed.protocol === "https:",
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -87,6 +118,23 @@ async function preloadFrame(base64: string): Promise<void> {
   }
 }
 
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * How long a computer may go without a frame before that is worth telling anybody.
+ *
+ * GENEROUS ON PURPOSE. A first start pulls an image, schedules a pod and launches a browser, and a
+ * minute is ordinary. The panel used to call the first frameless poll a problem, so every cold start
+ * opened on "Can't show the screen right now… ask an admin", in front of a person whose computer was
+ * doing exactly what it should. Past the server's own wait for a cold start, with room to spare.
+ */
+const STARTUP_GRACE_MS = 150_000;
+
+/** How often a computer that has not drawn a frame yet is asked where it is. */
+const STATUS_POLL_MS = 2_000;
+
 /** Identical frames in a row that mean the page has stopped changing. */
 const SETTLED_FRAMES = 3;
 
@@ -109,9 +157,22 @@ function NothingToSee({
   blankBrowser,
   settled,
   page,
+  waiting,
+  owner = "the Bot's",
 }: {
   problem: string | null;
   blankBrowser: boolean;
+  /**
+   * Why there is no picture yet, when the reason is ordinary.
+   *
+   * `starting` is a computer on its way up, which on a first start takes about a minute; `asleep` is
+   * one that is off and starts on the Bot's next action. Neither is a problem and neither is drawn as
+   * one. A problem is only what is left after a generous wait, or a computer the server says it
+   * cannot reach.
+   */
+  waiting?: "starting" | "asleep" | undefined;
+  /** Whose computer, possessive and lower case: "Sales's", or "the Bot's" without a name. */
+  owner?: string;
   /** Whether this is a turn that has finished, rather than the browser as it is now. */
   settled?: boolean;
   /** The page that turn opened, named when there is no picture of it. */
@@ -134,6 +195,7 @@ function NothingToSee({
             for the assistant's screen…" and waited there for ever, because the poll that would have
             ended the wait stops the moment a turn settles.
           */}
+          {/* A turn that opened no page never gets here: it draws no card at all (see `nothingOpened`). */}
           {page?.url ? (
             <>
               <span className="font-medium">{page.title || "A page"}</span>
@@ -142,31 +204,111 @@ function NothingToSee({
                 Opened during this turn. The screen has moved on since.
               </span>
             </>
-          ) : (
-            /*
-             * A turn that ended without getting anywhere: refused by a boundary, stopped, or failed.
-             * Saying "opened during this turn" here would describe something that did not happen.
-             */
-            <span>This turn did not open a page.</span>
-          )}
+          ) : null}
         </>
       ) : problem ? (
         <>
-          <span className="font-medium">
-            You cannot see the screen right now
-          </span>
+          <span className="font-medium">Can't show the screen right now</span>
           <span>{problem}</span>
           <span>
-            The assistant may still be working. An administrator can check
-            whether its computer is running.
+            The Bot may still be working. If this keeps happening, ask an admin
+            to check its Computer.
           </span>
         </>
+      ) : waiting === "starting" ? (
+        <span role="status">
+          Starting {owner} computer. The first start takes about a minute.
+        </span>
+      ) : waiting === "asleep" ? (
+        <span role="status">
+          {capitalise(owner)} computer is off. It starts when the Bot next uses
+          it.
+        </span>
       ) : blankBrowser ? (
-        <span>The assistant has not opened a page yet.</span>
+        <span>Nothing is open in the Bot's browser right now.</span>
       ) : (
-        <span>Waiting for the assistant's screen…</span>
+        <span>Waiting for the Bot's screen…</span>
       )}
     </span>
+  );
+}
+
+/**
+ * The Bot's browser as a window, in the live full-size view: its bar (tabs, the address, back, forward and reload) over
+ * its page, framed as one, the page as large as the space left allows at the browser's own shape. The Browser page
+ * draws the person's own browser the same way (`components/browser/browser-screen.tsx`), the page inside the tabs'
+ * panel with the address. The window is sized to its page (`useFittedWidth`), centred in the space, so the page fills
+ * the window with no blank band under or beside it whatever the window's shape. A turn that is over is a picture rather
+ * than a browser, and is drawn as it always was.
+ */
+function BrowserWindow({
+  live,
+  botId,
+  bar,
+  aspectRatio,
+  onNavigated,
+  children,
+}: {
+  live: boolean;
+  botId: string;
+  /** The Bot's browser as this person sees it; undefined until it first answers, when the page is drawn barless. */
+  bar: BotBrowserApiState | undefined;
+  /** The page's shape, width over height: the browser behind it has a fixed one. */
+  aspectRatio: number;
+  /** An address typed in the bar went: the keyboard goes back to the page. */
+  onNavigated: () => void;
+  children: ReactNode;
+}) {
+  const space = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const width = useFittedWidth(space, frame, aspectRatio, { shown: live });
+  if (!live) return children;
+  return (
+    // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
+    // Top-aligned, as the wheel's column beside it is.
+    //
+    // `basis-0`, a length: the space is what the card has left once the wheel and Record have theirs, in a narrow
+    // window too, where they are under it. `flex-1` alone starts from 0%, which in a card as tall as its content is
+    // the page's own height at the window's full width: the page took the window and Record was below the fold,
+    // where a person scrolling over the Bot's page (which scrolls that page) never found it.
+    <div
+      ref={space}
+      className="flex min-h-80 min-w-0 flex-1 basis-0 items-start justify-center"
+    >
+      {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
+      <div
+        ref={frame}
+        className="flex w-full min-w-0 flex-col overflow-clip rounded-xl border border-border"
+        style={width === undefined ? undefined : { width }}
+      >
+        <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
+          {/* The page flush under the bar, as in the person's own browser (browser-screen.tsx). */}
+          <div className="bg-background">{children}</div>
+        </BotBrowserBar>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Who has the wheel and Record, in a live full-size view: a column beside the Bot's browser in a wide window, so the
+ * page takes the window's height, and under it in a narrow one, where the page takes the height they leave
+ * (`BrowserWindow`), so Record is on screen without scrolling. A container, so Record lays itself out by the width
+ * it is given here: one column beside the browser, two under it (`BotRecordPanel`). A turn that is over keeps them
+ * where they always were.
+ */
+function WheelColumn({
+  live,
+  children,
+}: {
+  live: boolean;
+  children: ReactNode;
+}) {
+  if (!live) return children;
+  return (
+    <div className="@container flex min-w-0 flex-col gap-4 lg:min-h-0 lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:pt-10">
+      {children}
+    </div>
   );
 }
 
@@ -206,6 +348,8 @@ type Props = {
    * side panel is not a turn and has nothing to remember.
    */
   toolCallId?: string;
+  /** How long to wait for a first frame before calling it a problem. Shortened by tests. */
+  startupGraceMs?: number;
 };
 
 export function ComputerView({
@@ -219,34 +363,24 @@ export function ComputerView({
   page,
   finished,
   toolCallId,
+  startupGraceMs = STARTUP_GRACE_MS,
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
+  /**
+   * The last screenshot that was attempted and failed. Held, not shown: see `shownProblem` below.
+   */
   const [problem, setProblem] = useState<string | null>(null);
+  /** What the last poll said about a computer that is not ready, which it says without waking it. */
+  const [polledState, setPolledState] = useState<ComputerState | null>(null);
+  /** Set once a computer has gone `startupGraceMs` without a frame. */
+  const [stalled, setStalled] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [control, setControl] = useState<ControlState | null>(null);
-  /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
-  const [secret, setSecret] = useState("");
-  const [secretProblem, setSecretProblem] = useState<string | null>(null);
-  const [sendingSecret, setSendingSecret] = useState(false);
-  const driving = control?.holder === "human";
-  /** Read by the polling loop without restarting it on control changes. */
-  const drivingRef = useRef(false);
-  drivingRef.current = driving;
-
-  /** Release control; the Bot's waiting tool call resumes from this state change. */
-  const handBack = async () => {
-    const state = await releaseControl(computerId);
-    if (state) setControl(state);
-  };
-  /** Secret prompts keep the screen live even though the human does not hold the wheel. */
-  const secretPending = Boolean(control?.secretWanted);
-  const secretPendingRef = useRef(false);
-  secretPendingRef.current = secretPending;
-  // Held in a ref so a slow response cannot overwrite a newer frame after the component moved on.
-  const generation = useRef(0);
-  /** Force a short watch window after non-Bot actions such as secret entry. */
-  const watchUntil = useRef(0);
-
+  /** The full-size view's live screen, which the bar hands the keyboard back to once an address goes. */
+  const screen = useRef<LiveScreenHandle>(null);
+  const [streamProblem, setStreamProblem] = useState<string | null>(null);
+  /** A dropped live stream being retried on its own. A badge, never the overlay. */
+  const [reconnecting, setReconnecting] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   /**
    * A finished turn is history, and history is not polled.
    *
@@ -277,6 +411,53 @@ export function ComputerView({
   const [, setFrameArrived] = useState(0);
 
   const settled = !active && (finished || Boolean(knownPage));
+  const {
+    control,
+    busy: changingControl,
+    change: changeControl,
+    refresh: refreshControl,
+    someoneElse,
+  } = useComputerControl(computerId, !settled);
+  /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
+  const [secret, setSecret] = useState("");
+  const [secretProblem, setSecretProblem] = useState<string | null>(null);
+  const [sendingSecret, setSendingSecret] = useState(false);
+  const pageVisible = usePageVisible();
+  const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
+  /** The signed-in person holds the wheel. Someone else holding it on a shared Bot is not them driving. */
+  const driving =
+    control?.holder === "human" && !control.transitioning && !someoneElse;
+  /** Read by the polling loop without restarting it on control changes. */
+  const drivingRef = useRef(false);
+  drivingRef.current = driving;
+
+  /** Secret prompts keep the screen live even though the human does not hold the wheel. */
+  const secretPending = Boolean(control?.secretWanted);
+  const secretPendingRef = useRef(false);
+  secretPendingRef.current = secretPending;
+  // A new request is a fresh start: what went wrong with the last one is not news about it.
+  const secretAsked = control?.secretId ?? control?.secretWanted;
+  useEffect(() => {
+    if (secretAsked) setSecretProblem(null);
+  }, [secretAsked]);
+  // Held in a ref so a slow response cannot overwrite a newer frame after the component moved on.
+  const generation = useRef(0);
+  /** Force a short watch window after non-Bot actions such as secret entry. */
+  const watchUntil = useRef(0);
+
+  const visualVisible = pageVisible && (expanded || previewIntersecting);
+  /**
+   * The full-size view is showing the live stream, which is the screen as it is, frame by frame.
+   *
+   * The screenshot poll stops then. It went on underneath, once a second: a full-size PNG taken in the
+   * same browser the person was driving, and a re-render of this whole view, which showed as a hitch
+   * every second and a caret that blinked out. Worked out the same way `showLiveScreen` is below.
+   */
+  const liveStreamOpen =
+    expanded &&
+    !settled &&
+    (driving || (shot !== null && !isBlankBrowser(shot)));
+  const polling = visualVisible && !liveStreamOpen;
 
   /*
    * The frame this turn's page was showing, fetched once and then kept.
@@ -317,6 +498,7 @@ export function ComputerView({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
     if (settled) return;
+    if (!polling) return;
     const mine = ++generation.current;
     let timer: ReturnType<typeof setTimeout>;
     // Consecutive identical frames observed during post-action settling.
@@ -337,11 +519,29 @@ export function ComputerView({
     // Always fetch at least one frame; only repeated refreshes are conditional.
     const tick = async () => {
       try {
-        const { frame, error } = await readScreenshot(computerId);
+        const { frame, error, notReady } = await readScreenshot(computerId);
         if (generation.current !== mine) return;
 
-        if (!frame) {
-          setProblem(error ?? "The screen is not available right now.");
+        if (notReady) {
+          /*
+           * Asleep or starting, said by the server without waking the computer. Not a problem:
+           * nothing has failed, so the last failure (if any) is no longer the news.
+           */
+          setPolledState(notReady.state);
+          setProblem(null);
+          /*
+           * A frame from before the computer went to sleep is not what it shows now, and keeping it
+           * would also keep the live stream mounted, which reconnects to a computer nobody woke.
+           */
+          setShot(null);
+        } else if (!frame) {
+          setProblem(error ?? "The screen isn't available right now.");
+          /*
+           * The state is unknown again, not whatever the last not-ready answer said. A stale
+           * "absent" would keep calling a computer that is failing "off", and an off computer is
+           * never timed out, so the failure would never be shown. Cleared, the status read resumes.
+           */
+          setPolledState(null);
         } else {
           // Exact byte comparison is the settling signal.
           unchanged = frame.base64 === lastFrame ? unchanged + 1 : 0;
@@ -351,6 +551,7 @@ export function ComputerView({
           if (generation.current !== mine) return;
           setShot(frame);
           setProblem(null);
+          setPolledState(null);
         }
       } finally {
         if (generation.current === mine && shouldContinue()) {
@@ -364,36 +565,126 @@ export function ComputerView({
       generation.current++;
       clearTimeout(timer);
     };
-  }, [computerId, active, intervalMs, secretPending, settled]);
+  }, [computerId, active, intervalMs, secretPending, settled, polling]);
 
-  /** Poll control state independently from screenshot polling so help/secret prompts surface. */
+  /*
+   * Where the computer is in its life, until there is a picture to show.
+   *
+   * The status route never wakes a computer, so this is safe to poll while one is starting. It is
+   * what the panel knows before its first screenshot has come back, and the only word on a computer
+   * the server cannot reach. Once a frame arrives the frame is the answer and this stops asking, and
+   * so it does while the screenshot poll is itself reporting the state, which it does every second.
+   * A failed status read is "not known yet", never a problem in itself.
+   */
+  const status = useQuery({
+    ...computerStatusQueryOptions(computerId),
+    enabled: !settled && visualVisible && shot === null && polledState === null,
+    refetchInterval: STATUS_POLL_MS,
+    retry: false,
+  });
+  /**
+   * The fresher of the two answers: the poll that just ran, else the status read. A state a newer
+   * server sends that this app doesn't know is none of the ones below: the screen waits for a frame.
+   */
+  const computerState: string | undefined = polledState ?? status.data?.state;
+  /*
+   * OPENING THE SCREEN STARTS A COMPUTER THAT IS OFF. Once, for the state the screen was opened on.
+   *
+   * Nothing this view reads starts a computer, so one that was off stayed off however long a person
+   * looked at it, and the only way to see the Bot's browser was to ask the Bot to do something. A
+   * person opening the screen is asking to see the computer, so the server is told, and starts it.
+   *
+   * Only the screen beside a conversation, which a person opens: a card in a turn is drawn by
+   * scrolling past it, and its computer is started by the Bot's action. And only for what the screen
+   * found when it opened. A computer that goes off later, in front of a person who left the screen
+   * open, stays off: nobody opened anything, and starting it again would keep every computer with a
+   * screen left open running for ever.
+   */
+  const openedOn = useRef<string | null>(null);
+  const [startAsked, setStartAsked] = useState(false);
+  // A picture is a computer that is up, whatever the state reads have or have not said yet.
+  const hasFrame = shot !== null;
   useEffect(() => {
-    if (settled) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      const state = await readControl(computerId);
-      if (!live) return;
-      if (state) setControl(state);
-      timer = setTimeout(tick, 1000);
-    };
-    void tick();
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [computerId, settled]);
+    if (toolCallId || settled || !visualVisible) return;
+    if (!computerState && !hasFrame) return;
+    if (openedOn.current === computerId) return;
+    openedOn.current = computerId;
+    if (computerState !== "absent") return;
+    /*
+     * "Starting" only once the server says it is. Until then, and for a server that has no such
+     * call or refuses it, the screen says what it always said: the computer is off.
+     */
+    void startComputer(computerId).then((state) => {
+      if (state === "starting" || state === "ready") setStartAsked(true);
+    });
+  }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
+  useEffect(() => {
+    // Up, or on its way: what the server says is the news again, and a later "off" is one.
+    if (computerState && computerState !== "absent") setStartAsked(false);
+  }, [computerState]);
+  /**
+   * Off, and staying off until the Bot uses it. In a turn, an absent computer is one the Bot's action
+   * is about to start, and one this screen has just asked for is on its way.
+   */
+  const asleep = computerState === "absent" && !toolCallId && !startAsked;
+  /** Waiting for a first frame, for a reason that can end. A computer that is off waits for the Bot. */
+  const waitingForFrame = !settled && visualVisible && shot === null && !asleep;
 
-  // Input forwarding lives in LiveScreen on the socket.
-  // Escape is bound to the window so it works regardless of overlay focus.
   useEffect(() => {
-    if (!expanded) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExpanded(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [expanded]);
+    if (!waitingForFrame) {
+      setStalled(false);
+      return;
+    }
+    const timer = setTimeout(() => setStalled(true), startupGraceMs);
+    return () => clearTimeout(timer);
+  }, [waitingForFrame, startupGraceMs]);
+
+  /*
+   * Input forwarding lives in LiveScreen on the socket. The full-size view is a Base UI dialog, so
+   * it closes on Escape, keeps Tab inside itself and makes the page behind it inert. A screen being
+   * driven takes Tab as a key for the Bot's browser and lets Escape through, which takes the
+   * keyboard off it on the way out.
+   */
+  const opener = useRef<HTMLElement | null>(null);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const openExpanded = () => {
+    opener.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setExpanded(true);
+  };
+  /** Back to what opened it, or to the picture that opens it when that has gone. */
+  const focusAfterClose = () =>
+    opener.current?.isConnected
+      ? opener.current
+      : expandButton.current?.isConnected
+        ? expandButton.current
+        : true;
+
+  /*
+   * The Bot's browser as the person working in it sees it: the bar above the screen and Record under it. Read only
+   * while the screen is open full size and live, every second, as the screen itself is watched; a finished turn is a
+   * record and has neither.
+   */
+  const botBrowser = useQuery({
+    ...botBrowserStateQueryOptions(computerId),
+    enabled: expanded && !settled,
+  });
+  /*
+   * Read again the moment the wheel changes hands, rather than up to a second later: the bar and Record go live, or
+   * still, with the button the person just pressed.
+   */
+  const holder = control ? `${control.holder}:${control.heldBy ?? ""}` : null;
+  useEffect(() => {
+    if (holder === null) return;
+    void queryClient.invalidateQueries({
+      queryKey: botBrowserKeys.state(computerId),
+    });
+  }, [computerId, holder]);
+  /** Whether the full-size view draws the Bot's browser's bar over the screen. A turn that is over has none. */
+  const barState = settled ? undefined : botBrowser.data;
 
   // Always render the card frame; help/secret controls live below the conditional picture.
   /*
@@ -401,6 +692,36 @@ export function ComputerView({
    * live browser can be sitting on about:blank.
    */
   const blankBrowser = !settled && shot ? isBlankBrowser(shot) : false;
+
+  const owner = name ? `${name}'s` : "the Bot's";
+  /**
+   * The problem worth showing, which is not the same as the last one that happened.
+   *
+   * A computer the server says it cannot reach is a problem at once. Anything else that failed is
+   * shown only once the wait has run past what a start can take, because before then a failed
+   * screenshot is far more often a browser still launching than a broken computer.
+   */
+  const shownProblem =
+    computerState === "unreachable"
+      ? `${capitalise(owner)} computer can't be reached right now.`
+      : stalled
+        ? (problem ?? "It's taking longer than usual to start.")
+        : null;
+  /**
+   * The calm sentence, when there is no picture and nothing wrong.
+   *
+   * A ready computer that has simply not sent its first frame yet keeps the plain "Waiting for the
+   * Bot's screen…", and so does one whose state is not known yet: saying "Starting" over a computer
+   * that is already running would be the panel inventing a delay. A failed screenshot from a computer
+   * that is not known to be ready is read as one still coming up.
+   */
+  const waiting: "starting" | "asleep" | undefined = asleep
+    ? "asleep"
+    : computerState === "starting" ||
+        computerState === "absent" ||
+        (problem !== null && computerState !== "ready")
+      ? "starting"
+      : undefined;
 
   /*
    * Sized from the ratio, never from the payload, so the frame is identical while a screen is
@@ -440,93 +761,203 @@ export function ComputerView({
    * believed somebody was driving it.
    */
   const wheelHere = driving && !settled;
+  /** What the Bot asked for the wheel for, when it asked. Never the person's own take. */
+  const reason = botsReason(control);
 
   const polledScreen = showScreen ? (
     <img
       src={`data:image/png;base64,${drawn.base64}`}
-      alt="What the assistant is looking at"
+      alt="What the Bot is looking at"
       // Keep unexpected screenshot dimensions inside the reserved frame.
       className="absolute inset-0 h-full w-full object-contain opacity-100 transition-opacity duration-300 starting:opacity-0"
     />
   ) : null;
 
+  /** Where the browser in the picture is, by host: the page drawn now, or the page a finished turn left it on. */
+  const pageUrl = showScreen
+    ? drawn?.url
+    : settled
+      ? knownPage?.url
+      : undefined;
+  const address = pageUrl ? addressParts(pageUrl) : null;
+
+  /*
+   * A TURN THAT IS OVER AND OPENED NO PAGE DRAWS NOTHING.
+   *
+   * The frame is reserved at the screen's shape so that a page still loading does not move the
+   * conversation around it, and that is still what a running turn gets. A turn refused by a boundary,
+   * stopped or failed has no page coming, and its reserved frame was a grey box the width of the
+   * conversation between the Bot's sentence and its answer, saying only "This turn did not open a
+   * page." The answer says what happened; the navigation's own line says it was tried (computer-tools).
+   */
+  const nothingOpened = settled && !knownPage?.url && keptFrame === null;
+  if (nothingOpened) return null;
+
   return (
     <>
-      <figure className="overflow-hidden rounded-2xl border">
-        {/* Inline preview remains in transcript; click opens a readable full-size view. */}
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          /*
-           * Opens whether or not there is a picture in it. It used to be disabled without one, and
-           * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
-           * computer that could not be reached left a person with no way to take control at all —
-           * the states where they most want it. With nothing to draw the full-size view shows these
-           * same words, and the wheel below them.
-           */
-          className="relative block w-full cursor-pointer bg-muted"
-          style={frameStyle}
-          aria-label="Open the assistant's screen full size"
-        >
-          {polledScreen}
-
-          {/* Whose computer this is — and whose hands are on it — said on the picture itself. */}
-          {name || wheelHere ? (
-            <span className="absolute right-2 bottom-2 flex items-center gap-1.5">
-              {name ? (
-                <span className="flex items-center gap-1.5 rounded-full bg-black/60 py-1 pr-2.5 pl-1.5 font-medium text-white text-xs backdrop-blur-sm">
-                  <ChannelAvatar participantIds={[computerId]} size={16} />
-                  {name}
-                </span>
-              ) : null}
-              {wheelHere ? (
-                <span className="rounded-full bg-white px-2.5 py-1 font-medium text-black text-xs shadow-sm">
-                  You have control
-                </span>
-              ) : null}
-            </span>
-          ) : null}
-
-          {showScreen ? null : (
-            <NothingToSee
-              blankBrowser={blankBrowser}
-              page={knownPage}
-              problem={problem}
-              settled={settled}
-            />
-          )}
-        </button>
-
+      {/* A container, so the status over the picture can be compact in the narrow side panel (a glimpse) and roomy
+          where the card is wide in the conversation. */}
+      <figure
+        ref={previewRef}
+        className="@container overflow-hidden rounded-2xl border bg-background"
+      >
         {/*
-         * The Bot ASKING for the wheel, which is not the same thing as a person wanting it.
-         *
-         * The standing "who is driving" prose and the everyday Take control button live in the
-         * full-size view, where there is a page big enough to drive. This row is the exception: a
-         * request is an exceptional state with a reason attached, it is the one moment the screen is
-         * waiting on a person rather than the other way round, and making them open the full-size
-         * view to find out what was wanted would hide the reason behind a click. Taking the wheel
-         * from here opens that view, because driving is what they are being asked to do.
-         */}
+          The card read as a browser window: where it is, as an address bar says it (the site in ink, the rest of the
+          address quieter), with a dot in the colour that means a Bot is acting while the picture is of the browser as
+          it is now rather than of a turn that is over. With no page open, whose browser it is.
+        */}
+        {address || name ? (
+          <figcaption className="flex h-8 items-center gap-2 border-b bg-sidebar px-3 text-xs">
+            {address ? (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                {address.secure ? (
+                  <IconLock
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                ) : (
+                  <IconWorld
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="min-w-0 truncate">
+                  <span className="font-medium">{address.host}</span>
+                  <span className="text-muted-foreground">{address.rest}</span>
+                </span>
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
+                <ChannelAvatar participantIds={[computerId]} size={14} />
+                {name}
+              </span>
+            )}
+            {showScreen && !settled ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-indigo-500 motion-safe:animate-pulse"
+              />
+            ) : null}
+          </figcaption>
+        ) : null}
+        {/*
+          The picture, and over its foot, while the Bot holds the wheel, a status with Take control: the one
+          thing a person watching may want to do, on the thing they are watching. A sibling of the picture's button
+          rather than inside it, because a control cannot sit inside another control.
+        */}
+        <div className="relative">
+          {/* Inline preview remains in transcript; click opens a readable full-size view. */}
+          <button
+            type="button"
+            onClick={openExpanded}
+            ref={expandButton}
+            /*
+             * Opens whether or not there is a picture in it. It used to be disabled without one, and
+             * the wheel is down there: a blank browser, a screen that had not arrived yet, or a
+             * computer that could not be reached left a person with no way to take control at all —
+             * the states where they most want it. With nothing to draw the full-size view shows these
+             * same words, and the wheel below them.
+             */
+            className="relative block w-full cursor-pointer bg-muted"
+            style={frameStyle}
+            aria-label="Open the Bot's screen full size"
+          >
+            {polledScreen}
+
+            {/* Whose hands are on it, said on the picture itself. Whose computer it is, the frame above says. */}
+            {wheelHere ? (
+              <span className="absolute right-2 bottom-2 rounded-full border bg-popover px-2.5 py-1 font-medium text-popover-foreground text-xs shadow-sm">
+                You have control
+              </span>
+            ) : null}
+
+            {showScreen ? null : (
+              <NothingToSee
+                blankBrowser={blankBrowser}
+                owner={owner}
+                page={knownPage}
+                problem={shownProblem}
+                settled={settled}
+                waiting={waiting}
+              />
+            )}
+          </button>
+          {!settled && !(driving && !control?.transitioning) ? (
+            // Solid, not frosted: a blur over a screen that keeps changing is redrawn with every frame of it.
+            <div
+              className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border bg-popover py-1.5 pr-1.5 pl-3 text-popover-foreground shadow-lg"
+              data-slot="control-strip"
+            >
+              <span className="flex min-w-0 items-center gap-2 text-xs @sm:text-sm">
+                {control && !control.transitioning && !someoneElse ? (
+                  <span className="hidden shrink-0 @sm:flex">
+                    <ChannelAvatar participantIds={[computerId]} size={18} />
+                  </span>
+                ) : null}
+                <span className="min-w-0 truncate">
+                  {!control
+                    ? "Checking who has control…"
+                    : control.transitioning
+                      ? "Finishing the current action…"
+                      : someoneElse
+                        ? "Someone else has control."
+                        : // Who holds the wheel, which is always true; whether it is acting right now, the page shows.
+                          `${name ?? "The Bot"} has control`}
+                </span>
+              </span>
+              <ComputerControlButton
+                computerId={computerId}
+                onTakeControl={openExpanded}
+                prominent
+              />
+            </div>
+          ) : null}
+        </div>
+
+        {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
           <div className="flex items-start justify-between gap-3 border-t bg-amber-500/10 px-3 py-2 text-sm">
             <span>
-              <strong className="font-medium">The assistant needs you.</strong>{" "}
-              {control.reason}
+              <strong className="font-medium">The Bot needs you.</strong>{" "}
+              {reason}
             </span>
-            <button
-              type="button"
-              onClick={async () => {
-                const state = await takeControl(computerId);
-                if (state) setControl(state);
-                setExpanded(true);
-              }}
-              className="shrink-0 rounded-md bg-primary px-3 py-1 font-medium text-primary-foreground text-xs"
-            >
-              Take control
-            </button>
           </div>
         ) : null}
 
+        {!settled && control?.requested ? (
+          <div className="px-3 pb-2 text-sm">
+            <button
+              type="button"
+              className="underline"
+              disabled={changingControl}
+              onClick={() => void changeControl?.("cancel")}
+            >
+              Cancel request
+            </button>
+          </div>
+        ) : null}
+        {!settled && control?.transitioning ? (
+          <p className="px-3 py-2 text-sm">
+            {someoneElse
+              ? "Finishing the Bot's current action…"
+              : "Finishing the Bot's current action before giving you control…"}
+          </p>
+        ) : null}
+        {/*
+          The request's own interruption reason is written for the assistant, so the person gets
+          their own sentence, and is only asked to act when the assistant is actually waiting on them.
+        */}
+        {!settled && control?.recoveryRequired ? (
+          <p className="px-3 py-2 text-sm">
+            The Computer stopped while you had control. Take control to check
+            the page, then hand it back to the Bot.
+          </p>
+        ) : !settled && control?.request?.status === "interrupted" ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground">
+            The Computer stopped before anyone took control. The Bot will ask
+            again if it still needs you.
+          </p>
+        ) : null}
         {/*
           Secret values go directly to the page path and are never included in the conversation.
           Audit records that a secret was supplied, not the value.
@@ -544,12 +975,11 @@ export function ComputerView({
               // Clear even on failure so plaintext is not left in the DOM.
               setSecret("");
               setSecretProblem(result.ok ? null : (result.error ?? null));
-              const state = await readControl(computerId);
-              if (state) setControl(state);
+              await refreshControl?.();
             }}
           >
             <label className="block" htmlFor="openbot-secret">
-              <span className="font-medium">The assistant needs </span>
+              <span className="font-medium">The Bot needs </span>
               <span>{control.secretWanted}</span>
             </label>
             <div className="mt-1.5 flex gap-2">
@@ -561,7 +991,7 @@ export function ComputerView({
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                placeholder="Typed here, never shown to the assistant"
+                placeholder="Never shown to the Bot"
                 className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm"
               />
               <button
@@ -573,55 +1003,138 @@ export function ComputerView({
               </button>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              This goes straight to the page. It is not shown in the
-              conversation and the assistant never receives it.
+              This goes straight to the page. It isn't shown in the
+              conversation, and the Bot never sees it.
             </p>
             {secretProblem ? (
-              <p className="mt-1 text-xs text-destructive">{secretProblem}</p>
+              <p className="mt-1 text-xs text-destructive" role="alert">
+                {secretProblem}
+              </p>
             ) : null}
           </form>
+        ) : secretProblem ? (
+          /*
+            A send that failed because the request had already ended closes the box with it, and the
+            reason went with the box: the person saw it vanish and nothing else. It stays here until
+            the Bot asks again.
+          */
+          <p
+            className="border-t bg-muted/40 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {secretProblem}
+          </p>
         ) : null}
 
         {/*
-         * The inline card carries no persistent footer: taking the wheel, handing it back, and the
-         * standing "who is driving" prose all live in the full-size view, where there is a page big
-         * enough to drive. The two rows above appear only while the Bot is stuck — waiting on a
-         * credential, or asking for the wheel — and go again when it is not.
-         */}
+          Holding the wheel stops the Bot until the person hands it back, and closing the full-size
+          view never hands it back. So while they hold it, this line says so as plainly as "The Bot
+          needs you" does: someone who closes the big view and moves on is not left with a Bot
+          quietly waiting on them.
+        */}
+        {!settled && driving && !control?.transitioning ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-amber-500/10 px-3 py-2">
+            <span className="text-sm">
+              <strong className="font-medium">You have control.</strong> The Bot
+              waits until you hand it back. Open the screen to click and type.
+            </span>
+            <ComputerControlButton
+              computerId={computerId}
+              onTakeControl={openExpanded}
+            />
+          </div>
+        ) : null}
       </figure>
 
       {/*
-        Portal to body so fixed positioning is measured against the viewport, not containing panes.
+        Portalled to the body so fixed positioning is measured against the viewport, not containing
+        panes. Opened from the Computer drawer on a phone it is a dialog nested in that one, so only
+        one of them traps focus at a time, and closing it hands focus back to the drawer.
       */}
-      {expanded && typeof document !== "undefined"
-        ? createPortal(
+      <DialogPrimitive.Root
+        open={expanded}
+        onOpenChange={(next) => {
+          if (!next) setExpanded(false);
+        }}
+      >
+        <DialogPrimitive.Portal>
+          {/*
+           * Scrolls when the card is taller than the window (a narrow window, with Record under the screen), and the
+           * card's auto margins centre it when it is not. Centring with justify-content instead put the card's top out
+           * of reach above the window. A live view keeps only a thin margin: the window is for the Bot's browser.
+           *
+           * Focus starts on Close. A person who opened it to drive gets the keyboard on the screen once it connects
+           * (LiveScreen's autoFocus), as before.
+           */}
+          <DialogPrimitive.Popup
+            aria-label="The Bot's screen"
+            initialFocus={closeButton}
+            finalFocus={focusAfterClose}
+            className={`fixed inset-0 z-50 flex flex-col overflow-y-auto outline-none ${settled ? "p-2 sm:p-8" : "p-2 sm:p-4"}`}
+          >
+            {/*
+                Backdrop closes only while read-only, so a click that misses the page while driving
+                does not throw the person out of it. A turn that is over is always read-only, whoever
+                is holding the live browser. It is a mouse shortcut only: the close button in the
+                card is the way out a person can see and reach from the keyboard, as Escape is.
+              */}
+            <button
+              type="button"
+              onClick={() => !wheelHere && setExpanded(false)}
+              aria-hidden
+              tabIndex={-1}
+              className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
+            />
+            {/*
+                A card holding the screen, with who and the wheel beneath it. A turn that is over is
+                only a picture, sized to its width. On a phone it takes the whole width but an 8px
+                gutter: capped at 70vw inside the padding it was a thumbnail on a 390px screen.
+
+                A live view fills the window, because the Bot's browser is what it is for: the bar and
+                the page take everything but a column beside them for the wheel and Record (under them
+                in a narrow window), and the page is as large as that space allows at its own shape, so
+                Record is on screen with it. Never less than a screen a person can work in: in a short
+                window the card grows past it and the view scrolls, so Record is always reachable.
+              */}
             <div
-              role="dialog"
-              aria-modal="true"
-              aria-label="The assistant's screen"
-              className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 sm:p-8"
+              className={`relative m-auto flex w-full min-w-0 shrink-0 flex-col rounded-2xl bg-background shadow-2xl ring-1 ring-black/5 dark:ring-white/10 ${settled ? "p-3 sm:max-w-[70vw] sm:p-4" : "min-h-[calc(100svh-1rem)] gap-4 p-3 sm:min-h-[calc(100svh-2rem)] lg:h-[calc(100svh-2rem)] lg:flex-row"}`}
             >
               {/*
-                Backdrop closes only while read-only; during driving, Escape remains the exit. A
-                turn that is over is always read-only, whoever is holding the live browser.
-              */}
-              <button
-                type="button"
-                onClick={() => !wheelHere && setExpanded(false)}
-                aria-label="Close the assistant's screen"
-                aria-hidden={wheelHere}
-                tabIndex={wheelHere ? -1 : 0}
-                className={`absolute inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
-              />
-              {/* A card holding the screen, with who and the wheel centered beneath it. */}
-              <div className="relative flex w-full max-w-[70vw] min-w-0 flex-col rounded-2xl bg-background p-4 shadow-2xl">
+                  The way back to the conversation. A live view fills the window, so the backdrop
+                  around it is a thin strip, and it does nothing while the person is driving: without
+                  this, Escape was the only way out and nothing on screen said so. Closing is what
+                  Escape does: it never hands the wheel back. In a wide live view it sits over the
+                  top of the wheel's column, which leaves it the room; otherwise it is a row of its
+                  own above the screen.
+                */}
+              <div
+                className={`flex justify-end ${settled ? "mb-2" : "lg:absolute lg:top-3 lg:right-3 lg:z-10"}`}
+              >
+                <button
+                  type="button"
+                  ref={closeButton}
+                  onClick={() => setExpanded(false)}
+                  aria-label="Close the Bot's screen"
+                  title="Close (Esc)"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <IconX className="size-5" aria-hidden />
+                </button>
+              </div>
+              <BrowserWindow
+                live={!settled}
+                botId={computerId}
+                bar={barState}
+                aspectRatio={aspectRatio}
+                onNavigated={() => screen.current?.focus()}
+              >
                 {/*
                   Overlay uses the live socket; the inline card keeps low-cost polling. With no page
                   to draw it reserves the same frame and says the same thing the card does — the
                   wheel below is the reason this view opens at all in that state.
                 */}
                 <div
-                  className={`relative max-h-[75vh] min-h-0 overflow-auto rounded-xl ${showLiveScreen ? "bg-black" : "bg-muted"}`}
+                  className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-full overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
                 >
                   {settled && drawn ? (
                     /*
@@ -642,19 +1155,48 @@ export function ComputerView({
                   ) : showLiveScreen ? (
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <LiveScreen
+                        // The person opened this view to drive: taking control puts the keyboard on the screen.
+                        autoFocus
+                        ref={screen}
                         computerId={computerId}
                         driving={driving}
-                        onProblem={setProblem}
+                        onProblem={setStreamProblem}
+                        onReconnecting={setReconnecting}
+                        retryKey={retryKey}
                       />
+                      {/*
+                        A drop being retried, said quietly in a corner. The stream retries on its
+                        own with a backoff, and the screen under it is usually back in a second;
+                        covering it with the Retry panel made a routine reconnect look like a dead
+                        one. The panel below is for when the retries have run out.
+                      */}
+                      {reconnecting && !streamProblem ? (
+                        <span
+                          role="status"
+                          className="absolute top-2 left-2 rounded-full bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
+                        >
+                          Reconnecting…
+                        </span>
+                      ) : null}
                       {/*
                         A live screen that ends reports why through `onProblem`, and this is the
                         branch that is mounted when it does. Without drawing it here the message
                         landed in `problem`, which only the sibling `NothingToSee` reads, so the
                         screen ended with the stale last frame frozen on the canvas and nothing said.
                       */}
-                      {problem ? (
-                        <div className="absolute inset-0 flex items-center justify-center bg-background/85 p-4 text-center text-sm text-muted-foreground">
-                          <span>{problem}</span>
+                      {streamProblem ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-sm text-muted-foreground">
+                          <span>{streamProblem}</span>
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => {
+                              setStreamProblem(null);
+                              setRetryKey((value) => value + 1);
+                            }}
+                          >
+                            Retry
+                          </button>
                         </div>
                       ) : null}
                     </div>
@@ -662,22 +1204,35 @@ export function ComputerView({
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <NothingToSee
                         blankBrowser={blankBrowser}
+                        owner={owner}
                         page={knownPage}
-                        problem={problem}
+                        problem={shownProblem}
                         settled={settled}
+                        waiting={waiting}
                       />
                     </div>
                   )}
                 </div>
-                {/*
+              </BrowserWindow>
+              {/*
                   NOT ON A TURN THAT IS OVER. Every past turn used to carry the wheel and the
                   standing "who is driving" prose under a picture of a page it opened an hour ago,
                   offering control of whatever the Bot has open now. Those sentences are about the
                   present and this view is a record; a record does not get a steering wheel.
                 */}
+              <WheelColumn live={!settled}>
+                {control?.transitioning ? (
+                  <p
+                    className={settled ? "mt-3 text-center text-sm" : "text-sm"}
+                  >
+                    {someoneElse
+                      ? "Finishing the current action…"
+                      : "Finishing the current action before giving you control…"}
+                  </p>
+                ) : null}
                 {settled ? null : (
-                  <div className="mt-4 flex items-center justify-center gap-4">
-                    <span className="flex min-w-0 items-center gap-2 text-sm">
+                  <div className="flex items-center justify-center gap-4 lg:flex-col lg:items-start lg:gap-3">
+                    <span className="flex min-w-0 items-center gap-2 text-sm lg:flex-col lg:items-start lg:gap-1">
                       {name ? (
                         <span className="flex shrink-0 items-center gap-1.5 font-medium">
                           <ChannelAvatar
@@ -688,46 +1243,43 @@ export function ComputerView({
                         </span>
                       ) : null}
                       {driving ? (
-                        <span className="truncate text-muted-foreground">
-                          You have control — click and type on the page.
-                          {control?.reason ? ` ${control.reason}` : null}
+                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                          You have control. Click and type on the page.
+                          {reason ? ` ${reason}` : null}
+                        </span>
+                      ) : someoneElse ? (
+                        <span className="truncate text-muted-foreground lg:whitespace-normal">
+                          Someone else has control.
                         </span>
                       ) : control?.requested ? (
-                        <span className="truncate text-muted-foreground">
+                        <span className="truncate text-muted-foreground lg:whitespace-normal">
                           <strong className="font-medium text-foreground">
-                            The assistant needs you.
+                            The Bot needs you.
                           </strong>{" "}
-                          {control.reason}
+                          {reason}
                         </span>
                       ) : null}
                     </span>
-                    {driving ? (
-                      <button
-                        type="button"
-                        onClick={() => void handBack()}
-                        className="shrink-0 rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground text-sm"
-                      >
-                        Hand back
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const state = await takeControl(computerId);
-                          if (state) setControl(state);
-                        }}
-                        className="shrink-0 rounded-md border px-3 py-1.5 font-medium text-sm"
-                      >
-                        Take control
-                      </button>
-                    )}
+                    <ComputerControlButton computerId={computerId} />
                   </div>
                 )}
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+                {/*
+                  Record, under the wheel, because it is only for the person holding it. Branched on
+                  the data first, so a read that fails after one has answered keeps what it showed.
+                */}
+                {settled ? null : botBrowser.data ? (
+                  <BotRecordPanel botId={computerId} state={botBrowser.data} />
+                ) : botBrowser.error ? (
+                  <p className="text-destructive text-sm" role="alert">
+                    Couldn't load the Bot's browser. Close this and open it
+                    again.
+                  </p>
+                ) : null}
+              </WheelColumn>
+            </div>
+          </DialogPrimitive.Popup>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
     </>
   );
 }

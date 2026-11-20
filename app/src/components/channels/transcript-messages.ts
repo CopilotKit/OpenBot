@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import type { Attachment } from "@copilotkit/react-core/v2";
 
 /**
  * What a transcript shows while a brand-new channel is still joining.
@@ -36,27 +37,32 @@ export function seedMessage(text: string, id: string): Message {
  * Deliberately not persisted. A reload finds nothing here, which is correct, by then the message
  * is in the thread and arrives through the normal replay.
  */
-const firstMessages = new Map<
-  string,
-  { text: string; documentIds: string[] }
->();
+export type FirstMessage = {
+  /**
+   * The words, with a `/` skill still at their start as `/<command>`: the server finds the skill
+   * there and gives the Bot its instructions, for the first message as for every later one.
+   */
+  text: string;
+  /**
+   * The files the first message carries, already stored in the new channel (`uploadHeldFiles`),
+   * so it is sent with them as any later message would be.
+   */
+  attachments: readonly Attachment[];
+};
+
+const firstMessages = new Map<string, FirstMessage>();
 
 export function stashFirstMessage(
   channelId: string,
   text: string,
-  documentIds: readonly string[] = [],
+  attachments: readonly Attachment[] = [],
 ): void {
-  firstMessages.set(channelId, {
-    text,
-    documentIds: [...documentIds],
-  });
+  firstMessages.set(channelId, { text, attachments });
 }
 
 /** Read the pending first message and forget it. Null for a channel opened any other way. */
-export function takeFirstMessage(
-  channelId: string,
-): { text: string; documentIds: string[] } | null {
-  const pending = firstMessages.get(channelId) ?? null;
+export function takeFirstMessage(channelId: string): FirstMessage | null {
+  const message = firstMessages.get(channelId) ?? null;
   firstMessages.delete(channelId);
-  return pending;
+  return message;
 }

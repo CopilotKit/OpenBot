@@ -1,7 +1,32 @@
-import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
+import { useCopilotKit, useFrontendTool } from "@copilotkit/react-core/v2";
+import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
+import {
+  answeredTooEarly,
+  drawnTooEarlyAnswer,
+} from "@openbot/shared/tool-steps";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  FailedCard,
+  UNREADABLE,
+  WENT_WRONG,
+} from "@/components/gallery/failed";
 import { RefusedCard } from "@/components/gallery/refused";
+import {
+  ArgumentsArrivingContext,
+  GalleryDecidedContext,
+  GalleryStreamingContext,
+  TurnInFlightContext,
+} from "@/components/gallery/streaming";
 import {
   agentComponentsQueryOptions,
   announceGallery,
@@ -9,16 +34,33 @@ import {
   decideComponent,
   type GrantedComponent,
 } from "@/lib/components/queries";
-import { useActiveBotId, useDeclaredBotId } from "@/lib/copilot/active-bot";
+import {
+  type ToolCallContext,
+  useBotOfCall,
+  useDeclaredBotId,
+} from "@/lib/copilot/active-bot";
+import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
 import {
   GALLERY_COMPONENTS,
   type GalleryComponent,
   galleryManifest,
 } from "@/lib/copilot/gallery-registry";
+import {
+  cardState,
+  COULDNT_CHECK,
+  createGrantStore,
+  type GrantStore,
+  grantsFrom,
+} from "@/lib/copilot/grant-store";
+import { settledArgs } from "@/lib/copilot/settled-args";
+import { drawnTooEarlyIn } from "@/lib/copilot/tool-steps";
+import { browserCallFailed } from "@/lib/plugins/tool-result";
 
 /**
- * Register compiled gallery components once per name, scoped to the active Bot with `available`.
- * Handlers still recheck grants at call time because a run's offered tool list is only a snapshot.
+ * Register compiled gallery components once per name. Which run is offered which is decided per run,
+ * for the Bot whose run it is (`bot-offer.ts`), never by the screen. Handlers still recheck grants at
+ * call time because a run's offered tool list is only a snapshot, and they recheck them for the Bot
+ * that made the call.
  */
 export function GalleryTools() {
   const queryClient = useQueryClient();
@@ -30,12 +72,35 @@ export function GalleryTools() {
     });
   }, [queryClient]);
 
-  // Active Bot comes from the route/channel surface currently driving the provider.
-  const grantsFor = useActiveBotId();
-  // See sandboxed-tools: the placeholder Bot is not fetchable, so the grant query waits for a
-  // surface to declare a real one.
+  // Each one offered to a Bot holding it, in its published words.
+  const offered = useMemo(
+    () =>
+      Object.fromEntries(
+        GALLERY_COMPONENTS.map((spec) => [spec.name, heldComponent]),
+      ),
+    [],
+  );
+  useOfferedTo(offered);
+
+  /*
+   * The grants of the Bot on screen, for the cards drawn in its conversation. See sandboxed-tools:
+   * the placeholder Bot is not fetchable, so the grant query waits for a surface to declare a real
+   * one.
+   */
   const declared = useDeclaredBotId();
-  const { data: granted } = useQuery(agentComponentsQueryOptions(declared));
+  const grantsQuery = useQuery(agentComponentsQueryOptions(declared));
+  const granted = grantsQuery.data;
+  // One store per mount; every card reads its grants from here (see `grant-store.ts`).
+  const [store] = useState(createGrantStore);
+  useEffect(() => {
+    store.set({
+      grants: grantsFrom({
+        data: granted,
+        isError: grantsQuery.isError,
+        enabled: declared !== undefined,
+      }),
+    });
+  }, [store, granted, grantsQuery.isError, declared]);
   const held = useMemo(
     () =>
       new Map(
@@ -51,14 +116,14 @@ export function GalleryTools() {
     <>
       {GALLERY_COMPONENTS.map((spec) =>
         spec.kind === "decision" ? (
-          <GrantedDecision held={held} key={spec.name} spec={spec} />
-        ) : (
-          <GrantedTool
-            grantsFor={grantsFor}
+          <GrantedDecision
             held={held}
             key={spec.name}
             spec={spec}
+            store={store}
           />
+        ) : (
+          <GrantedTool held={held} key={spec.name} spec={spec} store={store} />
         ),
       )}
     </>
@@ -66,74 +131,50 @@ export function GalleryTools() {
 }
 
 function GrantedTool({
-  grantsFor,
   spec,
   held,
+  store,
 }: {
-  grantsFor: string;
   spec: GalleryComponent;
   held: Map<string, string>;
+  store: GrantStore;
 }) {
   const description = held.get(spec.name);
-  const isHeld = description !== undefined;
-
-  /**
-   * Refusals decided by the server, keyed by the call they refused.
-   *
-   * Per-call keys preserve the original render for calls made before a grant was revoked.
-   */
-  const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(
-    new Map(),
-  );
-
-  const Component = spec.Component;
-
-  const render = useCallback(
-    (props: { toolCallId?: string; args?: Record<string, unknown> }) => {
-      const refusal = props.toolCallId
-        ? refusals.get(props.toolCallId)
-        : undefined;
-      if (refusal) {
-        return <RefusedCard reason={refusal} title={spec.title} />;
-      }
-      // Render from the polled grant snapshot so revocations show before a new call starts.
-      if (!isHeld) {
-        return (
-          <RefusedCard
-            reason={`${spec.title} is not available to this Bot at the moment. An administrator grants components per Bot, and can unpublish one for every Bot at once.`}
-            title={spec.title}
-          />
-        );
-      }
-      return <Component {...(props.args ?? {})} />;
-    },
-    [Component, isHeld, refusals, spec.title],
-  );
+  // Created ONCE: the SDK rebuilds a card whenever this identity changes. See `makeGalleryRender`.
+  const [render] = useState(() => makeGalleryRender(spec, store));
+  const botOf = useBotOfCall();
 
   useFrontendTool({
     name: spec.name,
-    // Published descriptions are model-facing runtime behavior.
+    // Published descriptions are model-facing runtime behavior. A run is given its own Bot's.
     description: description ?? spec.description,
     parameters: spec.parameters,
-    // Keep the hook mounted and hide revoked grants from the model to preserve hook order.
-    available: isHeld,
     handler: async (
       args: Record<string, unknown>,
-      context: { toolCall?: { id?: string } },
+      context: ToolCallContext = {},
     ) => {
+      // Asked for in the same step as another kind of call: not drawn. See `shared/tool-steps.ts`.
+      if (drawnTooEarlyIn(context?.agent?.messages, context?.toolCall?.id))
+        return drawnTooEarlyAnswer(spec.name);
+      /*
+       * Asked about the Bot that drew it, which is not always the one on screen: a turn carries on
+       * after its person leaves the conversation. See `botOfCall`.
+       */
       const decision = await decideComponent(
         spec.name,
-        grantsFor,
+        botOf(context?.agent),
         spec.reads?.(args ?? {}) ?? [],
       );
       if (!decision.allowed) {
         const reason = decision.reason ?? "That component is not allowed here.";
         const id = context?.toolCall?.id;
         if (id) {
-          setRefusals((current) => new Map(current).set(id, reason));
+          store.set({
+            refusals: new Map(store.get().refusals).set(id, reason),
+          });
         }
         // Led with the same words the card shows, so the transcript and the card agree.
-        return `Not shown: ${spec.title}. ${reason} Nothing was displayed, so tell the person that.`;
+        return `${NOT_SHOWN}${spec.title}. ${reason}${NOT_SHOWN_TAIL}`;
       }
       return spec.confirmation ?? "It is now on screen for the person.";
     },
@@ -143,43 +184,282 @@ function GrantedTool({
   return null;
 }
 
+/**
+ * The card a gallery tool call draws, made once per component.
+ *
+ * ONCE, AND THAT IS THE POINT. The SDK hands this function to `ToolCallRenderer` as the component
+ * type, and remounts the card whenever it changes identity. It used to be a `useCallback` over the
+ * grants, so grants arriving (they start unknown on every channel) rebuilt every card: drawn as the
+ * refusal, then torn down and drawn again as the component. Now it reads the grants from the store
+ * and only re-renders. Exported for its tests.
+ */
+export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
+  const Component = spec.Component;
+  return function GalleryRender(props: {
+    toolCallId?: string;
+    args?: Record<string, unknown>;
+    result?: string;
+    status?: string;
+  }) {
+    const snapshot = useSyncExternalStore(
+      store.subscribe,
+      store.get,
+      store.get,
+    );
+    const arriving = useContext(ArgumentsArrivingContext);
+    const turnRunning = useContext(TurnInFlightContext);
+    const refusal = props.toolCallId
+      ? snapshot.refusals.get(props.toolCallId)
+      : undefined;
+    // Asked for too early, so never drawn, not even as a refusal. See `shared/tool-steps.ts`.
+    if (answeredTooEarly(props.result)) return null;
+    if (refusal) {
+      return <RefusedCard reason={refusal} title={spec.title} />;
+    }
+    /*
+     * A stored refusal. The in-memory map above is gone once the page reloads, and a headless turn
+     * never had one: the server answered the call itself (`server/src/components/headless.ts`).
+     * The result is what survives, so a call that drew nothing is drawn as the refusal it was.
+     */
+    if (props.result?.startsWith(NOT_SHOWN)) {
+      const lead = `${NOT_SHOWN}${spec.title}. `;
+      const reason = (
+        props.result.startsWith(lead)
+          ? props.result.slice(lead.length)
+          : props.result.slice(NOT_SHOWN.length)
+      ).replace(NOT_SHOWN_TAIL, "");
+      return <RefusedCard reason={reason} title={spec.title} />;
+    }
+    /*
+     * A call that failed drew nothing, and what failed is often its arguments: Claude Code refuses
+     * arguments that aren't JSON before the browser ever runs the call. Drawn from those arguments,
+     * a table waited "for complete table data" for good, and again after a reload. The result says
+     * it failed, and the result is what a reload keeps.
+     */
+    if (props.status === "complete" && browserCallFailed(props.result)) {
+      return (
+        <FailedCard
+          reason={
+            argumentsFit(spec, props.args) === false ? UNREADABLE : WENT_WRONG
+          }
+          title={spec.title}
+        />
+      );
+    }
+    // From the polled grants, so a revocation shows before a new call starts. Unknown draws.
+    const state = cardState(snapshot, spec.name, spec.title, props.toolCallId);
+    if (typeof state === "object") {
+      return <RefusedCard reason={state.refused} title={spec.title} />;
+    }
+    /*
+     * A number, link or colour still arriving is held back; see `settledArgs`. Only while the
+     * arguments are streaming (`inProgress`, not `executing`) in a row that can still receive them.
+     */
+    const complete = !(arriving && props.status === "inProgress");
+    // Still being decided: the call has no answer yet in a turn that is still running.
+    const decided = !(turnRunning && props.status !== "complete");
+    return (
+      <GalleryStreamingContext.Provider value={!complete}>
+        <GalleryDecidedContext.Provider value={decided}>
+          <Component {...settledArgs(props.args ?? {}, complete)} />
+        </GalleryDecidedContext.Provider>
+      </GalleryStreamingContext.Provider>
+    );
+  };
+}
+
+/**
+ * Whether a call's arguments are what the component takes, or `undefined` when its schema can't say
+ * at once. Asked only of a call that is over, to say why it drew nothing.
+ */
+function argumentsFit(
+  spec: GalleryComponent,
+  args: unknown,
+): boolean | undefined {
+  const verdict = spec.parameters?.["~standard"]?.validate(args ?? {});
+  if (!verdict || verdict instanceof Promise) return undefined;
+  return !verdict.issues;
+}
+
 function GrantedDecision({
   spec,
   held,
+  store,
 }: {
   spec: GalleryComponent;
   held: Map<string, string>;
+  store: GrantStore;
 }) {
-  const description = held.get(spec.name);
-  const isHeld = description !== undefined;
-  const Component = spec.Component;
+  useDecisionTool(spec, store, held);
+  return null;
+}
 
-  /** Stable component type so in-progress decision cards do not remount. */
-  const Render = useMemo(
-    () =>
-      function DecisionRender(props: Record<string, unknown>) {
-        if (isHeld) return <Component {...props} />;
-        return (
-          <RefusedDecision
-            respond={
-              props.respond as ((result: unknown) => Promise<void>) | undefined
-            }
-            title={spec.title}
-          />
-        );
-      },
-    [Component, isHeld, spec.title],
+type FrontendTool = Parameters<typeof useFrontendTool>[0];
+
+/**
+ * The removal the SDK's `useHumanInTheLoop` does on unmount, which `useDecisionTool` copies the rest
+ * of: without it a decision's renderer stayed registered after the gallery tools went away, drawing
+ * from a grant store nobody updated any more.
+ */
+export function useForgetRenderOnUnmount(
+  name: string,
+  core: { removeHookRenderToolCall(name: string, agentId?: string): void },
+) {
+  useLayoutEffect(
+    () => () => core.removeHookRenderToolCall(name),
+    [core, name],
+  );
+}
+
+/** `useFrontendTool`, and its renderer removed again on unmount, as `useHumanInTheLoop` does. */
+function useHumanInTheLoopTool(tool: FrontendTool) {
+  const { copilotkit } = useCopilotKit();
+  useFrontendTool(tool);
+  useForgetRenderOnUnmount(tool.name, copilotkit);
+}
+
+/**
+ * A decision tool: the run waits until the person answers on the card.
+ *
+ * REGISTERED THROUGH `useFrontendTool`, NOT `useHumanInTheLoop`, AND THAT IS THE FIX. The SDK's
+ * human-in-the-loop hook wraps the render in a component of its own that is rebuilt whenever the
+ * tool's description changes (1.83.0: a `useCallback` over `tool.description`). Ours changes from
+ * the built-in words to the published ones exactly when the grants load, so a decision on screen was
+ * torn down at that moment, and again on a revoke. This is that hook's answer-and-wait handler, with
+ * our render created once.
+ *
+ * ONE WAITING CALL PER TOOL CALL, NOT ONE PER TOOL. The SDK's hook keeps a single answer slot, which
+ * is enough while only the conversation on screen is offered a decision. Every run of a Bot holding
+ * it is offered one now (`bot-offer.ts`), on screen or not, so two can wait at once: a second call
+ * took the slot, the first never heard back, and the answer given on one card went to whichever call
+ * had asked last, which could be another conversation's. Each call waits under its own id, and each
+ * card answers its own.
+ *
+ * `register` is the SDK hook (with its unmount cleanup) in the app and a recorder in the tests. Exported for its tests.
+ */
+export function useDecisionTool(
+  spec: GalleryComponent,
+  store: GrantStore,
+  held: Map<string, string>,
+  register: (tool: FrontendTool) => void = useHumanInTheLoopTool,
+) {
+  const description = held.get(spec.name);
+  // The calls waiting for an answer, by tool call id: how to answer each, and how to stop listening.
+  const waitingRef = useRef(
+    new Map<string, { resolve: (result: unknown) => void; stop: () => void }>(),
   );
 
-  useHumanInTheLoop({
+  const respond = useCallback(async (result: unknown, toolCallId = "") => {
+    const waiting = waitingRef.current.get(toolCallId);
+    if (!waiting) return;
+    waitingRef.current.delete(toolCallId);
+    waiting.stop();
+    waiting.resolve(result);
+  }, []);
+
+  const handler = useCallback(
+    async (_args: unknown, context: ToolCallContext = {}) =>
+      new Promise<unknown>((resolve, reject) => {
+        /*
+         * Asked for in the same step as another kind of call: the person is not asked, and the Bot
+         * asks again from the results. See `shared/tool-steps.ts`.
+         */
+        if (drawnTooEarlyIn(context.agent?.messages, context.toolCall?.id)) {
+          resolve(drawnTooEarlyAnswer(spec.name));
+          return;
+        }
+        const signal = context.signal;
+        if (signal?.aborted) {
+          reject(new Error("Human-in-the-loop interaction aborted"));
+          return;
+        }
+        const id = context.toolCall?.id ?? "";
+        const onAbort = () => {
+          if (waitingRef.current.get(id)?.resolve === resolve)
+            waitingRef.current.delete(id);
+          reject(new Error("Human-in-the-loop interaction aborted"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        waitingRef.current.set(id, {
+          resolve,
+          stop: () => signal?.removeEventListener("abort", onAbort),
+        });
+      }),
+    [spec.name],
+  );
+
+  // Created once, for the same reason as `makeGalleryRender`.
+  const [Render] = useState(() => makeDecisionRender(spec, store, respond));
+
+  register({
     name: spec.name,
     description: description ?? spec.description,
     parameters: spec.parameters,
-    available: isHeld,
+    type: "human-in-the-loop",
+    handler,
     render: Render,
-  });
+  } as FrontendTool);
+}
 
-  return null;
+/**
+ * The card a decision draws, made once per component.
+ *
+ * It can answer only while the call is executing, as the SDK's own decisions do. While the grants
+ * are unknown it draws without `respond`, which the decision components read as "not yet": the
+ * person sees what is being asked and cannot answer until the Bot is known to be allowed to ask.
+ * Then the same card enables in place. Exported for its tests.
+ */
+export function makeDecisionRender(
+  spec: GalleryComponent,
+  store: GrantStore,
+  respond: (result: unknown, toolCallId?: string) => Promise<void>,
+) {
+  const Component = spec.Component;
+  return function DecisionRender(props: Record<string, unknown>) {
+    const snapshot = useSyncExternalStore(
+      store.subscribe,
+      store.get,
+      store.get,
+    );
+    // This card answers its own call, and only that one.
+    const toolCallId =
+      typeof props.toolCallId === "string" ? props.toolCallId : "";
+    const answerThisCall = useCallback(
+      (result: unknown) => respond(result, toolCallId),
+      [toolCallId],
+    );
+    const answer = props.status === "executing" ? answerThisCall : undefined;
+    // Asked for too early, so the person was never asked. See `shared/tool-steps.ts`.
+    if (answeredTooEarly(props.result)) return null;
+    /*
+     * Failed on arguments it can't be drawn from: an empty question with its buttons off, for good.
+     * Only then. A decision stopped while it waited also ends in a failed result, and its card,
+     * drawn from arguments that were fine, is still what the person was asked.
+     */
+    if (
+      props.status === "complete" &&
+      browserCallFailed(
+        typeof props.result === "string" ? props.result : undefined,
+      ) &&
+      argumentsFit(spec, props.args) === false
+    ) {
+      return <FailedCard reason={UNREADABLE} title={spec.title} />;
+    }
+    const state = cardState(snapshot, spec.name, spec.title);
+    if (state === "draw") return <Component {...props} respond={answer} />;
+    if (state === "wait-for-grant") {
+      return <Component {...props} respond={undefined} />;
+    }
+    return (
+      <RefusedDecision
+        {...(snapshot.grants.status === "failed"
+          ? { reason: COULDNT_CHECK(spec.title) }
+          : {})}
+        respond={answer}
+        title={spec.title}
+      />
+    );
+  };
 }
 
 /**
@@ -190,12 +470,12 @@ function GrantedDecision({
 function RefusedDecision({
   title,
   respond,
+  reason = `${title} is not available to this Bot at the moment, so the person was not asked. An administrator grants components per Bot, and can unpublish one for every Bot at once.`,
 }: {
   title: string;
   respond?: (result: unknown) => Promise<void>;
+  reason?: string;
 }) {
-  const reason = `${title} is not available to this Bot at the moment, so the person was not asked. An administrator grants components per Bot, and can unpublish one for every Bot at once.`;
-
   useEffect(() => {
     if (!respond) return;
     void respond(reason).catch(() => {

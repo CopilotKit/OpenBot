@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# xcrun, first on PATH while Tauri builds the signed Mac app, so Tauri's own staple of the .app tries
+# a dropped connection to Apple again (staple-with-retry.sh) before anything is built from it.
+#
+# Tauri notarizes the .app, staples it with `xcrun stapler staple -v OpenBot.app`, ignores stapler's
+# exit code (staple_app in tauri-macos-sign), and builds the disk image and the updater archive from
+# that .app straight after. A connection that drops there, as it did three times in v0.3.3's signing
+# run, would leave both carrying an app with no ticket, which the verify step then rejects. Stapling
+# again after the build is too late for them, and Tauri has no step in between, so the retry goes
+# here, where Tauri staples.
+#
+# Only that call is changed: `stapler staple <file>`, with or without `-v`. Every other xcrun call
+# (notarytool, the SDK lookups the Rust build makes) goes to the real xcrun as it was.
+#
+# Tauri discards what stapling prints, so it is also appended to STAPLE_LOG when that is set, for
+# the build step to show. REAL_XCRUN exists so the regression test can stand in for xcrun.
+set -uo pipefail
+
+real="${REAL_XCRUN:-/usr/bin/xcrun}"
+file=""
+if [ "${1:-}" = stapler ] && [ "${2:-}" = staple ]; then
+  if [ "$#" -eq 3 ]; then
+    file="$3"
+  elif [ "$#" -eq 4 ] && [ "$3" = -v ]; then
+    file="$4"
+  fi
+fi
+if [ -z "$file" ]; then
+  exec "$real" "$@"
+fi
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+XCRUN="$real" "$here/../staple-with-retry.sh" "$file" 2>&1 | tee -a "${STAPLE_LOG:-/dev/null}"
+exit "${PIPESTATUS[0]}"

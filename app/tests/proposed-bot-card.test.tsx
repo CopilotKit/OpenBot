@@ -80,7 +80,7 @@ function routed(node: ReactNode) {
     }),
     createRoute({
       getParentRoute: () => rootRoute,
-      path: "/agents",
+      path: "/bots/$agentId",
       component: () => null,
     }),
   ]);
@@ -88,7 +88,7 @@ function routed(node: ReactNode) {
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
-  // The app's router is registered globally for typing; this one only has to resolve /agents.
+  // The app's router is registered globally for typing; this one only has to resolve /bots/$agentId.
   return render(<RouterProvider router={router as never} />);
 }
 
@@ -104,7 +104,7 @@ test("a proposal still streaming shows nothing to press", async () => {
 
   // Awaited rather than read synchronously: the router mounts its route on a later tick, so nothing
   // at all is in the document on the first one.
-  expect(await view.findByText("Writing the coworker…")).toBeTruthy();
+  expect(await view.findByText("Writing the Bot…")).toBeTruthy();
   expect(view.queryByRole("button")).toBeNull();
 });
 
@@ -293,7 +293,7 @@ test("a completed card links to the coworker, rebuilt from the answer alone", as
   );
 
   const link = await view.findByText("Open Renewal Desk");
-  expect(link.closest("a")?.getAttribute("href")).toContain("agent=agent_1");
+  expect(link.closest("a")?.getAttribute("href")).toBe("/bots/agent_1");
 });
 
 /**
@@ -310,4 +310,13 @@ test("the created answer carries an id the card can read back", () => {
   // A declined card is not a created one, and carries no coworker to link to.
   expect(wasCreated(botCardAnswer.declined())).toBe(false);
   expect(createdBotIdIn(botCardAnswer.declined())).toBeNull();
+});
+
+test("an answer written before Bot pages existed still links to the coworker it made", () => {
+  // Conversations people scroll back through still hold the old sentence.
+  expect(
+    createdBotIdIn(
+      "Created. Tell the person that its profile is at /agents?agent=agent_9.",
+    ),
+  ).toBe("agent_9");
 });

@@ -11,17 +11,29 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { botPath } from "./bots-api";
 import { Route as BotRoute } from "@/routes/_authed/_app/bot";
 
-beforeAll(() => GlobalRegistrator.register());
+let originalRect: typeof HTMLElement.prototype.getBoundingClientRect;
+beforeAll(() => {
+  GlobalRegistrator.register();
+  originalRect = HTMLElement.prototype.getBoundingClientRect;
+});
 
 const originalFetch = global.fetch;
 
 afterEach(() => {
-  global.fetch = originalFetch;
   cleanup();
+  global.fetch = originalFetch;
+  HTMLElement.prototype.getBoundingClientRect = originalRect;
 });
 
 afterAll(() => GlobalRegistrator.unregister());
@@ -30,13 +42,20 @@ function agent(
   overrides: Partial<AgentProfile> & { id: string },
 ): AgentProfile {
   return {
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
     avatarSeed: "seed",
     builtIn: true,
     canManage: true,
     endpoint: null,
     hasAuth: false,
     hasCallbackToken: false,
+    isolated: false,
+    isolationActive: false,
+    isolationOffReason: null,
     hidden: false,
+    pinned: false,
     mine: true,
     name: "Agent",
     roleDescription: "Role",
@@ -68,7 +87,8 @@ function queryClientWithAgentsAndFetchedAgent(
   global.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === `/api/agents/${agentId}`) return response.clone();
+      // One Bot, read at the API's address (getBot), as the server answers it.
+      if (url === botPath(agentId)) return response.clone();
       throw new Error(`Unexpected fetch: ${url}`);
     },
     { preconnect: originalFetch.preconnect },
@@ -145,6 +165,7 @@ const PICKED_HARNESS = agent({
   builtIn: false,
   endpoint: "http://127.0.0.1:4201",
   id: "picked-harness",
+  packageBotId: "picked-harness",
   name: "LangGraph",
   title: "LangGraph",
 });
@@ -160,6 +181,34 @@ test("/bot defaults to the picked harness when this setup selected one", async (
   );
 });
 
+/*
+ * A new organization has its own copies of the Bots OpenBot starts with, under generated ids. Each
+ * still says which package Bot it is, so /bot opens the picked harness there too.
+ */
+test("/bot defaults to a new organization's copy of the picked harness", async () => {
+  const view = renderBot(
+    queryClientWithAgents([
+      agent({
+        id: "bot_4f1c2a",
+        packageBotId: "general-assistant",
+        name: "General Assistant",
+        title: "Everyday work",
+      }),
+      agent({
+        builtIn: false,
+        endpoint: "http://127.0.0.1:4201",
+        id: "bot_9c2e7d",
+        packageBotId: "picked-harness",
+        name: "LangGraph",
+        title: "LangGraph",
+      }),
+    ]),
+  );
+
+  expect(await view.findByRole("heading", { name: "LangGraph" })).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("bot_9c2e7d");
+});
+
 test("/bot with an empty agent query uses the normal default Bot", async () => {
   const view = renderBot(
     queryClientWithAgents([GENERAL_ASSISTANT, PICKED_HARNESS]),
@@ -170,15 +219,17 @@ test("/bot with an empty agent query uses the normal default Bot", async () => {
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
     "picked-harness",
   );
-  expect(view.queryByText('This deployment has no Bot called "".')).toBeNull();
-  expect(view.queryByText("This deployment has no Bots yet.")).toBeNull();
+  expect(view.queryByText('There\'s no Bot called "".')).toBeNull();
+  expect(view.queryByText("There are no Bots yet.")).toBeNull();
 });
 
 test("/bot reports a failed initial roster load instead of claiming there are no Bots", async () => {
   const view = renderBot(queryClientWithFailingAgents());
 
-  expect(await view.findByText("Bots couldn't be loaded.")).toBeTruthy();
-  expect(view.queryByText("This deployment has no Bots yet.")).toBeNull();
+  expect(
+    await view.findByText("Couldn't load your Bots. Try again in a moment."),
+  ).toBeTruthy();
+  expect(view.queryByText("There are no Bots yet.")).toBeNull();
 });
 
 test("/bot preserves an explicit agent, including the built-in first agent", async () => {
@@ -206,7 +257,7 @@ test("/bot preserves an explicit unknown agent as a clear missing-bot state", as
   );
 
   expect(
-    await view.findByText('This deployment has no Bot called "missing-agent".'),
+    await view.findByText('There\'s no Bot called "missing-agent".'),
   ).toBeTruthy();
   expect(view.queryByTestId("copilot-chat")).toBeNull();
 });
@@ -222,16 +273,14 @@ test("/bot loads a hidden explicit agent from the detail endpoint", async () => 
     queryClientWithAgentsAndFetchedAgent(
       [GENERAL_ASSISTANT],
       "hidden-bot",
-      Response.json({ agent: hiddenBot }),
+      Response.json({ bot: hiddenBot }),
     ),
     "/bot?agent=hidden-bot",
   );
 
   expect(await view.findByRole("heading", { name: "Hidden Bot" })).toBeTruthy();
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("hidden-bot");
-  expect(
-    view.queryByText('This deployment has no Bot called "hidden-bot".'),
-  ).toBeNull();
+  expect(view.queryByText('There\'s no Bot called "hidden-bot".')).toBeNull();
 });
 
 test("/bot hidden lookup does not collide with the shared agent detail cache", async () => {
@@ -244,16 +293,14 @@ test("/bot hidden lookup does not collide with the shared agent detail cache", a
   const queryClient = queryClientWithAgentsAndFetchedAgent(
     [GENERAL_ASSISTANT],
     "hidden-bot",
-    Response.json({ agent: hiddenBot }),
+    Response.json({ bot: hiddenBot }),
   );
   queryClient.setQueryData(agentKeys.detail("hidden-bot"), hiddenBot);
   const view = renderBot(queryClient, "/bot?agent=hidden-bot");
 
   expect(await view.findByRole("heading", { name: "Hidden Bot" })).toBeTruthy();
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("hidden-bot");
-  expect(
-    view.queryByText('This deployment has no Bot called "hidden-bot".'),
-  ).toBeNull();
+  expect(view.queryByText('There\'s no Bot called "hidden-bot".')).toBeNull();
 });
 
 test("/bot reports an explicit agent detail load failure", async () => {
@@ -267,7 +314,7 @@ test("/bot reports an explicit agent detail load failure", async () => {
   );
 
   expect((await view.findByRole("alert")).textContent).toBe(
-    "Bot couldn't be loaded.",
+    "Couldn't load this Bot. Try again in a moment.",
   );
   expect(view.queryByTestId("copilot-chat")).toBeNull();
 });
@@ -281,6 +328,106 @@ test("/bot still falls back to the first agent when no picked harness exists", a
   expect(
     await view.findByRole("heading", { name: "General Assistant" }),
   ).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
+    "general-assistant",
+  );
+});
+
+test("/bot opens a live Computer sidebar with ownership controls and preserves the chat", async () => {
+  HTMLElement.prototype.getBoundingClientRect = () =>
+    new DOMRect(0, 0, 1200, 800);
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/control"))
+        return Response.json({
+          holder: "bot",
+          since: "2026-09-26",
+          requested: false,
+          transitioning: false,
+          resumeSnapshotRequired: false,
+          recoveryRequired: false,
+        });
+      return Response.json({ error: "No frame yet" }, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = renderBot(
+    queryClientWithAgents([GENERAL_ASSISTANT, PICKED_HARNESS]),
+    "/bot?agent=general-assistant",
+  );
+  const toggle = await view.findByRole("button", { name: "Open Computer" });
+  await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+  // Taking control is offered inside the Computer, never beside the header's icon.
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
+  const chat = view.getByTestId("copilot-chat");
+  fireEvent.change(view.getByRole("textbox", { name: "Chat draft" }), {
+    target: { value: "Keep this conversation" },
+  });
+  fireEvent.click(toggle);
+  const sidebarElement = await view.findByRole("region", {
+    name: "Computer sidebar",
+  });
+  const sidebar = within(sidebarElement);
+  expect(
+    sidebar
+      .getByRole("button", { name: "Take control" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  expect(
+    sidebar.getByRole("button", {
+      name: "Open the Bot's screen full size",
+    }),
+  ).toBeTruthy();
+  expect(sidebar.getByRole("heading", { name: "Activity" })).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "Close Computer" }));
+  // Poll a boolean: Bun serializes the entire Happy DOM tree when a pending
+  // element is compared with null, starving the navigation this wait observes.
+  await waitFor(() => expect(sidebarElement.isConnected).toBe(false));
+  expect(view.getByTestId("copilot-chat")).toBe(chat);
+  expect(chat.dataset.agentId).toBe("general-assistant");
+  expect(view.getByDisplayValue("Keep this conversation")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Open Computer" })).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "New chat" }));
+  await waitFor(() =>
+    expect(view.getByTestId("copilot-chat").dataset.threadId).not.toBe(
+      chat.dataset.threadId,
+    ),
+  );
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
+    "general-assistant",
+  );
+});
+
+test("/bot?watch=true restores the live Computer panel on reload", async () => {
+  HTMLElement.prototype.getBoundingClientRect = () =>
+    new DOMRect(0, 0, 1200, 800);
+  global.fetch = Object.assign(
+    async () =>
+      Response.json({
+        holder: "bot",
+        since: "2026-09-26",
+        requested: false,
+        transitioning: false,
+        resumeSnapshotRequired: false,
+        recoveryRequired: false,
+      }),
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = renderBot(
+    queryClientWithAgents([GENERAL_ASSISTANT]),
+    "/bot?agent=general-assistant&watch=true",
+  );
+  const sidebar = within(
+    await view.findByRole("region", { name: "Computer sidebar" }),
+  );
+  await waitFor(() =>
+    expect(
+      sidebar
+        .getByRole("button", { name: "Take control" })
+        .hasAttribute("disabled"),
+    ).toBe(false),
+  );
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
     "general-assistant",
   );

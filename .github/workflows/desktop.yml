@@ -3,13 +3,20 @@ name: Desktop
 # The shell is the one thing here that cannot be proved by running it on Linux: it is a macOS app, a
 # Windows app and a Linux app built from one tree, and the ways they differ are exactly the ways
 # this fails. So it tests and builds on all three, on every change to it.
+# `shared/harnesses.json` and `shared/marks/**` are watched here even though they are not under
+# desktop/: the catalogue the setup window draws moved there so the web app could read one copy, and
+# these jobs are the only ones that prove it still deserializes into `Harness` — `catalogue()` parses
+# it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "shared/fixtures/client-version/**", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   push:
-    branches: [none]
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    branches: [main]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "shared/recorder-extension.json", "shared/fixtures/client-version/**", "package.json", ".github/workflows/desktop.yml", ".github/workflows/desktop-build.yml"]
   workflow_call:
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
+        required: false
 
 permissions:
   contents: read
@@ -17,6 +24,12 @@ permissions:
 concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Match the source publisher's exact repository/distribution identity in official and fork builds.
+env:
+  OPENBOT_DISTRIBUTION_ID: ${{ vars.OPENBOT_DISTRIBUTION_ID || github.repository }}
+  OPENBOT_RELEASE_REPOSITORY: ${{ github.repository }}
+  OPENBOT_RELEASE_CHANNEL: ${{ vars.OPENBOT_RELEASE_CHANNEL || 'stable' }}
 
 jobs:
   # Fast formatting and lint checks. Rust regression tests run once per platform below.
@@ -28,11 +41,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: desktop/src-tauri
       # Linux is the only target needing system libraries, and it needs them even to check.
@@ -44,106 +57,16 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: desktop/src-tauri
 
-  # The three artifacts. Not `bundle`, which signs and notarizes: that is S7 and needs certificates
-  # this workflow deliberately does not hold. This proves the tree builds into an app on each
-  # platform, which is the thing that breaks when a dependency is not portable.
+  # The three artifacts, built by the shared workflow. A pull request build is unchanged: unpinned, no CLI, kept 7 days.
   app:
-    name: app (${{ matrix.platform.name }})
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - name: macos
-            runner: macos-latest
-          - name: windows
-            runner: windows-latest
-          - name: linux
-            runner: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: desktop/src-tauri
-          key: ${{ matrix.platform.name }}
-      - if: matrix.platform.name == 'linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: bun install --frozen-lockfile
-        working-directory: desktop
-      - run: bun run typecheck
-        working-directory: desktop
-      - name: Desktop version regressions
-        run: bun test scripts/desktop-version.test.ts
-        working-directory: desktop
-      - name: Prepare internal build version
-        run: bun scripts/desktop-version.ts internal
-        working-directory: desktop
-      # `tauri build`, not `cargo build --release`. tauri-build emits `cargo:rustc-cfg=dev`
-      # for anything the Tauri CLI did not build, so a plain cargo release binary still points
-      # at the dev server and shows "Could not connect to localhost" when it is run. That
-      # compiles, proves the Rust, and proves nothing about the thing people install.
-      #
-      # Bundling is included because the bundle is the product, and because the failures live
-      # there: the Windows resource step needs an .ico, and macOS wants an .icns, neither of
-      # which a compile would miss.
-      - run: bun run tauri build --config src-tauri/tauri.build-version.conf.json
-        working-directory: desktop
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ matrix.platform.name == 'macos' && '-' || '' }}
-      - name: Verify packaged Mac version and ad-hoc signature
-        if: matrix.platform.name == 'macos'
-        run: |
-          # Tauri removes the temporary .app after producing a DMG. Check its payload.
-          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
-          test "${#images[@]}" -eq 1
-          mount="$RUNNER_TEMP/openbot-version-check"
-          mkdir -p "$mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${images[0]}"
-          trap 'hdiutil detach "$mount"' EXIT
-          export OPENBOT_VERIFY_APP="$mount/OpenBot.app"
-          python3 - <<'PY'
-          import json, os, pathlib, plistlib, subprocess
-          build = json.loads(pathlib.Path('desktop/build-version.json').read_text())
-          app = pathlib.Path(os.environ['OPENBOT_VERIFY_APP'])
-          info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
-          for key, expected in {
-              'CFBundleShortVersionString': build['releaseVersion'],
-              'CFBundleVersion': build['releaseVersion'],
-              'OpenBotBuildVersion': build['version'],
-              'OpenBotSourceRevision': build['sourceSha'],
-          }.items():
-              if info.get(key) != expected:
-                  raise SystemExit(f'{key}: expected {expected}, got {info.get(key)}')
-          subprocess.run(['codesign', '--verify', '--deep', '--strict', '--verbose=2', str(app)], check=True)
-          print(f"Verified packaged Mac version: {build['version']}")
-          PY
-      # Frontend assets and platform dependencies are ready after the packaged build.
-      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
-      - name: Rust regression tests
-        run: cargo test --locked --lib --bins
-        working-directory: desktop/src-tauri
-      # Keep what was built. Without this the only way to try an installer is to build one on
-      # the machine you are trying it on, which is not what anybody installs.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: openbot-desktop-${{ matrix.platform.name }}
-          path: |
-            desktop/src-tauri/target/release/bundle/**/*.dmg
-            desktop/src-tauri/target/release/bundle/**/*.exe
-            desktop/src-tauri/target/release/bundle/**/*.AppImage
-            desktop/src-tauri/target/release/bundle/**/*.deb
-            desktop/src-tauri/target/release/bundle/**/*.rpm
-            desktop/build-version.json
-          if-no-files-found: error
-          retention-days: 7
+    name: app
+    uses: $/.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      channel: internal
+      bundle_cli: false
+      manifest_artifact: ""
+      retention_days: 7
+      platforms: '["macos","windows","linux"]'
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}

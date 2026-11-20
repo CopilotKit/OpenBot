@@ -1,0 +1,2189 @@
+{
+  "name": "reasoning",
+  "transport": "intelligence",
+  "recordedWith": {
+    "copilotkit": "c21eeda029",
+    "@ag-ui/client": "1.0.2"
+  },
+  "exchanges": [
+    {
+      "at": 61,
+      "url": "http://127.0.0.1:4000/api/copilotkit",
+      "method": "POST",
+      "body": "{\"method\":\"agent/run\",\"params\":{\"agentId\":\"reasoner\"},\"body\":{\"threadId\":\"ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70\",\"runId\":\"7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6\",\"protocolVersion\":\"1.0\",\"tools\":[],\"context\":[],\"forwardedProps\":{},\"state\":{},\"messages\":[{\"id\":\"644cb2c1-e6a5-4f88-91bd-26698b014e58\",\"role\":\"user\",\"content\":\"Think it through first: what is 17 multiplied by 23? Call no tools, answer with the number.\"}]}}",
+      "status": 200,
+      "contentType": "application/json;charset=utf-8",
+      "chunks": [
+        {
+          "at": 105,
+          "text": "{\"threadId\":\"ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70\",\"runId\":\"7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6\",\"joinToken\":\"[omitted]\",\"realtime\":{\"clientUrl\":\"ws://127.0.0.1:7253/client\",\"topic\":\"thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70\"}}"
+        }
+      ],
+      "end": {
+        "at": 105,
+        "outcome": "complete"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "at": 108,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "phx_join",
+      "payload": {
+        "stream_mode": "run",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6"
+      }
+    },
+    {
+      "at": 164,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "input": {
+          "context": [],
+          "messages": [
+            {
+              "content": "Think it through first: what is 17 multiplied by 23? Call no tools, answer with the number.",
+              "id": "644cb2c1-e6a5-4f88-91bd-26698b014e58",
+              "role": "user"
+            }
+          ],
+          "protocolVersion": "1.0",
+          "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+          "state": {},
+          "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+          "tools": []
+        },
+        "metadata": {
+          "cpki_event_id": "c3903d7b-898e-4276-89d3-d9600800d1e3",
+          "cpki_event_seq": 1,
+          "cpki_ingested": "01a15b9d-dc02-79bd-b1ee-0b68b263412a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "protocolVersion": "1.0",
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "RUN_STARTED"
+      }
+    },
+    {
+      "at": 167,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "replay_complete"
+    },
+    {
+      "at": 616,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "7183a4af-cf76-49cf-8dca-85f0d3363a7d",
+          "cpki_event_seq": 2,
+          "cpki_ingested": "01a15b9d-ddfb-7f95-82d2-60627e6b79b1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_START"
+      }
+    },
+    {
+      "at": 617,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "6844ec1d-d04a-4b9d-8d8c-4ae3e37b5250",
+          "cpki_event_seq": 3,
+          "cpki_ingested": "01a15b9d-ddfb-7bff-8a5a-0c5d4e7e17e9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "reasoning",
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_START"
+      }
+    },
+    {
+      "at": 1547,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "**Computing multiplication**\n\nI",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "3f030442-a343-4926-958c-eebe0eae522c",
+          "cpki_event_seq": 4,
+          "cpki_ingested": "01a15b9d-e19f-7fbf-b398-9936b8d0575d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1553,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " need",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "3bb2f1d4-1ab4-4908-8b3d-8ae3cfd94ba7",
+          "cpki_event_seq": 5,
+          "cpki_ingested": "01a15b9d-e1a5-7920-8bb9-cbc2a9ba1f1b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1566,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " to",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "583cc190-342d-4d48-8298-2abc4b58c3ae",
+          "cpki_event_seq": 6,
+          "cpki_ingested": "01a15b9d-e1b3-7c8e-b31e-45a9274f4292"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1567,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " think",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "d225aed8-464a-4298-a4e6-5334b614900f",
+          "cpki_event_seq": 7,
+          "cpki_ingested": "01a15b9d-e1b3-74c3-b05f-02f7bbc8a887"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1614,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " through",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "8787a39e-2f2d-4bb1-9e73-09ea8d45557f",
+          "cpki_event_seq": 8,
+          "cpki_ingested": "01a15b9d-e1e2-7698-8c80-809f523b014b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1615,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " the",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "efad8a20-2893-44e5-9a17-979598b4672b",
+          "cpki_event_seq": 9,
+          "cpki_ingested": "01a15b9d-e1e2-7ac8-8970-62dd54a24c2c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1626,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " user",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "24e64efa-e1ee-475f-86d9-83f9d33748f5",
+          "cpki_event_seq": 10,
+          "cpki_ingested": "01a15b9d-e1ee-75e9-ae72-819ce4d48017"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1637,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " request",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "ba309718-1c77-4bf3-85c7-cc855bc7ec87",
+          "cpki_event_seq": 11,
+          "cpki_ingested": "01a15b9d-e1f7-7acd-8986-b4f26181e8ea"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1640,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " carefully",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "0c900fe2-5b53-4922-b531-cb33fa0034b8",
+          "cpki_event_seq": 12,
+          "cpki_ingested": "01a15b9d-e1fc-73a5-8417-5db7c5ab54db"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1641,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " before",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "e8c64d1d-68dc-4556-822f-39d253b4de86",
+          "cpki_event_seq": 13,
+          "cpki_ingested": "01a15b9d-e1fc-771a-8931-6e81367fb540"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1653,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " providing",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "b80ce5b3-fb84-4203-9594-c32dc042678f",
+          "cpki_event_seq": 14,
+          "cpki_ingested": "01a15b9d-e208-741e-8b21-4549c97a1789"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1653,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " an",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "8b871fe8-e311-4350-a951-c6cda9c56588",
+          "cpki_event_seq": 15,
+          "cpki_ingested": "01a15b9d-e208-794b-a9d4-426f2e1369c2"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1660,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " answer",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "7e7a597f-e625-43ef-8bdf-383f8fe2f0d2",
+          "cpki_event_seq": 16,
+          "cpki_ingested": "01a15b9d-e210-712e-925b-0bdb3d2cf7bb"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1661,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "a89ad5e7-add3-42c7-a768-d70218e31cd6",
+          "cpki_event_seq": 17,
+          "cpki_ingested": "01a15b9d-e210-7a31-9ffe-f2ed40f82500"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1677,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " They",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "4d90338e-0dcf-4d7e-a12d-a3bae4a792fa",
+          "cpki_event_seq": 18,
+          "cpki_ingested": "01a15b9d-e222-796e-b8d9-65a461a78fbe"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1692,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " want",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "8f25d583-9651-49d8-857a-11bce096e30f",
+          "cpki_event_seq": 19,
+          "cpki_ingested": "01a15b9d-e230-7b05-9fb8-3b453f47105f"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1701,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " a",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "634fb523-b1aa-4b6f-9f9f-866b0416850f",
+          "cpki_event_seq": 20,
+          "cpki_ingested": "01a15b9d-e238-7917-8b6d-da191238924c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " straightforward",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "a78f0c10-3d1f-42de-8063-7f02ea7e9fe3",
+          "cpki_event_seq": 21,
+          "cpki_ingested": "01a15b9d-e238-7857-a286-614cc97065d1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " calculation",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "0e80f4fe-0233-4cc6-be41-b31b7adf07aa",
+          "cpki_event_seq": 22,
+          "cpki_ingested": "01a15b9d-e238-7a7b-bd31-76c8f1aa1a26"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " of",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "89780373-29b5-4238-85f4-85ca234abdc8",
+          "cpki_event_seq": 23,
+          "cpki_ingested": "01a15b9d-e238-788e-86f0-636da14f8db8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 17",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "bf31ba04-181e-4287-af7e-057c1aa9fc14",
+          "cpki_event_seq": 24,
+          "cpki_ingested": "01a15b9d-e238-7748-b479-93e7f59ddcef"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " times",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "8aabfe90-4f10-473c-b5fc-b2286384b545",
+          "cpki_event_seq": 25,
+          "cpki_ingested": "01a15b9d-e238-77a3-baef-da1e6b568ebf"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 23",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "647898ed-1819-4e55-93e1-d9ec0ce59c10",
+          "cpki_event_seq": 26,
+          "cpki_ingested": "01a15b9d-e238-7363-ad3b-4c26493870b1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "6a9521fc-0f4f-4d92-901b-8bc854b7d430",
+          "cpki_event_seq": 27,
+          "cpki_ingested": "01a15b9d-e238-74e9-923a-8819e9b11ec0"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1702,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " I'll",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "4acffb29-2c90-48ae-9a0e-b6bb45e3893c",
+          "cpki_event_seq": 28,
+          "cpki_ingested": "01a15b9d-e238-70d8-9651-7f10f14718bf"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1775,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " break",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "3f44ece6-f4cc-4266-ae40-5b9372d5baab",
+          "cpki_event_seq": 29,
+          "cpki_ingested": "01a15b9d-e283-7fc6-bd7f-95c70e6d3f4e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1775,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " it",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "0a53809e-eea1-4d7a-a719-9c46792e52d6",
+          "cpki_event_seq": 30,
+          "cpki_ingested": "01a15b9d-e283-7a2b-bacc-f2e26f0060ce"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1775,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " down",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "3fb84421-072a-48b3-8094-26810e3ab4be",
+          "cpki_event_seq": 31,
+          "cpki_ingested": "01a15b9d-e283-7604-a90e-ddbfb2f7d90e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1780,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ":",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "975b2789-7fb7-4935-ad9e-b218f14cec4b",
+          "cpki_event_seq": 32,
+          "cpki_ingested": "01a15b9d-e288-7f03-b77b-ad850c836d4a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1781,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " if",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "b3647821-6e6f-4804-9e00-e1a3f7132cd4",
+          "cpki_event_seq": 33,
+          "cpki_ingested": "01a15b9d-e288-71a9-99ef-539f4715633a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1781,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " I",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "d7e914cb-151e-4c86-b270-305e3ef3fa23",
+          "cpki_event_seq": 34,
+          "cpki_ingested": "01a15b9d-e288-77c5-afe4-a46f461b4b89"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1790,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " calculate",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "217a08f7-5d27-40da-b8c1-d7938b7f9e3d",
+          "cpki_event_seq": 35,
+          "cpki_ingested": "01a15b9d-e292-7a08-9c27-0107dd938d98"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1791,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 20",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "82d86f0b-9ee9-4f1b-87cd-3917134c21e7",
+          "cpki_event_seq": 36,
+          "cpki_ingested": "01a15b9d-e292-7608-85ba-7e63fd0913f3"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1796,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " times",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "666aef8a-d2af-4b1e-ba9d-b3d8815bbf4f",
+          "cpki_event_seq": 37,
+          "cpki_ingested": "01a15b9d-e298-72f2-9235-25ea1eb0ee18"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1797,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 17",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "ebff0c98-29af-402e-ac50-404838bd97df",
+          "cpki_event_seq": 38,
+          "cpki_ingested": "01a15b9d-e298-724e-8325-1dc21a19e049"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1797,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "e447513e-013f-4085-afc3-72e0d0f23397",
+          "cpki_event_seq": 39,
+          "cpki_ingested": "01a15b9d-e298-71b1-b1b0-21ee8ba1cba0"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1802,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " that",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "1dd96f44-ad6a-473f-aaf6-60993e3ed1fc",
+          "cpki_event_seq": 40,
+          "cpki_ingested": "01a15b9d-e29e-71db-be4b-2b41c9a5f098"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1802,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " gives",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "80bb01f4-7c8e-4ba9-9c7e-5e8df288a795",
+          "cpki_event_seq": 41,
+          "cpki_ingested": "01a15b9d-e29e-7446-9509-67cdb949b502"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1803,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " me",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "51e97740-942b-4439-b944-293a9fa412ec",
+          "cpki_event_seq": 42,
+          "cpki_ingested": "01a15b9d-e29e-7b25-8bcf-b7acb2620343"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1803,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 340",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "5d9b8626-9dbf-43ad-bbb5-80e501b0b942",
+          "cpki_event_seq": 43,
+          "cpki_ingested": "01a15b9d-e29e-7e63-8652-da858c69b5f9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1803,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "a639ca3f-76a3-46d4-86fc-8152b6d87ec5",
+          "cpki_event_seq": 44,
+          "cpki_ingested": "01a15b9d-e29e-70b9-8334-f37c0e4d075a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1803,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Then",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "e2561603-3eae-4037-bacb-687be192ebc7",
+          "cpki_event_seq": 45,
+          "cpki_ingested": "01a15b9d-e29e-76ec-a4e1-c1545d2c548c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1803,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " I",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "0cf79ccb-156c-495a-a1fc-deffea30fcc5",
+          "cpki_event_seq": 46,
+          "cpki_ingested": "01a15b9d-e29e-76dd-a8f5-5b57026510c1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1813,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " need",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "d5d15665-3c46-4f9e-ab92-5b0e15b35aea",
+          "cpki_event_seq": 47,
+          "cpki_ingested": "01a15b9d-e2a8-73d0-8423-1927f21becce"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1821,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " to",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "535e18bc-bc4c-49d4-b322-48a4436afd7b",
+          "cpki_event_seq": 48,
+          "cpki_ingested": "01a15b9d-e2b1-7b8c-b94a-791428ea766a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1831,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " compute",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "afdc74ae-c708-46e1-88ad-bde8c1c23fb5",
+          "cpki_event_seq": 49,
+          "cpki_ingested": "01a15b9d-e2bb-7e7e-b805-e2da761b6048"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1845,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 3",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "1a2bf6db-8f33-4d67-8315-ec9cb3722e3f",
+          "cpki_event_seq": 50,
+          "cpki_ingested": "01a15b9d-e2c9-7c7b-b8a1-9bdd02e63c4a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1853,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " times",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "06158098-4d70-439e-8286-d28887e03039",
+          "cpki_event_seq": 51,
+          "cpki_ingested": "01a15b9d-e2d2-7aae-bfcd-f65e3ffed0ea"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1874,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 17",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "9c71c4e6-0e0a-47bd-9875-b88b1659d6c3",
+          "cpki_event_seq": 52,
+          "cpki_ingested": "01a15b9d-e2e5-7da9-b2a6-437b78374ca0"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1880,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "9120f729-fa44-4f8d-ad28-0d379ea3337e",
+          "cpki_event_seq": 53,
+          "cpki_ingested": "01a15b9d-e2ec-74c6-96a0-e7ecdc658686"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1899,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " which",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "7361168c-acf3-4b0f-9a8f-77e44c7b1f9d",
+          "cpki_event_seq": 54,
+          "cpki_ingested": "01a15b9d-e2ff-7603-a5fd-a15a63760f34"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1904,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " is",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "3b447829-573d-44eb-9492-6a4dba3ad042",
+          "cpki_event_seq": 55,
+          "cpki_ingested": "01a15b9d-e303-77e6-8e4f-d32a18eeda89"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1921,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 51",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "d311aba2-47fc-415e-a91c-779f5ec1dd78",
+          "cpki_event_seq": 56,
+          "cpki_ingested": "01a15b9d-e314-7eb7-9d79-3dbcb7147ed5"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1930,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "4d8680b0-5e08-4f16-82cb-900ba14a7291",
+          "cpki_event_seq": 57,
+          "cpki_ingested": "01a15b9d-e31d-73c9-8e84-59c8c8aa7f86"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1940,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " Adding",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "4150c1f6-21b3-4406-b847-256f0e235f12",
+          "cpki_event_seq": 58,
+          "cpki_ingested": "01a15b9d-e328-7645-8443-f427c9e13c46"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1946,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " those",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "144d91ad-54fb-4d2a-98a0-b0cebaf769af",
+          "cpki_event_seq": 59,
+          "cpki_ingested": "01a15b9d-e32e-7a06-921f-568a9cadeda9"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1947,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " results",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "606b0784-b839-4da6-8e32-03d5a07bd10f",
+          "cpki_event_seq": 60,
+          "cpki_ingested": "01a15b9d-e32e-7582-bf86-1dc65be1a072"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1961,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " together",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "38e31d72-66c0-4fba-99c4-a5b1c409ccda",
+          "cpki_event_seq": 61,
+          "cpki_ingested": "01a15b9d-e33d-7c15-b6b9-ef77996af0f2"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1987,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "3fb5fd48-b3d3-426f-bd43-ec6b312764ba",
+          "cpki_event_seq": 62,
+          "cpki_ingested": "01a15b9d-e357-7dfc-8765-73a89ea8fbd4"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 1996,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " I",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "4f6dd60c-fead-4f1c-a551-b197f932fe88",
+          "cpki_event_seq": 63,
+          "cpki_ingested": "01a15b9d-e361-7069-9057-62e1b6ca3499"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2005,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " arrive",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "31bfd295-775a-45ff-b192-3c324fbe7378",
+          "cpki_event_seq": 64,
+          "cpki_ingested": "01a15b9d-e369-7ad0-a30a-c898c4d55546"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2005,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " at",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "5212cf74-dfac-4420-a155-3c088215a19a",
+          "cpki_event_seq": 65,
+          "cpki_ingested": "01a15b9d-e369-75c6-87ae-358152773e01"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2033,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " 391",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "b2bd6c0f-55d6-4087-9620-8e9411543a7b",
+          "cpki_event_seq": 66,
+          "cpki_ingested": "01a15b9d-e385-7ec4-9c7c-ccf6a12987b6"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2042,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "d8bdb54e-2e0a-4b6e-999e-63cb662940a2",
+          "cpki_event_seq": 67,
+          "cpki_ingested": "01a15b9d-e38e-7a5e-958c-c60f1ba0bedb"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2061,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " So",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "bb9a4221-e75d-4db6-ab52-3facee29145e",
+          "cpki_event_seq": 68,
+          "cpki_ingested": "01a15b9d-e3a1-7bd4-bec6-03f7ff5dc8a1"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2072,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ",",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "8900e119-ecf5-45a2-a870-287df1961935",
+          "cpki_event_seq": 69,
+          "cpki_ingested": "01a15b9d-e3ac-76d9-9c1e-f972df3b5c79"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2083,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " I",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "a185bccb-26b0-49e1-a5c6-6f15b25818fe",
+          "cpki_event_seq": 70,
+          "cpki_ingested": "01a15b9d-e3b8-7337-83ef-5be079581c1e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2092,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " just",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "0d3ec977-be60-40d1-9cb2-d8d10db51d86",
+          "cpki_event_seq": 71,
+          "cpki_ingested": "01a15b9d-e3c0-7df4-95e5-51f0743c943e"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2099,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " need",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "9a73b7b5-bca9-4bac-a5bf-e8f04d18896e",
+          "cpki_event_seq": 72,
+          "cpki_ingested": "01a15b9d-e3c7-7041-bffd-eb91081e8494"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2109,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " to",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "6311a325-cb11-4ab1-8396-3984692f1e99",
+          "cpki_event_seq": 73,
+          "cpki_ingested": "01a15b9d-e3d1-761f-a92f-43f67e450194"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2115,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " give",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "8fbfe97f-3abe-45cc-b204-5d5261aa1416",
+          "cpki_event_seq": 74,
+          "cpki_ingested": "01a15b9d-e3d7-755e-9cf4-1b10743d0060"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2125,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " them",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "7891e859-8ce8-4443-8c98-ace9131855ea",
+          "cpki_event_seq": 75,
+          "cpki_ingested": "01a15b9d-e3e1-7c86-9009-db35d5fe6d7c"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2135,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " the",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "fcadaedf-8620-436b-9975-74c8a2818c07",
+          "cpki_event_seq": 76,
+          "cpki_ingested": "01a15b9d-e3eb-72f5-998b-52482cabb74a"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2144,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": " number",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "47edaa71-32a4-4c7d-9e5c-36d0acf17af3",
+          "cpki_event_seq": 77,
+          "cpki_ingested": "01a15b9d-e3f4-7c50-a89d-e8413c1b406b"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2150,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": ".",
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "6bdc5015-60dd-40df-973e-961dcee56739",
+          "cpki_event_seq": 78,
+          "cpki_ingested": "01a15b9d-e3fa-746b-a062-eea7d16df4e8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2227,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "220284eb-3b62-4ef1-8afe-1f528e8673f1",
+          "cpki_event_seq": 79,
+          "cpki_ingested": "01a15b9d-e447-71d2-9e20-ab958b64af2f"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_MESSAGE_END"
+      }
+    },
+    {
+      "at": 2228,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+        "metadata": {
+          "cpki_event_id": "2f5ae4da-55ad-4e15-ba7d-15d42b46dd76",
+          "cpki_event_seq": 80,
+          "cpki_ingested": "01a15b9d-e447-7080-8c01-6c574d253218"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "REASONING_END"
+      }
+    },
+    {
+      "at": 2246,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_07f1526e0392f41d006ad7f744a2ec87d091c390e511ce0504",
+        "metadata": {
+          "cpki_event_id": "64175fe7-8dfb-4df3-9367-bb739960a30e",
+          "cpki_event_seq": 81,
+          "cpki_ingested": "01a15b9d-e459-7570-b509-251052c4f114"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "role": "assistant",
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "TEXT_MESSAGE_START"
+      }
+    },
+    {
+      "at": 2247,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "delta": "391",
+        "messageId": "msg_07f1526e0392f41d006ad7f744a2ec87d091c390e511ce0504",
+        "metadata": {
+          "cpki_event_id": "262ccc17-6e6f-49be-aff4-938733cb2663",
+          "cpki_event_seq": 82,
+          "cpki_ingested": "01a15b9d-e459-779e-9b37-f47469bde6b8"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "TEXT_MESSAGE_CONTENT"
+      }
+    },
+    {
+      "at": 2452,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "messageId": "msg_07f1526e0392f41d006ad7f744a2ec87d091c390e511ce0504",
+        "metadata": {
+          "cpki_event_id": "80c3c94d-1d09-4982-b901-c945060efefe",
+          "cpki_event_seq": 83,
+          "cpki_ingested": "01a15b9d-e50c-7086-a5bd-3cf700a1e40d"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "TEXT_MESSAGE_END"
+      }
+    },
+    {
+      "at": 2452,
+      "socket": 1,
+      "direction": "in",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "ag_ui_event",
+      "payload": {
+        "metadata": {
+          "cpki_event_id": "e627130b-aadf-47f6-99e9-5cec578e6ea7",
+          "cpki_event_seq": 84,
+          "cpki_ingested": "01a15b9d-e50c-7568-bb4f-814152f6fc58",
+          "finishReason": "stop"
+        },
+        "organization_id": "392ec1e3-59dd-4798-a95b-2715d96d2e89",
+        "project_id": 1,
+        "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "run_id": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+        "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "thread_id": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+        "type": "RUN_FINISHED",
+        "usage": [
+          {
+            "cachedInputTokens": 0,
+            "inputTokens": 226,
+            "model": "gpt-5-mini",
+            "outputTokens": 63,
+            "provider": "openai.responses",
+            "reasoningTokens": 0,
+            "totalTokens": 289
+          }
+        ]
+      }
+    },
+    {
+      "at": 2454,
+      "socket": 1,
+      "direction": "out",
+      "joinRef": "3",
+      "topic": "thread:ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+      "event": "phx_leave"
+    }
+  ],
+  "sink": [
+    {
+      "trajectoryId": "9f356316-9c0b-499f-a76b-a8db56f06383",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "page",
+          "value": {
+            "route": "/",
+            "url": "http://127.0.0.1:4000/",
+            "title": "",
+            "referrer": "",
+            "seq": 1
+          },
+          "timestamp": 1792538434465
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "644cb2c1-e6a5-4f88-91bd-26698b014e58",
+            "runId": null,
+            "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+            "agentId": "reasoner",
+            "role": "user",
+            "textLength": 91,
+            "text": "Think it through first: what is 17 multiplied by 23? Call no tools, answer with the number.",
+            "seq": 2
+          },
+          "timestamp": 1792538434517
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "started",
+            "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+            "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+            "agentId": "reasoner",
+            "seq": 3
+          },
+          "timestamp": 1792538434628
+        }
+      ],
+      "dropped": 0
+    },
+    {
+      "trajectoryId": "9f356316-9c0b-499f-a76b-a8db56f06383",
+      "events": [
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "rs_07f1526e0392f41d006ad7f74313f087d0a30b0e93780b82d6:0",
+            "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+            "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+            "agentId": "reasoner",
+            "role": "reasoning",
+            "textLength": 368,
+            "text": "**Computing multiplication**\n\nI need to think through the user request carefully before providing an answer. They want a straightforward calculation of 17 times 23. I'll break it down: if I calculate 20 times 17, that gives me 340. Then I need to compute 3 times 17, which is 51. Adding those results together, I arrive at 391. So, I just need to give them the number.",
+            "seq": 4
+          },
+          "timestamp": 1792538436689
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.message",
+          "value": {
+            "messageId": "msg_07f1526e0392f41d006ad7f744a2ec87d091c390e511ce0504",
+            "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+            "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+            "agentId": "reasoner",
+            "role": "assistant",
+            "textLength": 3,
+            "text": "391",
+            "seq": 5
+          },
+          "timestamp": 1792538436914
+        },
+        {
+          "type": "CUSTOM",
+          "name": "agent.run",
+          "value": {
+            "phase": "finished",
+            "runId": "7f6d7aa1-1b96-4a38-b72b-6c8ffe8cd3a6",
+            "threadId": "ae6c9cb8-d3d7-4f53-a2ef-9b1e8e477d70",
+            "agentId": "reasoner",
+            "seq": 6
+          },
+          "timestamp": 1792538436916
+        }
+      ],
+      "dropped": 0
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { socketUrl } from "../src/lib/socket-url";
 import { relativeTime } from "../src/lib/relative-time";
+import { socketUrl } from "../src/lib/socket-url";
 
 const at = (protocol: string, hostname: string, host: string) => ({
   protocol,

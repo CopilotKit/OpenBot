@@ -9,6 +9,7 @@ COPY agent-langgraph-agui/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent-langgraph-agui/src ./src
+COPY shared/model_providers.py shared/model-providers.json /shared/
 
 ENV PORT=4206
 EXPOSE 4206

@@ -1,10 +1,10 @@
-import type { Attachment } from "@copilotkit/react-core/v2";
 import { describe, expect, test } from "bun:test";
+import type { Attachment } from "@copilotkit/react-core/v2";
 import { chip, type Segment, text } from "prompt-area/helpers";
 import {
   applyCommandChips,
-  canSendDraft,
   type CommandOption,
+  canSendDraft,
   enforceSingleAgent,
   toDraft,
 } from "./draft";
@@ -50,6 +50,16 @@ describe("toDraft", () => {
     ]);
 
     expect(draft.commandIds).toEqual(["search", "summarize"]);
+  });
+
+  test("a skill chip shows its name but sends its command", () => {
+    const draft = toDraft([
+      command("standup", "Standup notes"),
+      text(" for the design team"),
+    ]);
+
+    expect(draft.text).toBe("/standup for the design team");
+    expect(draft.commandIds).toEqual(["standup"]);
   });
 
   test("treats whitespace-only content as empty", () => {

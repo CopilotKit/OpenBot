@@ -1,0 +1,3 @@
+{"id":"Image ghcr.invalid/copilotkit/openbot-agent-claude-sdk@sha256:5ce6f82ab8c90810cb45c86c2f5e9cdf4e73bfee1aef13713c9076a0883fd54d","status":"Working","text":"Pulling"}
+{"id":"Image ghcr.invalid/copilotkit/openbot-agent-claude-sdk@sha256:5ce6f82ab8c90810cb45c86c2f5e9cdf4e73bfee1aef13713c9076a0883fd54d","status":"Error","text":"Error","details":"lookup ghcr.invalid: no such host"}
+{"error":true,"message":"Error response from daemon: lookup ghcr.invalid: no such host"}

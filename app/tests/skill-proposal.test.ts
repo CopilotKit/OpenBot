@@ -18,7 +18,10 @@ import {
  * fix reaches the model, and everything else reaches the person unchanged.
  */
 
-const skill = (over: Partial<PluginSkill> = {}): PluginSkill => ({
+const skill = (
+  over: Partial<PluginSkill> = {},
+): PluginSkill & { usableOnYourBots: boolean } => ({
+  usableOnYourBots: false,
   id: "skill_1",
   slug: "check-a-claim",
   ownerUserId: null,
@@ -197,12 +200,11 @@ describe("the tool refs a skill may declare", () => {
       title: "Notion",
       tools: [
         {
-          serverId: "notion",
           name: "notion-search",
           description: "Search Notion.",
-          inputSchema: {},
           ref: "notion/notion-search",
           effect: "read",
+          destructive: false,
           grantedTo: [],
         },
       ],
@@ -218,10 +220,8 @@ describe("the tool refs a skill may declare", () => {
       server({
         tools: [
           {
-            serverId: "notion",
             name: "notion-create",
             description: "Create a page.",
-            inputSchema: {},
             ref: "notion/notion-create",
             effect: "write",
             destructive: false,
@@ -232,6 +232,7 @@ describe("the tool refs a skill may declare", () => {
     ]);
     expect(answer).toContain("Notion (notion):");
     expect(answer).toContain("notion/notion-create (writes)");
+    expect(answer).toContain("`@research/search` and `@research/fetch`");
   });
 
   test("a connector advertising nothing is left out rather than shown empty", () => {

@@ -1,0 +1,207 @@
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { MemorySources } from "@/components/memory/sources";
+import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
+import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
+import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH } from "./conversations-api";
+import {
+  MEMORY,
+  memoryContract,
+  memorySourceBody,
+  page,
+  problem,
+  requestOf,
+} from "./learning-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
+import { settleReactWork } from "./settle-react-work";
+
+/** A Bot's Memory page: the apps that feed it facts, and its background research. */
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const originalFetch = global.fetch;
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+const source = (id: string, botId: string, title: string) =>
+  memorySourceBody({ id, title, botId, toolRef: "mcp/drive/search" });
+
+const research = (id: string, agentId: string, focus: string) => ({
+  id,
+  botId: agentId,
+  conversationId: `channel-${agentId}`,
+  focus,
+  enabled: true,
+  intervalMinutes: 240,
+  nextRunAt: "2026-10-09T12:00:00Z",
+  lastRunAt: null,
+  lastStatus: "idle",
+  lastError: null,
+});
+
+const requested: string[] = [];
+/** A refusal the server gives the next write, or none. */
+let refuseWrite: string | null = null;
+/** The settings the Drive search action takes. */
+let searchSettings: Record<string, unknown> = {};
+function serving() {
+  requested.length = 0;
+  refuseWrite = null;
+  searchSettings = {};
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const request = requestOf(input, init);
+    requested.push(request.path);
+    if (request.method !== "GET") {
+      if (refuseWrite) {
+        const detail = refuseWrite;
+        refuseWrite = null;
+        return problem(400, detail, "VALIDATION_ERROR");
+      }
+      return Response.json({ ok: true });
+    }
+    if (request.path === MEMORY.sources) {
+      return page(memoryContract.ListMemorySourcesResponse, "sources", [
+        source("s1", "expenses", "Receipts folder"),
+        source("s2", "knowledge", "Wiki pages"),
+      ]);
+    }
+    if (request.path.endsWith("/memory-source-tools")) {
+      return page(memoryContract.ListMemorySourceToolsResponse, "tools", [
+        {
+          ref: "mcp/drive/search",
+          title: "Search Drive",
+          description: "",
+          inputSchema: { properties: searchSettings },
+        },
+      ]);
+    }
+    if (pathOf(url) === CHECK_INS_PATH) {
+      return Response.json({
+        nextCursor: null,
+        checkIns: [
+          research("p1", "expenses", "Unpaid invoices"),
+          research("p2", "knowledge", "Stale pages"),
+        ],
+        allowed: true,
+      });
+    }
+    if (url.split("?")[0] === CONVERSATIONS_PATH) {
+      return Response.json({ conversations: [], nextCursor: null });
+    }
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "expenses", name: "Expenses" },
+          { id: "knowledge", name: "Knowledge" },
+        ],
+      }) ?? Response.json({})
+    );
+  }) as unknown as typeof fetch;
+}
+
+/** Drawn under a router: a check-in's row is a link to its page. */
+function draw(node: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => node,
+      }),
+    ]),
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+test("only this Bot's sources are listed, and its app actions load without picking a Bot", async () => {
+  serving();
+  const view = draw(<MemorySources agentId="expenses" />);
+  expect(await view.findByText("Receipts folder")).toBeTruthy();
+  expect(view.queryByText("Wiki pages")).toBeNull();
+  expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
+  await waitFor(() => expect(requested).toContain(MEMORY.tools("expenses")));
+});
+
+test("only this Bot's background research is listed, with no Bot to pick", async () => {
+  serving();
+  const view = draw(<ProactiveResearchSettings agentId="expenses" />);
+  expect(await view.findByText(/Unpaid invoices/)).toBeTruthy();
+  expect(view.queryByText(/Stale pages/)).toBeNull();
+  expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
+});
+
+/** Opens Add source for the Expenses Bot and chooses its one read action. */
+async function openAddSource(view: ReturnType<typeof draw>) {
+  const user = userEvent.setup({ document });
+  await view.findByText("Receipts folder");
+  await user.click(view.getByRole("button", { name: "Add source" }));
+  await user.click(await view.findByRole("combobox", { name: "What to read" }));
+  await user.click(await view.findByRole("option", { name: "Search Drive" }));
+  return user;
+}
+
+test("an action setting called name is its own field, not the source name", async () => {
+  serving();
+  searchSettings = { name: { type: "string" } };
+  const view = draw(<MemorySources agentId="expenses" />);
+  await openAddSource(view);
+  const setting = await view.findByLabelText("name");
+  expect(setting).not.toBe(view.getByLabelText("Source name"));
+});
+
+test("reopening Add source after a failure keeps the draft but not the failure", async () => {
+  serving();
+  const view = draw(<MemorySources agentId="expenses" />);
+  const user = await openAddSource(view);
+  await user.type(view.getByLabelText("Source name"), "Invoices");
+  refuseWrite = "That folder cannot be read.";
+  await user.click(view.getByRole("button", { name: "Add and sync source" }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "That folder cannot be read.",
+  );
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: "Add source" }));
+  const name = (await view.findByLabelText("Source name")) as HTMLInputElement;
+  expect(name.value).toBe("Invoices");
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("a refused Run now says why on the check-in's page", async () => {
+  serving();
+  const view = draw(<CheckInRoutePage checkInId="p1" />);
+  const user = userEvent.setup({ document });
+  refuseWrite = "Research is paused.";
+  await user.click(await view.findByRole("button", { name: /^Run now/ }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Research is paused.",
+  );
+});

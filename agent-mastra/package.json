@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@ai-sdk/openai": "4.0.121",
-    "@mastra/core": "1.84.0",
-    "mastra": "1.40.0"
+    "@ai-sdk/anthropic": "*",
+    "@ai-sdk/openai": "*",
+    "@mastra/core": "*",
+    "mastra": "*"
   }
 }

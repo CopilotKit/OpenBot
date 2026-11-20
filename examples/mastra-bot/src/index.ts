@@ -14,7 +14,7 @@ import { listenPort } from "../../../shared/listen-port";
  *
  * `@ag-ui/mastra` exists and is the client side, it lets a CopilotKit runtime call a Mastra agent. A
  * Bot here has to be the server, so this emits AG-UI directly with `@ag-ui/encoder`, the same shape
- * as `agent-bot` and the LangGraph example.
+ * as the LangGraph example.
  */
 
 const resolvedPort = listenPort(process.env.PORT, 4400);

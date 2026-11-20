@@ -12,13 +12,71 @@
  * translation belongs on OpenBot's side, in one place, where every remote Bot is governed the same
  * way — not in each harness.
  */
-import { openai } from "@ai-sdk/openai";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
 import { listenPort } from "../../../shared/listen-port";
+import {
+  apiKeyOrPlaceholder,
+  botSettings,
+  providerSpec,
+} from "../../../shared/model-providers";
 
-const model = process.env.BOT_MODEL?.trim() || "gpt-4o-mini";
+/** The providers this Bot can drive: the ones whose SDK modules it loads below. */
+const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
+
+/**
+ * The model this Bot answers with, read from the spec file rather than remembered in this file.
+ *
+ * `shared/model-providers.json` holds this Bot's `bots.agent-mastra` row and the provider facts
+ * around it; `BOT_PROVIDER` and `BOT_MODEL` still win over both, as they always have. The file
+ * says which providers exist; this file still decides which of them it can drive, because only two
+ * SDK modules are loaded here. Both halves refuse at startup: a provider the file has not heard of,
+ * and one it has that this harness has no module for, used to fall through to the OpenAI branch
+ * below and answer with a model the deployment never chose.
+ */
+async function buildModel() {
+  const settings = botSettings("agent-mastra");
+  const providerName = settings.provider;
+  const spec = providerSpec(providerName);
+  if (!spec) {
+    // What to use is what this harness answers on, which is narrower than the registry.
+    throw new Error(
+      `BOT_PROVIDER=${providerName} is not one this Bot knows. Use ${[...SUPPORTED_PROVIDERS].join(" or ")}.`,
+    );
+  }
+  if (!SUPPORTED_PROVIDERS.has(spec.id)) {
+    throw new Error(
+      `BOT_PROVIDER=${providerName} names ${spec.label}, and this Bot loads no ${spec.label} module. It answers on OpenAI and Anthropic only.`,
+    );
+  }
+  const model = settings.model;
+  const baseVariable = spec.baseUrlVariable;
+  const baseURL = process.env[baseVariable]?.trim();
+  // Provider modules create default clients at import, which reject Compose's empty overrides.
+  if (!baseURL) delete process.env[baseVariable];
+
+  if (spec.id === "anthropic") {
+    const { createAnthropic } = await import("@ai-sdk/anthropic");
+    // Other harnesses accept an Anthropic origin; AI SDK expects the /v1 API prefix.
+    const origin = (baseURL || "https://api.anthropic.com").replace(/\/+$/, "");
+    return createAnthropic({
+      baseURL: origin.endsWith("/v1") ? origin : `${origin}/v1`,
+    })(model);
+  }
+  const { createOpenAI } = await import("@ai-sdk/openai");
+  const compatible =
+    Boolean(baseURL) &&
+    baseURL?.replace(/\/+$/, "") !== "https://api.openai.com/v1";
+  const openai = createOpenAI({
+    baseURL: baseURL || "https://api.openai.com/v1",
+    apiKey: compatible
+      ? apiKeyOrPlaceholder(process.env[spec.keyVariable])
+      : undefined,
+  });
+  // Compatible endpoints commonly expose Chat Completions; OpenAI keeps its Responses default.
+  return compatible ? openai.chat(model) : openai(model);
+}
 const port = listenPort(process.env.PORT, 4213);
 if (!port.ok) throw new Error(port.reason);
 
@@ -28,6 +86,7 @@ export const openbotBaseInstructions =
 const OPENBOT_CONTEXT_DESCRIPTIONS = [
   "OpenBot standing role",
   "OpenBot granted tools guidance",
+  "OpenBot learned skills",
 ] as const;
 
 type OpenBotInstructionArgs = {
@@ -45,37 +104,62 @@ function agUiContextEntries(
   return agUi.context;
 }
 
-function openBotContextValue(entry: unknown, description: string) {
-  if (typeof entry !== "object" || entry === null) return undefined;
-  if (!("description" in entry) || !("value" in entry)) return undefined;
-  if (entry.description !== description) return undefined;
-  if (typeof entry.value !== "string") return undefined;
-  const value = entry.value.trim();
-  if (value.length === 0) return undefined;
-  return value;
+type ContextEntry = { description: string; value: string };
+
+function isUsableEntry(entry: unknown): entry is ContextEntry {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    "description" in entry &&
+    typeof entry.description === "string" &&
+    "value" in entry &&
+    typeof entry.value === "string" &&
+    entry.value.trim().length > 0
+  );
 }
 
+/**
+ * What the model is told: the base line, OpenBot's three model-visible entries in a fixed order,
+ * then whatever the calling surface sent, as `description: value`.
+ *
+ * Every other `OpenBot …` entry is for this process, not the model: the Bot id, the deployment's
+ * tool list, and the signed run assertion, which is a credential. The server keeps callers out of
+ * that namespace (`RESERVED_MASTRA_CONTEXT_DESCRIPTIONS` in server/src/copilot.ts), so the prefix
+ * is a safe line to draw. `OpenBot personal memory` is for the model, but as untrusted data, not
+ * as an instruction: the server sends the same records as a quoted conversation row
+ * (`quotedConversationRow` in server/src/copilot.ts), so it stays out of here too. Caller context
+ * used to be dropped here altogether, although the server forwards it and every other harness puts
+ * it in front of the model.
+ */
 export function buildOpenBotInstructions({
   requestContext,
 }: OpenBotInstructionArgs = {}) {
-  const contextEntries = agUiContextEntries(requestContext);
+  const contextEntries =
+    agUiContextEntries(requestContext).filter(isUsableEntry);
   const openbotInstructions = OPENBOT_CONTEXT_DESCRIPTIONS.flatMap(
     (description) =>
-      contextEntries.flatMap((entry) => {
-        const value = openBotContextValue(entry, description);
-        return value === undefined ? [] : [value];
-      }),
+      contextEntries
+        .filter((entry) => entry.description === description)
+        .map((entry) => entry.value.trim()),
   );
+  const callerInstructions = contextEntries
+    .filter((entry) => !entry.description.startsWith("OpenBot "))
+    .map((entry) =>
+      entry.description.trim()
+        ? `${entry.description.trim()}: ${entry.value.trim()}`
+        : entry.value.trim(),
+    );
 
-  if (openbotInstructions.length === 0) return openbotBaseInstructions;
-  return [openbotBaseInstructions, ...openbotInstructions].join("\n\n");
+  const instructions = [...openbotInstructions, ...callerInstructions];
+  if (instructions.length === 0) return openbotBaseInstructions;
+  return [openbotBaseInstructions, ...instructions].join("\n\n");
 }
 
 const openbot = new Agent({
   id: "openbot",
   name: "openbot",
   instructions: buildOpenBotInstructions,
-  model: openai(model),
+  model: await buildModel(),
 });
 
 /** The one header OpenBot's server sends, compared without leaking length through timing. */

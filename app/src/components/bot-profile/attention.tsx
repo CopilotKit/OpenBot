@@ -1,0 +1,330 @@
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import {
+  type BotAttention,
+  botAttentionQueryOptions,
+  lastPingQueryOptions,
+} from "@/lib/bot-lifecycle/queries";
+// Whether this browser, or OpenBot Desktop, lets OpenBot interrupt: the same answer the offer to
+// turn notifications on reads, so the two cannot disagree.
+import { notificationsAllowed } from "@/lib/notifications/permission";
+import { conversationTag, inSight, showNotice } from "@/lib/notifications/show";
+import {
+  type ProactiveSuggestion,
+  proactiveSuggestionsQueryOptions,
+} from "@/lib/proactive";
+import { stoppedByYou, taskListQueryOptions } from "@/lib/tasks/queries";
+import { cn } from "@/lib/utils";
+
+/**
+ * Questions, approvals and stalled hand-offs: the things only the person can move forward, answered
+ * on the Bot's own page. A Bot with any of these is listed under Needs you itself. A task waiting on
+ * them is listed as the task, so it is not counted here.
+ */
+export function needsInput(bot: BotAttention): number {
+  return bot.questions + bot.approvals + bot.handoffs;
+}
+
+/**
+ * What this Bot needs the person to answer or decide: what `needsInput` counts, and its tasks
+ * waiting on an approval or a question. What a browser notification is about.
+ *
+ * Every number is added as it comes. The server counts what a task waits on once, as the task
+ * needing input, and leaves that approval or question out of `approvals` and `questions`
+ * (server/src/activity/activity.ts), so nothing here is counted twice.
+ */
+export function asksOf(bot: BotAttention): number {
+  return needsInput(bot) + bot.tasks.needsInput;
+}
+
+/**
+ * What this Bot is stopped on until the person acts: what `asksOf` counts, and its tasks with a
+ * reply to read or a failure to try again. Not what its check-ins found: that is something the
+ * person may act on or not, listed under From check-ins and shown as a dot, never counted, so the
+ * number means a Bot is blocked.
+ */
+export function waitingOnYou(bot: BotAttention): number {
+  return asksOf(bot) + bot.tasks.ready + bot.tasks.failed;
+}
+
+/**
+ * How many things wait on the person across all their Bots: the one number every badge, bell and tab
+ * shows, in OpenBot's sidebar and in every skin. Counted once, by the server's rule (`waitingOnYou`
+ * per Bot), so a skin never counts its own way: one that counted the approval inbox said 1 while
+ * the Bots badge said 2, because a failed task or a task waiting on a question is in one and not the
+ * other.
+ */
+export function waitingAcross(
+  bots: readonly BotAttention[] | undefined,
+): number {
+  return (bots ?? []).reduce((total, bot) => total + waitingOnYou(bot), 0);
+}
+
+/** {@link waitingAcross}, read live, for whatever draws the number. */
+export function useWaitingCount(): number {
+  return waitingAcross(useQuery(botAttentionQueryOptions()).data);
+}
+
+/**
+ * The same count, read live, for one Bot or, given none, across all of them: what a list of what
+ * waits on the person says beside its rows, so it says the badge's number and never its own.
+ */
+export function useWaitingOnYou(): (botId?: string) => number {
+  const bots = useQuery(botAttentionQueryOptions()).data;
+  return (botId) =>
+    waitingAcross(
+      botId === undefined ? bots : bots?.filter((bot) => bot.botId === botId),
+    );
+}
+
+const count = (total: number, one: string, many: string) =>
+  `${total} ${total === 1 ? one : many}`;
+
+/**
+ * How many of each Bot's tasks the person stopped, from the task list. The server counts a stopped
+ * task among the failed ones, since its status is failed; the words tell the two apart.
+ */
+export function useStoppedTasks(): (botId: string) => number {
+  const tasks = useQuery(taskListQueryOptions());
+  return (botId) =>
+    (tasks.data ?? []).filter(
+      (task) => task.agentId === botId && stoppedByYou(task),
+    ).length;
+}
+
+/**
+ * What the badge says, in words, for the row's accessible name and its tooltip. `stopped` is how
+ * many of its failed tasks the person stopped themselves: those are said as stopped, not failed.
+ */
+export function attentionSummary(bot: BotAttention, stopped = 0): string {
+  const parts: string[] = [];
+  if (bot.questions) parts.push(count(bot.questions, "question", "questions"));
+  if (bot.approvals) parts.push(count(bot.approvals, "approval", "approvals"));
+  if (bot.handoffs)
+    parts.push(count(bot.handoffs, "stalled hand-off", "stalled hand-offs"));
+  if (bot.tasks.needsInput)
+    parts.push(
+      count(
+        bot.tasks.needsInput,
+        "task waiting on you",
+        "tasks waiting on you",
+      ),
+    );
+  // What its check-ins found, counted in the badge's words: "2 things need you".
+  if (bot.items)
+    parts.push(count(bot.items, "thing needs you", "things need you"));
+  if (bot.tasks.ready)
+    parts.push(count(bot.tasks.ready, "task to review", "tasks to review"));
+  const byYou = Math.min(stopped, bot.tasks.failed);
+  const failed = bot.tasks.failed - byYou;
+  if (failed) parts.push(count(failed, "failed task", "failed tasks"));
+  if (byYou) parts.push(count(byYou, "stopped task", "stopped tasks"));
+  if (bot.unread) parts.push(`${bot.unread} unread`);
+  return parts.join(", ");
+}
+
+/** A push body is cut here too, so the browser says what the phone says. */
+const PING_BODY_LIMIT = 200;
+/** How many items a ping's notice lists before it says how many more there are, as the phone does. */
+const PING_LISTED = 5;
+
+/** A title as the server compares titles: case, runs of spacing and a closing stop are not news. */
+const titleKey = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s.!?]+$/, "")
+    .trim();
+
+/**
+ * What one ping says in the browser, the way a phone push says it: "3 things need you" over a line
+ * per item naming its Bot, "Expenses: Approve the March invoice", and how many more past five. Each
+ * thing is listed once, even when two Bots raised it. `items` are the ones the ping carried that are
+ * still open; when the person already acted on all of them in another tab, the notice still says
+ * something needs them, without a title it cannot name.
+ */
+export function pingNotice(
+  items: Pick<ProactiveSuggestion, "botId" | "title">[],
+  botName: (agentId: string) => string | undefined,
+): { title: string; body: string } {
+  const seen = new Set<string>();
+  const once = items.filter((item) => {
+    const key = titleKey(item.title);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (once.length === 0)
+    return {
+      title: "Something needs you",
+      body: "Open Bots to see what's waiting.",
+    };
+  const lines = once.slice(0, PING_LISTED).map((item) => {
+    const bot = botName(item.botId);
+    return bot ? `${bot}: ${item.title}` : item.title;
+  });
+  const more = once.length - PING_LISTED;
+  const body = [...lines, ...(more > 0 ? [`and ${more} more`] : [])].join("\n");
+  return {
+    title:
+      once.length === 1
+        ? "One thing needs you"
+        : `${once.length} things need you`,
+    body:
+      body.length > PING_BODY_LIMIT
+        ? `${body.slice(0, PING_BODY_LIMIT - 1).trimEnd()}…`
+        : body,
+  };
+}
+
+/**
+ * Where a "needs you" notice opens: the conversation that is waiting, when there is one, so the
+ * person lands on the question or the card itself. Otherwise the Bot's page, which lists what it
+ * waits on.
+ */
+export function noticePath(bot: BotAttention): string {
+  return bot.waitingIn
+    ? `/channel/${encodeURIComponent(bot.waitingIn)}`
+    : `/bots/${encodeURIComponent(bot.botId)}`;
+}
+
+/**
+ * A browser notification when a Bot starts needing this person for a question, an approval, a
+ * stalled hand-off or a task waiting on them, if they allowed notifications and did not mute this
+ * Bot. Badges show either way; this is the interruption, and it is opt-in.
+ *
+ * Check-in items are left to the ping: a Bot's items count rising is not news on its own, because
+ * the person hears about items at most once an hour, folded across their Bots.
+ */
+function useAttentionNotifications(bots: BotAttention[] | undefined) {
+  const seen = useRef<Map<string, number> | null>(null);
+  // Asks OpenBot Desktop now, while OpenBot is in front, so its answer is in before anything needs
+  // the person.
+  useEffect(() => {
+    void notificationsAllowed();
+  }, []);
+  useEffect(() => {
+    if (!bots) return;
+    const previous = seen.current;
+    seen.current = new Map(bots.map((bot) => [bot.botId, asksOf(bot)]));
+    // The first answer is the state on arrival, not news.
+    if (!previous) return;
+    const rose = bots.filter(
+      (bot) =>
+        bot.notify !== "none" && asksOf(bot) > (previous.get(bot.botId) ?? 0),
+    );
+    if (rose.length === 0) return;
+    void notificationsAllowed().then((allowed) => {
+      // Someone looking at OpenBot sees the badge and the conversation; a notice is for when they are not.
+      if (!allowed || inSight()) return;
+      for (const bot of rose)
+        showNotice({
+          title: `${bot.name} needs you`,
+          body: attentionSummary(bot),
+          // The conversation's tag when it waits in one: its reply notice, if any, is replaced by this.
+          tag: bot.waitingIn
+            ? conversationTag(bot.waitingIn)
+            : `openbot-attention-${bot.botId}`,
+          path: noticePath(bot),
+        });
+    });
+  }, [bots]);
+}
+
+/**
+ * One browser notification per ping, never one per item: each time the person's newest ping
+ * changes, the notice names what that ping carried. The first answer is the state on arrival, so a
+ * page opened after a ping does not announce it again. The tag is the ping's own, so two open tabs
+ * show one notice between them.
+ *
+ * A Bot muted to "Nothing" never reaches a ping (the server leaves its items out), so nothing here
+ * filters by Bot.
+ */
+function usePingNotifications(
+  lastPingId: string | null | undefined,
+  bots: BotAttention[] | undefined,
+) {
+  // Read only when a ping arrives: the badge has no other use for the list, so it does not poll it.
+  const suggestions = useQuery({
+    ...proactiveSuggestionsQueryOptions(),
+    enabled: false,
+  });
+  const seen = useRef<string | null | undefined>(undefined);
+  const names = useRef(bots);
+  names.current = bots;
+  const refetch = suggestions.refetch;
+  useEffect(() => {
+    if (lastPingId === undefined) return;
+    const previous = seen.current;
+    seen.current = lastPingId;
+    if (previous === undefined || lastPingId === null) return;
+    if (lastPingId === previous) return;
+    void (async () => {
+      if (!(await notificationsAllowed())) return;
+      const { data } = await refetch();
+      const notice = pingNotice(
+        (data ?? []).filter((item) => item.pingId === lastPingId),
+        (agentId) => names.current?.find((bot) => bot.botId === agentId)?.name,
+      );
+      // Bots lists what the ping carried first, under Needs you.
+      showNotice({
+        title: notice.title,
+        body: notice.body,
+        tag: `openbot-ping-${lastPingId}`,
+        path: "/bots",
+      });
+    })();
+  }, [lastPingId, refetch]);
+}
+
+/**
+ * The badge on the sidebar's Bots item: how many things wait on this person across all their Bots,
+ * or a dot when the only news is something unread. Opening Bots lists what is behind the number
+ * first, under Needs you.
+ *
+ * It also sends the browser notifications, since it is the one piece of the app that is always on
+ * screen and always reading this.
+ *
+ * Renders nothing when nothing is waiting, so a quiet day costs the sidebar nothing.
+ *
+ * `onIcon` draws it to sit on an icon's corner rather than at the end of a row: the count in a
+ * 16px circle that a second digit widens, small enough to leave an 18px icon readable under it.
+ */
+export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
+  const attention = useQuery(botAttentionQueryOptions());
+  const lastPing = useQuery(lastPingQueryOptions());
+  useAttentionNotifications(attention.data);
+  usePingNotifications(lastPing.data, attention.data);
+  const bots = attention.data ?? [];
+  const waiting = waitingAcross(bots);
+  if (waiting > 0) {
+    return (
+      <span
+        aria-label={`${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`}
+        className={cn(
+          "rounded-full bg-primary font-medium text-primary-foreground tabular-nums",
+          onIcon
+            ? "grid h-4 min-w-4 place-items-center px-1 text-[10px] leading-none"
+            : "ml-auto px-1.5 text-[11px]",
+        )}
+        role="img"
+      >
+        {waiting}
+      </span>
+    );
+  }
+  if (bots.some((bot) => bot.unread > 0 || bot.items > 0)) {
+    return (
+      <span
+        aria-label={
+          bots.some((bot) => bot.unread > 0)
+            ? "Unread messages"
+            : "Your check-ins found something"
+        }
+        className={cn("size-2 rounded-full bg-primary", !onIcon && "ml-auto")}
+        role="img"
+      />
+    );
+  }
+  return null;
+}

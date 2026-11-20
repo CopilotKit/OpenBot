@@ -1,0 +1,328 @@
+import { IconChevronDown } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { Fragment, type ReactNode, useState } from "react";
+import { BotOrb } from "@/components/agents/bot-orb";
+import {
+  useHeldAnswers,
+  useWaitingByBot,
+} from "@/components/approvals/waiting";
+import { useWaitingOnYou } from "@/components/bot-profile/attention";
+import { PageSection } from "@/components/layout/page-shell";
+import { SuggestionRow } from "@/components/suggestions/suggestion-row";
+import { TaskBoardRow } from "@/components/tasks/task-row";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import {
+  type ProactiveSetting,
+  proactiveSettingsQueryOptions,
+} from "@/lib/proactive";
+import type { ReadFailure } from "@/lib/read-failure";
+import { relativeTime } from "@/lib/relative-time";
+import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
+import { useNeedsYou } from "./needs-you";
+import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
+
+/** How many of one Bot's finds show before the rest open in place. */
+const FINDS_SHOWN = 3;
+
+/**
+ * Everything waiting on the person, in two halves, each grouped under the Bot it came from.
+ *
+ * WAITING ON YOU is what a Bot is stopped on: a question, an action to allow or deny, a task to
+ * review or answer. Each is decided on its row. FROM CHECK-INS is what a Bot found on its own, which
+ * the person may act on or not; it is quieter, and the Bots badge does not count it
+ * (`waitingOnYou`).
+ *
+ * BOT FIRST. A row used to name its Bot in the faintest line at its foot, and with two Bots nobody
+ * could tell who was asking. Each group now opens with the Bot's orb and name, and for finds, what
+ * its check-ins watch. Given a Bot (its own page), there is one group of each.
+ */
+export function NeedsYouBoard({ agentId }: { agentId?: string }) {
+  const agents = useQuery(agentListQueryOptions());
+  const settings = useQuery(proactiveSettingsQueryOptions());
+  const list = useNeedsYou(agentId);
+  // A question or an action waiting in a task's own conversation is that task waiting: one row.
+  const waiting = useWaitingByBot(
+    agentId,
+    heldByTaskOf([...list.tasks, ...list.done]),
+  );
+
+  const stalledHandoffs = useStalledHandoffs(agentId);
+  // A task waiting on something in its thread is answered on its own row.
+  const heldAnswer = useHeldAnswers();
+
+  /*
+   * ONE COUNT, THE BADGE'S. How many things wait on the person is the number the Bots badge shows
+   * (`waitingOnYou`, the server's rule), read from the same answer, for every Bot or for this one:
+   * the board counted its own rows and said "18 waiting" beside a badge of 16. The two it had over
+   * were tasks under a Bot no longer shared with the person, which the server leaves out, as it
+   * leaves out every Bot they can't reach: there is nothing left there for them to read, answer or
+   * try again, only to mark done. Those rows are still listed, and are not counted.
+   */
+  const waitingOn = useWaitingOnYou();
+  const waitingCount = waitingOn(agentId);
+  const blocked = new Map(waiting.byBot);
+  for (const listed of list.tasks) {
+    const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
+    group.rows.push(
+      <TaskBoardRow
+        held={
+          listed.status === "needs_input" ? heldAnswer(listed.task) : undefined
+        }
+        key={`task-${listed.task.id}`}
+        listed={listed}
+      />,
+    );
+    // Only what waits on the person says how long it has waited.
+    if (countsAsWaiting(listed)) group.times.push(listed.task.updatedAt);
+    blocked.set(listed.task.agentId, group);
+  }
+  // A hand-off that ran out of tries waits on the person too, and the badge counts it.
+  for (const stalled of stalledHandoffs) {
+    const group = blocked.get(stalled.botId) ?? { rows: [], times: [] };
+    group.rows.push(
+      <StalledHandoffBoardRow
+        key={`handoff-${stalled.item.id}`}
+        stalled={stalled}
+      />,
+    );
+    group.times.push(stalled.item.at);
+    blocked.set(stalled.botId, group);
+  }
+  const found = new Map<string, typeof list.items>();
+  for (const item of list.items)
+    found.set(item.botId, [...(found.get(item.botId) ?? []), item]);
+
+  /*
+   * Each read that failed, said on its own whatever else loaded. A failed read is never "nothing
+   * waiting": the rows that did load stay, and the notice says which part may be missing.
+   */
+  const failures = [
+    {
+      key: "approvals",
+      what: "questions and approvals",
+      failure: waiting.failure,
+    },
+    { key: "tasks", what: "tasks", failure: list.failures.tasks },
+    {
+      key: "check-ins",
+      what: "check-in findings",
+      failure: list.failures.checkIns,
+    },
+  ].flatMap(({ failure, ...source }) =>
+    failure ? [{ ...source, failure }] : [],
+  );
+
+  if (blocked.size === 0 && found.size === 0 && failures.length === 0)
+    return null;
+
+  const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
+  const settingOf = (id: string | null | undefined) =>
+    id ? settings.data?.find((setting) => setting.id === id) : undefined;
+  const foundCount = list.items.length;
+
+  return (
+    <PageSection
+      action={
+        <span className="text-muted-foreground text-xs">
+          {[
+            waitingCount ? `${waitingCount} waiting` : null,
+            foundCount ? `${foundCount} found` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      }
+      title="Needs you"
+    >
+      <div className="flex flex-col gap-5">
+        {failures.length ? (
+          <div className="flex flex-col gap-2">
+            {failures.map(({ key, what, failure }) => (
+              <ReadFailureNotice failure={failure} key={key} what={what} />
+            ))}
+          </div>
+        ) : null}
+        {blocked.size ? (
+          <Half title={waitingCount ? "Waiting on you" : "Your tasks"}>
+            {[...blocked].map(([botId, group]) => (
+              <BotGroup
+                bot={bot(botId)}
+                botId={botId}
+                key={botId}
+                note={
+                  group.times.length && waitingOn(botId)
+                    ? `waiting since ${relativeTime(
+                        group.times.reduce((first, at) =>
+                          Date.parse(at) < Date.parse(first) ? at : first,
+                        ),
+                      )}`
+                    : "nothing waiting on you"
+                }
+              >
+                {group.rows}
+              </BotGroup>
+            ))}
+          </Half>
+        ) : null}
+        {found.size ? (
+          <Half title="From check-ins">
+            {[...found].map(([botId, items]) => {
+              const watched = [
+                ...new Set(
+                  items
+                    .map((item) => settingOf(item.checkInId)?.subject)
+                    .filter((subject): subject is string => Boolean(subject)),
+                ),
+              ];
+              return (
+                <FoundGroup
+                  bot={bot(botId)}
+                  botId={botId}
+                  items={items}
+                  key={botId}
+                  note={
+                    watched.length
+                      ? `watching ${watched.join(", ")}`
+                      : "from its check-ins"
+                  }
+                  settingOf={settingOf}
+                />
+              );
+            })}
+          </Half>
+        ) : null}
+      </div>
+    </PageSection>
+  );
+}
+
+/** One source that didn't load: what may be missing, and Retry for that read alone. */
+function ReadFailureNotice({
+  what,
+  failure,
+}: {
+  what: string;
+  failure: ReadFailure;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5"
+      data-needs-you-failure={what}
+      role="alert"
+    >
+      <p className="text-sm">Couldn't load {what}. Some may be missing here.</p>
+      <Button
+        disabled={failure.retrying}
+        onClick={failure.retry}
+        size="sm"
+        variant="outline"
+      >
+        {failure.retrying ? "Retrying…" : "Retry"}
+      </Button>
+    </div>
+  );
+}
+
+function Half({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="font-semibold text-muted-foreground text-xs">{title}</h3>
+      <div className="flex flex-col gap-3">{children}</div>
+    </div>
+  );
+}
+
+type GroupBot = { name: string; avatarSeed: string } | undefined;
+
+/** One Bot's rows in a bordered card, opened by its orb, its name and a note on what they are. */
+function BotGroup({
+  bot,
+  botId,
+  note,
+  children,
+}: {
+  bot: GroupBot;
+  botId: string;
+  note: string;
+  children: ReactNode[];
+}) {
+  const name = bot?.name ?? "Your Bot";
+  return (
+    <div
+      // The page's own card: white on the off-white page, borderless in the dark, as PageRows is.
+      className="overflow-hidden rounded-lg border border-border bg-card dark:border-transparent"
+      data-needs-you-bot={botId}
+    >
+      <div className="flex items-center gap-2.5 border-border border-b bg-muted px-3.5 py-2.5">
+        <BotOrb name={name} seed={bot?.avatarSeed || botId} size={22} />
+        <span className="font-semibold text-[13px]">{name}</span>
+        <span className="truncate text-muted-foreground text-xs">· {note}</span>
+      </div>
+      <div className="flex flex-col">
+        {children.map((row, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: rows carry their own keys inside.
+          <Fragment key={index}>
+            {/* Short of each edge, lined up with the rows' text, as PageRows draws them. */}
+            {index > 0 ? <Separator className="mx-4 w-auto" /> : null}
+            {row}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One Bot's finds, the newest few with the rest a click away. */
+function FoundGroup({
+  bot,
+  botId,
+  note,
+  items,
+  settingOf,
+}: {
+  bot: GroupBot;
+  botId: string;
+  note: string;
+  items: ReturnType<typeof useNeedsYou>["items"];
+  settingOf: (id: string | null | undefined) => ProactiveSetting | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const folded = expanded ? 0 : Math.max(0, items.length - FINDS_SHOWN);
+  const shown = folded ? items.slice(0, FINDS_SHOWN) : items;
+  const rows: ReactNode[] = shown.map((item) => (
+    <SuggestionRow
+      botName={bot?.name ?? "Your Bot"}
+      inGroup
+      key={item.id}
+      setting={settingOf(item.checkInId)}
+      suggestion={item}
+    />
+  ));
+  if (folded)
+    rows.push(
+      <button
+        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-[13px] hover:bg-muted"
+        key="more"
+        onClick={() => setExpanded(true)}
+        type="button"
+      >
+        Show {folded} more
+        <IconChevronDown className="size-4" />
+      </button>,
+    );
+  return (
+    <BotGroup bot={bot} botId={botId} note={note}>
+      {rows}
+    </BotGroup>
+  );
+}
+
+/**
+ * What one Bot is waiting on the person for, at the top of its page: the same board, for one Bot.
+ * Nothing is drawn when nothing waits.
+ */
+export function BotNeedsYou({ agentId }: { agentId: string }) {
+  return <NeedsYouBoard agentId={agentId} />;
+}

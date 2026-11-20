@@ -14,10 +14,15 @@ import {
 
 export const AGENT_TRIGGER = "@";
 export const COMMAND_TRIGGER = "/";
-export const DOCUMENT_TRIGGER = "#";
 
 export type ComposerDraft = {
-  /** Plain text, with chips flattened back to `@Agent` / `/command` / `#Document`. */
+  /**
+   * Plain text, with chips flattened back to `@Agent` / `/command`.
+   *
+   * A `/` chip shows a skill's name in the box, but flattens to its command (`/standup`, not
+   * `/Standup notes`): the command never changes, while a skill can be renamed, so a message keeps
+   * naming the skill it ran, and the transcript can find the skill again to draw its badge.
+   */
   text: string;
   /**
    * The single agent this message is addressed to, or `null` to let the channel pick its default.
@@ -28,8 +33,6 @@ export type ComposerDraft = {
   agentId: string | null;
   /** Commands that survive into the sent message, in the order they were typed. */
   commandIds: string[];
-  /** Company knowledge documents attached via `#`, in chip order. */
-  documentIds: string[];
   isEmpty: boolean;
   attachments: Attachment[];
 };
@@ -40,13 +43,17 @@ export function toDraft(
 ): ComposerDraft {
   const agentChips = getChipsByTrigger(segments, AGENT_TRIGGER);
   const commandChips = getChipsByTrigger(segments, COMMAND_TRIGGER);
-  const documentChips = getChipsByTrigger(segments, DOCUMENT_TRIGGER);
 
   return {
-    text: segmentsToPlainText(segments).trim(),
+    text: segmentsToPlainText(
+      segments.map((segment) =>
+        segment.type === "chip" && segment.trigger === COMMAND_TRIGGER
+          ? { ...segment, displayText: segment.value }
+          : segment,
+      ),
+    ).trim(),
     agentId: agentChips.at(-1)?.value ?? null,
     commandIds: commandChips.map((chip) => chip.value),
-    documentIds: documentChips.map((chip) => chip.value),
     isEmpty: isSegmentsEmpty(segments),
     attachments,
   };
@@ -65,11 +72,7 @@ export function canSendDraft(draft: ComposerDraft): boolean {
     return false;
   }
 
-  return (
-    draft.attachments.length > 0 ||
-    draft.documentIds.length > 0 ||
-    !draft.isEmpty
-  );
+  return draft.attachments.length > 0 || !draft.isEmpty;
 }
 
 /** Collapse multiple agent mentions to the most recent one while preserving identity on no-op. */

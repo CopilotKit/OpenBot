@@ -50,7 +50,17 @@ const ERROR_SHAKE_KEYFRAMES = [0, -3, 3, 0];
 const ERROR_SHAKE_DURATION = 0.18;
 const EASE_IN_OUT = [0.645, 0.045, 0.355, 1] as const;
 const GLOW_BLUR_RATIO = 0.28;
+/** The bloom's box reaches this far past the orb's on every side, as a fraction of the orb size. */
+const GLOW_INSET_RATIO = 0.12;
 const GLOW_MAX_OPACITY = 0.7;
+
+/**
+ * How far past its own box the orb paints, as a fraction of its size: the bloom's box, blurred
+ * outward by its blur. Something that sits over the page right next to the orb, such as a sticky
+ * header, cuts the glow flat unless this much room is left between them. The disc's own scale
+ * (at most 1.1, plus the amplitude's 12%) stays well inside it.
+ */
+export const ORB_GLOW_REACH = GLOW_INSET_RATIO + GLOW_BLUR_RATIO;
 /** Depth rim, as a fraction of the orb size. */
 const RIM_RATIO = 0.06;
 const RIM_MIN = 1.5;
@@ -85,6 +95,17 @@ export interface AgentOrbProps {
   size?: string;
   /** Shared AI state driving speed, scale, saturation and reactivity. */
   state?: AIState;
+  /**
+   * Held still, as reduced motion holds it: for an orb nobody can see right now, such as a picture
+   * scrolled off screen or in a hidden tab, so a loop nobody watches does not keep running.
+   */
+  still?: boolean;
+  /**
+   * Drawn in `colors` as given, in every state: for a Bot's orb, whose colors are how a person
+   * tells that Bot from another. The state still sets how it moves, but never mutes it at rest or
+   * turns its hue while it works.
+   */
+  trueColors?: boolean;
 }
 
 const AgentOrb: React.FC<AgentOrbProps> = ({
@@ -94,8 +115,10 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
   animationDuration = 20,
   amplitude,
   state = "idle",
+  still = false,
+  trueColors = false,
 }) => {
-  const shouldReduceMotion = useReducedMotion();
+  const shouldReduceMotion = useReducedMotion() || still;
   const amplitudeValue = useAmplitudeValue(amplitude);
   const stateMotion = getAIStateMotion(state);
 
@@ -251,13 +274,14 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
         style={{
           background: `radial-gradient(circle at 50% 50%, ${glowColor} 0%, transparent 64%)`,
           filter: `blur(calc(var(--orb-size) * ${GLOW_BLUR_RATIO}))`,
-          inset: "-12%",
+          inset: `-${GLOW_INSET_RATIO * 100}%`,
         }}
         transition={shouldReduceMotion ? { duration: 0 } : SPRING_DEFAULT}
       />
 
       <motion.div
         className="agent-orb"
+        data-still={still ? "" : undefined}
         style={
           {
             "--animation-duration": `${loopDuration}s`,
@@ -276,7 +300,9 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
             // Saturation and hue only affect the gradient disc. Applying them
             // to the whole component would desaturate the semantic accent too,
             // and `error` would lose the very red that identifies it.
-            filter: `saturate(${stateMotion.saturation}) hue-rotate(${stateMotion.hueRotate}deg)`,
+            filter: trueColors
+              ? undefined
+              : `saturate(${stateMotion.saturation}) hue-rotate(${stateMotion.hueRotate}deg)`,
             height: "100%",
             scale: reactiveScale,
             width: "100%",
@@ -427,6 +453,11 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
           .agent-orb-sheen {
             animation: none;
           }
+        }
+
+        .agent-orb[data-still]::before,
+        .agent-orb[data-still] .agent-orb-sheen {
+          animation: none;
         }
       `}</style>
       </motion.div>

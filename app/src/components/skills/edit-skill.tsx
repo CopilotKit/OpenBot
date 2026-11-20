@@ -2,33 +2,46 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { SkillAgents } from "@/components/skills/skill-agents";
 import { SkillFields } from "@/components/skills/skill-fields";
-import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { saveSkillMutationOptions } from "@/lib/skills/mutations";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 
 /**
  * Editing a skill, in the same panel that writes one.
  *
- * THERE IS NO EDIT ENDPOINT, AND NONE IS NEEDED. `POST /api/plugins/skills` upserts on the slug:
- * `installSkill` does `onConflictDoUpdate` and deliberately leaves `owner_user_id` alone, so a
- * re-save changes the words and never quietly changes whose skill it is. The route has already
- * refused anyone editing a skill that is not theirs before it gets that far.
+ * THERE IS NO SEPARATE EDIT, AND NONE IS NEEDED. `replaceSkill` writes under the slug and keeps
+ * whose the skill is, so a re-save changes the words and never quietly changes its owner. The server
+ * has already refused anyone editing a skill that is not theirs before it gets that far.
  */
 export function EditSkill({ slug }: { slug: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { data, isPending } = useQuery(pluginsPageQueryOptions());
+  const { data, isPending } = useQuery(skillListQueryOptions());
 
   /*
    * Read from the list already on screen rather than fetched again. It is the same request the page
    * behind this panel just made, so react-query serves it from cache and the form is filled on the
    * first frame instead of flashing empty fields at somebody who came here to change one word.
    */
-  const skill = data?.skills.find((candidate) => candidate.slug === slug);
+  const skill = data?.find((candidate) => candidate.slug === slug);
 
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
 
   /* Nothing while it loads. "Missing" and "not yet arrived" must not read the same. */
   if (isPending) return null;
+
+  /*
+   * No list is not a missing skill. `isPending` goes false on a failed read too, and the sentence
+   * below tells somebody their skill is gone, or was never theirs, on no evidence at all.
+   */
+  if (!data) {
+    return (
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
+        <p className="text-destructive text-sm" role="alert">
+          Couldn't load this skill. Try again in a moment.
+        </p>
+      </div>
+    );
+  }
 
   if (!skill) {
     return (
@@ -40,7 +53,7 @@ export function EditSkill({ slug }: { slug: string }) {
          * not own.
          */}
         <p className="text-muted-foreground text-sm">
-          That skill no longer exists, or it is not yours to edit.
+          This skill was deleted, or it isn't yours to edit.
         </p>
       </div>
     );
@@ -51,8 +64,8 @@ export function EditSkill({ slug }: { slug: string }) {
       <header>
         <h1 className="text-2xl font-semibold">Edit skill</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Changes apply the next time <code>/{skill.slug}</code> is used. Agents
-          already carrying it keep it.
+          Changes apply the next time someone uses {skill.title}. Bots that have
+          it keep it.
         </p>
       </header>
 

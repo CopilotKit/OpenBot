@@ -18,13 +18,22 @@ import {
  *
  * A coworker with no token can still hold a conversation. What it cannot do is reach anything outside
  * one, which is the right default for a URL somebody pasted.
+ *
+ * A Bot OpenBot runs itself, the harness picked in setup, is handed OpenBot's key on every run and
+ * uses its tools with none of its own. The panel says so and offers nothing to generate: it used to
+ * tell the personal starter it "can't use tools" while it searched the web and used the browser.
  */
+export const KEY_FROM_OPENBOT =
+  "OpenBot runs this Bot, so it can use its tools without a key.";
+
 export function CallbackTokenPanel({
   agentId,
   hasToken,
+  fromOpenBot = false,
 }: {
   agentId: string;
   hasToken: boolean;
+  fromOpenBot?: boolean;
 }) {
   const queryClient = useQueryClient();
   const issue = useMutation(issueCallbackTokenMutationOptions(queryClient));
@@ -34,22 +43,35 @@ export function CallbackTokenPanel({
   const [token, setToken] = useState<string | null>(null);
   const error = issue.error ?? revoke.error;
 
+  const heading = (
+    <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+      Key for tools
+    </h2>
+  );
+
+  if (fromOpenBot) {
+    return (
+      <section className="mt-6 grid gap-2">
+        {heading}
+        <p className="text-muted-foreground text-sm">{KEY_FROM_OPENBOT}</p>
+      </section>
+    );
+  }
+
   return (
     <section className="mt-6 grid gap-2">
-      <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        Calling tools back
-      </h2>
+      {heading}
 
       <p className="text-muted-foreground text-sm">
         {hasToken
-          ? "This coworker holds a credential, so it can use the tools it has been granted. Rotating replaces it, and the old one stops working straight away."
-          : "This coworker has no credential, so it can hold a conversation but cannot use any tool it has been granted. Generate one and put it in that agent's configuration."}
+          ? "This Bot has a key, so it can use its tools. If you make a new key, the old one stops working right away."
+          : "This Bot has no key yet. It can talk but can't use tools. Generate a key and add it to your agent's configuration."}
       </p>
 
       {token ? (
         <div className="grid gap-2 rounded-lg border border-border bg-card p-3">
           <p className="font-medium text-sm">
-            Copy this now. It will not be shown again.
+            Copy this key now. You won't see it again.
           </p>
           {/*
            * Selectable and wrapped rather than a copy button alone: somebody pasting this into a
@@ -59,8 +81,7 @@ export function CallbackTokenPanel({
             {token}
           </code>
           <p className="text-muted-foreground text-xs">
-            The deployment keeps only a hash of it, so nothing here can show it
-            to you a second time.
+            If you lose it, make a new one.
           </p>
           <Button onClick={() => setToken(null)} size="sm" variant="outline">
             Done
@@ -77,8 +98,8 @@ export function CallbackTokenPanel({
             {issue.isPending
               ? "Generating…"
               : hasToken
-                ? "Rotate token"
-                : "Generate token"}
+                ? "Make a new key"
+                : "Generate key"}
           </Button>
           {hasToken ? (
             <Button
@@ -87,7 +108,7 @@ export function CallbackTokenPanel({
               size="sm"
               variant="outline"
             >
-              {revoke.isPending ? "Revoking…" : "Revoke"}
+              {revoke.isPending ? "Revoking…" : "Revoke key"}
             </Button>
           ) : null}
         </div>

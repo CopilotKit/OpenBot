@@ -1,0 +1,101 @@
+{
+  "version": "v0.3.3",
+  "commit": "8df6fe1cb4aaeb9c276bc995e4abad1e996d2751",
+  "images": {
+    "openbot": {
+      "repository": "ghcr.io/copilotkit/openbot",
+      "digest": "sha256:669c128b3b548e68ad5d8ee46534401bd3a65e98abcf9052be0e0239edd9f20c",
+      "reference": "ghcr.io/copilotkit/openbot@sha256:669c128b3b548e68ad5d8ee46534401bd3a65e98abcf9052be0e0239edd9f20c"
+    },
+    "agent-adk": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-adk",
+      "digest": "sha256:feb9b8249aeffa13eb44d5e1f7d06f985c8807cbe39651c872a3a764b4a7610c",
+      "reference": "ghcr.io/copilotkit/openbot-agent-adk@sha256:feb9b8249aeffa13eb44d5e1f7d06f985c8807cbe39651c872a3a764b4a7610c"
+    },
+    "agent-ag2": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-ag2",
+      "digest": "sha256:6d265ee5ce04e4be7d1df8994ae2c5a34bb8f7ccd4ecacde45f10283c5f5f3ab",
+      "reference": "ghcr.io/copilotkit/openbot-agent-ag2@sha256:6d265ee5ce04e4be7d1df8994ae2c5a34bb8f7ccd4ecacde45f10283c5f5f3ab"
+    },
+    "agent-agno": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-agno",
+      "digest": "sha256:c33ad5f986d07e02db06c66ad01249fdcf52a8df02ffbe9ac01189476e40a276",
+      "reference": "ghcr.io/copilotkit/openbot-agent-agno@sha256:c33ad5f986d07e02db06c66ad01249fdcf52a8df02ffbe9ac01189476e40a276"
+    },
+    "agent-antigravity": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-antigravity",
+      "digest": "sha256:95bef350588b45ea9f99b3a3cb352bc29e76003bd683f90c962310ba68487bed",
+      "reference": "ghcr.io/copilotkit/openbot-agent-antigravity@sha256:95bef350588b45ea9f99b3a3cb352bc29e76003bd683f90c962310ba68487bed"
+    },
+    "agent-bot": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-bot",
+      "digest": "sha256:a5518672bf8add00603ac4420dd1316a7d097c02c82fd4606f6ba13b1ffbe4b9",
+      "reference": "ghcr.io/copilotkit/openbot-agent-bot@sha256:a5518672bf8add00603ac4420dd1316a7d097c02c82fd4606f6ba13b1ffbe4b9"
+    },
+    "agent-claude-sdk": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-claude-sdk",
+      "digest": "sha256:1f007dc9712f86b899410b12c414ff0218eeec11e941c9b3680629df54c407bc",
+      "reference": "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:1f007dc9712f86b899410b12c414ff0218eeec11e941c9b3680629df54c407bc"
+    },
+    "agent-computer": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-computer",
+      "digest": "sha256:7e5e93c2a29d7450efed1f492f870e2e497bc031da6919473c2a21f657ea227a",
+      "reference": "ghcr.io/copilotkit/openbot-agent-computer@sha256:7e5e93c2a29d7450efed1f492f870e2e497bc031da6919473c2a21f657ea227a"
+    },
+    "agent-crewai": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-crewai",
+      "digest": "sha256:a9afc3fe67252253911cc6fd5e80d2db158a5cb1511daa6f5d2d1cea8bc091ed",
+      "reference": "ghcr.io/copilotkit/openbot-agent-crewai@sha256:a9afc3fe67252253911cc6fd5e80d2db158a5cb1511daa6f5d2d1cea8bc091ed"
+    },
+    "agent-langgraph-agui": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-langgraph-agui",
+      "digest": "sha256:7ae4c62fed073506a0a709776640cbb55030da6c8a928603ff649d5d891936fa",
+      "reference": "ghcr.io/copilotkit/openbot-agent-langgraph-agui@sha256:7ae4c62fed073506a0a709776640cbb55030da6c8a928603ff649d5d891936fa"
+    },
+    "agent-langgraph": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-langgraph",
+      "digest": "sha256:64dc3773574570875b0426a5b5fac210ad17e3ab6fbb872b91face0c1877baef",
+      "reference": "ghcr.io/copilotkit/openbot-agent-langgraph@sha256:64dc3773574570875b0426a5b5fac210ad17e3ab6fbb872b91face0c1877baef"
+    },
+    "agent-langroid": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-langroid",
+      "digest": "sha256:df314c02bf0afd535fa9590f4a2d72289a67405bccca29e80942df0950db293a",
+      "reference": "ghcr.io/copilotkit/openbot-agent-langroid@sha256:df314c02bf0afd535fa9590f4a2d72289a67405bccca29e80942df0950db293a"
+    },
+    "agent-llamaindex": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-llamaindex",
+      "digest": "sha256:7e090391fdfe80a788c56b481e1bab302862d5bf27859722991c89e9df670b9b",
+      "reference": "ghcr.io/copilotkit/openbot-agent-llamaindex@sha256:7e090391fdfe80a788c56b481e1bab302862d5bf27859722991c89e9df670b9b"
+    },
+    "agent-mastra": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-mastra",
+      "digest": "sha256:532b21d83ebcd9f964f763316b20834c6d9e4855fcea927d2c8dfe4d1bc3246b",
+      "reference": "ghcr.io/copilotkit/openbot-agent-mastra@sha256:532b21d83ebcd9f964f763316b20834c6d9e4855fcea927d2c8dfe4d1bc3246b"
+    },
+    "agent-microsoft": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-microsoft",
+      "digest": "sha256:21b2c6d330454d9cae25425c6156a2844cdd5528ec9a4314162b3caf602b97b4",
+      "reference": "ghcr.io/copilotkit/openbot-agent-microsoft@sha256:21b2c6d330454d9cae25425c6156a2844cdd5528ec9a4314162b3caf602b97b4"
+    },
+    "agent-pydantic-ai": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-pydantic-ai",
+      "digest": "sha256:1af76548403c16076fd7c19d65ef388b055986b2076a116a34d2fce8b4a40210",
+      "reference": "ghcr.io/copilotkit/openbot-agent-pydantic-ai@sha256:1af76548403c16076fd7c19d65ef388b055986b2076a116a34d2fce8b4a40210"
+    },
+    "agent-strands": {
+      "repository": "ghcr.io/copilotkit/openbot-agent-strands",
+      "digest": "sha256:b191836d93ad2d8d42ac134116472d540a5373d4a74901df566c3fd71df8f7b3",
+      "reference": "ghcr.io/copilotkit/openbot-agent-strands@sha256:b191836d93ad2d8d42ac134116472d540a5373d4a74901df566c3fd71df8f7b3"
+    },
+    "server": {
+      "repository": "ghcr.io/copilotkit/openbot-server",
+      "digest": "sha256:fce3ffc51b12c075642a8b37d00d6137d85f418cd8d43d28456757b173d7eef9",
+      "reference": "ghcr.io/copilotkit/openbot-server@sha256:fce3ffc51b12c075642a8b37d00d6137d85f418cd8d43d28456757b173d7eef9"
+    },
+    "supervisor": {
+      "repository": "ghcr.io/copilotkit/openbot-supervisor",
+      "digest": "sha256:b6afb2e918efe5dde57f66d5f09887ec67316007abc0e80e68a240b66cd8c328",
+      "reference": "ghcr.io/copilotkit/openbot-supervisor@sha256:b6afb2e918efe5dde57f66d5f09887ec67316007abc0e80e68a240b66cd8c328"
+    }
+  }
+}

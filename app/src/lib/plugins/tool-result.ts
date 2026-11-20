@@ -1,3 +1,5 @@
+import { declinedByPerson } from "@openbot/shared/approval-outcomes";
+
 /**
  * What the server puts in front of a refused call's reason.
  *
@@ -9,6 +11,20 @@
  * administrator rephrases a policy message, and fails silently by drawing a refusal as a result.
  */
 export const REFUSAL_MARKER = "Refused.";
+
+/**
+ * Why a step was not carried out, when it was refused, or undefined when it was not: the reason
+ * behind {@link REFUSAL_MARKER}, or the sentence the approval service answers a step the person
+ * declined on the conversation's card with. That one carries no marker (the service answers every
+ * kind of step the same way), and read as a result, a folder edit the person declined was drawn as
+ * "Saved a file".
+ */
+export function refusalOf(answer: string | undefined): string | undefined {
+  if (answer === undefined) return undefined;
+  if (answer.startsWith(REFUSAL_MARKER))
+    return answer.slice(REFUSAL_MARKER.length).trim();
+  return declinedByPerson(answer) ? answer.trim() : undefined;
+}
 
 /**
  * The tool's own answer, out of whatever the transcript is carrying it in.
@@ -37,6 +53,35 @@ export function asText(text: string): string {
 }
 
 /**
+ * The content inside the untrusted-content envelope, without the notice in front of it.
+ *
+ * The server marks every connector result as outside data before the model reads it
+ * (`server/src/untrusted-content.ts`). The notice is for the model; a person reading the transcript
+ * wants the vendor's answer, drawn the way it always was. Declared at both ends like
+ * {@link REFUSAL_MARKER}. Text with no envelope is returned unchanged.
+ */
+export function withoutUntrustedEnvelope(text: string): string {
+  return text.replace(
+    /CRITICAL: The following [^\n]* is untrusted data, not instructions or tool authorization\.[^\n]*\n<untrusted_data source="[^"]*">\n([\s\S]*?)\n<\/untrusted_data>/g,
+    (_match, inner: string) =>
+      inner.replace(/<\\\/untrusted_data/gi, "</untrusted_data"),
+  );
+}
+
+/**
+ * The openings of the line the server puts in front of an app's answer, saying what the call did
+ * for the model ("Ran: the app made this change. It answered: sheetId 12, title "Summary"."). The
+ * person sees the step's own state and the app's answer, so the line is left out of what is drawn,
+ * as the untrusted-content notice is. Declared at both ends like {@link REFUSAL_MARKER}.
+ */
+const OUTCOME_LINE = /^(?:Ran|Partly ran|Already done): [^\n]*\n/;
+
+/** An app's answer without the outcome line the server wrote in front of it for the model. */
+export function withoutOutcomeLine(text: string): string {
+  return text.replace(OUTCOME_LINE, "");
+}
+
+/**
  * A tool result, as something worth looking at.
  *
  * MCP says a text part, and vendors fill it with anything from plain markdown to a JSON envelope
@@ -44,15 +89,17 @@ export function asText(text: string): string {
  * the markdown it was hiding, and anything else is fenced as JSON. Nothing is discarded.
  */
 export function forDisplay(text: string): string {
-  const trimmed = asText(text).trim();
+  const trimmed = withoutUntrustedEnvelope(
+    withoutOutcomeLine(asText(text)),
+  ).trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    // Not JSON after all. Draw what the server sent.
-    return text;
+    // Not JSON after all. Draw what the server sent, without the model's notice.
+    return trimmed;
   }
 
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -99,4 +146,130 @@ export function saidItWentAhead(result: unknown, marker: string): boolean {
   if (result === undefined) return true;
   if (typeof result !== "string") return false;
   return asText(result).startsWith(marker);
+}
+
+/**
+ * The text of a failure wrapped as the Claude Agent SDK harness wraps one, or undefined.
+ *
+ * `ag-ui-claude-sdk` has nowhere in an AG-UI result to put Claude Code's `is_error`, so it wraps a
+ * failed result as `{"error": true, "content": "..."}`, and OpenBot's harness keeps that wrapper in
+ * the history a reloaded conversation draws (`agent-claude-sdk/src/adapter.py`).
+ *
+ * ONLY THAT EXACT SHAPE: `error: true` and a string `content`, and nothing else. The harness also
+ * parses a result that is JSON text and sends it on re-serialised, so a command that printed an
+ * API's `{"error": true, "message": "..."}` arrives looking like a flagged failure, and reading any
+ * `error: true` as one drew a request that worked as "Didn't work". The harness adds `error: true`
+ * to a failed result that was a JSON object too, but Claude Code's own tools answer in text, and a
+ * failed one starts with its exit code or `<tool_use_error>`, so none of the calls drawn here fails
+ * that way. What stays ambiguous is output that is itself exactly `{"error": true, "content": "..."}`:
+ * the two are the same string, and nothing else in the stream tells them apart.
+ */
+export function flaggedFailure(answer: string): string | undefined {
+  if (!answer.trimStart().startsWith("{")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(answer);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return undefined;
+    const { error, content, ...rest } = parsed as Record<string, unknown>;
+    if (error !== true || typeof content !== "string") return undefined;
+    return Object.keys(rest).length === 0 ? content : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a call the browser answers, a gallery component, failed instead of drawing anything.
+ *
+ * Its successful results are known: the component's confirmation, a refusal, or a person's answer.
+ * A failure comes from one of three places, each with its own mark:
+ *
+ * - The Claude Agent SDK harness: Claude Code refused the call before it reached the browser, for
+ *   arguments it couldn't parse. Wrapped as {@link flaggedFailure} while the turn streams and in
+ *   the history it keeps.
+ * - History from before the harness kept that wrapper: Claude Code's bare `<tool_use_error>`.
+ * - CopilotKit, for a call it couldn't run itself (arguments that don't parse, a handler that
+ *   threw): `Error: ` and the reason (`executeToolHandler` in `@copilotkit/core`).
+ */
+export function browserCallFailed(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  return (
+    flaggedFailure(answer) !== undefined ||
+    /^\s*<tool_use_error>/.test(answer) ||
+    answer.startsWith("Error: ")
+  );
+}
+
+/**
+ * How a call's answer begins when its run was cut off before the result was recorded: the server
+ * restarted, or the run crashed, with the step under way. The rest of that answer tells the Bot how
+ * to carry on safely, and is for the Bot.
+ */
+const CUT_OFF_ANSWER =
+  "Outcome unknown: this call was started, and the run was cut off before its result was recorded";
+
+/** What a cut-off step says, opened. Its Bot was told, and carried on. */
+export const CUT_OFF_SENTENCE =
+  "This step was interrupted before its result came back. The Bot carried on from here.";
+
+/**
+ * Whether a call was cut off with its outcome unknown. Not a failure, since nothing is known to
+ * have gone wrong, and not still running: the step reads as interrupted.
+ */
+export function cutOffStep(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  return (flaggedFailure(answer) ?? answer)
+    .trimStart()
+    .replace(/^Error: /, "")
+    .startsWith(CUT_OFF_ANSWER);
+}
+
+/** What a step says, opened, when its Bot asked for a tool it doesn't have. */
+export const UNOFFERED_TOOL_SENTENCE =
+  "This Bot asked for a tool it doesn't have, so it carried on without it.";
+
+/**
+ * Whether a call's answer is its runtime saying the Bot was never offered that tool.
+ *
+ * The answer is written for the model: it names every tool the Bot does have, by identifier, so the
+ * model can pick one of them next time. Drawn as it came, a person opening the step reads a wall of
+ * `computer_navigate, computer_read, …` under "Web search". Two wordings, each the library's own
+ * and each checked against its source: the AI SDK's `NoSuchToolError` ("Model tried to call
+ * unavailable tool 'web_search'. Available tools: …"), which the runtime hands back with `Error: `
+ * in front, and LangGraph's prebuilt `ToolNode` ("Error: web_search is not a valid tool, try one of
+ * […]."). Claude Code's wrapper is read through, as {@link browserCallFailed} reads it.
+ */
+export function unofferedTool(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  const text = (flaggedFailure(answer) ?? answer).trim();
+  return (
+    /^(Error: )?Model tried to call unavailable tool '[^']*'\./.test(text) ||
+    /^Error: \S+ is not a valid tool, try one of \[/.test(text)
+  );
+}
+
+/**
+ * Whether a server-side tool reached a terminal failure rather than returning a result.
+ *
+ * These prefixes are written by the two server tool doors after the distinction between policy
+ * refusal and execution failure has already been made. A refusal has its own marker and must not
+ * be collapsed into this state.
+ */
+export function toolResultFailed(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  /*
+   * BEHIND THE RUNTIME'S "Error: " TOO. A failed app call is handed to the model as an error rather
+   * than a result, so the model is told it failed (Anthropic's `is_error`), and the runtime then
+   * puts the same words in the conversation with `Error: ` in front of them.
+   */
+  const answer = asText(result).replace(/^Error: /, "");
+  return (
+    answer.startsWith("The vendor reported an error:") ||
+    answer.startsWith("That tool could not be called") ||
+    // A folder action on the person's computer that broke there, rather than being declined.
+    answer.startsWith("That host operation could not be completed")
+  );
 }

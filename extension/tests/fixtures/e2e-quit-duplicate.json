@@ -1,0 +1,235 @@
+{
+  "source": "The final end-to-end run's Edge restart (trajectory 88456df7): the typed name left for Intelligence as the browser quit, and the restarted browser sent it again from the held steps. Rows from cpki.trajectory_events, seq removed; quitAt is when the run closed the browser (CDP Browser.close).",
+  "quitAt": 1792556517774,
+  "startedAt": 1792556503914,
+  "nameClick": {
+    "name": "click",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 273,
+        "y": 211,
+        "width": 720,
+        "height": 40
+      },
+      "url": "http://127.0.0.1:7420/checkout?order=1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/checkout?order=1043",
+        "title": "Refund to card - Corner Shop admin"
+      },
+      "step": "click",
+      "route": "/checkout",
+      "target": {
+        "tag": "input",
+        "name": "Name on the refund",
+        "role": null,
+        "text": "",
+        "input": "pointer",
+        "value": "",
+        "action": null,
+        "ariaRole": "textbox",
+        "inputType": "text",
+        "attributes": {
+          "id": "full-name",
+          "name": "fullName",
+          "autocomplete": "name"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "selectors": [
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Name on the refund\"]"
+        },
+        {
+          "by": "id",
+          "selector": "#full-name"
+        },
+        {
+          "by": "name",
+          "selector": "input[name=\"fullName\"]"
+        },
+        {
+          "by": "css",
+          "selector": "#refund-form > input:nth-of-type(1)"
+        }
+      ]
+    },
+    "timestamp": 1792556513720
+  },
+  "nameInput": {
+    "name": "input",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 273,
+        "y": 211,
+        "width": 720,
+        "height": 40
+      },
+      "url": "http://127.0.0.1:7420/checkout?order=1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/checkout?order=1043",
+        "title": "Refund to card - Corner Shop admin"
+      },
+      "step": "input",
+      "route": "/checkout",
+      "target": {
+        "tag": "input",
+        "name": "Name on the refund",
+        "role": null,
+        "text": "",
+        "value": "Rita Restart",
+        "action": null,
+        "ariaRole": "textbox",
+        "inputType": "text",
+        "attributes": {
+          "id": "full-name",
+          "name": "fullName",
+          "autocomplete": "name"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "eventType": "input",
+      "selectors": [
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Name on the refund\"]"
+        },
+        {
+          "by": "id",
+          "selector": "#full-name"
+        },
+        {
+          "by": "name",
+          "selector": "input[name=\"fullName\"]"
+        },
+        {
+          "by": "css",
+          "selector": "#refund-form > input:nth-of-type(1)"
+        }
+      ]
+    },
+    "timestamp": 1792556514738
+  },
+  "reasonClick": {
+    "name": "click",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 273,
+        "y": 291,
+        "width": 720,
+        "height": 62
+      },
+      "url": "http://127.0.0.1:7420/checkout?order=1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/checkout?order=1043",
+        "title": "Refund to card - Corner Shop admin"
+      },
+      "step": "click",
+      "route": "/checkout",
+      "target": {
+        "tag": "textarea",
+        "name": "Reason",
+        "role": null,
+        "text": "",
+        "input": "pointer",
+        "value": "",
+        "action": null,
+        "ariaRole": "textbox",
+        "inputType": "textarea",
+        "attributes": {
+          "id": "reason",
+          "name": "reason"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "selectors": [
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Reason\"]"
+        },
+        {
+          "by": "id",
+          "selector": "#reason"
+        },
+        {
+          "by": "name",
+          "selector": "textarea[name=\"reason\"]"
+        },
+        {
+          "by": "css",
+          "selector": "#refund-form > textarea:nth-of-type(1)"
+        }
+      ]
+    },
+    "timestamp": 1792556517022
+  },
+  "reasonInput": {
+    "name": "input",
+    "type": "CUSTOM",
+    "value": {
+      "box": {
+        "x": 273,
+        "y": 291,
+        "width": 720,
+        "height": 62
+      },
+      "url": "http://127.0.0.1:7420/checkout?order=1043",
+      "page": {
+        "url": "http://127.0.0.1:7420/checkout?order=1043",
+        "title": "Refund to card - Corner Shop admin"
+      },
+      "step": "input",
+      "route": "/checkout",
+      "target": {
+        "tag": "textarea",
+        "name": "Reason",
+        "role": null,
+        "text": "",
+        "value": "quit mid",
+        "action": null,
+        "ariaRole": "textbox",
+        "inputType": "textarea",
+        "attributes": {
+          "id": "reason",
+          "name": "reason"
+        }
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 860
+      },
+      "eventType": "input",
+      "selectors": [
+        {
+          "by": "role",
+          "selector": "role=textbox[name=\"Reason\"]"
+        },
+        {
+          "by": "id",
+          "selector": "#reason"
+        },
+        {
+          "by": "name",
+          "selector": "textarea[name=\"reason\"]"
+        },
+        {
+          "by": "css",
+          "selector": "#refund-form > textarea:nth-of-type(1)"
+        }
+      ]
+    },
+    "timestamp": 1792556517633
+  }
+}
