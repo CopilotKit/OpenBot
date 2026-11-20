@@ -66,7 +66,9 @@ References: [xAI's OpenCode integration](https://x.ai/news/grok-opencode) and
 
 Cloudflare sign-in connects OpenBot to the person's own
 [AI Gateway](https://developers.cloudflare.com/ai-gateway/). Model calls go to
-`https://gateway.ai.cloudflare.com/v1/{account}/default/compat/chat/completions`,
+`https://gateway.ai.cloudflare.com/v1/{account}/default/compat/chat/completions`
+or, for a model that takes tools only on the Responses API (`openai/gpt-5.5`),
+`.../default/compat/responses`. Both are on
 the account's automatically created `default` gateway, and are billed to the
 account's AI Gateway credits (Unified Billing). It is not a Cloudflare
 subscription to a model: with no credits loaded, the gateway refuses the call. A
@@ -84,25 +86,53 @@ account, or more than one, is refused with what to do, because the gateway bills
 exactly one. The session is sent to the gateway in `cf-aig-authorization`; the
 account-level REST API does not accept it.
 
-Before distributing a configured desktop build, create an OAuth client in the
-Cloudflare dashboard under **Manage Account > OAuth clients**:
+### Setting up the Cloudflare OAuth client
 
-- Response type **Code**; grant types **Authorization Code** and **Refresh
-  Token** (without the second, Cloudflare issues no refresh token and the
-  sign-in is refused as one that cannot renew).
-- Token authentication method **None (PKCE)**. The desktop app is a public
-  client and ships no secret.
-- Redirect URLs, all three, exactly: `http://127.0.0.1:47823/oauth/callback`,
-  `http://127.0.0.1:47824/oauth/callback` and
-  `http://127.0.0.1:47825/oauth/callback`. Cloudflare matches the redirect
-  address exactly, port included, so OpenBot uses the first of these ports that
-  is free.
-- Scopes: `aig.run` and `account-settings.read` (`offline_access` comes with
-  the Refresh Token grant). The names are those of the matching API token
-  permissions; `GET /client/v4/oauth/scopes` lists them.
-- A new client is private: only members of the account that owns it can
-  authorize it. Making it public needs a logo, a client URL and a DNS `TXT`
-  record proving ownership of that URL's domain, and cannot be undone.
+A desktop build needs one OAuth client, registered once by whoever distributes
+the build. People who use OpenBot never do this; they only approve the consent
+page. In the Cloudflare dashboard, under **Manage Account > OAuth clients**,
+create a client. The form has three steps.
+
+1. **Configure OAuth client.**
+   - **Client Name**: what the consent page calls the app, for example
+     `OpenBot`.
+   - **Response Type**: **Code**.
+   - **Grant type**: **Authorization Code** and **Refresh Token**. Without the
+     second, Cloudflare issues no refresh token and OpenBot refuses the sign-in
+     as one that cannot renew.
+   - **Token Authentication Method**: **None (PKCE)**. The desktop app is a
+     public client and ships no secret.
+   - **Redirect (Callback) URLs**, all three, exactly:
+     `http://127.0.0.1:47823/oauth/callback`,
+     `http://127.0.0.1:47824/oauth/callback` and
+     `http://127.0.0.1:47825/oauth/callback`. Cloudflare matches the redirect
+     address exactly, port included, so OpenBot uses the first of these ports
+     that is free. `localhost` is a different address and does not match.
+   - Leave **Client URL** and everything under **Advanced options** empty for a
+     private client.
+2. **Select permission scopes.** The search matches the permission's name, not
+   the scope's ID, so search `gateway` and `account settings`:
+   - **AI & Machine Learning > AI Gateway**: **Run** only (`aig.run`). **Read**
+     and **Edit** manage gateways and do not allow a model call. **Agents
+     Gateway** is another product.
+   - **Account & Billing > Account Settings**: **Read** only
+     (`account-settings.read`).
+
+   `offline_access` is not in the list; it comes with the Refresh Token grant.
+3. **Choose optional scopes.** Leave both **Required**: OpenBot cannot work
+   when either is declined.
+
+**Create client** shows the client ID, which is not a secret.
+
+A new client is private: only members of the account that owns it can authorize
+it, and the consent page says the application has not verified ownership of any
+domain. That is enough to test with. Making it public, so anyone with a
+Cloudflare account can sign in, needs a logo, a client URL and a DNS `TXT`
+record proving ownership of that URL's domain, and cannot be undone.
+
+The account that signs in also needs AI Gateway credits (**AI > AI Gateway**,
+Unified Billing). Without them the gateway answers 402 and OpenBot shows
+Cloudflare's own sentence, "Insufficient unified billing credits".
 
 Set `OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID` to the client's ID when building
 the desktop app, or in the process environment at run time. For GitHub-built
