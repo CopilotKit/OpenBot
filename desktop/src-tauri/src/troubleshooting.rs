@@ -4,7 +4,7 @@
 //! Before this, finding out why a fresh install said "The back end could not start" took asking for
 //! two files by path, the version, and Docker's details, one message at a time. Now one action
 //! gathers them: which build, on what, what failed, the container engine's version and size as the
-//! back end's own engine check measures it (`local_eval::measured_engine`), the end of this app's
+//! back end's own engine check measures it (`local_eval::measured_engine_by`), the end of this app's
 //! newest log file and of the back end CLI's log, and the end of the speech log
 //! (`speech::diagnostics`), which says what dictation and narration did and never what was said.
 //!
@@ -14,11 +14,21 @@
 //! keys, tokens, passwords and emails as `logging::redact` replaces them, the home folder as `~`,
 //! and the account identifiers below as `[id]`. Support has never needed them to read a failure,
 //! and they say whose installation it is.
+//!
+//! NOTHING HERE WAITS LONGER THAN `LIMIT`. Logs are asked for when something is stuck, and the
+//! container engine is often what is stuck: on OpenBot Desktop 1.1.2 a Mac's Docker Desktop stalled,
+//! `docker compose logs` for the server's log had no time limit, and Get Troubleshooting Logs… sat on
+//! "Gathering Logs…" until Docker was restarted, with no file and nothing said. Now everything that
+//! asks the engine runs at once, each on a thread of its own, against one deadline; every command
+//! still running then is stopped; and the file is written with what came back, and a section, What
+//! couldn't be collected, that says what didn't and why.
 
 use std::borrow::Cow;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 use regex::Regex;
 
@@ -41,6 +51,106 @@ pub const SAVED_PREFIX: &str = "openbot-troubleshooting-";
 
 /// Written in place of an account, organisation, user or installation identifier.
 pub const ID: &str = "[id]";
+
+/**
+The longest gathering waits for anything that asks the container engine: which engine is answering,
+its version, disk use and size, and the server container's log. They are asked at once, so this is
+also about the longest the whole gathering takes. A healthy engine answers all of them in a few
+seconds, the `docker run` that measures free disk included.
+*/
+pub const LIMIT: Duration = Duration::from_secs(20);
+
+/// How long after the deadline a source's thread is still waited for, to hand over what it has
+/// once its commands were stopped.
+const HANDOVER: Duration = Duration::from_secs(2);
+
+/// What a source that asks the engine can't give: it didn't answer before the deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoAnswer;
+
+/// A source that can hang, asked on a thread of its own with the deadline it must keep: every
+/// command it runs is stopped by then. `Ok(None)` is a source that has nothing to give, such as the
+/// log of a server that isn't running.
+pub type Ask<T> = Box<dyn FnOnce(Instant) -> Result<Option<T>, NoAnswer> + Send>;
+
+/// A source already known, for a caller that has it in hand.
+pub fn given<T: Send + 'static>(value: Option<T>) -> Ask<T> {
+    Box::new(move |_| Ok(value))
+}
+
+/// What the bundle couldn't collect, each in "What couldn't be collected".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Missed {
+    /// Which engine is answering, before setup chose one.
+    Engine,
+    EngineVersion,
+    EngineDiskUse,
+    /// CPUs, memory and free disk, as `[local check]` measures them.
+    EngineSize,
+    ServerLog,
+}
+
+impl Missed {
+    /// The line in "What couldn't be collected", for a gathering that waited `limit`.
+    fn said(self, limit: Duration) -> String {
+        let seconds = limit.as_secs().max(1);
+        let after = if seconds == 1 {
+            "1 second".to_owned()
+        } else {
+            format!("{seconds} seconds")
+        };
+        match self {
+            Missed::Engine => {
+                format!("Which container engine is running: none answered within {after}.")
+            }
+            Missed::EngineVersion => {
+                format!("The container engine's version: it didn't answer within {after}.")
+            }
+            Missed::EngineDiskUse => format!(
+                "The container engine's disk use (system df): it didn't answer within {after}."
+            ),
+            Missed::EngineSize => format!(
+                "The container engine's CPUs, memory and free disk: it didn't answer within {after}."
+            ),
+            Missed::ServerLog => format!(
+                "The server's log, for model provider errors: the container engine didn't answer \
+                 within {after}."
+            ),
+        }
+    }
+
+    /// The same, as a few words for the summary.
+    fn named(self) -> &'static str {
+        match self {
+            Missed::Engine => "which container engine is running",
+            Missed::EngineVersion => "the container engine's version",
+            Missed::EngineDiskUse => "the container engine's disk use",
+            Missed::EngineSize => "the container engine's CPUs, memory and free disk",
+            Missed::ServerLog => "the server's log",
+        }
+    }
+}
+
+/// `work` started on a thread of its own, its answer waited for later with `by`.
+struct Asked<T>(mpsc::Receiver<T>);
+
+fn ask<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Asked<T> {
+    let (sender, received) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+    Asked(received)
+}
+
+impl<T> Asked<T> {
+    /// The answer, or None when there was none by `until`. A thread with no answer by then is
+    /// left to end by itself: the commands it runs are stopped at the deadline it was given.
+    fn by(self, until: Instant) -> Option<T> {
+        self.0
+            .recv_timeout(until.saturating_duration_since(Instant::now()))
+            .ok()
+    }
+}
 
 /// The container engine as the bundle reports it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -75,6 +185,10 @@ pub struct Facts {
     /// The end of the speech log, oldest first: the end of the one set aside (`speech.log.1`) when
     /// the current one is shorter than the budget, then the current one. Empty when there is none.
     pub speech_log: Vec<(PathBuf, String)>,
+    /// What didn't answer before the deadline, in the order asked.
+    pub missed: Vec<Missed>,
+    /// How long the gathering waited for it.
+    pub limit: Duration,
 }
 
 /// Where `gather` finds what goes into a bundle.
@@ -86,9 +200,11 @@ pub struct Sources<'a> {
     /// The home folder the CLI runs with, which also holds its log. Written as `~`.
     pub home: Option<&'a str>,
     /// The engine to measure: the one the back end runs on, or the one answering.
-    pub engine: Option<crate::engine::Address>,
-    /// The end of the server container's log, or None when the server isn't running.
-    pub server_log: Option<String>,
+    pub engine: Ask<crate::engine::Address>,
+    /// The end of the server container's log, or nothing when the server isn't running.
+    pub server_log: Ask<String>,
+    /// How long anything that asks the engine may take: `LIMIT`, or less in a test.
+    pub limit: Duration,
 }
 
 /// How many of the server's latest `model-provider-refused` lines go in.
@@ -107,25 +223,78 @@ pub fn provider_refusals(log: &str) -> String {
     lines[lines.len().saturating_sub(SERVER_REFUSAL_LINES)..].join("\n")
 }
 
-/// Gather a bundle and lay it out, redacted.
+/**
+Gather a bundle and lay it out, redacted, within `sources.limit` (and a moment to hand over).
+
+The engine and the server's log are asked at once, each on a thread of its own, while the files are
+read here. What hasn't answered by the deadline is left out and named in `Facts::missed`.
+*/
 pub fn gather(sources: Sources) -> String {
+    let limit = sources.limit;
+    let deadline = Instant::now() + limit;
+    let server_log = sources.server_log;
+    let server = ask(move || server_log(deadline));
+    let find_engine = sources.engine;
+    let engine = ask(move || match find_engine(deadline) {
+        Ok(Some(address)) => Ok(Some(measure_engine(&address, deadline))),
+        Ok(None) => Ok(None),
+        Err(NoAnswer) => Err(NoAnswer),
+    });
     let read = |path: PathBuf, bytes: u64| tail(&path, bytes).ok().map(|tail| (path, tail));
+    let desktop_log = sources
+        .log_folder
+        .and_then(newest_log)
+        .and_then(|path| read(path, DESKTOP_TAIL_BYTES));
+    let cli_log = sources
+        .home
+        .and_then(|home| read(cli_log(Path::new(home)), CLI_TAIL_BYTES));
+    let speech_log = crate::speech::diagnostics::path()
+        .map(|path| speech_log(&path, SPEECH_TAIL_BYTES))
+        .unwrap_or_default();
+
+    let mut missed = Vec::new();
+    // The engine's thread waits for its own measurements until a handover after the deadline, so
+    // it is given one more.
+    let engine = match engine.by(deadline + HANDOVER * 2) {
+        Some(Ok(Some((engine, unanswered)))) => {
+            missed.extend(unanswered);
+            Some(engine)
+        }
+        Some(Ok(None)) => None,
+        Some(Err(NoAnswer)) | None => {
+            missed.push(Missed::Engine);
+            None
+        }
+    };
+    let server_log = match server.by(deadline + HANDOVER) {
+        Some(Ok(log)) => log,
+        Some(Err(NoAnswer)) | None => {
+            missed.push(Missed::ServerLog);
+            None
+        }
+    };
+    if !missed.is_empty() {
+        log::warn!(
+            "[logs] no answer within {}s from: {}",
+            limit.as_secs(),
+            missed
+                .iter()
+                .map(|missed| missed.named())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     let facts = Facts {
         desktop: sources.desktop,
         system: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         failure: sources.failure,
-        engine: sources.engine.as_ref().map(measure_engine),
-        desktop_log: sources
-            .log_folder
-            .and_then(newest_log)
-            .and_then(|path| read(path, DESKTOP_TAIL_BYTES)),
-        cli_log: sources
-            .home
-            .and_then(|home| read(cli_log(Path::new(home)), CLI_TAIL_BYTES)),
-        server_log: sources.server_log,
-        speech_log: crate::speech::diagnostics::path()
-            .map(|path| speech_log(&path, SPEECH_TAIL_BYTES))
-            .unwrap_or_default(),
+        engine,
+        desktop_log,
+        cli_log,
+        server_log,
+        speech_log,
+        missed,
+        limit,
     };
     bundle(&facts, sources.home)
 }
@@ -151,30 +320,80 @@ pub fn speech_log(current: &Path, max_bytes: u64) -> Vec<(PathBuf, String)> {
     found
 }
 
-/// The engine's version, size and disk use, asked at once: each within the engine check's own
-/// limits, so a hung engine holds the bundle no longer than it holds the check.
-pub fn measure_engine(address: &crate::engine::Address) -> Engine {
+/// What the engine's measurement says when it didn't finish by the deadline.
+pub const NOT_MEASURED: &str = "Couldn't measure it in time";
+
+/**
+The engine's version, size and disk use, asked at once, each on a thread of its own and stopped at
+`deadline`, and what didn't answer by then.
+*/
+pub fn measure_engine(
+    address: &crate::engine::Address,
+    deadline: Instant,
+) -> (Engine, Vec<Missed>) {
     let format = match address.engine {
         crate::engine::Engine::Podman => "{{.Version.Version}}",
         crate::engine::Engine::Docker => "{{.ServerVersion}}",
     };
-    std::thread::scope(|scope| {
-        let version =
-            scope.spawn(|| crate::local_eval::engine_query(address, &["info", "--format", format]));
-        let disk_use = scope.spawn(|| crate::local_eval::engine_query(address, &["system", "df"]));
-        let measured = crate::local_eval::measured_engine(address);
-        let said = |answer: Option<String>| {
-            answer
-                .map(|said| said.trim().to_owned())
-                .filter(|said| !said.is_empty())
-        };
-        Engine {
-            name: address.engine.binary().to_owned(),
-            version: said(version.join().ok().flatten()),
-            measured,
-            disk_use: said(disk_use.join().ok().flatten()),
+    let asking = |args: Vec<&'static str>| {
+        let address = address.clone();
+        ask(move || engine_query(&address, &args, deadline))
+    };
+    let version = asking(vec!["info", "--format", format]);
+    let disk_use = asking(vec!["system", "df"]);
+    let measured = {
+        let address = address.clone();
+        ask(move || crate::local_eval::measured_engine_by(&address, deadline))
+    };
+    let until = deadline + HANDOVER;
+    let mut missed = Vec::new();
+    let mut answered = |answer: Option<Result<Option<String>, NoAnswer>>, what: Missed| match answer
+    {
+        Some(Ok(said)) => said,
+        Some(Err(NoAnswer)) | None => {
+            missed.push(what);
+            None
         }
-    })
+    };
+    let version = answered(version.by(until), Missed::EngineVersion);
+    let disk_use = answered(disk_use.by(until), Missed::EngineDiskUse);
+    let measured = answered(
+        measured
+            .by(until)
+            .map(|said| said.map(Some).ok_or(NoAnswer)),
+        Missed::EngineSize,
+    );
+    let engine = Engine {
+        name: address.engine.binary().to_owned(),
+        version,
+        measured: measured.unwrap_or_else(|| NOT_MEASURED.to_owned()),
+        disk_use,
+    };
+    (engine, missed)
+}
+
+/// `args` on the engine, stopped at `deadline`: its trimmed stdout when it succeeded and said
+/// something, nothing when it failed, and `NoAnswer` when it was still running at the deadline.
+fn engine_query(
+    address: &crate::engine::Address,
+    args: &[&str],
+    deadline: Instant,
+) -> Result<Option<String>, NoAnswer> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(NoAnswer);
+    }
+    let mut command = address.command();
+    command.args(args);
+    match crate::quiet::output_within(&mut command, left) {
+        Ok(out) => Ok(out
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+            .filter(|said| !said.is_empty())),
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => Err(NoAnswer),
+        Err(_) => Ok(None),
+    }
 }
 
 /// The bundle as text, redacted. `home` is written as `~`.
@@ -198,6 +417,13 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
         }
         None => out.push_str("Nothing reported a failure.\n"),
     }
+    // Beside what failed, since what was stuck is often why: a source that didn't answer in time.
+    if !facts.missed.is_empty() {
+        out.push_str("\n## What couldn't be collected\n\n");
+        for missed in &facts.missed {
+            out.push_str(&format!("- {}\n", missed.said(facts.limit)));
+        }
+    }
     out.push_str("\n## Container engine\n\n");
     match &facts.engine {
         Some(engine) => {
@@ -206,6 +432,9 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
             if let Some(disk_use) = &engine.disk_use {
                 out.push_str(&format!("\n$ {} system df\n{disk_use}\n", engine.name));
             }
+        }
+        None if facts.missed.contains(&Missed::Engine) => {
+            out.push_str("No container engine answered in time.\n")
         }
         None => out.push_str("No container engine is answering.\n"),
     }
@@ -230,6 +459,9 @@ pub fn bundle(facts: &Facts, home: Option<&str>) -> String {
     match facts.server_log.as_deref().map(provider_refusals) {
         Some(lines) if !lines.is_empty() => out.push_str(&format!("```\n{lines}\n```\n")),
         Some(_) => out.push_str("None in the server's recent log.\n"),
+        None if facts.missed.contains(&Missed::ServerLog) => {
+            out.push_str("Couldn't read the server's log in time.\n")
+        }
         None => out.push_str("The server isn't running.\n"),
     }
     // What dictation and narration did: which languages this computer said it could recognise,
@@ -287,8 +519,18 @@ fn summary(facts: &Facts, failure: Option<&str>) -> String {
             engine_name(engine),
             engine.measured
         ),
+        None if facts.missed.contains(&Missed::Engine) => {
+            "Container engine: none answered in time.".to_owned()
+        }
         None => "Container engine: none is answering.".to_owned(),
     });
+    if !facts.missed.is_empty() {
+        let named: Vec<&str> = facts.missed.iter().map(|missed| missed.named()).collect();
+        lines.push(format!(
+            "Couldn't collect: {}. See What couldn't be collected.",
+            named.join(", ")
+        ));
+    }
     lines.join("\n") + "\n"
 }
 
@@ -604,6 +846,7 @@ mod tests {
                 PathBuf::from("/Users/dana/Library/Logs/OpenBot/speech.log"),
                 "1763460000000 session=0 available(cy-GB) = Unavailable\n".into(),
             )],
+            ..Facts::default()
         };
         let text = bundle(&facts, Some("/Users/dana"));
         assert!(text.starts_with(
@@ -623,6 +866,8 @@ mod tests {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
         assert!(!text.contains("/Users/dana"));
+        // Everything answered: nothing is said about what couldn't be collected.
+        assert!(!text.contains("collect"), "{text}");
 
         let empty = bundle(&Facts::default(), None);
         assert!(empty.contains("Container engine: none is answering."));
@@ -835,5 +1080,71 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(path).unwrap(), "text");
         let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+    }
+
+    /**
+    Sources that never answer, as on a computer whose engine stalled before setup chose one: the
+    bundle still comes back by the deadline, with the logs that are files, and says what it couldn't
+    collect near the top, beside what failed. The commands themselves are stopped at the deadline:
+    `tests::troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs` in main.rs.
+    */
+    #[test]
+    fn sources_that_never_answer_are_named_and_the_rest_comes_back_in_time() {
+        let logs = temp_root("troubleshooting-never-answer");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("openbot-desktop.log"),
+            "2026-11-20T18:21:25.340Z INFO  [watch] OpenBot stopped answering and is not running\n",
+        )
+        .unwrap();
+        let never = |_: Instant| -> Result<Option<String>, NoAnswer> {
+            std::thread::sleep(Duration::from_secs(60));
+            Ok(None)
+        };
+        let started = Instant::now();
+        let text = gather(Sources {
+            desktop: "OpenBot Desktop 1.1.2 (Built 2026-11-20 13:53 UTC from 8826a0fe)".into(),
+            failure: None,
+            log_folder: Some(&logs),
+            home: None,
+            engine: Box::new(|_| {
+                std::thread::sleep(Duration::from_secs(60));
+                Ok(None)
+            }),
+            server_log: Box::new(never),
+            limit: Duration::from_secs(1),
+        });
+        let took = started.elapsed();
+        assert!(
+            took < Duration::from_secs(1) + HANDOVER * 3,
+            "took {took:?}"
+        );
+        let missing = text
+            .split("## What couldn't be collected\n\n")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no What couldn't be collected section in\n{text}"));
+        let missing = &missing[..missing.find("\n## ").unwrap()];
+        assert_eq!(
+            missing,
+            "- Which container engine is running: none answered within 1 second.\n\
+             - The server's log, for model provider errors: the container engine didn't answer \
+             within 1 second.\n"
+        );
+        assert!(
+            text.find("## What failed").unwrap() < text.find("## What couldn't").unwrap()
+                && text.find("## What couldn't").unwrap()
+                    < text.find("## Container engine").unwrap(),
+            "{text}"
+        );
+        for expected in [
+            "Container engine: none answered in time.",
+            "Couldn't collect: which container engine is running, the server's log.",
+            "## Container engine\n\nNo container engine answered in time.\n",
+            "## Model provider errors (server log)\n\nCouldn't read the server's log in time.\n",
+            "[watch] OpenBot stopped answering and is not running",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
+        let _ = std::fs::remove_dir_all(logs);
     }
 }

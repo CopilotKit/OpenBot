@@ -263,10 +263,15 @@ pub fn compose_command_for(engine: &Address, root: &Path, secrets: &Secrets) -> 
 
 fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
     let project = project(engine, root).unwrap_or_else(|_| desktop_project());
+    compose_command_as(engine, root, secrets, &project)
+}
+
+/// `compose_command` for `project`, already known.
+fn compose_command_as(engine: &Address, root: &Path, secrets: &Secrets, project: &str) -> Command {
     let mut command = engine.command();
     command.current_dir(root).args(["compose"]).envs(secrets);
-    command.env("COMPOSE_PROJECT_NAME", &project);
-    if let Some(namespace) = computer_namespace_for(&project) {
+    command.env("COMPOSE_PROJECT_NAME", project);
+    if let Some(namespace) = computer_namespace_for(project) {
         command.env("COMPUTER_NAMESPACE", namespace);
     }
     command
@@ -3584,6 +3589,36 @@ pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> 
             text.trim().to_string()
         })
         .unwrap_or_default()
+}
+
+/**
+`service_log`, stopped at `deadline`: None when Compose was still running then. For troubleshooting
+logs, which are asked for when the engine may be stalled: `compose logs` then waits on it for
+minutes, or until it is restarted.
+
+As the project the installation recorded, or `desktop_project` when it recorded none. Never decided
+here (`project`): deciding asks the engine, with no time limit, and records the answer.
+*/
+pub fn service_log_by(
+    engine: &Address,
+    root: &Path,
+    service: &str,
+    lines: u16,
+    deadline: std::time::Instant,
+) -> Option<String> {
+    let project = saved_project(root).unwrap_or_else(desktop_project);
+    let mut command = compose_command_as(engine, root, &Secrets::new(), &project);
+    command.args(["logs", "--tail", &lines.to_string(), service]);
+    let left = deadline.saturating_duration_since(std::time::Instant::now());
+    match crate::quiet::output_within(&mut command, left) {
+        Ok(out) => {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            Some(text.trim().to_string())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => None,
+        Err(_) => Some(String::new()),
+    }
 }
 
 /// The exit code the OpenBot server uses for every refusal to start: 78, `EX_CONFIG` from

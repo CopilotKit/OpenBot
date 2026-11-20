@@ -110,4 +110,28 @@ describe("heartbeat interval", () => {
       expect(gap).toBeLessThan(5_000);
     }
   });
+
+  test("a failed heartbeat calls the agent's check, so a revoked install can enroll again without a restart", async () => {
+    const agent = load({ heartbeatIntervalSeconds: 1 }) as ReadyAgent;
+    const management = new ManagementAgent(
+      agent,
+      {} as Kube,
+      {} as ManagementClient,
+      () => {},
+    );
+    management.tick = async () => {
+      throw new Error("ECONNRESET");
+    };
+    const failures: unknown[] = [];
+    management.onHeartbeatFailure = async (error) => {
+      failures.push(error);
+    };
+    const controller = new AbortController();
+    const looping = management.loop(controller.signal);
+    const deadline = Date.now() + 5_000;
+    while (failures.length < 1 && Date.now() < deadline) await Bun.sleep(50);
+    controller.abort();
+    await looping;
+    expect(String(failures[0])).toContain("ECONNRESET");
+  });
 });
