@@ -29,6 +29,37 @@ export const AgentConfig = z.strictObject({
     helmRelease: name,
     ociRepository: name,
     pinsConfigMap: name,
+    /** Where Flux pulls the product's chart from: the OCIRepository the agent creates. */
+    source: z.strictObject({
+      url: z.string().regex(/^oci:\/\/\S+$/),
+      /** The first pin. null waits, suspended, for the management service to name a version. */
+      digest: z
+        .string()
+        .regex(/^sha256:[0-9a-f]{64}$/)
+        .nullable(),
+      insecure: z.boolean(),
+      pullSecret: name.nullable(),
+      verify: z
+        .strictObject({
+          provider: z.enum(["cosign", "notation"]),
+          secretRef: name,
+        })
+        .nullable(),
+    }),
+    /** How Flux installs it: the HelmRelease the agent creates. */
+    release: z.strictObject({
+      serviceAccountName: name,
+      timeout: z.string().regex(/^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$/),
+      valuesFrom: z.array(
+        z.strictObject({
+          kind: z.enum(["Secret", "ConfigMap"]),
+          name,
+          valuesKey: z.string().optional(),
+          targetPath: z.string().optional(),
+          optional: z.boolean().optional(),
+        }),
+      ),
+    }),
   }),
   backup: z.strictObject({
     kind: z.enum([

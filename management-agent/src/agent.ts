@@ -177,8 +177,17 @@ export class ManagementAgent {
     );
   }
 
-  /** One heartbeat, then commands, then the desired version. */
+  /** The product's Flux objects, then one heartbeat, then commands, then the desired version. */
   async tick() {
+    try {
+      const created = await this.flux.ensure();
+      if (created.length > 0)
+        this.log("created the product's Flux objects", { created });
+    } catch (error) {
+      this.log("could not create or update the product's Flux objects", {
+        error: String(error),
+      });
+    }
     const { state, journal } = await this.store.read();
     const heartbeat = await collectHeartbeat({
       config: this.config,
