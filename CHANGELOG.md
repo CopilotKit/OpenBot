@@ -51,6 +51,13 @@ unless you rely on task threads.
   Bot it stays read-only, and a built-in Bot is unchanged. Other Setup edits no longer send the
   stored address, so a Bot saved at an address the deployment's rules have since closed can still
   be renamed.
+- **A Bot asked to watch Slack says what works.** Without a Slack pairing, which the personal edition
+  never has, no Slack event reaches OpenBot. A Bot asked to act on Slack messages was sent to a
+  Reaching you page that edition does not show; it is now refused before anything else, and the Bot
+  runs the goal from a routine that checks the person's connected Slack app instead, with Slack's
+  connect card in the conversation when it is not connected. Where a pairing exists, the owner's
+  Slack account linked under Connections counts as well as a Reaching you binding: only the owner,
+  only channels that account is in, checked again on every event.
 
 ### OpenBot Desktop
 
@@ -75,6 +82,9 @@ unless you rely on task threads.
   keeps it on C:, and Install says so. An engine already on C: stays there. When C: is short and
   F: has room, OpenBot offers **Move OpenBot's storage to F:**, which stops every WSL distro for
   a moment, Docker Desktop included.
+- **On Windows with only the WSL that ships with Windows, setup offers the WSL update.** It stopped
+  on "could not check the WSL version", because that WSL does not know `wsl --version`. Setup now
+  shows the WSL update screen, whose fix runs `wsl --update`.
 
 ### Kubernetes
 
@@ -94,10 +104,13 @@ unless you rely on task threads.
     organization or a tenant; `otel.enabled: false` turns it off.
   - It upgrades only to a release the management service names, only inside both your window and
     the service's, only along the release's upgrade paths, by pinning Flux to that release's exact
-    chart digest. Before an upgrade that changes the database it stops writes and takes a backup,
-    and goes on only once the backup succeeds. A failed backup puts the install back as it was, and
-    the same release is not tried again for 30 minutes. It never rolls back by itself: an upgrade
-    that stops after the database may have changed waits for a person.
+    chart digest. It creates and keeps the product's Flux objects from the chart's settings, so
+    `helm install --wait` finishes under Helm 4. Before an upgrade that changes the database it
+    stops writes and takes a backup, and goes on only once the backup succeeds; it refuses the
+    upgrade when the backup it would take is of a different database from the one the install
+    uses. A failed backup puts the install back as it was, and the same release is not tried again
+    for 30 minutes. It never rolls back by itself: an upgrade that stops after the database may
+    have changed waits for a person.
   - It runs five commands, each signed and short-lived: restart, rollback (only where the release
     says the previous one runs on its database), pause, resume, and a support bundle that is
     redacted and written to a volume in your cluster, never uploaded.
@@ -116,6 +129,12 @@ unless you rely on task threads.
   identity does not match the candidate", and a release that stops writes for its upgrade was
   scaled back to zero. It now checks the version, distribution, repository and channel, with the
   image digest the server Deployment is pinned to, as before.
+
+### Smaller changes
+
+- The API refuses a notification route that names the same way of reaching a person twice, such as
+  `["push", "push"]`, with 400 `VALIDATION_ERROR`, and changes nothing, as the spec's unique lists
+  say. The web app never sends one.
 
 ## 1.1.1
 
