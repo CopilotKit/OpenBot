@@ -14,6 +14,8 @@ info:
 
     An install for one person on one computer has no sign-in. It signs nobody in, so it has neither OAuth nor API keys, and the operations that manage keys and sessions answer 503 with the code SIGN_IN_UNAVAILABLE.
 
+    An organization can require its members to sign in through their company's identity provider. A member who hasn't is held out of it: every operation under its address answers 403 with the code SSO_REQUIRED (category permission, not retryable), whose detail tells them to sign in with their work email. getCompanySignIn alone still answers, and says which providers they can use.
+
     OpenBot's own apps name themselves on every request in the header `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop, mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header may name more than one, separated by spaces: OpenBot Desktop adds its own to the one its window's page sent. getDeployment says which API versions this OpenBot serves and the oldest release of each app it serves (minimumClients). Every other operation under /api/v2 refuses an app older than that with 400 and the code CLIENT_UPDATE_REQUIRED, whose problem names the app (client) and its minimum (minimumVersion) and whose detail tells the person to update OpenBot. When that minimum was raised because of a security problem in older releases, the problem also says security: true, and getDeployment lists it under securityMinimumClients. A program of your own need not send the header; without it nothing is refused for a version.
 
     This file is the single source of truth: the clients, the server's types, the docs and the contract tests are all generated from it or checked against it. A change that breaks an existing client fails the pull request.
@@ -1606,7 +1608,7 @@ paths:
         - Identity providers
       operationId: listIdentityProviders
       summary: List identity providers
-      description: 'Return one page of the identity providers registered for single sign-on, by email domain: a company''s own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the identity providers registered for single sign-on, by email domain: a company''s own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization too, and can''t be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -1707,7 +1709,7 @@ paths:
         - Identity providers
       operationId: deleteIdentityProvider
       summary: Remove an identity provider
-      description: Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider already removed is not found.
+      description: 'Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.'
       security:
         - webSession: []
         - appOAuth:
@@ -1723,11 +1725,52 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/AdminOnly'
+          $ref: '#/components/responses/IdentityProviderNotRemovable'
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags:
+        - People
+      operationId: getCompanySignIn
+      summary: Read whether a person must use their company sign-in here
+      description: Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId).
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:read
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the person must use their company sign-in here.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignIn'
+              examples:
+                required:
+                  $ref: '#/components/examples/CompanySignInExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -22464,6 +22507,9 @@ components:
             - string
             - 'null'
           description: The id of the person who registered it, while they still have an account here. Null once they are gone; the provider stays.
+        deployment:
+          type: boolean
+          description: 'True for a provider registered for the whole OpenBot, listed in another organization: it counts for every organization here, and can''t be removed from this one. False or absent for the organization''s own.'
     IdentityProviderPage:
       type: object
       required:
@@ -24203,6 +24249,35 @@ components:
       minLength: 1
       maxLength: 1000
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+    CompanySignIn:
+      type: object
+      description: Whether a person must sign in through their company's identity provider to work in this organization, and how they can.
+      required:
+        - required
+        - met
+        - providers
+      properties:
+        required:
+          type: boolean
+          description: Whether this organization requires its members to sign in through an identity provider.
+        met:
+          type: boolean
+          description: 'Whether the person has: they signed in through one of providers, or with the same identity at the same issuer another way, or they are the admin who runs this OpenBot. While required is true and met is false, the organization holds them out.'
+        providers:
+          type: array
+          description: 'The identity providers that count for this organization: its own, and where this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.'
+          items:
+            type: object
+            required:
+              - id
+              - domain
+            properties:
+              id:
+                type: string
+                description: The provider's id, which signing in through it takes.
+              domain:
+                type: string
+                description: The email domain it signs in.
     AttachmentLimits:
       type: object
       description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
@@ -37048,7 +37123,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     Forbidden:
-      description: The caller holds no role in this organization.
+      description: The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -37061,6 +37136,17 @@ components:
                 status: 403
                 detail: Authorization required.
                 code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
@@ -37096,7 +37182,7 @@ components:
                 traceId: trace_example
                 capability: isolatedComputers
     AdminOnly:
-      description: The caller is not an administrator of the organization, or holds no role in it.
+      description: The caller is not an administrator of the organization, or holds no role in it. Or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -37109,6 +37195,17 @@ components:
                 status: 403
                 detail: Only an admin can do this.
                 code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
@@ -37989,6 +38086,35 @@ components:
                 code: APP_SERVICE_FAILED
                 category: dependency
                 retryable: true
+                requestId: req_example
+                traceId: trace_example
+    IdentityProviderNotRemovable:
+      description: The caller is not an administrator of the organization, or holds no role in it. Or the provider was registered for the whole OpenBot, so it can't be removed from this organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            deployment:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: This identity provider is set up for all of OpenBot, so it can't be removed here. Ask the admin who runs OpenBot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
                 requestId: req_example
                 traceId: trace_example
     NoBotToAnswer:
@@ -42775,7 +42901,7 @@ components:
         provider: github
         authorizationUrl: https://github.com/login/oauth/authorize?client_id=Iv23liExample&redirect_uri=https%3A%2F%2Fopenbot.acme.com%2Fapi%2Fidentity%2Fgithub%2Fcallback&state=sealed
     IdentityProviderPageLast:
-      summary: One provider, on one page.
+      summary: The organization's own provider, and one registered for the whole OpenBot.
       value:
         identityProviders:
           - id: acme-okta
@@ -42783,6 +42909,13 @@ components:
             domain: acme.com
             protocol: saml
             registeredBy: 8kq2m4x7p1rvz3a9c5d0
+            deployment: false
+          - id: example-entra
+            issuer: https://login.microsoftonline.com/0d1c2b3a-4f5e-6d7c-8b9a-0f1e2d3c4b5a/v2.0
+            domain: example.com
+            protocol: oidc
+            registeredBy: null
+            deployment: true
         nextCursor: null
     IdentityProviderExample:
       summary: A SAML provider, registered.
@@ -43183,6 +43316,16 @@ components:
       value:
         model: gpt-6.1-pro
         effort: xhigh
+    CompanySignInExample:
+      summary: An organization that requires its company sign-in, which the caller hasn't used yet.
+      value:
+        required: true
+        met: false
+        providers:
+          - id: acme-okta
+            domain: acme.com
+          - id: example-entra
+            domain: example.com
     ConversationPageExample:
       summary: One page of conversations, and the last.
       value:

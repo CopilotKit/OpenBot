@@ -995,8 +995,12 @@ paths:
         by email domain: a company's own SAML or OIDC provider, which signs in
         everybody at its domain. Every administrator sees every provider,
         whoever registered it. Never a client secret or a signing
-        certificate. Only an administrator may list them. A missing cursor
-        starts at the first page and nextCursor null ends the list.
+        certificate. Where this OpenBot may keep more than one organization,
+        the list in any organization but `default` also holds the providers
+        registered for the whole OpenBot, marked deployment: they count for
+        this organization too, and can't be removed here. Only an
+        administrator may list them. A missing cursor starts at the first
+        page and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth: [identity-providers:read]
@@ -1103,7 +1107,9 @@ paths:
       description: >-
         Remove an identity provider, whoever registered it, so nobody signs in
         through it again. Only an administrator may remove one. A provider
-        already removed is not found.
+        registered for the whole OpenBot (deployment) is removed only where it
+        was registered: in any other organization it is refused with 403. A
+        provider already removed is not found.
       security:
         - webSession: []
         - appOAuth: [identity-providers:write]
@@ -1118,11 +1124,58 @@ paths:
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
-          $ref: './common.yaml#/components/responses/AdminOnly'
+          $ref: '#/components/responses/IdentityProviderNotRemovable'
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
           $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getCompanySignIn
+      summary: Read whether a person must use their company sign-in here
+      description: >-
+        Return whether this organization requires its members to sign in
+        through their company's identity provider, whether the person has,
+        and the providers they can use for it. Any member may read their own,
+        as me or by their own id. It answers even while the organization
+        holds them out for not having signed in that way, when every other
+        request they make in it is refused with SSO_REQUIRED. To use a
+        provider, they sign in through it by its id (POST
+        /api/auth/sign-in/sso with providerId).
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the person must use their company sign-in here.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignIn'
+              examples:
+                required:
+                  $ref: '#/components/examples/CompanySignInExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
         default:
@@ -1705,6 +1758,48 @@ components:
           description: >-
             The id of the person who registered it, while they still have an
             account here. Null once they are gone; the provider stays.
+        deployment:
+          type: boolean
+          description: >-
+            True for a provider registered for the whole OpenBot, listed in
+            another organization: it counts for every organization here, and
+            can't be removed from this one. False or absent for the
+            organization's own.
+    CompanySignIn:
+      type: object
+      description: >-
+        Whether a person must sign in through their company's identity
+        provider to work in this organization, and how they can.
+      required: [required, met, providers]
+      properties:
+        required:
+          type: boolean
+          description: >-
+            Whether this organization requires its members to sign in through
+            an identity provider.
+        met:
+          type: boolean
+          description: >-
+            Whether the person has: they signed in through one of providers,
+            or with the same identity at the same issuer another way, or they
+            are the admin who runs this OpenBot. While required is true and
+            met is false, the organization holds them out.
+        providers:
+          type: array
+          description: >-
+            The identity providers that count for this organization: its own,
+            and where this OpenBot may keep more than one organization, those
+            registered for the whole OpenBot. Empty when there are none.
+          items:
+            type: object
+            required: [id, domain]
+            properties:
+              id:
+                type: string
+                description: The provider's id, which signing in through it takes.
+              domain:
+                type: string
+                description: The email domain it signs in.
     IdentityProviderPage:
       type: object
       required: [identityProviders, nextCursor]
@@ -2004,6 +2099,38 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderNotRemovable:
+      description: >-
+        The caller is not an administrator of the organization, or holds no
+        role in it. Or the provider was registered for the whole OpenBot, so
+        it can't be removed from this organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            deployment:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: This identity provider is set up for all of OpenBot, so it can't be removed here. Ask the admin who runs OpenBot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     IdentityProviderNotFound:
       description: No identity provider has that id, it was removed, or the organization does not exist.
       content:
@@ -2243,7 +2370,7 @@ components:
         provider: github
         authorizationUrl: https://github.com/login/oauth/authorize?client_id=Iv23liExample&redirect_uri=https%3A%2F%2Fopenbot.acme.com%2Fapi%2Fidentity%2Fgithub%2Fcallback&state=sealed
     IdentityProviderPageLast:
-      summary: One provider, on one page.
+      summary: The organization's own provider, and one registered for the whole OpenBot.
       value:
         identityProviders:
           - id: acme-okta
@@ -2251,7 +2378,24 @@ components:
             domain: acme.com
             protocol: saml
             registeredBy: 8kq2m4x7p1rvz3a9c5d0
+            deployment: false
+          - id: example-entra
+            issuer: https://login.microsoftonline.com/0d1c2b3a-4f5e-6d7c-8b9a-0f1e2d3c4b5a/v2.0
+            domain: example.com
+            protocol: oidc
+            registeredBy: null
+            deployment: true
         nextCursor: null
+    CompanySignInExample:
+      summary: An organization that requires its company sign-in, which the caller hasn't used yet.
+      value:
+        required: true
+        met: false
+        providers:
+          - id: acme-okta
+            domain: acme.com
+          - id: example-entra
+            domain: example.com
     IdentityProviderExample:
       summary: A SAML provider, registered.
       value:
