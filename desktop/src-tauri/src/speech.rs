@@ -709,8 +709,9 @@ mod tests {
             failure: None,
             log_folder: None,
             home: None,
-            engine: None,
-            server_log: None,
+            engine: crate::troubleshooting::given(None),
+            server_log: crate::troubleshooting::given(None),
+            limit: crate::troubleshooting::LIMIT,
         });
         let section = text
             .split("## Speech log (end)\n\n")

@@ -92,6 +92,8 @@ interface Pod {
 export class ManagementAgent {
   readonly store: StateStore;
   readonly flux: Flux;
+  /** Called after every failed heartbeat (main.ts: has OpenBot connected a new install?). */
+  onHeartbeatFailure?: (error: unknown) => Promise<void>;
   /** The upgrade, rollback or support bundle running now, if any. */
   private operation: Promise<void> | null = null;
   private operationTarget: string | null = null;
@@ -218,6 +220,11 @@ export class ManagementAgent {
         await this.tick();
       } catch (error) {
         this.log("heartbeat failed", { error: String(error) });
+        await this.onHeartbeatFailure?.(error).catch((failure) =>
+          this.log("after a failed heartbeat, the check failed too", {
+            error: String(failure),
+          }),
+        );
       }
       const jitter = 1 + Math.random() * 0.1;
       await Bun.sleep(interval * jitter);

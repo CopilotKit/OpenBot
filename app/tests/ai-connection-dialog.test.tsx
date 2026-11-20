@@ -412,6 +412,10 @@ describe.skipIf(!asked)("changing the AI connection in Settings", () => {
 
           const dialog = page.getByRole("dialog");
           await dialog.getByText("AI connection", { exact: true }).waitFor();
+          // Styled before anything in it is pressed, screenshots or not: unstyled, the dialog is
+          // not lifted over the modal's backdrop, which then takes the press, as it never does in
+          // the app.
+          await style(page);
           await expect(
             dialog.getByText("API key", { exact: true }).count(),
           ).resolves.toBe(1);
