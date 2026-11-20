@@ -540,15 +540,62 @@ describe("the rules name the jobs the workflows run", () => {
     );
   });
 
-  test("desktop.yml: core, and each platform the shared build makes", () => {
+  test("desktop.yml: core, each platform the shared build makes, and the live tests beside them", () => {
     const names = jobNames("desktop.yml");
     expect(names).toContain("core");
     const parsed = Bun.YAML.parse(
       readFileSync(join(ROOT, ".github/workflows/desktop.yml"), "utf8"),
-    ) as { jobs: { app: { with: { platforms: string } } } };
+    ) as {
+      jobs: {
+        app: { with: { platforms: string } };
+        live: { if: string };
+      };
+    };
     const platforms = JSON.parse(parsed.jobs.app.with.platforms) as string[];
+    const live = names.filter((name) => name.startsWith("live ("));
+    expect(live.length).toBeGreaterThan(0);
     expect(DESKTOP_RULES.find((rule) => rule.output === "app")?.checks).toEqual(
-      platforms.map((platform) => `app / app (${platform})`),
+      [...platforms.map((platform) => `app / app (${platform})`), ...live],
     );
+    // The live jobs stand on the app's gate, so a commit that skips the builds skips them too.
+    expect(parsed.jobs.live.if).toBe("needs.changes.outputs.app == 'true'");
+  });
+
+  // The Docker regression tests moved out of the Linux build into desktop.yml's live jobs. Every
+  // suite still runs, and runs once.
+  test("desktop.yml's live jobs run every Docker regression suite once", () => {
+    const parsed = Bun.YAML.parse(
+      readFileSync(join(ROOT, ".github/workflows/desktop.yml"), "utf8"),
+    ) as {
+      jobs: {
+        live: {
+          strategy: { matrix: { suite: string[] } };
+          steps: { if?: string; run?: string }[];
+        };
+      };
+    };
+    const { suite } = parsed.jobs.live.strategy.matrix;
+    const runs = parsed.jobs.live.steps.filter((step) =>
+      step.run?.includes("--ignored"),
+    );
+    expect(
+      runs.map((step) => step.run?.match(/--lib (\S+) --/)?.[1]).sort(),
+    ).toEqual([
+      "ai_connection::tests::real_engine",
+      "host_access::live",
+      "local_images::live",
+      "netavark_rules::live",
+      "update_ready::live",
+    ]);
+    for (const step of runs) {
+      expect(suite.map((name) => `matrix.suite == '${name}'`)).toContain(
+        step.if,
+      );
+    }
+    for (const name of suite) {
+      expect(runs.some((step) => step.if === `matrix.suite == '${name}'`)).toBe(
+        true,
+      );
+    }
   });
 });
