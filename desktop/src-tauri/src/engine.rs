@@ -427,19 +427,27 @@ fn running_machine(preferred: &str) -> Option<String> {
         .args(["machine", "list", "--format", "json"])
         .output()
         .ok()?;
-    running_machine_in(output, preferred)
-}
-
-/// `running_machine`, from what `podman machine list --format json` said.
-fn running_machine_in(output: std::process::Output, preferred: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let machines: Vec<MachineListing> = serde_json::from_slice(&output.stdout).ok()?;
+    running_machine_in(&output.stdout, preferred, &crate::acquire::podman)
+}
+
+/// `running_machine`, from what `podman machine list --format json` said, with every other podman
+/// command run by `run`.
+fn running_machine_in(
+    listing: &[u8],
+    preferred: &str,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Option<String> {
+    let machines: Vec<MachineListing> = serde_json::from_slice(listing).ok()?;
     usable_running_machine(&machines, preferred, |name| {
-        passed_over(name, std::env::consts::OS, crate::acquire::machine_behind).is_some()
+        passed_over(name, std::env::consts::OS, |connection| {
+            crate::acquire::machine_behind_with(connection, run)
+        })
+        .is_some()
     })
-    .map(|name| crate::acquire::connection_of_machine(&name))
+    .map(|name| crate::acquire::connection_of_machine_with(&name, run))
 }
 
 /// The running machine to use, by name: `preferred` when it runs, else the first running one that
@@ -495,6 +503,46 @@ pub fn passed_over_machine(address: &Address) -> Option<String> {
         std::env::consts::OS,
         crate::acquire::machine_behind,
     )
+}
+
+/// `passed_over_machine`, with every podman command run by `run`, the default connection
+/// included: `pin` asks for it with no time limit.
+fn passed_over_machine_with(
+    address: &Address,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Option<String> {
+    if address.engine != Engine::Podman || !matches!(std::env::consts::OS, "macos" | "windows") {
+        return None;
+    }
+    let env = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let connection = match (&address.connection, env("CONTAINER_CONNECTION")) {
+        (Some(connection), _) => connection.clone(),
+        (None, Some(connection)) => connection,
+        // A URL, as `pin` keeps it: not a machine's connection.
+        (None, None) if env("CONTAINER_HOST").is_some() => return None,
+        (None, None) => {
+            let listed = run(&[
+                "system",
+                "connection",
+                "list",
+                "--format",
+                "{{if .Default}}{{.Name}}{{end}}",
+            ])
+            .ok()?;
+            let names: Vec<&str> = listed
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect();
+            match names.as_slice() {
+                [name] => (*name).to_owned(),
+                _ => return None,
+            }
+        }
+    };
+    passed_over(&connection, std::env::consts::OS, |connection| {
+        crate::acquire::machine_behind_with(connection, run)
+    })
 }
 
 /// `passed_over_machine` for the connection `connection` on `os`, with the machine behind it read
@@ -871,6 +919,22 @@ absent. For troubleshooting logs, which must not wait on a stalled engine.
 pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
     let left = || deadline.saturating_duration_since(std::time::Instant::now());
     let timed_out = std::cell::Cell::new(false);
+    // Every podman command the detection runs: `machine list`, `machine inspect`, the default
+    // connection and the `volume ls` that finds where OpenBot's database is.
+    let podman = |args: &[&str]| -> Result<String, String> {
+        match crate::quiet::output_within(&mut podman_command(args), left()) {
+            Ok(out) if out.status.success() => {
+                Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            }
+            Ok(out) => Err(crate::quiet::said(&out.stderr)),
+            Err(error) => {
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    timed_out.set(true);
+                }
+                Err(error.to_string())
+            }
+        }
+    };
     let status = detect_among_with(
         &[Engine::Docker, Engine::Podman],
         own_machine_only(std::env::consts::OS),
@@ -881,19 +945,10 @@ pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
                 false
             }
         },
-        passed_over_machine,
+        |address| passed_over_machine_with(address, &podman),
         || {
-            let mut list = tool(Engine::Podman);
-            list.args(["machine", "list", "--format", "json"]);
-            match crate::quiet::output_within(&mut list, left()) {
-                Ok(output) => running_machine_in(output, crate::acquire::MACHINE),
-                Err(error) => {
-                    if error.kind() == std::io::ErrorKind::TimedOut {
-                        timed_out.set(true);
-                    }
-                    None
-                }
-            }
+            let listing = podman(&["machine", "list", "--format", "json"]).ok()?;
+            running_machine_in(listing.as_bytes(), crate::acquire::MACHINE, &podman)
         },
         |engine| program(engine).is_some(),
     );

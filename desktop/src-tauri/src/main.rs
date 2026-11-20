@@ -27220,14 +27220,20 @@ mod release_1_0_3_quit_notice {
 #[cfg(test)]
 mod troubleshooting_logs_tests {
     use super::*;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
     /// How long each fake engine command hangs: longer than the gathering may wait, so a command
     /// that is not stopped in time is seen. One that outlives it writes `<name>-outlived-<pid>`.
     const HANG: Duration = Duration::from_secs(30);
 
-    /// `docker` and `podman` that hang whatever they are asked, as a stalled Docker Desktop does.
-    const HANGING_ENGINE: &str = r#"
+    /**
+    `docker` and `podman` that hang on whatever they are asked, as a stalled engine does, except
+    for what answers without the engine: `version` fails at once, as an engine that isn't running
+    does, and Podman lists and inspects its machine, `openbot`, running and rootful, from files on
+    this computer.
+    */
+    const HANGING_ENGINE: &str = r##"
 use std::io::Write;
 fn main() {
     let me = std::env::current_exe().unwrap();
@@ -27239,6 +27245,22 @@ fn main() {
         .open(me.with_file_name("asked"))
         .unwrap();
     writeln!(log, "{name} {}", asked.join(" ")).unwrap();
+    let words: Vec<&str> = asked.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["version", ..] => {
+            eprintln!("Cannot connect to the engine");
+            std::process::exit(1);
+        }
+        ["machine", "list", ..] => {
+            println!(r#"[{{"Name":"openbot","Running":true}}]"#);
+            return;
+        }
+        ["machine", "inspect", "openbot"] => {
+            println!(r#"[{{"Name":"openbot","Rootful":true,"ConnectionInfo":{{}}}}]"#);
+            return;
+        }
+        _ => {}
+    }
     std::thread::sleep(std::time::Duration::from_secs(30));
     std::fs::write(
         me.with_file_name(format!("{name}-outlived-{}", std::process::id())),
@@ -27246,26 +27268,12 @@ fn main() {
     )
     .unwrap();
 }
-"#;
+"##;
 
-    /**
-    FOUND LIVE, OpenBot Desktop 1.1.2 on a Mac. Docker Desktop stalled while OpenBot ran, and
-    OpenBot > Get Troubleshooting Logs… gave no file and no word until Docker was restarted: the
-    server's log came from `docker compose logs` with no time limit, and the engine's version, disk
-    use and size waited on it after. Now the gathering asks them all at once, stops every engine
-    command at its deadline, and the logs come back then, saying what they couldn't collect.
-
-    Through the menu's own path (`gather_troubleshooting_logs`), on an OpenBot this session started,
-    with the engine it runs on hanging on every command.
-    */
-    #[test]
-    fn troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs() {
-        if crate::test_support::isolated_process(
-            "troubleshooting_logs_tests::troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs",
-        ) {
-            return;
-        }
-        let dir = crate::test_support::temp_root("logs-engine-hangs");
+    /// `HANGING_ENGINE` as `docker` and `podman`, first on PATH, and a home folder of its own.
+    /// Sets process environment: only for a test in its own process.
+    fn hanging_engine(label: &str) -> (PathBuf, PathBuf) {
+        let dir = crate::test_support::temp_root(label);
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let source = dir.join("hanging_engine.rs");
@@ -27286,23 +27294,11 @@ fn main() {
         let home = dir.join("home");
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home);
-        let root = dir.join("OpenBot");
-        std::fs::create_dir_all(&root).unwrap();
-        let address = engine::Address::new(engine::Engine::Docker, None);
-        local_eval::use_engine(&address);
-        let app = tauri::test::mock_builder()
-            .manage(Shell::default())
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        {
-            let shell = app.state::<Shell>();
-            *shell.root.lock().unwrap() = Some(root.clone());
-            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
-                root: root.clone(),
-                address,
-            });
-        }
+        (dir, bin)
+    }
 
+    /// Get Troubleshooting Logs… as the menu gathers them, timed from when it was asked.
+    fn gathered(app: &tauri::App<tauri::test::MockRuntime>) -> (String, Instant) {
         let handle = app.handle().clone();
         let (sender, received) = std::sync::mpsc::channel();
         let asked = Instant::now();
@@ -27314,6 +27310,75 @@ fn main() {
             .unwrap_or_else(|_| panic!("no troubleshooting logs 28s after asking"));
         let took = asked.elapsed();
         assert!(took < Duration::from_secs(26), "took {took:?}");
+        (text, asked)
+    }
+
+    /// The "What couldn't be collected" section of `text`.
+    fn not_collected(text: &str) -> &str {
+        let missing = text
+            .split("## What couldn't be collected\n\n")
+            .nth(1)
+            .unwrap_or_else(|| panic!("nothing said about what wasn't collected in\n{text}"));
+        &missing[..missing.find("\n## ").unwrap()]
+    }
+
+    /// Every engine command was stopped: none lived to write that it outlived the gathering.
+    fn none_outlived(bin: &Path, asked: Instant) {
+        std::thread::sleep(
+            (asked + HANG + Duration::from_secs(3)).saturating_duration_since(Instant::now()),
+        );
+        let outlived: Vec<String> = std::fs::read_dir(bin)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("-outlived-"))
+            .collect();
+        assert!(
+            outlived.is_empty(),
+            "still running after the gathering: {outlived:?}"
+        );
+    }
+
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    /**
+    FOUND LIVE, OpenBot Desktop 1.1.2 on a Mac. Docker Desktop stalled while OpenBot ran, and
+    OpenBot > Get Troubleshooting Logs… gave no file and no word until Docker was restarted: the
+    server's log came from `docker compose logs` with no time limit, and the engine's version, disk
+    use and size waited on it after. Now the gathering asks them all at once, stops every engine
+    command at its deadline, and the logs come back then, saying what they couldn't collect.
+
+    Through the menu's own path (`gather_troubleshooting_logs`), on an OpenBot this session started,
+    with the engine it runs on hanging on every command.
+    */
+    #[test]
+    fn troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs() {
+        if crate::test_support::isolated_process(
+            "troubleshooting_logs_tests::troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs",
+        ) {
+            return;
+        }
+        let (dir, bin) = hanging_engine("logs-engine-hangs");
+        let root = dir.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        let address = engine::Address::new(engine::Engine::Docker, None);
+        local_eval::use_engine(&address);
+        let app = app();
+        {
+            let shell = app.state::<Shell>();
+            *shell.root.lock().unwrap() = Some(root.clone());
+            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.clone(),
+                address,
+            });
+        }
+
+        let (text, asked) = gathered(&app);
 
         // The engine was asked, and what it didn't answer is named, near the top.
         let engine_asked = std::fs::read_to_string(bin.join("asked")).unwrap_or_default();
@@ -27321,11 +27386,7 @@ fn main() {
             engine_asked.contains("compose logs --tail 5000 server"),
             "{engine_asked}"
         );
-        let missing = text
-            .split("## What couldn't be collected\n\n")
-            .nth(1)
-            .unwrap_or_else(|| panic!("nothing said about what wasn't collected in\n{text}"));
-        let missing = &missing[..missing.find("\n## ").unwrap()];
+        let missing = not_collected(&text);
         for expected in [
             "- The container engine's version: it didn't answer within 20 seconds.\n",
             "- The container engine's disk use (system df): it didn't answer within 20 seconds.\n",
@@ -27348,21 +27409,41 @@ fn main() {
         ] {
             assert!(text.contains(expected), "missing {expected:?} in\n{text}");
         }
+        none_outlived(&bin, asked);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
-        // Every engine command was stopped: none lived to write that it outlived the gathering.
-        std::thread::sleep(
-            (asked + HANG + Duration::from_secs(3)).saturating_duration_since(Instant::now()),
+    /**
+    FOUND ON A REAL WINDOWS BOX, testing the fix above: before setup has chosen an engine, with
+    OpenBot's Podman machine stalled, every gathering left a `podman volume ls` running until the
+    engine came back. Finding which engine is running asked for `machine list` within the deadline,
+    but then for where OpenBot's database is (`acquire::connection_of_machine`) with no time limit.
+    Every podman command of that search now stops at the deadline too.
+    */
+    #[test]
+    fn troubleshooting_logs_before_setup_leave_no_engine_command_running() {
+        if crate::test_support::isolated_process(
+            "troubleshooting_logs_tests::troubleshooting_logs_before_setup_leave_no_engine_command_running",
+        ) {
+            return;
+        }
+        let (dir, bin) = hanging_engine("logs-engine-hangs-before-setup");
+        let app = app();
+
+        let (text, asked) = gathered(&app);
+
+        let engine_asked = std::fs::read_to_string(bin.join("asked")).unwrap_or_default();
+        assert!(engine_asked.contains("volume ls"), "{engine_asked}");
+        assert_eq!(
+            not_collected(&text),
+            "- Which container engine is running: none answered within 20 seconds.\n",
+            "{text}"
         );
-        let outlived: Vec<String> = std::fs::read_dir(&bin)
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains("-outlived-"))
-            .collect();
         assert!(
-            outlived.is_empty(),
-            "still running after the gathering: {outlived:?}"
+            text.contains("Container engine: none answered in time.\n"),
+            "{text}"
         );
+        none_outlived(&bin, asked);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
