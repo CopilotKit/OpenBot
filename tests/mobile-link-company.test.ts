@@ -18,7 +18,9 @@ test("a tap asks for a ticket for that provider and opens it at once in the syst
   });
   expect(outcome).toBe("opened");
   expect(asked).toEqual(["harbor-okta"]);
-  expect(opened).toEqual([["https://openbot.example/ticket/1", RETURN_ADDRESS]]);
+  expect(opened).toEqual([
+    ["https://openbot.example/ticket/1", RETURN_ADDRESS],
+  ]);
 
   // Another tap is a new ticket, never the last one again.
   await linkCompanyAccount("harbor-okta", {

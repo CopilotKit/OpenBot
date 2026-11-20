@@ -31,7 +31,10 @@ export async function linkCompanyAccount(
   try {
     ({ url } = await steps.ticket(providerId));
   } catch (error) {
-    if ((error as { code?: unknown } | null)?.code === "IDENTITY_PROVIDER_NOT_FOUND")
+    if (
+      (error as { code?: unknown } | null)?.code ===
+      "IDENTITY_PROVIDER_NOT_FOUND"
+    )
       return "stale";
     throw error;
   }
