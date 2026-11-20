@@ -23,6 +23,8 @@ import {
   type OrganizationChoices,
 } from "../organization";
 import { clientHeaders } from "../release";
+import type { Deployment } from "./generated/model";
+import { getDeployment } from "./generated/organization-settings/organization-settings";
 import {
   getListOrganizationsUrl,
   listOrganizations,
@@ -54,7 +56,7 @@ export const ORGANIZATION_ID = "{organizationId}";
 /**
  * The organization every install has. What the deployment itself offers (how people sign in) is asked of it before
  * anybody has signed in, when the organization a person works in is not known yet. Once somebody is signed in it is
- * asked of the organization they work in ({@link deploymentOrganization}), since `default` need not be one of theirs.
+ * asked of the organization they work in ({@link readDeployment}), since `default` need not be one of theirs.
  */
 export const DEPLOYMENT_ORGANIZATION_ID = "default";
 
@@ -121,7 +123,10 @@ async function organizationFor(
 ): Promise<string | undefined> {
   if (!cookie || address.startsWith(OWN_ORGANIZATIONS)) return undefined;
   const named = /^\/api\/v2\/organizations\/([^/?]+)/.exec(address)?.[1];
-  return named ? decodeURIComponent(named) : organizations.current(cookie);
+  if (named) return decodeURIComponent(named);
+  // A cookie that is not a live session can't read the person's organizations: the request goes without the header,
+  // and is answered as whoever holds that cookie is.
+  return organizations.current(cookie).catch(() => undefined);
 }
 
 /**
@@ -132,11 +137,24 @@ export async function organizationAddress(rest: string): Promise<string> {
   return inOrganization(`${ORGANIZATION}${rest}`, await authClient.getCookie());
 }
 
-/** The organization the deployment is asked about: `default` before sign-in, else the one the person works in. */
-export async function deploymentOrganization(): Promise<string> {
-  return (await authClient.getCookie())
-    ? ORGANIZATION_ID
-    : DEPLOYMENT_ORGANIZATION_ID;
+/**
+ * What the deployment offers (how people sign in, which apps it serves), read in the organization the person works in
+ * while they hold a live session (`signedIn`, the session the sign-in client reports), and in `default` otherwise.
+ *
+ * Whether somebody is signed in is the session's answer, never whether the phone holds a cookie: sign-in leaves cookies
+ * of its own behind (an unfinished sign-in's state, an expired or revoked session), and reading the person's
+ * organizations with one of those is refused, which left the signed-out screen with no way to sign in. A session that
+ * turns out to have ended on the way (refused as signed out) is read in `default` too.
+ */
+export async function readDeployment(signedIn: boolean): Promise<Deployment> {
+  if (!signedIn) return getDeployment(DEPLOYMENT_ORGANIZATION_ID);
+  try {
+    return await getDeployment(ORGANIZATION_ID);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401)
+      return getDeployment(DEPLOYMENT_ORGANIZATION_ID);
+    throw error;
+  }
 }
 
 /** The signed-in person's organizations, and the one they work in. */
