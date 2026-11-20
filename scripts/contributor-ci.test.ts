@@ -52,7 +52,7 @@ describe("contributor CI makes way for CopilotKit's", () => {
     expect(result.rerun).toEqual([]);
   });
 
-  test("a whole team run still queued counts, a team PR branch's too", () => {
+  test("a whole team run still queued counts by its queued jobs, a team PR branch's too", () => {
     const result = plan(
       facts({
         active: [
@@ -63,9 +63,56 @@ describe("contributor CI makes way for CopilotKit's", () => {
           }),
           fork({ id: 3 }),
         ],
+        jobsOf: (r) =>
+          r.id === 2
+            ? [{ status: "queued", created_at: minutesAgo(WAIT_MINUTES + 2) }]
+            : [],
       }),
     );
     expect(result.cancel.map((r) => r.id)).toEqual([3]);
+  });
+
+  // Run 43097645146: Desktop macOS signing on a team branch, `queued` since 11 November with no
+  // jobs, which GitHub would not cancel. It paused every fork run every five minutes.
+  test("a run stuck in queued for days with no jobs is not the team waiting", () => {
+    const ghost = run({
+      id: 43097645146,
+      path: ".github/workflows/desktop-macos-signing.yml",
+      event: "pull_request",
+      status: "queued",
+      conclusion: null,
+      created_at: "2026-11-11T20:42:40Z",
+      head_repository: { full_name: REPO },
+      pull_requests: [],
+    });
+    const contributor = fork({ id: 3, status: "in_progress" });
+    const result = plan(
+      facts({ active: [ghost, contributor], jobsOf: () => [] }),
+    );
+    expect(result.cancel).toEqual([]);
+    // Nor when the API does list a queued job for it: it is days old.
+    const stale = plan(
+      facts({
+        active: [ghost, contributor],
+        jobsOf: () => [
+          { status: "queued", created_at: "2026-11-11T20:42:41Z" },
+        ],
+      }),
+    );
+    expect(stale.cancel).toEqual([]);
+  });
+
+  test("a queued team run with no jobs yet pauses nothing", () => {
+    const result = plan(
+      facts({
+        active: [
+          run({ id: 2, status: "queued", created_at: minutesAgo(20) }),
+          fork({ id: 3 }),
+        ],
+        jobsOf: () => [],
+      }),
+    );
+    expect(result.cancel).toEqual([]);
   });
 
   test("a team job that has only just queued pauses nothing", () => {
@@ -136,6 +183,7 @@ describe("contributor CI resumes when the runners are free", () => {
           active: [
             run({ id: 2, status: "queued", created_at: minutesAgo(10) }),
           ],
+          jobsOf: () => [{ status: "queued", created_at: minutesAgo(10) }],
         }),
       ).rerun,
     ).toEqual([]);
