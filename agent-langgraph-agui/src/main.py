@@ -15,6 +15,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
+from run_model_key import RunModelKey
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -260,7 +261,6 @@ def _model(plan_models=None):
             model,
             **_google_genai_kwargs(prefix),
             **_provider_kwargs(prefix, named, run.effort),
-            **_gateway_key(run, prefix),
             **_retries(run),
         )
     return init_chat_model(
@@ -268,24 +268,8 @@ def _model(plan_models=None):
         model_provider=provider,
         **_google_genai_kwargs(provider),
         **_provider_kwargs(provider, model, run.effort),
-        **_gateway_key(run, provider),
         **_retries(run),
     )
-
-
-def _gateway_key(run, provider: str) -> dict:
-    """The run's own model gateway token as the key, when the server sent one.
-
-    One harness serves every organization of an OpenBot, and the deployment's gateway token in the
-    environment means one organization only. The server sends each run a token for its own
-    organization (`openbotModelRoute`), so the call goes out on that organization's AI connection.
-    The address stays the configured one: the server sends a token only to a harness it runs, which
-    reaches the model through its gateway.
-    """
-    token = getattr(run, "gateway_token", "")
-    if not isinstance(token, str) or not token or provider not in ("openai", "anthropic"):
-        return {}
-    return {"api_key": token}
 
 
 async def _plan_model():
@@ -378,6 +362,8 @@ builder.add_edge("tools", "answer")
 graph = builder.compile(checkpointer=MemorySaver())
 
 app = FastAPI()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

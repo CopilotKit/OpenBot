@@ -799,51 +799,6 @@ async def test_without_a_server_choice_the_deployment_model_answers(monkeypatch)
     assert "reasoning_effort" not in body
 
 
-# One harness serves every organization of an OpenBot, and the key in its environment is the
-# deployment's gateway token, which means one organization. A run the server sends its own token
-# (`openbotModelRoute`) calls the model with that token, so the gateway answers it on the AI
-# connection of the run's own organization. A run with none keeps the deployment's key.
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("provider", "via", "key_name", "base_name", "base_suffix"),
-    [
-        ("openai", "openai", "OPENAI_API_KEY", "OPENAI_BASE_URL", "/v1"),
-        ("anthropic", "anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", ""),
-    ],
-)
-async def test_a_runs_own_gateway_token_is_the_key_it_calls_the_model_with(
-    monkeypatch, provider, via, key_name, base_name, base_suffix
-):
-    keys: list[str] = []
-    with fake_provider(keys) as (base, bodies):
-        monkeypatch.setenv("BOT_PROVIDER", provider)
-        monkeypatch.setenv(key_name, "deployment-gateway-token")
-        monkeypatch.setenv(base_name, f"{base}{base_suffix}")
-        monkeypatch.setenv("BOT_MODEL", "configured-model")
-        body = run_body()
-        body["forwardedProps"]["openbotModelRoute"] = {
-            "via": via,
-            "token": "obgw_run-token-org-b",
-        }
-        body["forwardedProps"]["openbotOrganization"] = "org-b"
-        finished(await run(body))
-        # A plan's route carries no token, and a run without a route keeps the deployment's key.
-        plan = run_body()
-        plan["forwardedProps"]["openbotModelRoute"] = {"via": "claude-plan"}
-        finished(await run(plan))
-        finished(await run(run_body()))
-
-    assert keys == [
-        "obgw_run-token-org-b",
-        "deployment-gateway-token",
-        "deployment-gateway-token",
-    ]
-    assert len(bodies) == 3
-    # The route and the organization are the server's, never passed on to the model.
-    assert "obgw_run-token-org-b" not in json.dumps(bodies)
-    assert "org-b" not in json.dumps(bodies)
-
-
 @pytest.mark.parametrize(
     ("model", "expected"),
     [

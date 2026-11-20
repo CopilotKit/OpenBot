@@ -53,6 +53,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import StreamEvent
 
 from .replay import RESULT_CHARS, cut_note, run_replayed_query, system_instructions
+from .run_model_proxy import query_environment, refresh
 
 logger = logging.getLogger(__name__)
 
@@ -827,7 +828,13 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         if chosen:
             # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
-        options.env = {**(options.env or {}), UNKNOWN_MODEL_WINDOW: "1"}
+        # On the gateway, the query's calls come back through this harness with the newest run
+        # token of its thread. See run_model_proxy.py.
+        options.env = {
+            **(options.env or {}),
+            UNKNOWN_MODEL_WINDOW: "1",
+            **query_environment(thread_id),
+        }
         if once:
             options.env[MAX_RETRIES] = "0"
         options.max_buffer_size = MESSAGE_BUFFER_BYTES
@@ -1291,6 +1298,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
 
     async def run(self, input_data):
         thread_id, run_id = input_data.thread_id, input_data.run_id
+        # A query this run carries on sends its calls with this run's token from now.
+        refresh(thread_id)
         lock = self._segment_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
             answer_only = (
