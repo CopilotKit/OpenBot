@@ -70,6 +70,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 - **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
   moves to `copilotkit@3e64135`, so an install or update runs Intelligence 0.17.0-rc.4.
+- **Setup no longer stops for good after the back end's saved settings were deleted.** With
+  OpenBot's Podman machine removed and the back end's folder deleted by hand, but the CopilotKit
+  CLI's record of it kept, every setup stopped with "OpenBot can't run on this computer as it's set
+  up." until that record was removed by hand. Setup now forgets that back end and sets up a new
+  one.
 
 ### Kubernetes
 
