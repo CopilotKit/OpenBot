@@ -17,6 +17,7 @@ import {
 } from "../client-version";
 import {
   createOrganizationChoice,
+  IN_NO_ORGANIZATION,
   type ListedOrganization,
   ORGANIZATION,
   ORGANIZATION_HEADER,
@@ -180,6 +181,20 @@ export async function readDeployment(signedIn: boolean): Promise<Deployment> {
       (error.status === 401 || error.status === 404)
     )
       return asNobody();
+    throw error;
+  }
+}
+
+/**
+ * Every organization the signed-in person is in, or none: somebody removed from their last organization is in none,
+ * which is an answer here and not a failure.
+ */
+export async function organizationsHeld(): Promise<ListedOrganization[]> {
+  try {
+    return (await organizationChoices()).organizations;
+  } catch (error) {
+    if (error instanceof Error && error.message === IN_NO_ORGANIZATION)
+      return [];
     throw error;
   }
 }
