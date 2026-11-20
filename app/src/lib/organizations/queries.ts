@@ -26,6 +26,7 @@ import {
 } from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
+import { InNoOrganization } from "./in-no-organization";
 
 /** One of the person's organizations, with the server's verdicts: their role in it, and `active`. */
 export type OrganizationSummary = Organization;
@@ -95,27 +96,6 @@ function noSuchAddress(error: unknown): boolean {
     error.status === 404 &&
     (error.code === undefined || error.code === "NOT_FOUND")
   );
-}
-
-/** What the server says on every other request to somebody in no organization, said here too. */
-export const IN_NONE =
-  "You aren't a member of an organization here. Ask an admin to add you.";
-
-/**
- * Signed in, and in no organization here: never added, or removed from the last one. Every screen of the app works in
- * an organization, so this is answered with the page for somebody in none (`NoOrganizationPage`), never an error
- * screen, and the sign-in screen is shown as for anybody.
- */
-export class InNoOrganization extends Error {
-  constructor() {
-    super(IN_NONE);
-    this.name = "InNoOrganization";
-  }
-}
-
-/** Whether a failure is the person being in no organization here. */
-export function inNoOrganization(error: unknown): error is InNoOrganization {
-  return error instanceof InNoOrganization;
 }
 
 /**
@@ -279,8 +259,6 @@ export function ownOrganizationsQueryOptions() {
       return mine;
     },
     staleTime: 60_000,
-    // Being in no organization is an answer: asking again at once says the same, and only holds the page back.
-    retry: (failures, error) => !inNoOrganization(error) && failures < 1,
     /*
      * A switch made in another window is noticed when the person comes back to this one. Always,
      * however lately the list was read: the session is one for every window, so until this is
