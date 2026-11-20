@@ -5117,7 +5117,11 @@ fn lost_stack(
     installation: &std::path::Path,
     cancel: &Cancel,
 ) -> Result<Option<Lost>, Failure> {
-    if report.outcome != Outcome::Failed || report.reason != Some(Reason::LocalCommandFailed) {
+    let refused_engine =
+        report.outcome == Outcome::Blocked && report.reason == Some(Reason::UnsupportedEngine);
+    let failed =
+        report.outcome == Outcome::Failed && report.reason == Some(Reason::LocalCommandFailed);
+    if !failed && !refused_engine {
         return Ok(None);
     }
     let (code, bytes) = match execute(
@@ -5170,6 +5174,11 @@ fn lost_stack(
         };
         let shared = paths.iter().any(|path| !is_here(path));
         let files = private_files(&private);
+        if refused_engine
+            && (files != PrivateFiles::Missing || shared || private.join(STACK_ENGINE_FILE).exists())
+        {
+            return Ok(None);
+        }
         log::warn!(
             "[local setup] {}'s private files are {files:?}{}",
             stack.as_str(),
@@ -5389,6 +5398,7 @@ fn write_private(
 
 /// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
 fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failure> {
+    name_engine_of_lost(stack);
     let (code, bytes) = execute(
         cli,
         &forget_arguments(stack),
