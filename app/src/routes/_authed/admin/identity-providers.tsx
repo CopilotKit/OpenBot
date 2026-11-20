@@ -209,10 +209,18 @@ function IdentityProvidersPage() {
       {deploymentWide.length > 0 ? (
         <PageSection
           description={
-            // Only while the organization has none of its own: once it has, only those count for its Require SSO.
+            /*
+             * Only while the organization has none of its own: once it has, only those count for its Require SSO.
+             * On a hosted OpenBot whoever runs it is OpenBot by CopilotKit, whom an organization admin has no way
+             * to ask, so the sentence stops at what is true.
+             */
             registered.length > 0
-              ? "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these."
-              : "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
+              ? hosted
+                ? "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO."
+                : "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these."
+              : hosted
+                ? "Set up for everyone who signs in to OpenBot. They count for this organization too."
+                : "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
           }
           title="For all of OpenBot"
         >
