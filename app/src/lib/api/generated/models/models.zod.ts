@@ -258,17 +258,9 @@ export const GetAiConnectionResponse = zod
     provider: zod
       .union([
         zod
-          .enum([
-            "openai",
-            "anthropic",
-            "google",
-            "xai",
-            "unbiased",
-            "trustedrouter",
-            "openai-compatible",
-          ])
+          .string()
           .describe(
-            "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
           ),
         zod.null(),
       ])
@@ -318,17 +310,9 @@ export const GetAiConnectionResponse = zod
         zod
           .object({
             provider: zod
-              .enum([
-                "openai",
-                "anthropic",
-                "google",
-                "xai",
-                "unbiased",
-                "trustedrouter",
-                "openai-compatible",
-              ])
+              .string()
               .describe(
-                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])
@@ -456,17 +440,9 @@ export const ReplaceAiConnectionResponse = zod
     provider: zod
       .union([
         zod
-          .enum([
-            "openai",
-            "anthropic",
-            "google",
-            "xai",
-            "unbiased",
-            "trustedrouter",
-            "openai-compatible",
-          ])
+          .string()
           .describe(
-            "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+            "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
           ),
         zod.null(),
       ])
@@ -516,17 +492,9 @@ export const ReplaceAiConnectionResponse = zod
         zod
           .object({
             provider: zod
-              .enum([
-                "openai",
-                "anthropic",
-                "google",
-                "xai",
-                "unbiased",
-                "trustedrouter",
-                "openai-compatible",
-              ])
+              .string()
               .describe(
-                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+                "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
               ),
             login: zod
               .enum(["plan", "api-key", "endpoint", "oauth"])

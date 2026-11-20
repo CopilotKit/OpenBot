@@ -1,6 +1,7 @@
 import type {
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
 } from "@/lib/api/generated/model";
 
 /**
@@ -133,8 +134,12 @@ export function loginsHere(
   );
 }
 
+/**
+ * The row for a provider, by its id. The server's answer can name a provider this app doesn't know
+ * (the list grows, api/README.md "Enums that grow"): that one has no row, and is shown by its id.
+ */
 export function providerById(
-  id: AiConnectionProvider | null | undefined,
+  id: AiConnectionProviderAnswer | null | undefined,
 ): AiProvider | undefined {
   return AI_PROVIDERS.find((provider) => provider.id === id);
 }
