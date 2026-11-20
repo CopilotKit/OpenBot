@@ -311,6 +311,31 @@ export class Enrollment {
     return this.exchange(pending);
   }
 
+  /**
+   * While the agent runs with `installId`: has OpenBot connected this cluster as a new install
+   * since (an admin's Disconnect revoked the certificate, then Connect)? Then the new install's
+   * token is kept in the Secret, as before any token is spent, and this answers true, for the agent
+   * to start again and enroll for it. Anything else (no token, a refusal, the same install) is false
+   * and changes nothing.
+   */
+  async newInstallWaiting(installId: string): Promise<boolean> {
+    const collected = await this.collect(this.checkTimeoutMs);
+    if (
+      collected.kind === "wait" ||
+      collected.token.installId.toLowerCase() === installId.toLowerCase()
+    )
+      return false;
+    await this.secret.write({
+      [SECRET_KEYS.pendingToken]: collected.token.enrollmentToken,
+      [SECRET_KEYS.pendingInstall]: collected.token.installId,
+    });
+    this.options.log(
+      "OpenBot connected this cluster as a new install; starting again to enroll for it",
+      { previousInstallId: installId, installId: collected.token.installId },
+    );
+    return true;
+  }
+
   private pending(data: Record<string, string>) {
     const parsed = AgentEnrollmentToken.safeParse({
       installId: data[SECRET_KEYS.pendingInstall],
@@ -509,4 +534,27 @@ export async function enrolledAgent(
     config: { ...agent.config, installId },
     credentials,
   };
+}
+
+/**
+ * For the running agent: whether OpenBot has connected this cluster as a new install
+ * (`Enrollment.newInstallWaiting`), or null for an agent installed with a certificate of its own.
+ */
+export function newInstallCheck(
+  agent: Agent,
+  kube: Kube,
+  options: EnrollOptions,
+): ((installId: string) => Promise<boolean>) | null {
+  const { enrollment } = agent.config;
+  if (!enrollment) return null;
+  const check = new Enrollment(
+    enrollment,
+    new KubeSecretStore(
+      kube,
+      agent.config.agentNamespace,
+      enrollment.credentialsSecret,
+    ),
+    options,
+  );
+  return (installId) => check.newInstallWaiting(installId);
 }
