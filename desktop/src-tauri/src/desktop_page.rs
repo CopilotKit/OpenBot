@@ -353,7 +353,7 @@ async fn cancel_plan_sign_in(
     crate::cancel_plan_sign_in_now(app, plan).await
 }
 
-/// Start a Google, xAI or Unbiased AI sign-in in the browser.
+/// Start a Google, xAI, Cloudflare or Unbiased AI sign-in in the browser.
 #[tauri::command]
 async fn begin_provider_sign_in(
     app: tauri::AppHandle,
@@ -363,8 +363,8 @@ async fn begin_provider_sign_in(
 }
 
 /// What a provider's sign-in gave the page: for Unbiased AI, the key it minted, which the page
-/// sends straight to the server as an address's key and keeps nowhere. Nothing for Google or xAI,
-/// whose sign-in stays in the file the server reads.
+/// sends straight to the server as an address's key and keeps nowhere. Nothing for Google, xAI or
+/// Cloudflare, whose sign-in stays in the file the server reads.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderSignedIn {

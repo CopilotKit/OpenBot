@@ -43,6 +43,7 @@ export type SetupEvent =
         | "anthropic"
         | "google"
         | "xai"
+        | "cloudflare"
         | "compatible"
         | "none";
       credential_path: "subscription" | "api_key" | "oauth" | "none";
@@ -80,7 +81,12 @@ export function modelChoiceEvent(
       custom_base_url: Boolean(choice.baseUrl?.trim()),
     };
   }
-  if ((provider === "google" || provider === "xai") && login === "oauth") {
+  if (
+    (provider === "google" ||
+      provider === "xai" ||
+      provider === "cloudflare") &&
+    login === "oauth"
+  ) {
     return {
       kind: "model_chosen",
       provider,

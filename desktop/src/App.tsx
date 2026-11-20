@@ -1087,7 +1087,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   function modelCanStart(choice = model) {
     if (!choice) return false;
     if (!choice.saved) return true;
-    if (choice.provider === "google" || choice.provider === "xai") {
+    if (
+      choice.provider === "google" ||
+      choice.provider === "xai" ||
+      choice.provider === "cloudflare"
+    ) {
       return choice.login === "oauth" && Boolean(choice.model?.trim());
     }
     if (choice.provider === "openai-compatible") {

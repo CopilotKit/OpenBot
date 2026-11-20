@@ -58,6 +58,7 @@ import {
   hostOf,
   isEndpointAddress,
   loginsHere,
+  SIGN_IN_MODELS,
   providerById,
 } from "@/lib/ai-connection/providers";
 import {
@@ -341,7 +342,7 @@ function ChooseConnection({
     const nextPreset = next ? ENDPOINT_PRESETS[next.id] : undefined;
     setApiKey("");
     setBaseUrl(nextPreset?.baseUrl ?? "");
-    setModel(nextPreset?.model ?? "");
+    setModel(nextPreset?.model ?? (next ? SIGN_IN_MODELS[next.id] : "") ?? "");
     setUseSaved(true);
     setSignedIn(false);
     setSignInFailure(null);
@@ -444,7 +445,7 @@ function ChooseConnection({
         await finishPlanSignIn(plan);
       } else {
         const begun = await beginProviderSignIn(
-          provider.id as "google" | "xai" | "unbiased",
+          provider.id as "google" | "xai" | "cloudflare" | "unbiased",
         );
         if (!current()) {
           void cancelProviderSignIn(begun.attemptId).catch(() => {});
@@ -548,7 +549,14 @@ function ChooseConnection({
           aria-label="AI provider"
           className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
         >
-          {(provider ? [provider] : AI_PROVIDERS).map((row) => (
+          {(provider
+            ? [provider]
+            : // A row with no way in this page can offer (Cloudflare signs in through Desktop)
+              // would open onto nothing, so it is not listed.
+              AI_PROVIDERS.filter(
+                (row) => loginsHere(row, inDesktop).length > 0,
+              )
+          ).map((row) => (
             <Item
               key={row.id}
               render={
@@ -792,6 +800,8 @@ const SIGN_IN_SAYS: Record<string, string> = {
   google:
     "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
+  cloudflare:
+    "Choose one Cloudflare account in your browser and approve the request. Model calls go through that account's AI Gateway and are billed to its credits.",
   unbiased:
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };

@@ -22,6 +22,24 @@ const XAI_CLIENT: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const XAI_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access";
 const GOOGLE_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
 /*
+ * Cloudflare's sign-in for AI Gateway: an authorization code with PKCE against the dashboard, the
+ * only flow Cloudflare gives a third-party client. `aig.run` lets the session send model calls
+ * through the account's AI Gateway, which bills them to the account's own credits (Unified
+ * Billing); `account-settings.read` is what lists the account the person chose on the consent page;
+ * `offline_access` is what makes Cloudflare issue a refresh token at all.
+ */
+const CLOUDFLARE_SCOPE: &str = "offline_access aig.run account-settings.read";
+const CLOUDFLARE_DASHBOARD: &str = "https://dash.cloudflare.com";
+const CLOUDFLARE_API: &str = "https://api.cloudflare.com/client/v4";
+/*
+ * Cloudflare matches a redirect address exactly, port and all, so the listener cannot take whatever
+ * port is free as Google's does. These are the addresses the registered client lists; the first one
+ * free is used, so another program holding one does not stop the sign-in.
+ */
+const CLOUDFLARE_PORTS: [u16; 3] = [47823, 47824, 47825];
+const CLOUDFLARE_UNREGISTERED: &str =
+    "Cloudflare sign-in needs this OpenBot build's registered Cloudflare OAuth client. Use another provider until it is configured.";
+/*
  * Unbiased AI's partner sign-in: an RFC 8628 device authorization against its platform, which mints an
  * API key for its OpenAI-compatible gateway exactly once and keeps no copy (Unbiased AI's partner
  * integration guide). The client id is public by design, like xAI's: it carries no secret and only
@@ -50,6 +68,9 @@ pub struct Credentials {
     pub scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quota_project: Option<String>,
+    /// The Cloudflare account whose AI Gateway serves, and is billed for, the model calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     pub proxy_token: String,
 }
 
@@ -82,6 +103,15 @@ enum Pending {
         device_code: String,
         interval: u64,
         expires: Instant,
+    },
+    Cloudflare {
+        listener: TcpListener,
+        verifier: String,
+        state: String,
+        redirect: String,
+        client_id: String,
+        dashboard: String,
+        api: String,
     },
     Unbiased {
         platform: String,
@@ -117,6 +147,9 @@ fn configured(name: &str) -> Option<String> {
             option_env!("OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT")
         }
         "OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID" => option_env!("OPENBOT_XAI_MODEL_OAUTH_CLIENT_ID"),
+        "OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID" => {
+            option_env!("OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID")
+        }
         "OPENBOT_UNBIASED_OAUTH_CLIENT_ID" => option_env!("OPENBOT_UNBIASED_OAUTH_CLIENT_ID"),
         _ => None,
     };
@@ -258,6 +291,17 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
                 Some(user_code),
             )
         }
+        "cloudflare" => {
+            let client_id = configured("OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID")
+                .ok_or(CLOUDFLARE_UNREGISTERED)?;
+            let (pending, url) = begin_cloudflare(
+                &cloudflare_address("OPENBOT_CLOUDFLARE_DASHBOARD_URL", CLOUDFLARE_DASHBOARD),
+                &cloudflare_address("OPENBOT_CLOUDFLARE_API_URL", CLOUDFLARE_API),
+                &client_id,
+                &CLOUDFLARE_PORTS,
+            )?;
+            (pending, url, None)
+        }
         "unbiased" => {
             let client_id = configured("OPENBOT_UNBIASED_OAUTH_CLIENT_ID")
                 .unwrap_or_else(|| UNBIASED_CLIENT.into());
@@ -320,6 +364,164 @@ fn xai_verification_url(body: &serde_json::Value) -> Result<String, String> {
         return Err(invalid.into());
     }
     Ok(parsed.into())
+}
+
+/// Cloudflare's dashboard or API, or an override for driving this client against a mock of either.
+fn cloudflare_address(name: &str, official: &str) -> String {
+    configured(name)
+        .map(|url| url.trim_end_matches('/').to_owned())
+        .unwrap_or_else(|| official.into())
+}
+
+/// Step one of the Cloudflare flow: hold one of the registered callback ports and build the address
+/// of the consent page, where the person chooses the account and approves the scopes.
+fn begin_cloudflare(
+    dashboard: &str,
+    api: &str,
+    client_id: &str,
+    ports: &[u16],
+) -> Result<(Pending, String), String> {
+    let listener = ports
+        .iter()
+        .find_map(|port| TcpListener::bind(("127.0.0.1", *port)).ok())
+        .ok_or(
+            "Cloudflare sign-in could not start because another program is using its sign-in ports. Close it and try again.",
+        )?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let redirect = format!(
+        "http://127.0.0.1:{}/oauth/callback",
+        listener.local_addr().map_err(|e| e.to_string())?.port()
+    );
+    let verifier = random();
+    let state = random();
+    let challenge = pkce_challenge(&verifier);
+    let mut url = reqwest::Url::parse(&format!("{dashboard}/oauth2/auth"))
+        .map_err(|_| "The Cloudflare sign-in address is not valid.")?;
+    url.query_pairs_mut().extend_pairs([
+        ("client_id", client_id),
+        ("redirect_uri", redirect.as_str()),
+        ("response_type", "code"),
+        ("scope", CLOUDFLARE_SCOPE),
+        ("state", state.as_str()),
+        ("code_challenge", challenge.as_str()),
+        ("code_challenge_method", "S256"),
+    ]);
+    Ok((
+        Pending::Cloudflare {
+            listener,
+            verifier,
+            state,
+            redirect,
+            client_id: client_id.into(),
+            dashboard: dashboard.into(),
+            api: api.into(),
+        },
+        url.to_string(),
+    ))
+}
+
+/// Step three of the Cloudflare flow: exchange the code for the session. A public client proves
+/// itself with the PKCE verifier and carries no secret.
+fn cloudflare_tokens(
+    dashboard: &str,
+    client_id: &str,
+    code: &str,
+    verifier: &str,
+    redirect: &str,
+) -> Result<serde_json::Value, String> {
+    let response = http()?
+        .post(format!("{dashboard}/oauth2/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", client_id),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("redirect_uri", redirect),
+        ])
+        .send()
+        .map_err(|_| {
+            "Could not reach Cloudflare to finish sign-in. Check your connection and sign in again."
+        })?;
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|_| "Cloudflare returned an unreadable sign-in response. Sign in again.")?;
+    if !status.is_success() {
+        return Err(match body.get("error").and_then(|v| v.as_str()) {
+            Some("invalid_client") => CLOUDFLARE_UNREGISTERED.into(),
+            _ => format!(
+                "Cloudflare sign-in failed ({}): {}. Sign in again.",
+                status.as_u16(),
+                unbiased_reason(&body)
+            ),
+        });
+    }
+    // Without a refresh token the session would end with its first access token, about an hour in.
+    if body
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .is_none_or(str::is_empty)
+    {
+        return Err(
+            "Cloudflare did not return a renewable sign-in. This OpenBot build's Cloudflare OAuth client needs the Refresh Token grant."
+                .into(),
+        );
+    }
+    Ok(body)
+}
+
+/// A Cloudflare account id as the API gives it: 32 hexadecimal characters. It goes into the address
+/// model calls are sent to, so anything else is refused here.
+fn is_cloudflare_account_id(id: &str) -> bool {
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Step four of the Cloudflare flow: the one account the person let OpenBot use. The consent page
+/// asks which accounts the grant covers, and the listing answers exactly those; AI Gateway bills
+/// one account, so a grant covering several is refused with what to do rather than guessed at.
+fn cloudflare_account(api: &str, access_token: &str) -> Result<String, String> {
+    let response = http()?
+        .get(format!("{api}/accounts?per_page=50"))
+        .bearer_auth(access_token)
+        .send()
+        .map_err(|_| {
+            "Could not reach Cloudflare to read your account. Check your connection and sign in again."
+        })?;
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|_| "Cloudflare returned an unreadable account list. Sign in again.")?;
+    if !status.is_success() {
+        return Err(format!(
+            "Cloudflare would not list the account for this sign-in ({}). Sign in again and approve every permission OpenBot asks for.",
+            status.as_u16()
+        ));
+    }
+    let accounts: Vec<&str> = body
+        .get("result")
+        .and_then(|v| v.as_array())
+        .map(|accounts| {
+            accounts
+                .iter()
+                .filter_map(|account| account.get("id").and_then(|v| v.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
+    match accounts.as_slice() {
+        [] => Err(
+            "The Cloudflare sign-in covers no account. Sign in again and choose the account whose AI Gateway credits OpenBot should use. If the account is missing there, its administrator has turned off access for OAuth apps."
+                .into(),
+        ),
+        [id] if is_cloudflare_account_id(id) => Ok((*id).into()),
+        [_] => Err("Cloudflare returned an account OpenBot cannot use. Sign in again.".into()),
+        _ => Err(
+            "OpenBot uses one Cloudflare account. Sign in again and choose only the account whose AI Gateway credits OpenBot should use."
+                .into(),
+        ),
+    }
 }
 
 /// Where the Unbiased AI flow starts: the platform, or an override for driving this client against a
@@ -492,7 +694,7 @@ fn finish_unbiased(
     }
 }
 
-/// Finish the sign-in. Google and xAI leave a refreshable session in the private credential file
+/// Finish the sign-in. Google, xAI and Cloudflare leave a refreshable session in the private credential file
 /// and answer nothing; Unbiased AI answers the API key it minted, which the window carries on exactly
 /// as a typed endpoint key.
 pub fn finish(id: &str) -> Result<Option<String>, String> {
@@ -554,7 +756,14 @@ pub(crate) fn read_callback_request(
     }
 }
 
-fn receive_callback(stream: &mut TcpStream, state: &str) -> Result<Option<String>, String> {
+/// One request to the loopback callback. `issuer` is who must have sent the person back, where the
+/// provider says (RFC 9207): an answer naming anybody else is another server's code.
+fn receive_callback(
+    stream: &mut TcpStream,
+    state: &str,
+    provider: &str,
+    issuer: Option<&str>,
+) -> Result<Option<String>, String> {
     let request =
         read_callback_request(stream, Duration::from_secs(2)).map_err(|error| error.to_string())?;
     let path = request
@@ -565,7 +774,14 @@ fn receive_callback(stream: &mut TcpStream, state: &str) -> Result<Option<String
     let parsed = reqwest::Url::parse(&format!("http://localhost{path}"))
         .map_err(|_| "Invalid sign-in callback.")?;
     let query: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
-    if parsed.path() != "/oauth/callback" || query.get("state").map(String::as_str) != Some(state) {
+    if parsed.path() != "/oauth/callback"
+        || query.get("state").map(String::as_str) != Some(state)
+        || issuer.is_some_and(|issuer| {
+            query
+                .get("iss")
+                .is_some_and(|iss| iss.trim_end_matches('/') != issuer)
+        })
+    {
         let _ = stream.write_all(
             b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nInvalid sign-in callback.",
         );
@@ -573,18 +789,49 @@ fn receive_callback(stream: &mut TcpStream, state: &str) -> Result<Option<String
     }
     if let Some(error) = query.get("error") {
         let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nSign-in was not approved. Return to OpenBot.");
-        return Err(format!("Google sign-in was not approved: {error}"));
+        return Err(format!("{provider} sign-in was not approved: {error}"));
     }
     let code = query
         .get("code")
         .filter(|v| !v.is_empty())
         .cloned()
-        .ok_or("Google did not return an authorization code.")?;
+        .ok_or_else(|| format!("{provider} did not return an authorization code."))?;
     stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nReturn to OpenBot to finish signing in.").map_err(|e| e.to_string())?;
     Ok(Some(code))
 }
 
+/// Wait for the browser to come back to the loopback listener with the authorization code.
+fn await_callback(
+    flow: &Flow,
+    listener: &TcpListener,
+    state: &str,
+    provider: &str,
+    issuer: Option<&str>,
+) -> Result<String, String> {
+    let deadline = Instant::now() + Duration::from_secs(600);
+    loop {
+        check(flow)?;
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{provider} sign-in timed out. Try signing in again."
+            ));
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Some(code) = receive_callback(&mut stream, state, provider, issuer)? {
+                    return Ok(code);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                wait(flow, Duration::from_millis(100))?
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
 fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> {
+    let mut account = None;
     let (provider, client_id, client_secret, project, scope, tokens) = match pending {
         Pending::Unbiased {
             platform,
@@ -605,24 +852,7 @@ fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> 
             client_secret,
             project,
         } => {
-            let deadline = Instant::now() + Duration::from_secs(600);
-            let code = loop {
-                check(flow)?;
-                if Instant::now() >= deadline {
-                    return Err("Google sign-in timed out. Try signing in again.".into());
-                }
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        if let Some(code) = receive_callback(&mut stream, &state)? {
-                            break code;
-                        }
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        wait(flow, Duration::from_millis(100))?
-                    }
-                    Err(error) => return Err(error.to_string()),
-                }
-            };
+            let code = await_callback(flow, &listener, &state, "Google", None)?;
             let mut form = vec![
                 ("client_id", client_id.as_str()),
                 ("code", code.as_str()),
@@ -696,10 +926,36 @@ fn finish_flow(flow: &Flow, pending: Pending) -> Result<Option<String>, String> 
             };
             ("xai", client_id, None, None, XAI_SCOPE, tokens)
         }
+        Pending::Cloudflare {
+            listener,
+            verifier,
+            state,
+            redirect,
+            client_id,
+            dashboard,
+            api,
+        } => {
+            let code = await_callback(flow, &listener, &state, "Cloudflare", Some(&dashboard))?;
+            let tokens = cloudflare_tokens(&dashboard, &client_id, &code, &verifier, &redirect)?;
+            check(flow)?;
+            account = Some(cloudflare_account(
+                &api,
+                &required(&tokens, "access_token")?,
+            )?);
+            (
+                "cloudflare",
+                client_id,
+                None,
+                None,
+                CLOUDFLARE_SCOPE,
+                tokens,
+            )
+        }
     };
     check(flow)?;
-    let credentials =
+    let mut credentials =
         credentials_from_tokens(provider, client_id, client_secret, project, scope, &tokens)?;
+    credentials.account_id = account;
     write(&flow.root, &credentials, || check(flow))?;
     Ok(None)
 }
@@ -715,7 +971,8 @@ fn credentials_from_tokens(
         .get("expires_in")
         .and_then(|v| v.as_u64())
         .filter(|v| *v > 0)
-        .or_else(|| (provider == "xai").then_some(3600))
+        // Neither says how long its access token lasts every time; an hour is what both issue.
+        .or_else(|| matches!(provider, "xai" | "cloudflare").then_some(3600))
         .ok_or("The provider did not return a token expiry.")?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -736,6 +993,7 @@ fn credentials_from_tokens(
             .unwrap_or(scope)
             .into(),
         quota_project,
+        account_id: None,
         proxy_token: random(),
     })
 }
@@ -1395,7 +1653,7 @@ mod tests {
         let (sender, receiver) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             sender
-                .send(receive_callback(&mut stream, "expected"))
+                .send(receive_callback(&mut stream, "expected", "Google", None))
                 .unwrap();
         });
         let early = receiver.recv_timeout(Duration::from_millis(100));
@@ -1501,6 +1759,268 @@ mod tests {
             crate::quiet::said(&output.stderr)
         );
     }
+    const CLOUDFLARE_ACCOUNT: &str = "0123456789abcdef0123456789abcdef";
+
+    fn cloudflare_session() -> Scripted {
+        Some((
+            200,
+            serde_json::json!({"access_token": "cf-access", "refresh_token": "cf-refresh", "expires_in": 3600, "token_type": "bearer"}),
+        ))
+    }
+
+    fn cloudflare_accounts(ids: &[&str]) -> Scripted {
+        let result: Vec<_> = ids
+            .iter()
+            .map(|id| serde_json::json!({"id": id, "name": "Synthetic"}))
+            .collect();
+        Some((200, serde_json::json!({"success": true, "result": result})))
+    }
+
+    /// Start a Cloudflare sign-in against a mock and come back to its callback as the browser would.
+    fn cloudflare_sign_in(
+        mock: &MockPlatform,
+        root: &Path,
+        callback: impl FnOnce(&str, &str) -> String,
+    ) -> Result<Option<String>, String> {
+        // Port 0: any free port, since the mock has no registered redirect to match.
+        let (pending, url) = begin_cloudflare(&mock.url, &mock.url, "client", &[0]).unwrap();
+        let url = reqwest::Url::parse(&url).unwrap();
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        let request = callback(&query["redirect_uri"], &query["state"]);
+        let address = reqwest::Url::parse(&query["redirect_uri"]).unwrap();
+        let port = address.port().unwrap();
+        let browser = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .write_all(format!("GET {request} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+                .unwrap();
+            let mut answer = String::new();
+            let _ = stream.read_to_string(&mut answer);
+        });
+        let flow = Flow {
+            id: random(),
+            root: root.to_owned(),
+            canceled: AtomicBool::new(false),
+            pending: Mutex::new(None),
+        };
+        let finished = finish_flow(&flow, pending);
+        browser.join().unwrap();
+        finished
+    }
+
+    #[test]
+    fn cloudflare_consent_address_asks_for_gateway_access_with_pkce() {
+        let (pending, url) =
+            begin_cloudflare(CLOUDFLARE_DASHBOARD, CLOUDFLARE_API, "client", &[0]).unwrap();
+        let url = reqwest::Url::parse(&url).unwrap();
+        assert_eq!(url.host_str(), Some("dash.cloudflare.com"));
+        assert_eq!(url.path(), "/oauth2/auth");
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(query["client_id"], "client");
+        assert_eq!(query["response_type"], "code");
+        assert_eq!(
+            query["scope"],
+            "offline_access aig.run account-settings.read"
+        );
+        assert_eq!(query["code_challenge_method"], "S256");
+        let Pending::Cloudflare {
+            verifier,
+            state,
+            redirect,
+            ..
+        } = pending
+        else {
+            panic!("not a Cloudflare sign-in");
+        };
+        assert_eq!(query["code_challenge"], pkce_challenge(&verifier));
+        assert_eq!(query["state"], state);
+        assert_eq!(query["redirect_uri"], redirect);
+        assert!(redirect.starts_with("http://127.0.0.1:"));
+        assert!(redirect.ends_with("/oauth/callback"));
+    }
+
+    /// Cloudflare matches the redirect exactly, so a taken port moves to the next registered one
+    /// rather than to any free one.
+    #[test]
+    fn cloudflare_uses_the_next_registered_port_when_one_is_taken() {
+        let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let taken = held.local_addr().unwrap().port();
+        let free = {
+            let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            probe.local_addr().unwrap().port()
+        };
+        let (pending, _) = begin_cloudflare(
+            CLOUDFLARE_DASHBOARD,
+            CLOUDFLARE_API,
+            "client",
+            &[taken, free],
+        )
+        .unwrap();
+        let Pending::Cloudflare { redirect, .. } = pending else {
+            panic!("not a Cloudflare sign-in");
+        };
+        assert_eq!(redirect, format!("http://127.0.0.1:{free}/oauth/callback"));
+        assert!(
+            begin_cloudflare(CLOUDFLARE_DASHBOARD, CLOUDFLARE_API, "client", &[taken])
+                .err()
+                .unwrap()
+                .contains("sign-in ports")
+        );
+    }
+
+    #[test]
+    fn cloudflare_sign_in_saves_a_renewable_session_for_the_chosen_account() {
+        let root = crate::test_support::temp_root("provider-oauth-cloudflare");
+        let mock = mock_platform(
+            |_| None,
+            vec![
+                cloudflare_session(),
+                cloudflare_accounts(&[CLOUDFLARE_ACCOUNT]),
+            ],
+        );
+        let finished = cloudflare_sign_in(&mock, &root, |_, state| {
+            format!("/oauth/callback?code=synthetic-code&state={state}")
+        });
+        assert_eq!(finished, Ok(None));
+        let saved = read(&root, "cloudflare").unwrap();
+        assert_eq!(saved.account_id.as_deref(), Some(CLOUDFLARE_ACCOUNT));
+        assert_eq!(saved.access_token, "cf-access");
+        assert_eq!(saved.refresh_token, "cf-refresh");
+        assert_eq!(saved.client_secret, None);
+        assert_eq!(saved.scope, CLOUDFLARE_SCOPE);
+        // The file names the account under the name the server reads.
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join(FILE)).unwrap()).unwrap();
+        assert_eq!(written["accountId"], CLOUDFLARE_ACCOUNT);
+        assert_eq!(written["provider"], "cloudflare");
+        let requests = mock.requests.lock().unwrap();
+        assert_eq!(requests[0].0, "/oauth2/token");
+        for part in [
+            "grant_type=authorization_code",
+            "client_id=client",
+            "code=synthetic-code",
+            "code_verifier=",
+            "redirect_uri=http%3A%2F%2F127.0.0.1%3A",
+        ] {
+            assert!(requests[0].1.contains(part), "token request lacks {part}");
+        }
+        assert!(!requests[0].1.contains("client_secret"));
+        assert_eq!(requests[1].0, "/accounts?per_page=50");
+        drop(requests);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cloudflare_sign_in_refuses_a_grant_it_cannot_bill_to_one_account() {
+        for (accounts, says) in [
+            (vec![], "covers no account"),
+            (
+                vec![CLOUDFLARE_ACCOUNT, "fedcba9876543210fedcba9876543210"],
+                "choose only the account",
+            ),
+            (vec!["../../other/path"], "cannot use"),
+        ] {
+            let root = crate::test_support::temp_root("provider-oauth-cloudflare-accounts");
+            let mock = mock_platform(
+                |_| None,
+                vec![cloudflare_session(), cloudflare_accounts(&accounts)],
+            );
+            let refused = cloudflare_sign_in(&mock, &root, |_, state| {
+                format!("/oauth/callback?code=synthetic-code&state={state}")
+            })
+            .unwrap_err();
+            assert!(refused.contains(says), "{refused}");
+            assert!(read(&root, "cloudflare").is_err());
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// No refresh token means the client lacks the grant, and a session that would end within the
+    /// hour is not saved as though it would last.
+    #[test]
+    fn cloudflare_sign_in_refuses_a_session_that_cannot_renew() {
+        let root = crate::test_support::temp_root("provider-oauth-cloudflare-no-refresh");
+        let mock = mock_platform(
+            |_| None,
+            vec![Some((
+                200,
+                serde_json::json!({"access_token": "cf-access", "expires_in": 3600}),
+            ))],
+        );
+        let refused = cloudflare_sign_in(&mock, &root, |_, state| {
+            format!("/oauth/callback?code=synthetic-code&state={state}")
+        })
+        .unwrap_err();
+        assert!(refused.contains("Refresh Token grant"), "{refused}");
+        assert_eq!(mock.requests.lock().unwrap().len(), 1);
+        assert!(read(&root, "cloudflare").is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cloudflare_sign_in_reports_a_declined_consent_and_asks_nothing_more() {
+        let root = crate::test_support::temp_root("provider-oauth-cloudflare-declined");
+        let mock = mock_platform(|_| None, vec![]);
+        let refused = cloudflare_sign_in(&mock, &root, |_, state| {
+            format!("/oauth/callback?error=access_denied&state={state}")
+        })
+        .unwrap_err();
+        assert_eq!(
+            refused,
+            "Cloudflare sign-in was not approved: access_denied"
+        );
+        assert!(mock.requests.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// RFC 9207: a callback that says who issued it has to say Cloudflare did.
+    #[test]
+    fn a_callback_naming_another_issuer_is_not_the_answer() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        for (issuer, accepted) in [
+            ("https%3A%2F%2Fevil.example", None),
+            (
+                "https%3A%2F%2Fdash.cloudflare.com",
+                Some("synthetic".to_string()),
+            ),
+        ] {
+            let mut browser = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            browser
+                .write_all(
+                    format!("GET /oauth/callback?state=expected&code=synthetic&iss={issuer} HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                        .as_bytes(),
+                )
+                .unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(
+                receive_callback(
+                    &mut stream,
+                    "expected",
+                    "Cloudflare",
+                    Some(CLOUDFLARE_DASHBOARD)
+                )
+                .unwrap(),
+                accepted
+            );
+        }
+    }
+
+    #[test]
+    fn cloudflare_account_ids_are_exactly_what_the_api_issues() {
+        assert!(is_cloudflare_account_id(CLOUDFLARE_ACCOUNT));
+        for id in [
+            "",
+            "0123456789abcdef",
+            "0123456789ABCDEF0123456789ABCDEF",
+            "0123456789abcdef0123456789abcdeg",
+            "0123456789abcdef0123456789abcde/",
+            "0123456789abcdef0123456789abcdef0",
+        ] {
+            assert!(!is_cloudflare_account_id(id), "accepted {id}");
+        }
+    }
+
     #[test]
     fn persisted_credentials_remain_provider_bound() {
         let root = crate::test_support::temp_root("provider-oauth");

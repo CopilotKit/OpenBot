@@ -765,10 +765,12 @@ components:
       type: string
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
-        Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
-        openai-compatible: any server that speaks OpenAI's API, at an address
-        given.
-      enum: [openai, anthropic, google, xai, unbiased, openai-compatible]
+        Anthropic. google: Google Gemini. xai: xAI. cloudflare: Cloudflare AI
+        Gateway, billed to the person's Cloudflare credits. unbiased: Unbiased
+        AI. openai-compatible: any server that speaks OpenAI's API, at an
+        address given.
+      enum:
+        [openai, anthropic, google, xai, cloudflare, unbiased, openai-compatible]
     AiConnectionLogin:
       type: string
       description: >-
@@ -776,7 +778,7 @@ components:
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
         a key (google, xai, unbiased, openai-compatible). oauth: the person's
-        Google or xAI sign-in (google, xai).
+        Google, xAI or Cloudflare sign-in (google, xai, cloudflare).
       enum: [plan, api-key, endpoint, oauth]
     AiConnectionSaved:
       type: object
@@ -865,8 +867,9 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; google and xai take endpoint or oauth; unbiased and
-        openai-compatible take endpoint. Any other pair is refused.
+        api-key; google and xai take endpoint or oauth; cloudflare takes
+        oauth; unbiased and openai-compatible take endpoint. Any other pair is
+        refused.
       required: [provider, login]
       properties:
         provider:

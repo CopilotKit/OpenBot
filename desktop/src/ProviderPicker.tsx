@@ -55,13 +55,17 @@ export type SavedConfiguration = {
     | "compatible-endpoint"
     | "google-oauth"
     | "xai-oauth"
+    | "cloudflare-oauth"
     | null;
   intelligenceApiKey?: boolean | null;
   modelApiKeys?: Partial<
     Record<"openai" | "anthropic" | "compatible", boolean | null>
   >;
   modelSessions?: Partial<
-    Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
+    Record<
+      "openai" | "anthropic" | "google" | "xai" | "cloudflare",
+      boolean | null
+    >
   >;
 };
 
@@ -112,8 +116,19 @@ const oauthExplanation: Record<string, string> = {
   google:
     "Authorize Gemini API access using the configured Google Cloud project and its API quota.",
   xai: "Authorize OpenBot to use models available to your xAI account.",
+  cloudflare:
+    "Choose one Cloudflare account in your browser and approve the request. Model calls go through that account's AI Gateway and are billed to its credits.",
   unbiased:
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
+};
+
+/**
+ * The model a sign-in row starts with where the provider has no endpoint preset to take it from.
+ * Cloudflare's AI Gateway names a model by who serves it (`provider/model`), and this is the one
+ * new Bots run on (shared/model-providers.json).
+ */
+const signInModels: Record<string, string> = {
+  cloudflare: "openai/gpt-5.5",
 };
 
 function endpointIdentity(baseUrl: string | undefined): string {
@@ -146,8 +161,9 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
       return { provider: "openai", login: "plan", saved: true };
     case "google-oauth":
     case "xai-oauth":
+    case "cloudflare-oauth":
       return {
-        provider: held.saved.model === "google-oauth" ? "google" : "xai",
+        provider: held.saved.model.replace(/-oauth$/, ""),
         login: "oauth",
         saved: true,
         model: held.BOT_MODEL,
@@ -715,7 +731,7 @@ export function ProviderPicker({
                 } else {
                   setBaseUrl(nextPreset?.baseUrl ?? "");
                   setContainerBaseUrl("");
-                  setModel(nextPreset?.model ?? "");
+                  setModel(nextPreset?.model ?? signInModels[r.id] ?? "");
                 }
               }}
             />
@@ -1076,9 +1092,9 @@ export function ProviderPicker({
           {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
           {failure && <InlineFailure problem={failure} />}
 
-          {/* About a plan's own pool of use, so said only where the person signs in with one. On
-              Windows G it sat under "Anthropic API key", where it does not apply. */}
-          {row.caution && login === "plan" && (
+          {/* About what a plan or a sign-in draws on, so said only where the person signs in with
+              one. On Windows G it sat under "Anthropic API key", where it does not apply. */}
+          {row.caution && (login === "plan" || login === "oauth") && (
             <p className="caution">
               {row.caution.says}{" "}
               <a
