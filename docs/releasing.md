@@ -1141,6 +1141,14 @@ seen as the source file it removed. Every commit on `main` keeps its own CI run 
 in progress still gets a result. A final's parent is its candidate on `release/X.Y`, which main's CI
 never ran on, so a final always runs the full suite.
 
+The release PR's own CI run is as small, for the same reason
+([`scripts/ci-changes.ts`](../scripts/ci-changes.ts)). A PR labelled `release`, from this repository's
+`release/publish/v*` branch, whose diff from main is the release files alone, each version file
+changed only by its version, runs `format, lint, types` and the tests that name `CHANGELOG.md` or
+`release-policy.json`, and builds no Desktop app. Everything else is skipped, and `verify` reads a
+skipped check as a pass. Main's CI on the merge commit still runs every check, which is the run the
+publish gate waits for.
+
 **No secrets are required to release.** CI and **Create release PR** use only the built-in
 `GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass
 `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` to the installer build when it is set, and build without

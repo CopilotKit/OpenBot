@@ -14,9 +14,10 @@
 //!
 //! Deleting the data also removes what a new installation would otherwise find and take for its own:
 //! the backend OpenBot created (the CLI's `local delete`), OpenBot's machine, and OpenBot's files in
-//! the installation folder (`remove_installation`). Box I found why: with the machine gone and the
-//! folder left complete, the next install opened on a Start that could never work. Otherwise the
-//! machine is left stopped, with everything in it, so installing OpenBot again finds it.
+//! the installation folder with its downloads in `~\OpenBot\openbot-engine` (`remove_installation`).
+//! Box I found why: with the machine gone and the folder left complete, the next install opened on
+//! a Start that could never work. Otherwise the machine is left stopped, with everything in it and
+//! the downloads kept, so installing OpenBot again finds it.
 //!
 //! The person's own machines and containers are never touched. An OpenBot that ran in a machine of
 //! theirs has its containers taken down there, and their machine is left running.
@@ -77,8 +78,9 @@ pub trait Computer {
     fn stop_containers(&mut self, name: &str) -> Result<(), String>;
     /// Every one of OpenBot's port rules in the machine `name` removed, when its containers wouldn't stop.
     fn clear_port_rules(&mut self, name: &str) -> Result<(), String>;
-    /// OpenBot's files in the installation folder `root` (`remove_installation`). With
-    /// `keep_engine`, its `engine` folder stays: WSL may still have the machine whose disk is there.
+    /// OpenBot's files in the installation folder `root`, and its downloads
+    /// (`remove_installation`). With `keep_engine`, its `engine` folder and the downloads stay:
+    /// WSL may still have the machine whose disk is there.
     fn remove_installation(&mut self, root: &Path, keep_engine: bool) -> Result<(), String>;
 }
 
@@ -197,7 +199,9 @@ pub fn stop_with(
     if asked.delete_data {
         say("Removing OpenBot's files.");
         if !machine_gone {
-            log::warn!("[uninstall] {own} was not removed, so its engine folder stays");
+            log::warn!(
+                "[uninstall] {own} was not removed, so its engine folder and the downloads stay"
+            );
         }
         let removed = computer.remove_installation(root, !machine_gone);
         note(
@@ -255,6 +259,65 @@ fn openbots(name: &str) -> bool {
 }
 
 /**
+OpenBot's files in the installation folder `root` (`remove_installation_files`), and unless
+`keep_engine`, OpenBot's downloads in the home folder `home` (`remove_downloads`).
+
+The downloads are not in the installation folder: they are always in `openbot-engine` in the default
+one, `~\OpenBot` (`acquire::download_dir` of `stack::default_root`), whichever folder OpenBot was
+installed in. Removing only the installation folder left them, about 128 MB on a Windows box, after
+"Delete the application data". They stay with the machine (`keep_engine`): the record of the
+person's own default Podman connection, which removing the machine puts back, is kept there.
+*/
+pub fn remove_installation(
+    root: &Path,
+    home: Option<&Path>,
+    keep_engine: bool,
+) -> Result<(), String> {
+    let installation = remove_installation_files(root, home, keep_engine);
+    let downloads = match home {
+        Some(home) if !keep_engine => remove_downloads(home),
+        _ => Ok(()),
+    };
+    match (installation, downloads) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(installation), Err(downloads)) => Err(format!("{installation}; {downloads}")),
+    }
+}
+
+/**
+OpenBot's download folder, `openbot-engine` in the default installation folder in `home`, removed:
+the engine installers, the tools and the machine image OpenBot downloaded. Then that installation
+folder too, only when nothing at all is left in it. Nothing else in `home` is touched. A link is
+removed as a link, never followed.
+*/
+fn remove_downloads(home: &Path) -> Result<(), String> {
+    let folder = crate::stack::default_root_in(home);
+    let downloads = crate::acquire::download_dir(&folder);
+    match std::fs::symlink_metadata(&downloads) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{}: {error}", downloads.display())),
+        Ok(found) => {
+            let removed = if found.file_type().is_symlink() {
+                // A link to a folder is a directory entry on Windows, a file elsewhere.
+                std::fs::remove_file(&downloads).or_else(|_| std::fs::remove_dir(&downloads))
+            } else if found.is_dir() {
+                std::fs::remove_dir_all(&downloads)
+            } else {
+                std::fs::remove_file(&downloads)
+            };
+            removed.map_err(|error| format!("{}: {error}", downloads.display()))?;
+            log::info!("[uninstall] removed {}", downloads.display());
+        }
+    }
+    // Fails, and changes nothing, when anything is left in it.
+    if std::fs::remove_dir(&folder).is_ok() {
+        log::info!("[uninstall] removed {}, which was empty", folder.display());
+    }
+    Ok(())
+}
+
+/**
 OpenBot's files in the installation folder `root`, removed, then the folder itself once nothing else
 is left in it: what a new installation would otherwise find and take for its own.
 
@@ -264,7 +327,7 @@ go (`openbots`): a file of the person's stays, and with it the folder. The backe
 a `.gitignore` in the folder it runs in, which goes only when nothing but it is left. Links are
 removed as links, never followed.
 */
-pub fn remove_installation(
+fn remove_installation_files(
     root: &Path,
     home: Option<&Path>,
     keep_engine: bool,
@@ -776,6 +839,91 @@ mod tests {
         assert!(!root_alone.exists());
         let _ = std::fs::remove_dir_all(home);
         let _ = std::fs::remove_dir_all(home_alone);
+    }
+
+    /// What a Windows box had in `%USERPROFILE%\OpenBot\openbot-engine` after "Delete the
+    /// application data", about 128 MB: the downloads are always there, whichever folder OpenBot
+    /// was installed in. Returns the downloads folder.
+    fn downloads_in(home: &Path) -> std::path::PathBuf {
+        let downloads = home.join("OpenBot").join("openbot-engine");
+        for entry in [
+            "bin/docker-compose.exe",
+            "podman-installer.exe",
+            "machine.tar.zst",
+            "podman-default-before.json",
+        ] {
+            let path = downloads.join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "x").unwrap();
+        }
+        downloads
+    }
+
+    /// A Windows box: "Delete the application data" removed the installation and left
+    /// `%USERPROFILE%\OpenBot\openbot-engine`, because only the installation folder was looked in.
+    /// Now the downloads go too, and the default folder once it is empty. Nothing else in the
+    /// home folder is touched.
+    #[test]
+    fn deleting_the_data_removes_the_downloads_wherever_openbot_was_installed() {
+        let home = crate::test_support::temp_root("uninstall-downloads");
+        let root = home.join("Elsewhere").join("OpenBot");
+        for entry in LEFT_ON_BOX_I {
+            let path = root.join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "x").unwrap();
+        }
+        let downloads = downloads_in(&home);
+        std::fs::write(home.join("notes.txt"), "mine").unwrap();
+        std::fs::create_dir_all(home.join("Documents")).unwrap();
+        std::fs::create_dir_all(home.join("openbot-engine")).unwrap();
+
+        remove_installation(&root, Some(&home), false).unwrap();
+        assert!(!root.exists());
+        assert!(!downloads.exists(), "the downloads were left");
+        assert!(
+            !home.join("OpenBot").exists(),
+            "the empty default folder was left"
+        );
+        assert!(home.join("notes.txt").exists());
+        assert!(home.join("Documents").exists());
+        assert!(home.join("openbot-engine").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The downloads stay with the machine: without "Delete the application data", and when the
+    /// machine was not removed. A file of the person's in the default folder keeps the folder.
+    #[test]
+    fn the_downloads_stay_with_the_machine_and_a_persons_file_keeps_its_folder() {
+        let home = crate::test_support::temp_root("uninstall-downloads-kept");
+        let root = home.join("Elsewhere");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".openbot-deployment"), "x").unwrap();
+        let downloads = downloads_in(&home);
+        remove_installation(&root, Some(&home), true).unwrap();
+        assert!(downloads.join("podman-default-before.json").exists());
+
+        std::fs::write(home.join("OpenBot").join("notes.txt"), "mine").unwrap();
+        remove_installation(&root, Some(&home), false).unwrap();
+        assert!(!downloads.exists());
+        assert!(home.join("OpenBot").join("notes.txt").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A link where the downloads would be is removed as a link: what it points to stays.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_place_of_the_downloads_is_never_followed() {
+        let home = crate::test_support::temp_root("uninstall-downloads-link");
+        let elsewhere = home.join("Keep");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("mine.txt"), "mine").unwrap();
+        std::fs::create_dir_all(home.join("OpenBot")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, home.join("OpenBot").join("openbot-engine"))
+            .unwrap();
+        remove_installation(&home.join("Elsewhere"), Some(&home), false).unwrap();
+        assert!(elsewhere.join("mine.txt").exists());
+        assert!(!home.join("OpenBot").exists());
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

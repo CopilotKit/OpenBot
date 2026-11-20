@@ -26,11 +26,62 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Runners. Every job runs on the 16-core larger runners (org runner group openbot-larger, billed per
+# minute) for main, releases and pull requests from this repository: the standard runners are shared
+# across the organization, and a job used to wait longer for one than it took to run. Pull requests
+# from forks stay on the free standard runners.
 jobs:
+  # What this push has to run (scripts/ci-changes.ts). On a pull request, a job whose inputs are
+  # unchanged since a commit where it passed is skipped, and `verify` reads the skip as a pass: test
+  # files alone run just those tests, docs alone run only the tests that name them, and a release PR
+  # of only the release files runs the checks publishing re-runs on it. Main, the release's own call
+  # of these checks and a pull request labelled `full-ci` run everything.
+  changes:
+    name: changes
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    permissions:
+      contents: read
+      # To read which jobs passed on the commits this one sits on.
+      actions: read
+    outputs:
+      static: ${{ steps.decide.outputs.static }}
+      api: ${{ steps.decide.outputs.api }}
+      mobile: ${{ steps.decide.outputs.mobile }}
+      app_browser: ${{ steps.decide.outputs.app_browser }}
+      startup: ${{ steps.decide.outputs.startup }}
+      langgraph_ts: ${{ steps.decide.outputs.langgraph_ts }}
+      python_harness: ${{ steps.decide.outputs.python_harness }}
+      build: ${{ steps.decide.outputs.build }}
+      suite: ${{ steps.decide.outputs.suite }}
+      partial: ${{ steps.decide.outputs.partial }}
+      tests: ${{ steps.decide.outputs.tests }}
+      browser_tests: ${{ steps.decide.outputs.browser_tests }}
+      webkit_tests: ${{ steps.decide.outputs.webkit_tests }}
+      desktop_browser_tests: ${{ steps.decide.outputs.desktop_browser_tests }}
+    steps:
+      # A pull request's history, without file contents (a diff of names needs only the trees); any
+      # other event needs none.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Strings, since 0 is falsy and `&& 0 || 1` would always give 1.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          filter: ${{ github.event_name == 'pull_request' && 'blob:none' || '' }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - id: decide
+        name: Decide what runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ci-changes.ts ci
+
   # Formatting, linting, typing and tests are independent checks, so each reports its own result.
   static:
     name: format, lint, types
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.static == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,7 +132,9 @@ jobs:
   #   release that first served it deprecated.
   api:
     name: API spec
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     env:
       # Pinned with its checksum, from https://github.com/oasdiff/oasdiff/releases. The spec never
       # leaves the runner: the binary runs here, rather than the action, which uploads by default.
@@ -233,7 +286,9 @@ jobs:
 
   mobile:
     name: native types
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -254,7 +309,9 @@ jobs:
   # Playwright, whose Chromium is a different build from the one playwright-core launches.
   app-browser:
     name: app (real browser)
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.app_browser == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -323,7 +380,9 @@ jobs:
   # .github/actions/test-shard, which says why.
   test:
     name: tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.suite == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     strategy:
       # Every shard runs to the end, so one red run names every failing test, not just the first
       # shard's.
@@ -368,11 +427,11 @@ jobs:
   # add up to less than the floor (scripts/test-floor.ts).
   test-total:
     name: tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # Also when a shard failed, so this reports the failure rather than being skipped, which a
-    # required check would read as a pass.
-    if: always()
-    needs: [test]
+    # required check would read as a pass. Not when the suite was not needed: then no shard ran.
+    if: always() && needs.changes.outputs.suite == 'true'
+    needs: [changes, test]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -398,9 +457,48 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The test files `changes` picked when the suite itself was not needed: the ones changed since the
+  # suite last passed and every test that names a changed file, or for a release PR the tests that
+  # read the release files. A browser test runs in a real browser, as `app (real browser)` runs it.
+  # Not a shard, so passing here never stands in for the suite: the next push is still compared with
+  # the commit where every shard last passed.
+  changed-tests:
+    name: tests (changed files)
+    needs: changes
+    if: needs.changes.outputs.partial == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      # The same installs as a shard, since a picked file can be anywhere the suite looks.
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: agent-mastra
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Install Chromium
+        if: needs.changes.outputs.browser_tests != '[]' || needs.changes.outputs.desktop_browser_tests != '[]'
+        run: bunx playwright-core install --with-deps --no-shell chromium
+      - name: Install WebKit
+        if: needs.changes.outputs.webkit_tests != '[]'
+        run: bunx playwright-core install --with-deps webkit
+      - name: Run the changed tests
+        env:
+          TESTS: ${{ needs.changes.outputs.tests }}
+          BROWSER_TESTS: ${{ needs.changes.outputs.browser_tests }}
+          WEBKIT_TESTS: ${{ needs.changes.outputs.webkit_tests }}
+          DESKTOP_BROWSER_TESTS: ${{ needs.changes.outputs.desktop_browser_tests }}
+        run: bun scripts/ci-run-tests.ts
+
   startup:
     name: startup (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.startup == 'true'
+    runs-on: ${{ matrix.os == 'windows-latest' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'windows-latest' || 'openbot-windows-16core') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -424,7 +522,9 @@ jobs:
   # Node it ships on, from its own lockfile, as each Python harness below runs its own.
   langgraph-ts:
     name: typescript langgraph engine
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.langgraph_ts == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -441,9 +541,8 @@ jobs:
 
   python-harness:
     name: python harness regressions
-    # CPU-bound: runs on a 16-core larger runner (org runner group openbot-larger, billed per
-    # minute) for main, releases and pull requests from this repository. Pull requests from forks
-    # stay on the free standard runner.
+    needs: changes
+    if: needs.changes.outputs.python_harness == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -566,7 +665,9 @@ jobs:
 
   build:
     name: build
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -590,7 +691,7 @@ jobs:
   # price of a dependency in the one workflow whose inputs are a security boundary.
   component-dockerfiles:
     name: component dockerfiles
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     # Minutes rather than seconds, so on a pull request it runs only when an admin adds the
     # `full-ci` label, the point at which the PR is actually a merge candidate. On main and through
     # the release's workflow_call it always runs. `verify` treats a skipped job as passing.
@@ -629,18 +730,25 @@ jobs:
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
+  # A job `changes` found nothing to do for is skipped and passes; `changes` itself must succeed, so
+  # a decision that failed skips nothing.
   verify:
     name: verify
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     if: always()
-    needs: [static, api, mobile, app-browser, test, test-total, startup, langgraph-ts, python-harness, build, component-dockerfiles]
+    needs: [changes, static, api, mobile, app-browser, test, test-total, changed-tests, startup, langgraph-ts, python-harness, build, component-dockerfiles]
     steps:
       - name: Require every check
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          CHANGES: ${{ needs.changes.result }}
         run: |
           set -euo pipefail
           echo "$RESULTS"
+          if [ "$CHANGES" != success ]; then
+            echo "::error::Deciding what runs reported $CHANGES, so the skipped checks are not passes."
+            exit 1
+          fi
           for result in $RESULTS; do
             case "$result" in
               success|skipped) ;;
