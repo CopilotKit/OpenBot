@@ -39,11 +39,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `OPENBOT_MULTIPLE_ORGANIZATIONS=true` sets `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`
   and `INTELLIGENCE_PLATFORM_TOKEN` (or `INTELLIGENCE_PLATFORM_TOKEN_FILE`), the platform service
   token its Intelligence was given, before upgrading. At the first start each organization it held
-  is given an Intelligence organization of its own, with its members and Bots where they were. Left
-  as it was, or with the old setting removed and no authority named, it refuses to start, naming the
-  organizations and what to set: on `local` their Bots could not answer. An OpenBot that only ever
-  held one organization changes nothing, and keeps it. See
-  [configuration](docs/configuration.md#general-variables).
+  other than `default` is given an Intelligence organization of its own and starts fresh there:
+  its earlier conversation history, Learning and memory stay with `default` and aren't moved,
+  while its members, Bots and settings are kept. Left as it was, or with the old setting removed
+  and no authority named, it refuses to start before migrating, naming the organizations and what
+  to set: on `local` their Bots could not answer. An OpenBot that only ever held one organization
+  changes nothing, and keeps it. See [configuration](docs/configuration.md#general-variables).
 - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
   removed no earlier than its sunset, and only once nothing uses it.
   - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.
