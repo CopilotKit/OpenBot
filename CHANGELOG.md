@@ -41,6 +41,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   organization's members. Where it keeps one, the rule still holds for everybody.
 - **The Recorder can say which organization it records into.** Who a Recorder acts as carries its
   `organization`, with its id and name, and a new Recorder connection carries `organizationName`.
+- **Search an organization's members.** `listOrganizationMembers` takes `search`, which narrows the
+  list to the members whose name or address starts with it or holds it, ignoring case, best
+  matches first. Only that organization's current members are ever listed.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
