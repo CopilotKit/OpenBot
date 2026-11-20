@@ -29,6 +29,16 @@ const organizationNamed: { request: string; organization: string | null }[] =
   [];
 /** Which organization each read of the deployment was asked of. */
 const deploymentAsked: string[] = [];
+/** What each read of the deployment was sent with: the session cookie, and the organization it named. */
+const deploymentSentWith: {
+  cookie: string | null;
+  organization: string | null;
+}[] = [];
+/**
+ * The signed-in person is not a member of `default`, as on a hosted or multi-organization OpenBot: their list holds
+ * only org_work, and `default` is not found for their session, as an organization they are not in never is.
+ */
+let outsideDefault = false;
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
 /** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
@@ -70,6 +80,32 @@ const server = Bun.serve({
     );
     if (deployment) {
       deploymentAsked.push(deployment[1] as string);
+      deploymentSentWith.push({
+        cookie: request.headers.get("cookie"),
+        organization: request.headers.get("openbot-organization"),
+      });
+      if (
+        outsideDefault &&
+        deployment[1] === "default" &&
+        request.headers.get("cookie")
+      )
+        return Response.json(
+          {
+            type: "https://open.bot/errors/organization-not-found",
+            title: "Not found.",
+            status: 404,
+            detail: "Couldn't find that organization.",
+            code: "ORGANIZATION_NOT_FOUND",
+            category: "not_found",
+            retryable: false,
+            requestId: "req_example",
+            traceId: "trace_example",
+          },
+          {
+            status: 404,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
       return Response.json(deploymentAnswer.body, {
         status: deploymentAnswer.status,
       });
@@ -150,6 +186,21 @@ const server = Bun.serve({
           headers: { "content-type": "application/problem+json" },
         },
       );
+    if (route === `GET ${MINE}` && outsideDefault)
+      return Response.json({
+        organizations: [
+          {
+            id: "org_work",
+            slug: "work",
+            name: "Work",
+            role: "member",
+            active: true,
+            personal: false,
+          },
+        ],
+        canCreate: false,
+        nextCursor: null,
+      });
     if (route === `GET ${MINE}`)
       return Response.json({
         organizations: [
@@ -272,6 +323,7 @@ const { listInvitations } = await import(
   "../src/api/generated/organizations/organizations"
 );
 const { NOT_IN_ORGANIZATION } = await import("../src/organization");
+const { onSessionRefused } = await import("../src/session-refused");
 
 const { checkVersion } = await import("../src/version-check");
 const { onUpdateRequired } = await import("../src/client-version");
@@ -281,6 +333,8 @@ beforeEach(() => {
   named.length = 0;
   organizationNamed.length = 0;
   deploymentAsked.length = 0;
+  deploymentSentWith.length = 0;
+  outsideDefault = false;
   cookie = COOKIE;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
 });
@@ -576,10 +630,12 @@ test("signed out with a cookie sign-in left behind, the deployment is still read
     fixture.deployments.current.authProviders,
   );
   expect(deploymentAsked).toEqual(["default", "default"]);
-  // Nothing asked for the person's organizations, and nothing named an organization of theirs.
+  // Asked as nobody: nothing asked for the person's organizations, and no cookie or organization sent.
   expect(seen.map((request) => request.path)).not.toContain(MINE);
-  for (const { organization } of organizationNamed)
-    expect(organization).toBe("default");
+  expect(deploymentSentWith).toEqual([
+    { cookie: null, organization: null },
+    { cookie: null, organization: null },
+  ]);
 });
 
 test("a session that ended without the phone knowing yet reads the deployment in default", async () => {
@@ -592,6 +648,80 @@ test("a session that ended without the phone knowing yet reads the deployment in
   );
   // Each read asked for the person's organizations, was refused as signed out, and read default's.
   expect(deploymentAsked).toEqual(["default", "default"]);
+});
+
+/*
+ * REPORTED (fused end-to-end run, Android): on every cold start of a signed-in person who is not a member of `default`,
+ * Home said "Couldn't find that organization." in red and kept it. The session had not answered yet, so the signed-out
+ * screen's deployment read went to `default` with the person's own cookie, and `default` is not found for somebody
+ * who isn't in it.
+ */
+test("a cold start of a signed-in person outside default reads default's deployment as nobody, then their own", async () => {
+  outsideDefault = true;
+  cookie = "better-auth.session_token=signed-in-outside-default";
+  // Signed out as far as the screen knows: `default`'s, sent with no cookie and no organization, and it answers.
+  const signedOut = await readDeployment(false);
+  expect(signedOut.authProviders).toEqual(
+    fixture.deployments.current.authProviders,
+  );
+  expect(deploymentAsked).toEqual(["default"]);
+  expect(deploymentSentWith).toEqual([{ cookie: null, organization: null }]);
+
+  // Signed in: their own organization's, and their own organization's Bots, with nothing refused.
+  expect(await checkVersion(true)).toEqual({ kind: "ok" });
+  expect(deploymentAsked).toEqual(["default", "org_work"]);
+  expect(deploymentSentWith[1]).toEqual({
+    cookie: "better-auth.session_token=signed-in-outside-default",
+    organization: "org_work",
+  });
+  const answer = await getBot(ORGANIZATION_ID, "a b");
+  expect(answer.bot.id).toBe("a b");
+  expect(seen.map((request) => request.path)).toContain(`${ORG}/bots/a%20b`);
+});
+
+test("a signed-in person whose organization's deployment isn't found reads default's as nobody", async () => {
+  cookie = "better-auth.session_token=signed-in-not-found";
+  deploymentAnswer = {
+    status: 404,
+    body: {
+      detail: "Couldn't find that organization.",
+      code: "ORGANIZATION_NOT_FOUND",
+    },
+  };
+  await readDeployment(true).catch(() => undefined);
+  expect(deploymentAsked).toEqual(["org_work", "default"]);
+  expect(deploymentSentWith[1]).toEqual({ cookie: null, organization: null });
+});
+
+/*
+ * REPORTED (fused end-to-end run, Android): with the app open, a session revoked elsewhere left Home on the signed-in
+ * screen saying "Authentication required." until the app was opened again: nothing read the session again. A request
+ * sent with the session and refused as signed out now says so (src/session-refused.ts), and the root layout reads the
+ * session again on it, which takes the person back to the sign-in buttons.
+ */
+test("a signed-in request refused as signed out tells the app to read the session again; one sent as nobody doesn't", async () => {
+  const heard: string[] = [];
+  const stop = onSessionRefused(() => heard.push("refused"));
+  try {
+    cookie = "better-auth.session_token=revoked";
+    const refused = await getBot(ORGANIZATION_ID, "a b").catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toMatchObject({ status: 401 });
+    expect(heard.length).toBeGreaterThanOrEqual(1);
+
+    // Nobody signed in: a refusal says nothing about a session.
+    heard.length = 0;
+    cookie = null;
+    deploymentAnswer = {
+      status: 401,
+      body: { detail: "Authentication required.", code: "UNAUTHENTICATED" },
+    };
+    await readDeployment(false).catch(() => undefined);
+    expect(heard).toEqual([]);
+  } finally {
+    stop();
+  }
 });
 
 // Last: the pick it makes is the phone's from here on.

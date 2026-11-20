@@ -38,7 +38,10 @@ export default function Home() {
     () => readDeployment(false),
     [],
   );
-  const options = useLoad(loadOptions, !session);
+  // Only once the session has answered, and only for somebody signed out: it is the signed-out screen's.
+  const options = useLoad(loadOptions, !session && !isPending);
+  // A failure of that read belongs to the signed-out screen, and is not shown once somebody is signed in.
+  const optionsError = session ? undefined : options.error;
   // The person's organizations and the one they work in; picking another reads everything below again.
   const loadOrganizations = useCallback(() => organizationChoices(), []);
   const organizations = useLoad(loadOrganizations, Boolean(session));
@@ -117,9 +120,9 @@ export default function Home() {
           })}
         </View>
       )}
-      {(error || options.error || conversations.error) && (
+      {(error || optionsError || conversations.error) && (
         <Text accessibilityRole="alert" style={{ color: "#b42318" }}>
-          {error || options.error || conversations.error}
+          {error || optionsError || conversations.error}
         </Text>
       )}
       {!session ? (

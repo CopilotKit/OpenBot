@@ -5,6 +5,7 @@ import { View } from "react-native";
 import { authClient } from "../src/auth";
 import { withSecurityFloor } from "../src/floor-gate";
 import { notificationDestination } from "../src/links";
+import { onSessionRefused } from "../src/session-refused";
 import { useVersionVerdict, VersionGate } from "../src/version-gate";
 
 Notifications.setNotificationHandler({
@@ -16,10 +17,12 @@ Notifications.setNotificationHandler({
   }),
 });
 function Layout() {
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending, refetch } = authClient.useSession();
+  // A signed-in request refused as signed out: the session is read again, and one that is gone shows the sign-in.
+  useEffect(() => onSessionRefused(() => void refetch()), [refetch]);
   // Asked before sign-in: whether this app and its OpenBot can work together. When they can't, one sentence covers
   // the app, so no screen behind it is seen failing.
-  const { verdict, check } = useVersionVerdict(Boolean(session));
+  const { verdict, check } = useVersionVerdict(Boolean(session), isPending);
   const pending = useRef<unknown>(null);
   const handled = useRef<string | null>(null);
   useEffect(() => {

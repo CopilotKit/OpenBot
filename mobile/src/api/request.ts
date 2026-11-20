@@ -23,6 +23,7 @@ import {
   type OrganizationChoices,
 } from "../organization";
 import { clientHeaders } from "../release";
+import { reportSessionRefused } from "../session-refused";
 import type { Deployment } from "./generated/model";
 import { getDeployment } from "./generated/organization-settings/organization-settings";
 import {
@@ -144,15 +145,24 @@ export async function organizationAddress(rest: string): Promise<string> {
  * Whether somebody is signed in is the session's answer, never whether the phone holds a cookie: sign-in leaves cookies
  * of its own behind (an unfinished sign-in's state, an expired or revoked session), and reading the person's
  * organizations with one of those is refused, which left the signed-out screen with no way to sign in. A session that
- * turns out to have ended on the way (refused as signed out) is read in `default` too.
+ * turns out to have ended on the way (refused as signed out), or whose organization isn't found, is read in `default`
+ * too.
+ *
+ * `default`'s is read as nobody: no cookie and no organization of the person's. It answers anybody, and a signed-in
+ * person who isn't a member of `default` is refused there as if it didn't exist.
  */
 export async function readDeployment(signedIn: boolean): Promise<Deployment> {
-  if (!signedIn) return getDeployment(DEPLOYMENT_ORGANIZATION_ID);
+  const asNobody = () =>
+    getDeployment(DEPLOYMENT_ORGANIZATION_ID, { anonymous: true });
+  if (!signedIn) return asNobody();
   try {
     return await getDeployment(ORGANIZATION_ID);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401)
-      return getDeployment(DEPLOYMENT_ORGANIZATION_ID);
+    if (
+      error instanceof ApiError &&
+      (error.status === 401 || error.status === 404)
+    )
+      return asNobody();
     throw error;
   }
 }
@@ -199,10 +209,17 @@ function refusal(body: unknown): {
   };
 }
 
+/**
+ * What a generated call may add to its request. `anonymous` sends it as nobody: no session cookie and no organization,
+ * for an address that answers anybody (`default`'s deployment) and would refuse the person's own session.
+ */
+export type ApiRequestInit = RequestInit & { anonymous?: boolean };
+
 export async function apiRequest<T>(
   url: string,
-  init: RequestInit = {},
+  options: ApiRequestInit = {},
 ): Promise<T> {
+  const { anonymous = false, ...init } = options;
   if (!url.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
   const method = (init.method ?? "GET").toUpperCase();
   const headers: Record<string, string> = {};
@@ -213,7 +230,7 @@ export async function apiRequest<T>(
   if (apiWrite(url, method) && !headers["idempotency-key"])
     headers["idempotency-key"] = Crypto.randomUUID();
   Object.assign(headers, clientHeaders());
-  const cookie = await authClient.getCookie();
+  const cookie = anonymous ? null : await authClient.getCookie();
   if (cookie) headers.cookie = cookie;
   const address = await inOrganization(url, cookie);
   const organization = await organizationFor(address, cookie);
@@ -228,6 +245,8 @@ export async function apiRequest<T>(
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const { said, code, minimumVersion, security } = refusal(body);
+    // Sent as somebody signed in and refused as nobody: the session is gone, and the app reads it again.
+    if (response.status === 401 && cookie) reportSessionRefused();
     if (code === CLIENT_UPDATE_REQUIRED) {
       // A minimum raised for a security problem is always said in the app's own words for it.
       const detail = security
