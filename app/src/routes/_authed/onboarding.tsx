@@ -12,10 +12,7 @@ import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-first-copy";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
-import {
-  FRAMEWORKS,
-  SelfHostDemo,
-} from "@/components/onboarding/demos/self-host-demo";
+import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
 import { FINISH_MS, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import {
@@ -134,27 +131,22 @@ const WELCOME_SCENES: OnboardingScene[] = [
   },
   { ...ASK, from: 18.25 },
 ];
-const LOCAL = {
-  id: "local",
-  caption: "On your computer",
-  label: `${PRODUCT} on a laptop`,
+const DEPLOY = {
+  id: "deploy",
+  caption: `Deploy self-hosted or in the cloud. That's ${PRODUCT} for Business.`,
+  label: `${PRODUCT} on Kubernetes in your own infrastructure, on AWS, GCP or Azure, or in ${PRODUCT} Cloud`,
 };
+// The designers' second cut (Figma "Onboarding_it2"): where it runs, then the teams it serves.
 const BUSINESS_SCENES: OnboardingScene[] = [
-  { ...LOCAL, from: 0 },
+  { ...DEPLOY, from: 0 },
   {
-    id: "agents",
-    caption: "With the agents you already have",
-    label: `Frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}`,
-    from: 3.25,
-  },
-  {
-    id: "organization",
-    caption: "For your organization",
+    id: "teams",
+    caption: "Built for teams. With full governance, admin and audit.",
     label:
-      "Your organization signing in with Google, Microsoft or Okta, with your rules, team Bots and an audit trail",
-    from: 7,
+      "Four teams around one OpenBot, with policies, an audit trail and access",
+    from: 6,
   },
-  { ...LOCAL, from: 11.25 },
+  { ...DEPLOY, from: 12.75 },
 ];
 const NAME_SCENES: OnboardingScene[] = [
   {

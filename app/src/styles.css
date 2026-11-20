@@ -67,6 +67,7 @@
 :root {
   --frame: oklch(0.172 0.007 258.4);
   --frame-dither: url("./assets/patterns/pixel-dither.png");
+  /* Figma's frames: this same 800px tile at 339.55px and 30%, in Home, Setup and Onboarding alike. */
   --frame-dither-opacity: 0.3;
   --backdrop-shape: oklch(0.653 0.086 271.6 / 15%);
 }
@@ -250,8 +251,9 @@
   }
 
   /*
-   * The page's backdrop: three soft periwinkle shapes, Figma's "Hero / Background shapes", drawn as
-   * radial gradients rather than blurred ellipses so the compositor never has to blur 1,000px.
+   * The page's backdrop: Figma's "Hero / Background shapes" as Figma exports it (three blurred
+   * #7D8DC5 ellipses, the group at 15%), anchored where Figma anchors it, to the page's bottom left.
+   * One picture, painted once: the gradients drawn here before read brighter than Figma's blur.
    */
   :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main::before {
     content: "";
@@ -261,12 +263,8 @@
     pointer-events: none;
     border-radius: inherit;
     background:
-      radial-gradient(closest-side, var(--backdrop-shape), transparent)
-      calc(100% + 120px) 8% / 860px 820px no-repeat,
-      radial-gradient(closest-side, var(--backdrop-shape), transparent)
-      calc(100% + 40px) calc(100% + 220px) / 640px 560px no-repeat,
-      radial-gradient(closest-side, var(--backdrop-shape), transparent) 22%
-      calc(100% + 260px) / 940px 920px no-repeat;
+      url("./assets/patterns/backdrop-shapes.svg") -342px calc(100% + 388px) /
+      1769.55px 1653.19px no-repeat;
   }
 }
 
@@ -633,9 +631,37 @@
 }
 
 /*
- * A Bot's sphere, the one drawing of a Bot at every size, so it reads as the same Bot wherever it
- * is: its palette's lightest stop (c4) lit through c2 to c3 at the rim, with one sweep of c1 across
- * it. `BotOrb` draws it still at avatar sizes, with CSS alone, and live when larger or busy, where
+ * A Bot's orb (`BotOrb`): the designers' picture for its palette, filling its circle. A working
+ * Bot's orb breathes, a little smaller and brighter and back every 2.4 seconds; only `scale` and
+ * `filter` move, and nothing under reduced motion.
+ */
+.bot-orb-image {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.bot-orb-image[data-state="working"] {
+  animation: bot-orb-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes bot-orb-breathe {
+  50% {
+    scale: 0.9;
+    filter: brightness(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-orb-image[data-state="working"] {
+    animation: none;
+  }
+}
+
+/*
+ * The sphere the alternate skins' onboarding demos and the OpenBot for Business orb draw: its
+ * palette's lightest stop (c4) lit through c2 to c3 at the rim, with one sweep of c1 across
+ * it. `BotOrb` drew it still at avatar sizes, with CSS alone, and live when larger or busy, where
  * the sweep turns. Before, the live orb drew AgentOrb's own mesh instead, in which c3, a violet in
  * most palettes, lay across the top: the Personal Assistant was green in the sidebar and blue, teal
  * and pink at the top of its page and its conversation (bot-orb-one-color.test.tsx).

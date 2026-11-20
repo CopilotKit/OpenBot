@@ -1,20 +1,18 @@
-import type { CSSProperties } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
-import { orbPalette } from "@/lib/orb-palette";
-
-/** At this size and smaller, an idle orb is drawn still. */
-const STATIC_MAX_SIZE = 32;
+import { ORB_IMAGES } from "@/components/agents/orb-images";
+import { ORB_PALETTES, orbPalette } from "@/lib/orb-palette";
 
 /**
- * A Bot drawn as its orb, in the palette its seed picks (`orbPalette`), so renaming a Bot keeps
- * its color.
+ * A Bot drawn as its orb: the designers' picture for the palette its seed picks (`orbPalette`), so
+ * renaming a Bot keeps its color. Only OpenBot's own look draws Bots as orbs; the skins draw faces
+ * (`BotLookProvider`).
  *
- * One sphere at every size (`.bot-orb-still` and `.bot-orb-live` in styles.css), so a Bot is the
- * same color in the sidebar, at the top of its page and at the top of a conversation. At avatar
- * sizes an idle Bot's sphere is drawn still, with CSS alone: twenty animated orbs in a sidebar would
- * each run a blur and a backdrop filter on every frame. A larger orb, or one whose Bot is working,
- * is the live `AgentOrb` drawing the same sphere, in the palette as it is in every state. Neither
- * moves under reduced motion: `AgentOrb` honours it, and the still orb has nothing to move.
+ * ONE PICTURE AT EVERY SIZE. Figma's "Orbs" are eight finished spheres, glow and rim included
+ * (`ORB_IMAGES`), so a Bot is the same sphere in the sidebar, on its page and at the top of a
+ * conversation, and nothing is blurred or animated per frame to draw it.
+ *
+ * A working Bot's orb breathes (`.bot-orb-image` in styles.css): it eases a little smaller and
+ * brighter and back, so the sidebar shows which Bots are busy. Under reduced motion it holds still.
+ * A waiting Bot is still: the next move is the person's.
  */
 export function BotOrb({
   seed,
@@ -27,49 +25,20 @@ export function BotOrb({
   size?: number;
   state?: "idle" | "working" | "waiting";
 }) {
-  const colors = orbPalette(seed);
-
-  if (size <= STATIC_MAX_SIZE && state === "idle") {
-    return (
-      <span
-        role="img"
-        aria-label={name}
-        data-variant="static"
-        className="bot-orb-still inline-block shrink-0 rounded-full ring-1 ring-foreground/10"
-        style={
-          {
-            "--c1": colors.c1,
-            "--c2": colors.c2,
-            "--c3": colors.c3,
-            "--c4": colors.c4,
-            height: size,
-            width: size,
-          } as CSSProperties
-        }
-      />
-    );
-  }
-
-  // No outline, unlike the still orb: the live disc idles at 94% of this box, so a ring here floats
-  // off its edge, and on the dark page it read as a light ring around the orb. The disc has its rim.
+  const image =
+    ORB_IMAGES[ORB_PALETTES.indexOf(orbPalette(seed))] ?? ORB_IMAGES[0];
   return (
     <span
       role="img"
       aria-label={name}
-      data-variant="live"
-      className="bot-orb-live inline-flex shrink-0 rounded-full"
-      style={{ height: size, width: size }}
-    >
-      {/* Hidden so the Bot is announced once, by name. A waiting Bot idles: the next move is the
-          person's, not the Bot's. */}
-      <span aria-hidden="true" className="contents">
-        <AgentOrb
-          colors={colors}
-          size={`${size}px`}
-          state={state === "working" ? "thinking" : "idle"}
-          trueColors
-        />
-      </span>
-    </span>
+      data-variant="image"
+      data-state={state}
+      className="bot-orb-image inline-block shrink-0 rounded-full"
+      style={{
+        backgroundImage: `url("${image}")`,
+        height: size,
+        width: size,
+      }}
+    />
   );
 }

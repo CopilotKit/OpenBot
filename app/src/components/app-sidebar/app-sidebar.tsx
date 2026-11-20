@@ -65,6 +65,7 @@ import {
 } from "../browser/browser-nav-item";
 import { OpenBotLogo } from "../edition/openbot-logo";
 import { navigationRender } from "../edition/team-features-dialog";
+import { useSkinId } from "../../skins/store";
 import { SidebarToggle } from "../layout/sidebar-toggle";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
@@ -384,6 +385,7 @@ function PrimaryNavItem({
   tooltip?: React.ComponentProps<typeof SidebarMenuButton>["tooltip"];
   children?: React.ReactNode;
 }) {
+  const own = useSkinId() === "openbot";
   return (
     <SidebarMenuItem>
       {/*
@@ -392,13 +394,15 @@ function PrimaryNavItem({
        */}
       <SidebarMenuButton
         // No hover fill under a pointer that has not moved since the page changed (see
-        // usePointerRestingSinceNavigation).
-        className="hover:bg-foreground/5 h-9 group-data-[pointer-resting]/footer-menu:hover:bg-transparent"
+        // usePointerRestingSinceNavigation). In OpenBot's own look the hover is Figma's white pill,
+        // and the open page's row takes none.
+        className="hover:bg-sidebar-item-hover h-9 group-data-[pointer-resting]/footer-menu:hover:bg-transparent own:rounded-full own:data-[status=active]:hover:bg-transparent"
         render={(props) => <Link {...props} to={item.to} />}
         tooltip={tooltip}
       >
         <div className="size-[28px] flex items-center justify-center [&_svg]:size-[18px]">
-          <item.icon />
+          {/* Figma draws these 18px glyphs with a 1px line, 1.33 on the set's 24-unit grid. */}
+          <item.icon stroke={own ? 1.33 : undefined} />
         </div>
         <span className="text-sm">{item.label}</span>
         {children}
@@ -522,8 +526,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent ref={scrollRoot} className="scroll-fade-b">
         <SidebarMenu>
-          <SidebarGroup className="gap-px">
-            <SidebarMenuItem>
+          {/* Figma's "Search and Recent": the search 16px in from the sidebar's edges, 12px under the
+              name, and 8px between conversations. */}
+          <SidebarGroup className="gap-px own:gap-2">
+            <SidebarMenuItem className="own:px-2 own:pt-1 own:pb-1">
               {/* The UI Kit's small search. */}
               <SearchField
                 aria-label="Search conversations"
@@ -551,7 +557,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 {searchable ? SEARCH_SCOPE : SEARCH_HINT}
               </p>
             ) : null}
-            <div className="w-full h-2" />
+            <div className="w-full h-2 own:hidden" />
             {searching ? (
               searchable ? (
                 <SearchResults

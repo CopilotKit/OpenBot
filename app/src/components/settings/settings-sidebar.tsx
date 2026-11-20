@@ -219,15 +219,23 @@ export function SettingsSidebar({
               <SidebarMenu className="gap-px">
                 {entries.map((option) => (
                   <SidebarMenuItem key={option.title}>
+                    {/*
+                     * Figma's "Navigation item" in OpenBot's own look: the 18px glyph in a 28px box
+                     * with a 1px line, a white pill under the pointer, and no fill on the open page,
+                     * which the frame's notch marks. The skins keep their fill and 16px glyphs.
+                     */}
                     <SidebarMenuButton
+                      className="own:rounded-full own:hover:bg-sidebar-item-hover own:data-[status=active]:hover:bg-transparent"
                       render={(props) => (
                         <Link
                           {...option.linkOptions}
                           activeOptions={{ exact: option.exact ?? false }}
-                          activeProps={{ className: "bg-foreground/5" }}
+                          activeProps={{
+                            className: "bg-foreground/5 own:bg-transparent",
+                          }}
                           {...props}
                         >
-                          <option.icon className="mr-2 h-4 w-4" />
+                          <option.icon className="mr-2 h-4 w-4 own:mr-[13px] own:ml-[5px] own:size-[18px] own:**:[stroke-width:1.33]" />
                           {option.title}
                           {option.setup && toFix > 0 ? (
                             <span className="sr-only">

@@ -1,6 +1,7 @@
 import { IconPinFilled } from "@/components/icons";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
+import { useSkinId } from "@/skins/store";
 
 /** Shared by live conversations and the appearance preference previews. */
 export function ChannelItemContent({
@@ -26,6 +27,7 @@ export function ChannelItemContent({
   pinned?: boolean;
   revealing?: boolean;
 }) {
+  const own = useSkinId() === "openbot";
   // Figma's conversation row: a regular 14px line under a 12px one in the secondary ink, 4px apart.
   const primaryText = `text-sm ${unread ? "font-semibold" : "font-normal"}`;
   const secondaryText = "text-xs text-muted-foreground";
@@ -33,9 +35,10 @@ export function ChannelItemContent({
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <div className="shrink-0">
+        {/* Figma's 28px avatar in OpenBot's own look; the skins keep 32. */}
         <ChannelAvatar
           participantIds={participantIds}
-          size={32}
+          size={own ? 28 : 32}
           typing={busy}
         />
       </div>

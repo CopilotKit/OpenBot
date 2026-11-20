@@ -94,8 +94,10 @@ export const Channel = memo(function Channel({
             }
             params={{ channelId }}
             type="button"
-            // The open conversation is marked at the window's edge by the frame, not by a fill.
-            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-[20px] [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
+            // The open conversation is marked at the window's edge by the frame, not by a fill. In
+            // OpenBot's own look a row is Figma's "Recent Conversation item": 4px and 8px in, a white
+            // pill under the pointer, and none on the open conversation.
+            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-sidebar-item-hover rounded-[20px] own:rounded-full own:px-2 own:py-1 own:data-[status=active]:hover:bg-transparent [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
           >
             <ChannelItemContent
               participantIds={participantIds}

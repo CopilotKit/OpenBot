@@ -3,6 +3,7 @@ import {
   IconBrain,
   IconDeviceDesktop,
   IconMessages,
+  IconRefresh,
   IconSparkles,
 } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -28,6 +29,7 @@ import {
   setupChecklistQueryOptions,
 } from "@/lib/setup/queries";
 import { cn } from "@/lib/utils";
+import { useSkinId } from "@/skins/store";
 import { queryClient } from "@/query-client";
 
 const ICONS: Record<SetupRowId, typeof IconBrain> = {
@@ -79,6 +81,7 @@ export function SetupChecklist({
    * that could not be read at all is read again first.
    */
   const checking = checklist.isFetching || recheck.isPending;
+  const own = useSkinId() === "openbot";
   const checkAgain = (
     <Button
       className="self-center lg:self-start"
@@ -91,6 +94,13 @@ export function SetupChecklist({
       variant="ghost"
     >
       {checking ? "Checking…" : "Check again"}
+      {/* Figma's "setup/check-again-button": the refresh glyph after the words, turning while it checks. */}
+      {own ? (
+        <IconRefresh
+          className={cn(checking && "animate-spin motion-reduce:animate-none")}
+          data-icon="inline-end"
+        />
+      ) : null}
     </Button>
   );
 

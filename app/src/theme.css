@@ -333,6 +333,11 @@ body {
    */
   --leading-heading: 1.12;
   --color-row-hover: var(--secondary);
+  /*
+   * A sidebar row under the pointer (Figma's "sidebar/item hover", #fafafa, a pill). The open page's
+   * row takes none: the frame's notch at the window's edge marks it.
+   */
+  --color-sidebar-item-hover: var(--background);
   --color-bot-card-hover: var(--background);
   --spacing-row-actions: 0.75rem;
   --spacing-row: calc(1.25rem - 1px);

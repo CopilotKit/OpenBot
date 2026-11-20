@@ -115,7 +115,7 @@ export function OnboardingSlides({
         )}
       </div>
       {dots.length > 1 || scene.caption ? (
-        <div className="absolute inset-x-0 bottom-6 flex flex-col items-center gap-4 px-8 lg:bottom-19">
+        <div className="absolute inset-x-0 bottom-6 flex flex-col items-center gap-3 px-8 lg:bottom-19">
           {dots.length > 1 ? (
             <div aria-hidden="true" className="flex gap-1.5">
               {dots.map((id) => (
@@ -132,7 +132,8 @@ export function OnboardingSlides({
             </div>
           ) : null}
           {scene.caption ? (
-            <p className="text-sm max-w-lg text-center text-pretty text-muted-foreground">
+            // Figma's "Onboarding_it2": the caption in the ink at 16px, 12px under the dots.
+            <p className="max-w-xl text-center text-base text-foreground text-pretty">
               {scene.caption}
             </p>
           ) : null}

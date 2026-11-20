@@ -113,6 +113,11 @@
 
   --leading-heading: 1.25;
   --color-row-hover: var(--muted);
+  --color-sidebar-item-hover: color-mix(
+    in oklab,
+    var(--foreground) 5%,
+    transparent
+  );
   --color-bot-card-hover: color-mix(in oklab, var(--card) 70%, transparent);
   --spacing-row-actions: 0.5rem;
   --spacing-row: 1.25rem;

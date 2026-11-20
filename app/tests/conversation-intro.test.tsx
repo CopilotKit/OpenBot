@@ -82,7 +82,9 @@ test("the orb is the large one, named once", () => {
   const view = draw(<ConversationIntro agent={expenseReview} />);
   const orb = view.getByRole("img");
   expect(orb.getAttribute("aria-label")).toBe("Expense Review");
-  expect(orb.dataset.variant).toBe("live");
+  // The designers' picture (Figma's "Orbs"), at Figma's 72px for the Bot card.
+  expect(orb.dataset.variant).toBe("image");
+  expect(orb.style.width).toBe("72px");
 });
 
 test("a paragraph-long role is held to two lines, with the whole text on hover", () => {

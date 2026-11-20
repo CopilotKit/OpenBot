@@ -2,11 +2,13 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
 import { BotOrb } from "@/components/agents/bot-orb";
+import { ORB_IMAGES } from "@/components/agents/orb-images";
+import { ORB_PALETTES, orbPalette } from "@/lib/orb-palette";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * A Bot's orb, in its own palette. At avatar sizes a still orb is drawn with CSS alone, because a
- * sidebar of twenty animated orbs is expensive; larger or busy orbs are the live `AgentOrb`.
+ * A Bot's orb: the designers' picture for its palette (Figma's "Orbs"), the same picture at every
+ * size, breathing while its Bot works.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -16,6 +18,9 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
+const picture = (orb: HTMLElement) =>
+  /url\("?([^")]+)"?\)/.exec(orb.style.backgroundImage)?.[1];
+
 test("the orb is announced by the Bot's name", () => {
   const view = render(<BotOrb name="Expense Review" seed="expense-review" />);
   expect(view.getByRole("img").getAttribute("aria-label")).toBe(
@@ -23,31 +28,45 @@ test("the orb is announced by the Bot's name", () => {
   );
 });
 
-test("a small, idle orb is drawn still", () => {
-  const view = render(<BotOrb name="Knowledge" seed="knowledge" size={24} />);
-  expect(view.getByRole("img").dataset.variant).toBe("static");
+test("there is one picture for each of the eight palettes", () => {
+  expect(ORB_IMAGES).toHaveLength(ORB_PALETTES.length);
+  expect(new Set(ORB_IMAGES).size).toBe(ORB_PALETTES.length);
 });
 
-test("a large orb is the live one", () => {
-  const view = render(<BotOrb name="Knowledge" seed="knowledge" size={96} />);
-  expect(view.getByRole("img").dataset.variant).toBe("live");
+test("a Bot's orb is its palette's picture, the same at every size", () => {
+  const drawn = [24, 40, 72].map((size) => {
+    const view = render(
+      <BotOrb name="Knowledge" seed="knowledge" size={size} />,
+    );
+    const orb = view.getByRole("img");
+    const at = { variant: orb.dataset.variant, picture: picture(orb) };
+    view.unmount();
+    return at;
+  });
+  const expected = ORB_IMAGES[ORB_PALETTES.indexOf(orbPalette("knowledge"))];
+  expect(drawn).toEqual(
+    [24, 40, 72].map(() => ({ variant: "image", picture: expected })),
+  );
 });
 
-test("a working orb is live at any size", () => {
+test("a working Bot's orb is marked so it breathes, and is still its picture", () => {
   const view = render(
     <BotOrb name="Knowledge" seed="knowledge" size={24} state="working" />,
   );
-  expect(view.getByRole("img").dataset.variant).toBe("live");
+  const orb = view.getByRole("img");
+  expect(orb.dataset.state).toBe("working");
+  expect(picture(orb)).toBe(
+    ORB_IMAGES[ORB_PALETTES.indexOf(orbPalette("knowledge"))],
+  );
 });
 
-test("two Bots with different seeds get different colors", () => {
-  const style = (seed: string) => {
+test("two Bots with different seeds get different pictures", () => {
+  const of = (seed: string) => {
     const view = render(<BotOrb name={seed} seed={seed} size={24} />);
-    const orb = view.getByRole("img");
-    const value = orb.getAttribute("style") ?? "";
+    const value = picture(view.getByRole("img"));
     view.unmount();
     return value;
   };
   // These two seeds land on different palettes.
-  expect(style("knowledge")).not.toBe(style("risk-analyst"));
+  expect(of("knowledge")).not.toBe(of("risk-analyst"));
 });
