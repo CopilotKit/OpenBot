@@ -97,8 +97,25 @@ function noSuchAddress(error: unknown): boolean {
 }
 
 /** What the server says on every other request to somebody in no organization, said here too. */
-const IN_NONE =
+export const IN_NONE =
   "You aren't a member of an organization here. Ask an admin to add you.";
+
+/**
+ * Signed in, and in no organization here: never added, or removed from the last one. Every screen of the app works in
+ * an organization, so this is answered with the page for somebody in none (`NoOrganizationPage`), never an error
+ * screen, and the sign-in screen is shown as for anybody.
+ */
+export class InNoOrganization extends Error {
+  constructor() {
+    super(IN_NONE);
+    this.name = "InNoOrganization";
+  }
+}
+
+/** Whether a failure is the person being in no organization here. */
+export function inNoOrganization(error: unknown): error is InNoOrganization {
+  return error instanceof InNoOrganization;
+}
 
 /**
  * Work in `organizationId` from the server's side: the session's active organization, which is what
@@ -173,7 +190,7 @@ async function ownOrganizations(
   const active = organizations.find((one) => one.active);
   if (active) return { ...listed, currentId: active.id };
   const first = organizations[0];
-  if (!first) throw new Error(IN_NONE);
+  if (!first) throw new InNoOrganization();
   /*
    * In some, working in none: the session still names one this person has left. The rest of
    * OpenBot refuses every request until the session works somewhere they are, so it moves to the
@@ -256,6 +273,8 @@ export function ownOrganizationsQueryOptions() {
       return mine;
     },
     staleTime: 60_000,
+    // Being in no organization is an answer: asking again at once says the same, and only holds the page back.
+    retry: (failures, error) => !inNoOrganization(error) && failures < 1,
     /*
      * A switch made in another window is noticed when the person comes back to this one. Always,
      * however lately the list was read: the session is one for every window, so until this is

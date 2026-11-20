@@ -91,7 +91,8 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     response = await fetch(path, {
       ...init,
       headers: withClientName(init.headers),
-      credentials: "include",
+      // The session's cookie, unless the caller asks as nobody (`readDeployment` for somebody in no organization).
+      credentials: init.credentials ?? "include",
     });
   } catch (error) {
     noteNoAnswer(error);
