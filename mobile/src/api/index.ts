@@ -45,6 +45,7 @@ export {
   ORGANIZATION_ID,
   organizationAddress,
   organizationChoices,
+  organizationsHeld,
   setSignedInPerson,
 } from "./request";
 

@@ -18,6 +18,7 @@ import {
 import { listConversations } from "../src/api/generated/conversations/conversations";
 import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
 import { registerPush, unregisterPush } from "../src/notifications";
+import { homeView } from "../src/home-view";
 import { onOrganizationGone } from "../src/organization-gone";
 import { useLoad } from "../src/use-load";
 export default function Home() {
@@ -47,12 +48,17 @@ export default function Home() {
   const loadOrganizations = useCallback(() => organizationChoices(), []);
   const organizations = useLoad(loadOrganizations, Boolean(session));
   const workingIn = organizations.data?.currentId;
+  // In no organization here: nothing that acts on one is offered, and nothing is asked of one.
+  const view = homeView(Boolean(session), organizations.error);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, and wherever they work now
   const loadConversations = useCallback(
     () => listConversations(ORGANIZATION_ID, { limit: 100 }),
     [session?.user.id, workingIn],
   );
-  const conversations = useLoad(loadConversations, Boolean(session));
+  const conversations = useLoad(
+    loadConversations,
+    Boolean(session) && view !== "in-no-organization",
+  );
   /*
    * The organization they work in went away while the app was open (they were removed, or it was deleted): their
    * organizations are read again, and everything below follows the one they work in now.
@@ -92,6 +98,20 @@ export default function Home() {
       setBusy(false);
     }
   }
+  const signOutButton = (
+    <Button
+      disabled={busy}
+      title="Sign out"
+      onPress={() => {
+        void act(async () => {
+          await unregisterPush();
+          const result = await authClient.signOut();
+          if (result.error)
+            throw new Error(result.error.message ?? "Could not sign out.");
+        });
+      }}
+    />
+  );
   return (
     <ScrollView
       contentContainerStyle={{ padding: 20, gap: 16 }}
@@ -110,7 +130,7 @@ export default function Home() {
           : "Sign in to OpenBot"}
       </Text>
       <Text>{serverUrl}</Text>
-      {session &&
+      {view === "working" &&
         !organizations.error &&
         (organizations.data?.organizations.length ?? 0) > 1 && (
           <View style={{ gap: 8 }}>
@@ -142,12 +162,26 @@ export default function Home() {
       {(error ||
         optionsError ||
         organizations.error ||
-        conversations.error) && (
+        (view === "working" && conversations.error)) && (
         <Text accessibilityRole="alert" style={{ color: "#b42318" }}>
-          {error || optionsError || organizations.error || conversations.error}
+          {error ||
+            optionsError ||
+            organizations.error ||
+            (view === "working" ? conversations.error : undefined)}
         </Text>
       )}
-      {!session ? (
+      {view === "in-no-organization" ? (
+        <>
+          <Button
+            disabled={busy || organizations.pending}
+            title="Try again"
+            onPress={() => {
+              void organizations.refresh();
+            }}
+          />
+          {signOutButton}
+        </>
+      ) : !session ? (
         <View style={{ gap: 12 }}>
           <Text>
             {isPending
@@ -249,20 +283,7 @@ export default function Home() {
               No conversations yet. Create one in OpenBot on your computer.
             </Text>
           )}
-          <Button
-            disabled={busy}
-            title="Sign out"
-            onPress={() => {
-              void act(async () => {
-                await unregisterPush();
-                const result = await authClient.signOut();
-                if (result.error)
-                  throw new Error(
-                    result.error.message ?? "Could not sign out.",
-                  );
-              });
-            }}
-          />
+          {signOutButton}
         </>
       )}
     </ScrollView>
