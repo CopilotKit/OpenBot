@@ -34,7 +34,75 @@ export function stoppedReason(reported: unknown): string {
   if (refused) return refused;
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
+  if (RUNNER_DROPPED.test(said.trim())) return TURN_CUT_OFF;
   return said.trim() || "The Bot stopped without saying why.";
+}
+
+/**
+ * Whether the server ended the turn asking the person to have the Bot carry on: a reply that came
+ * back incomplete, or the connection to the Bot's model dropping part way ("The connection to Claude
+ * dropped. Ask the Bot to carry on."). Those turns did work that stands, like a turn cut off here,
+ * so they get the same Carry on.
+ */
+export function asksToCarryOn(said: string): boolean {
+  return /\bAsk (?:it|the Bot) to carry on\.$/.test(said.trim());
+}
+
+/** Said under a turn cut off part way because OpenBot's backend stopped answering. Its work stands. */
+export const TURN_CUT_OFF =
+  "The Bot stopped before it finished because OpenBot's backend stopped answering. What it saved is shown here.";
+
+/**
+ * How the backend's event store ends a run whose server went away under it, word for word. Found
+ * with the server killed and started again in the middle of a long turn: the conversation, opened
+ * again, said only "Runner connection dropped", in words nobody using OpenBot can act on.
+ */
+const RUNNER_DROPPED = /^Runner connection dropped\.?$/i;
+
+/** Whether a run ended because something here aborted it: Stop, Send now, or a step held for a person. */
+function aborted(reported: unknown): boolean {
+  if (!reported || typeof reported !== "object") return false;
+  const name = (reported as { name?: unknown }).name;
+  const message = (reported as { message?: unknown }).message;
+  return (
+    name === "AbortError" ||
+    (typeof message === "string" && /\baborted\b/i.test(message))
+  );
+}
+
+/**
+ * Why a later run of a turn failed in this browser, or null when there is nothing to say.
+ *
+ * A TURN THAT TOUCHES THE BROWSER IS SEVERAL RUNS. The first ends on a step the browser takes (it
+ * saves a file), and the next run is started from here carrying that step's result. Found on a
+ * person's 1.1.2 Desktop: the server stopped and started again in the middle of a long turn of file
+ * saves, the next run's request was never made, and the turn ended with nothing said. Its last save
+ * was drawn "Not run" only once they wrote again. A failure there was dropped as if it were Stop.
+ *
+ * So it is said, unless something here stopped it. A request that never reached the server does not
+ * say "your message wasn't sent", as it would for a first run: the message went, and the Bot worked on
+ * it, so what it did is kept and the person is told the turn was cut off.
+ */
+export function laterRunFailure(reported: unknown): string | null {
+  if (aborted(reported)) return null;
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  if (refusalForPerson(said)) return stoppedReason(reported);
+  if (
+    REST_REQUEST_FAILED.test(said.trim()) ||
+    /failed to fetch|load failed|networkerror|network connection/i.test(said)
+  ) {
+    console.warn(
+      "OpenBot couldn't reach its backend part way through a turn.",
+      said,
+    );
+    return TURN_CUT_OFF;
+  }
+  return stoppedReason(reported);
 }
 
 /**

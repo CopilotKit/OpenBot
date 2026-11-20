@@ -90,11 +90,11 @@ import {
 } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { useComponentTest } from "@/lib/copilot/tool-steps";
-import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type FolderNames,
@@ -144,7 +144,6 @@ import {
 } from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
-import { FileTypeIcon } from "./file-icon";
 import {
   attachmentModality,
   type SentAttachment,
@@ -152,6 +151,7 @@ import {
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
+import { FileTypeIcon } from "./file-icon";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
@@ -212,6 +212,11 @@ type ChatTranscriptProps = {
    * be told, and only the thing that ended the turn knows which one happened.
    */
   stopped?: string;
+  /**
+   * Carry on with a turn that was cut off part way, drawn as a button beside `stopped`. Absent for
+   * a turn that ended for a reason carrying on would not fix (a refusal, a Bot no longer shared).
+   */
+  onCarryOn?: () => void;
   /**
    * Work this conversation is waiting on that is not this tab's run: a Bot it asked, a routine.
    * Drawn in the same slot as `Thinking`, under the last thing said, because that is where the
@@ -346,15 +351,28 @@ function Thinking() {
  * and the conversation is sent back to the model on the next turn, so the Bot would then read its
  * own obituary as something it had written.
  */
-function Stopped({ reason }: { reason: string }) {
+function Stopped({
+  reason,
+  onCarryOn,
+}: {
+  reason: string;
+  /** A turn cut off part way can be carried on from here. See `onCarryOn` on the transcript. */
+  onCarryOn?: () => void;
+}) {
   return (
-    <p
-      className="text-destructive text-sm"
+    <div
+      className="flex flex-col items-start gap-2"
       data-testid="transcript-stopped"
-      role="alert"
     >
-      {reason}
-    </p>
+      <p className="text-destructive text-sm" role="alert">
+        {reason}
+      </p>
+      {onCarryOn ? (
+        <Button onClick={onCarryOn} size="sm" variant="outline">
+          Carry on
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -2033,6 +2051,7 @@ export function ChatTranscript({
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
+  onCarryOn,
   working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
@@ -2623,7 +2642,7 @@ export function ChatTranscript({
                   </ArrivalsLiveContext.Provider>
                   <div className="contents [&>*]:order-1">
                     {stopped ? (
-                      <Stopped reason={stopped} />
+                      <Stopped onCarryOn={onCarryOn} reason={stopped} />
                     ) : waitingOnTheModel ? (
                       <Thinking />
                     ) : null}

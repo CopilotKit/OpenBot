@@ -438,3 +438,29 @@ describe("self-serve enrollment", () => {
     }
   });
 });
+
+describe("reading the agent's own Secret", () => {
+  test("an API server refusal is not an absent Secret: a Role not created yet never sends the agent enrolling again", async () => {
+    const { Kube, CommandFailed } = await import("../src/kube");
+    const { KubeSecretStore } = await import("../src/enroll");
+    const answer = (stderr: string) =>
+      new KubeSecretStore(
+        new Kube(async (command) => {
+          throw new CommandFailed([...command], 1, stderr);
+        }),
+        "openbot-system",
+        "openbot-agent-credentials",
+      );
+    // What kubectl prints while the RoleBinding exists and its Role does not, yet.
+    const forbidden = answer(
+      'Error from server (Forbidden): secrets "openbot-agent-credentials" is forbidden: User "system:serviceaccount:openbot-system:openbot-agent" cannot get resource "secrets" in API group "" in the namespace "openbot-system": RBAC: role.rbac.authorization.k8s.io "openbot-agent" not found',
+    );
+    expect(
+      await forbidden.read().catch((error: Error) => error),
+    ).toBeInstanceOf(CommandFailed);
+    const absent = answer(
+      'Error from server (NotFound): secrets "openbot-agent-credentials" not found',
+    );
+    expect(await absent.read()).toBeNull();
+  });
+});
