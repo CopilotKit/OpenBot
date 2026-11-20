@@ -594,6 +594,15 @@ function report(what: string): (error: unknown) => void {
   return (error) => console.error(`Recorder: ${what} failed`, error);
 }
 
+/** The organization a connection records into, by name: OpenBot's latest answer about it, else what its grant said. */
+export function organizationNameOf(
+  me: RecorderMe | null,
+  connection: ConnectionRecord,
+): { organizationName?: string } {
+  const name = me?.organization?.name ?? connection.organizationName;
+  return name ? { organizationName: name } : {};
+}
+
 function liveFrom(
   record: DrainRecord,
   connection: Pick<ConnectionRecord, "token" | "organizationId">,
@@ -2680,6 +2689,7 @@ export function installRecording(
             openbotUrl: connection.openbotUrl,
             user: { name: connection.user.name, email: connection.user.email },
             via: connection.via,
+            ...organizationNameOf(me, connection),
           }
         : null,
       me: connection ? me : null,
