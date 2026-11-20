@@ -19,7 +19,7 @@ function Layout() {
   const { data: session } = authClient.useSession();
   // Asked before sign-in: whether this app and its OpenBot can work together. When they can't, one sentence covers
   // the app, so no screen behind it is seen failing.
-  const { verdict, check } = useVersionVerdict();
+  const { verdict, check } = useVersionVerdict(Boolean(session));
   const pending = useRef<unknown>(null);
   const handled = useRef<string | null>(null);
   useEffect(() => {

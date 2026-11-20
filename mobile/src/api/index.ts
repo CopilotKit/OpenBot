@@ -40,7 +40,7 @@ export {
   ApiError,
   chooseOrganization,
   DEPLOYMENT_ORGANIZATION_ID,
-  deploymentOrganization,
+  readDeployment,
   ME,
   ORGANIZATION_ID,
   organizationAddress,
