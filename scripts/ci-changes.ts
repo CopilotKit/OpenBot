@@ -92,6 +92,7 @@ const ciInputs = matcher(
 const desktopInputs = matcher(
   ".github/workflows/desktop.yml",
   ".github/workflows/desktop-build.yml",
+  "desktop/scripts/install-linux-build-deps.sh",
   "scripts/ci-changes.ts",
 );
 
@@ -117,6 +118,22 @@ const pythonHarness = matcher(
   "bun.lock",
 );
 
+/** The harnesses ci.yml's `python-harness` matrix tests, one job each. */
+export const PYTHON_HARNESSES = [
+  "agent-crewai",
+  "agent-claude-sdk",
+  "agent-langgraph-agui",
+  "agent-llamaindex",
+  "agent-agno",
+  "agent-strands",
+  "agent-pydantic-ai",
+  "agent-adk",
+  "agent-antigravity",
+  "agent-langroid",
+  "agent-ag2",
+  "agent-microsoft",
+];
+
 export const CI_RULES: Rule[] = [
   {
     output: "static",
@@ -137,7 +154,11 @@ export const CI_RULES: Rule[] = [
   },
   {
     output: "app_browser",
-    checks: ["app (real browser)"],
+    checks: [
+      "app (real browser)",
+      "app (real browser, WebKit)",
+      "app (real browser, desktop setup window)",
+    ],
     reads: isCode,
   },
   {
@@ -154,7 +175,10 @@ export const CI_RULES: Rule[] = [
   },
   {
     output: "python_harness",
-    checks: ["python harness regressions"],
+    checks: [
+      ...PYTHON_HARNESSES.map((harness) => `python harness (${harness})`),
+      "compose config",
+    ],
     // Of the tests, only the harnesses' own: the suite's and the TypeScript engine's run elsewhere.
     reads: (path) =>
       (!isDocs(path) &&
@@ -189,7 +213,14 @@ export const DESKTOP_RULES: Rule[] = [
   },
   {
     output: "app",
-    checks: ["app / app (macos)", "app / app (windows)", "app / app (linux)"],
+    // The builds, and the Docker regression tests desktop.yml runs beside them on the same gate.
+    checks: [
+      "app / app (macos)",
+      "app / app (windows)",
+      "app / app (linux)",
+      "live (images)",
+      "live (engines)",
+    ],
     // desktop.yml's own path filter, less the docs and the tests the suite runs.
     reads: (path) =>
       (!isDocs(path) &&

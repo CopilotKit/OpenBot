@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type Change,
@@ -12,6 +12,7 @@ import {
   isDocs,
   isTestFile,
   type PullRequest,
+  PYTHON_HARNESSES,
   SHARDS,
   SUITE_RULE,
 } from "./ci-changes";
@@ -235,7 +236,7 @@ describe("a pull request push", () => {
       deps({
         // c2 skipped the harnesses; they last passed on m0, and the harness changed since.
         passed: {
-          c2: ALL_CI.filter((name) => name !== "python harness regressions"),
+          c2: ALL_CI.filter((name) => !name.startsWith("python harness (")),
           m0: ALL_CI,
         },
         changes: { c2: [], m0: ["agent-crewai/src/agent.py"] },
@@ -504,15 +505,101 @@ describe("the rules name the jobs the workflows run", () => {
     ).toHaveLength(SHARDS);
   });
 
-  test("desktop.yml: core, and each platform the shared build makes", () => {
+  test("ci.yml: the harness matrix is every harness with tests, and the rule waits on each", () => {
+    const names = jobNames("ci.yml");
+    const withTests = readdirSync(ROOT)
+      .filter(
+        (dir) =>
+          dir.startsWith("agent-") &&
+          existsSync(join(ROOT, dir, "requirements-test.txt")),
+      )
+      .sort();
+    expect([...PYTHON_HARNESSES].sort()).toEqual(withTests);
+    expect(names.filter((name) => name.startsWith("python harness ("))).toEqual(
+      PYTHON_HARNESSES.map((harness) => `python harness (${harness})`),
+    );
+  });
+
+  test("ci.yml: each real-browser job's Playwright image is the playwright-core the root pins", () => {
+    // The image's browsers are the builds of its own Playwright version, and playwright-core
+    // launches only its own builds, so a bump of one without the other fails the job.
+    const parsed = Bun.YAML.parse(
+      readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8"),
+    ) as { jobs: Record<string, { env?: Record<string, string> }> };
+    const root = JSON.parse(
+      readFileSync(join(ROOT, "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    const version = root.dependencies?.["playwright-core"];
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    for (const job of [
+      "app-browser",
+      "app-browser-webkit",
+      "app-browser-desktop",
+    ]) {
+      expect(parsed.jobs[job]?.env?.PLAYWRIGHT_IMAGE ?? "").toMatch(
+        new RegExp(
+          `^mcr\\.microsoft\\.com/playwright:v${version?.replaceAll(".", "\\.")}-noble@sha256:[0-9a-f]{64}$`,
+        ),
+      );
+    }
+  });
+
+  test("desktop.yml: core, each platform the shared build makes, and the live tests beside them", () => {
     const names = jobNames("desktop.yml");
     expect(names).toContain("core");
     const parsed = Bun.YAML.parse(
       readFileSync(join(ROOT, ".github/workflows/desktop.yml"), "utf8"),
-    ) as { jobs: { app: { with: { platforms: string } } } };
+    ) as {
+      jobs: {
+        app: { with: { platforms: string } };
+        live: { if: string };
+      };
+    };
     const platforms = JSON.parse(parsed.jobs.app.with.platforms) as string[];
+    const live = names.filter((name) => name.startsWith("live ("));
+    expect(live.length).toBeGreaterThan(0);
     expect(DESKTOP_RULES.find((rule) => rule.output === "app")?.checks).toEqual(
-      platforms.map((platform) => `app / app (${platform})`),
+      [...platforms.map((platform) => `app / app (${platform})`), ...live],
     );
+    // The live jobs stand on the app's gate, so a commit that skips the builds skips them too.
+    expect(parsed.jobs.live.if).toBe("needs.changes.outputs.app == 'true'");
+  });
+
+  // The Docker regression tests moved out of the Linux build into desktop.yml's live jobs. Every
+  // suite still runs, and runs once.
+  test("desktop.yml's live jobs run every Docker regression suite once", () => {
+    const parsed = Bun.YAML.parse(
+      readFileSync(join(ROOT, ".github/workflows/desktop.yml"), "utf8"),
+    ) as {
+      jobs: {
+        live: {
+          strategy: { matrix: { suite: string[] } };
+          steps: { if?: string; run?: string }[];
+        };
+      };
+    };
+    const { suite } = parsed.jobs.live.strategy.matrix;
+    const runs = parsed.jobs.live.steps.filter((step) =>
+      step.run?.includes("--ignored"),
+    );
+    expect(
+      runs.map((step) => step.run?.match(/--lib (\S+) --/)?.[1]).sort(),
+    ).toEqual([
+      "ai_connection::tests::real_engine",
+      "host_access::live",
+      "local_images::live",
+      "netavark_rules::live",
+      "update_ready::live",
+    ]);
+    for (const step of runs) {
+      expect(suite.map((name) => `matrix.suite == '${name}'`)).toContain(
+        step.if,
+      );
+    }
+    for (const name of suite) {
+      expect(runs.some((step) => step.if === `matrix.suite == '${name}'`)).toBe(
+        true,
+      );
+    }
   });
 });
