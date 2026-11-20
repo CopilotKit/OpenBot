@@ -26,11 +26,13 @@ import { checkVersion } from "./version-check";
 const CHECK_WAIT_MS = 8_000;
 
 /** The decision, asked as the app opens and each time it comes back to the front, and changed by any refusal. */
-export function useVersionVerdict(signedIn: boolean) {
+export function useVersionVerdict(signedIn: boolean, sessionPending = false) {
   const [verdict, setVerdict] = useState<VersionVerdict | "checking">(
     "checking",
   );
   const check = useCallback(async () => {
+    // Not before the session has answered: which organization's deployment to read depends on it.
+    if (sessionPending) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waited = new Promise<VersionVerdict>((resolve) => {
       timer = setTimeout(() => resolve({ kind: "ok" }), CHECK_WAIT_MS);
@@ -38,7 +40,7 @@ export function useVersionVerdict(signedIn: boolean) {
     const decided = await Promise.race([checkVersion(signedIn), waited]);
     clearTimeout(timer);
     setVerdict(decided);
-  }, [signedIn]);
+  }, [signedIn, sessionPending]);
   useEffect(() => {
     void check();
     const subscription = AppState.addEventListener("change", (state) => {
