@@ -11,10 +11,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 **Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
 unless you rely on task threads.
 
-- **No migrations.** The database stays at `0137_ai_connections`, where 1.1.1 left it, so 1.1.1
-  upgrades to 1.1.2 with its servers rolling one by one, with no downtime, and goes back to 1.1.1
-  the same way. Upgrading from 1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before
-  upgrading first.
+- **One migration, expand only.** `0138_management_enrollment` adds one table for connecting to
+  CopilotKit management (below), which 1.1.1 never reads, so 1.1.1 upgrades to 1.1.2 with its
+  servers rolling one by one, with no downtime, and goes back to 1.1.1 the same way. Upgrading from
+  1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before upgrading first.
 - **Task threads are off unless you turn them on.** No Bot hands a person's request to a task
   thread any more: every Bot does the work in the conversation, including one set to hand work to
   agents. Set `OPENBOT_TASK_THREADS=on` on the server (also `true` or `1`) to bring them back as
@@ -104,6 +104,19 @@ unless you rely on task threads.
     cluster, and nothing secret is logged. Until you choose how the database is backed up
     (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
     anything.
+- **An admin can connect OpenBot to CopilotKit management from Admin.** Admin, CopilotKit
+  management, Connect shows a code to approve at CopilotKit's page, signed in to CopilotKit as an
+  admin of the organization your licence names. Once it's approved, it shows one `helm install` of
+  the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
+  OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
+  organization `default` see it, and only on a team install you run yourself.
+  - The `openbot` chart turns this on by default (`server.managementEnrollment.enabled`). Nothing is
+    connected or called until an admin clicks Connect. The server's internal status port is now on,
+    open only to the agent's own pod (`openbot-agent` in `openbot-system`) until the agent manages
+    the release. The server gets a projected token of its own service account and the cluster's CA,
+    and checks the agent's token against the cluster's own keys. No role is granted.
+  - With `networkPolicy.enabled`, also set `networkPolicy.kubernetesApiCidr`, so the server can read
+    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false`.
 - **`bun scripts/update.ts kubernetes apply` accepts a published release.** It compared the commit
   the running server reports with the one the release names, which never match for a published
   release, so an upgrade that had worked ended in recovery-required with "Running server release
