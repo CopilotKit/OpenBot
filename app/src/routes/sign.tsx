@@ -15,6 +15,7 @@ import {
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
+import { inNoOrganization } from "@/lib/organizations/queries";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
 import {
@@ -46,7 +47,11 @@ export const Route = createFileRoute("/sign")({
   validateSearch: (search: Record<string, unknown>): { flow_id?: string } =>
     searchTextEntry("flow_id", search.flow_id),
   beforeLoad: async ({ context, search }) => {
-    const user = await signedInUser(context.queryClient);
+    // Somebody signed in to no organization signs in like anybody: signing in again is how they come back once added.
+    const user = await signedInUser(context.queryClient).catch((error) => {
+      if (inNoOrganization(error)) return null;
+      throw error;
+    });
     if (user) {
       /*
        * Signed in already, so the handle has nowhere to be lost between here and the verifier.
