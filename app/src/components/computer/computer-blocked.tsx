@@ -23,51 +23,34 @@ import { cn } from "@/lib/utils";
  * At the organization's computer limit, an admin gets the way to Computers, where stopping one makes room. Anybody
  * else reads the server's sentence, which says to ask an admin.
  *
- * `inline` draws the same thing in spans with no action, for a place that is itself a button (the screen's tile in a
- * conversation, which opens the full-size view where the action is).
+ * `compact` leaves out the icon and tightens the spacing, for a small frame (the screen's tile beside a conversation),
+ * where the whole sentence and the link have to fit.
  */
 export function ComputerBlocked({
   title,
   refusal,
   className,
-  inline = false,
+  compact = false,
 }: {
   title: string;
   refusal: ClientError;
   className?: string;
-  inline?: boolean;
+  compact?: boolean;
 }) {
   const role = useQuery(currentUserQueryOptions()).data?.role;
   const makeRoom =
-    !inline &&
-    refusal.code === COMPUTER_LIMIT_REACHED &&
-    isOrganizationAdmin(role);
-  if (inline)
-    return (
-      <span
-        className={cn(
-          "flex flex-col items-center justify-center gap-2 p-4 text-center text-balance",
-          className,
-        )}
-        data-slot="computer-blocked"
-      >
-        <span className="mb-1 flex size-8 items-center justify-center rounded-lg bg-muted text-foreground">
-          <IconDeviceDesktopOff aria-hidden="true" className="size-4" />
-        </span>
-        <span className="font-heading font-medium text-foreground text-sm tracking-tight">
-          {title}
-        </span>
-        <span className="max-w-sm text-muted-foreground text-sm/relaxed">
-          {refusal.message}
-        </span>
-      </span>
-    );
+    refusal.code === COMPUTER_LIMIT_REACHED && isOrganizationAdmin(role);
   return (
-    <Empty className={cn("gap-3 p-4", className)} data-slot="computer-blocked">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <IconDeviceDesktopOff />
-        </EmptyMedia>
+    <Empty
+      className={cn(compact ? "gap-2 p-3" : "gap-3 p-4", className)}
+      data-slot="computer-blocked"
+    >
+      <EmptyHeader className={compact ? "gap-1" : undefined}>
+        {compact ? null : (
+          <EmptyMedia variant="icon">
+            <IconDeviceDesktopOff />
+          </EmptyMedia>
+        )}
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{refusal.message}</EmptyDescription>
       </EmptyHeader>
