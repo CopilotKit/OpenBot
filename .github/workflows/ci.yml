@@ -310,20 +310,31 @@ jobs:
 
   # The app's and the desktop window's tests that need a real Chromium, asked for by name because a
   # machine running `bun test` is not required to have a browser. The browser is the one the root's
-  # playwright-core pins, installed by that same package: a bare `bunx playwright` fetches the newest
-  # Playwright, whose Chromium is a different build from the one playwright-core launches.
+  # playwright-core pins: a different Playwright's Chromium is a different build from the one
+  # playwright-core launches.
   #
   # Three jobs, side by side: this list in Chromium, the dictation test in WebKit, and the desktop
   # setup window. One after another they took 11 to 20 minutes, the longest job of a run. The list's
   # files run in parallel worker processes, one browser each (`bun test --parallel`, a worker per
-  # core by default). The browsers are not cached: Playwright advises against it, as restoring them
-  # takes about as long as their download (4 seconds here), and the slow part is the system
-  # packages, which a cache does not hold (https://playwright.dev/docs/ci#caching-browsers).
+  # core by default).
+  #
+  # Each runs its tests in Playwright's own image for the playwright-core the root pins
+  # (PLAYWRIGHT_IMAGE), which has the browsers and every system package they need. Installing
+  # those packages on the runner came from the Ubuntu mirror, half a minute on a good day and three
+  # to nine on a bad one. Caching the browsers instead would not help: Playwright advises against
+  # it, as restoring them takes about as long as their download (4 seconds here), and a cache does
+  # not hold the system packages (https://playwright.dev/docs/ci#caching-browsers). The checkout,
+  # its installs and Bun are the runner's, handed to the image, so the tests run the same Bun as
+  # every other job. The tag and digest move with playwright-core (scripts/ci-changes.test.ts holds
+  # them together). `--ipc=host` gives Chromium the shared memory Playwright's Docker guidance asks
+  # for.
   app-browser:
     name: app (real browser)
     needs: changes
     if: needs.changes.outputs.app_browser == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    env:
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -332,7 +343,6 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
-      - run: bunx playwright-core install --with-deps --no-shell chromium
       # The app's real-browser tests: a running step's words
       # under reduced motion, where onboarding's Back lands beside the Mac window's buttons, the name
       # step's orb drawn whole under the step dashes, a conversation's rail of turns clear of the
@@ -358,23 +368,20 @@ jobs:
       # only when it is opened, counted on the wire. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
+      - run: bun run generate:app-config
       - run: |
-          bun run generate:app-config
-          bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx
-        env:
-          OPENBOT_APP_BROWSER: '1'
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx
 
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
   # next language the recognizer has, or says which language to add and where. The page's
-  # language and its names for languages are the engine's own.
-  #
-  # The test runs in Playwright's own image for the playwright-core the root pins, which has both
-  # browsers and every system package they need: installing WebKit's on the runner fetched about
-  # 94 MB from the Ubuntu mirror, half a minute on a good day and nine on a bad one. The checkout,
-  # its installs and Bun are the runner's, handed to the image, so the test runs the same Bun as
-  # every other job. The tag and digest move with playwright-core (scripts/ci-changes.test.ts holds
-  # them together).
+  # language and its names for languages are the engine's own. In the image, as above: WebKit's
+  # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   app-browser-webkit:
     name: app (real browser, WebKit)
     needs: changes
@@ -391,7 +398,6 @@ jobs:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
       - run: bun run generate:app-config
-      # `--ipc=host` gives Chromium the shared memory Playwright's Docker guidance asks for.
       - run: |
           docker run --rm --ipc=host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
@@ -402,12 +408,15 @@ jobs:
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
-  # dependencies. One file, so it is its own job rather than one of the list's workers.
+  # dependencies. One file, so it is its own job rather than one of the list's workers. In the
+  # image, as above.
   app-browser-desktop:
     name: app (real browser, desktop setup window)
     needs: changes
     if: needs.changes.outputs.app_browser == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    env:
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -416,13 +425,15 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
-      - run: bunx playwright-core install --with-deps --no-shell chromium
       - run: bun install --frozen-lockfile
         working-directory: desktop
-      - run: bun test src/setupLayout.browser.test.ts
-        working-directory: desktop
-        env:
-          OPENBOT_APP_BROWSER: '1'
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test src/setupLayout.browser.test.ts
 
   # The suite in shards, one runner each, so the run takes as long as its slowest shard rather than
   # as long as every file one after another. `bun test --shard` does the split, cut by the per-file
