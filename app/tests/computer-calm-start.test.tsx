@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ToolLine } from "@/components/channels/tool-line";
@@ -406,6 +407,25 @@ test("a computer the organization has no room for says why it stays off, calmly,
   });
   expect(view.getByText(atLimit)).toBeDefined();
   expect(asked).toBe(1);
+  // A computer that can't start has no screen to take: no Take control on it, here or full size, and nothing to
+  // record (the end-to-end run offered both).
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
+  fireEvent.click(
+    view.getByRole("button", { name: "Open the Bot's screen full size" }),
+  );
+  const full = await view.findByRole("dialog");
+  expect(within(full).getAllByText(atLimit).length).toBeGreaterThan(0);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  });
+  expect(within(full).queryByRole("button", { name: "Take control" })).toBe(
+    null,
+  );
+  expect(within(full).queryByRole("button", { name: /Record/ })).toBeNull();
+  expect(within(full).queryByText(/Record a task/)).toBeNull();
+  expect(within(full).queryByText(/Couldn't load the Bot's browser/)).toBe(
+    null,
+  );
 });
 
 test("a live stream that drops shows a quiet badge, not the Retry panel", async () => {
