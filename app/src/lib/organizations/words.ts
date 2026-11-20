@@ -105,6 +105,19 @@ export function memberControl(
 }
 
 /**
+ * What the Remove dialog tells the admin removing somebody. Somebody who hasn't opened OpenBot yet made nothing here, so
+ * it says only what removing them does.
+ */
+export function removeMemberWords(
+  member: Pick<OrganizationMemberSummary, "notOpenedYet">,
+  organizationName: string,
+): string {
+  return member.notOpenedYet
+    ? `This takes them out of ${organizationName}. They haven't opened OpenBot yet.`
+    : "They keep their account and their other organizations. What they made here stays here.";
+}
+
+/**
  * The roles a member's Role menu offers: the server's verdict (`assignableRoles`), less any role a
  * newer server lists that this app doesn't know. The app can't name one it doesn't know, and never
  * sends one back. None for somebody who hasn't opened OpenBot yet: their role is shown, not changed.
