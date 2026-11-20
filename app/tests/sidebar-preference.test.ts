@@ -112,15 +112,15 @@ describe("sidebar width", () => {
  */
 describe("the floor a drag stops at", () => {
   test("is the panel's floor with no strip", () => {
-    expect(sidebarFloor(0)).toBe(160);
+    expect(sidebarFloor(0)).toBe(180);
   });
 
   test("adds the strip's width to the panel's floor", () => {
-    expect(sidebarFloor(48)).toBe(208);
+    expect(sidebarFloor(48)).toBe(228);
   });
 
   test("holds a drag narrower than the panel's floor at it", () => {
-    expect(clampSidebarWidth(100, sidebarFloor(48))).toBe(208);
+    expect(clampSidebarWidth(100, sidebarFloor(48))).toBe(228);
   });
 });
 
@@ -163,17 +163,17 @@ describe("the page's Show sidebar button", () => {
 });
 
 /*
- * Admin and Settings share the width and may be dragged to 160px, which beside the strip would
+ * Admin and Settings share the width and may be dragged to 180px, which beside the strip would
  * leave the panel narrower than it may ever be dragged. And however wide it was left, the sidebar
  * takes no more than two-fifths of the window: zoomed in, the window is fewer of the page's pixels
  * wide and the sidebar would otherwise keep its count of them.
  */
 test("the shared width is drawn between the floor and two-fifths of the window", () => {
-  expect(sidebarWidthStyle("160px", { besideStrip: true })).toBe(
-    "clamp(calc(160px + var(--sidebar-width-icon)), 160px, 40vw)",
+  expect(sidebarWidthStyle("180px", { besideStrip: true })).toBe(
+    "clamp(calc(180px + var(--sidebar-width-icon)), 180px, 40vw)",
   );
   expect(sidebarWidthStyle("480px", { besideStrip: false })).toBe(
-    "clamp(160px, 480px, 40vw)",
+    "clamp(180px, 480px, 40vw)",
   );
 });
 
@@ -184,16 +184,16 @@ test("the shared width is drawn between the floor and two-fifths of the window",
  */
 describe("the widest a drag goes", () => {
   test("is the fixed maximum in a wide window", () => {
-    expect(sidebarCeiling(1440, 208)).toBe(480);
+    expect(sidebarCeiling(1440, 228)).toBe(480);
   });
 
   test("is two-fifths of a zoomed-in window", () => {
-    expect(sidebarCeiling(820, 208)).toBe(328);
-    expect(clampSidebarWidth(600, 208, sidebarCeiling(820, 208))).toBe(328);
+    expect(sidebarCeiling(820, 228)).toBe(328);
+    expect(clampSidebarWidth(600, 228, sidebarCeiling(820, 228))).toBe(328);
   });
 
   test("is never under the floor", () => {
-    expect(sidebarCeiling(400, 208)).toBe(208);
-    expect(clampSidebarWidth(100, 208, sidebarCeiling(400, 208))).toBe(208);
+    expect(sidebarCeiling(400, 228)).toBe(228);
+    expect(clampSidebarWidth(100, 228, sidebarCeiling(400, 228))).toBe(228);
   });
 });
