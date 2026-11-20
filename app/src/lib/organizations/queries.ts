@@ -17,6 +17,7 @@ import {
   listOrganizationMembers,
   listOrganizations,
 } from "@/lib/api/generated/organizations/organizations";
+import { renewalRequired } from "@/lib/auth/renewal";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
@@ -25,6 +26,7 @@ import {
 } from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
+import { InNoOrganization } from "./in-no-organization";
 
 /** One of the person's organizations, with the server's verdicts: their role in it, and `active`. */
 export type OrganizationSummary = Organization;
@@ -65,10 +67,11 @@ export const organizationKeys = {
 };
 
 /**
- * The one organization of an OpenBot that keeps one. The API addresses it as `default`
- * (api/openapi.yaml, `OrganizationId`).
+ * The one organization of an OpenBot that keeps one, which every install has. The API addresses it
+ * as `default` (api/openapi.yaml, `OrganizationId`), and an API key made before keys were bound to
+ * an organization acts in it.
  */
-const ONLY_ORGANIZATION = "default";
+export const ONLY_ORGANIZATION = "default";
 const ONLY: OwnOrganizations = {
   organizations: [],
   canCreate: false,
@@ -94,10 +97,6 @@ function noSuchAddress(error: unknown): boolean {
     (error.code === undefined || error.code === "NOT_FOUND")
   );
 }
-
-/** What the server says on every other request to somebody in no organization, said here too. */
-const IN_NONE =
-  "You aren't a member of an organization here. Ask an admin to add you.";
 
 /**
  * Work in `organizationId` from the server's side: the session's active organization, which is what
@@ -163,7 +162,12 @@ async function ownOrganizations(
     });
   } catch (error) {
     // Not signed in is an answer, as it is for the current user.
-    if (error instanceof ClientError && error.status === 401) return null;
+    if (
+      error instanceof ClientError &&
+      error.status === 401 &&
+      !renewalRequired(error)
+    )
+      return null;
     // An OpenBot that keeps one organization has no list of them. A refusal is not that.
     if (noSuchAddress(error)) return ONLY;
     throw error;
@@ -172,7 +176,7 @@ async function ownOrganizations(
   const active = organizations.find((one) => one.active);
   if (active) return { ...listed, currentId: active.id };
   const first = organizations[0];
-  if (!first) throw new Error(IN_NONE);
+  if (!first) throw new InNoOrganization();
   /*
    * In some, working in none: the session still names one this person has left. The rest of
    * OpenBot refuses every request until the session works somewhere they are, so it moves to the

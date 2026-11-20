@@ -675,6 +675,16 @@ fn blocker_with(
         }
     };
 
+    // Whether the current WSL (the one with WslService) is installed, once a probe has said.
+    let mut modern_wsl = None;
+    let modern_wsl_service = "the WSL service (powershell)";
+    let wsl_service_args = [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        modern_wsl_probe_command(),
+    ];
+
     let wsl_feature = "the WSL feature state (powershell)";
     let enabled = ask(
         wsl_feature,
@@ -692,19 +702,10 @@ fn blocker_with(
         // Modern WSL2 uses WslService and does not require the legacy WSL1 optional component.
         // https://learn.microsoft.com/en-us/windows/wsl/faq#was-lxssmanager-replaced-by-wslservice
         // Service presence only establishes installation; VMP and kernel health are checked below.
-        let modern_wsl = "the WSL service (powershell)";
-        let installed = ask(
-            modern_wsl,
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                modern_wsl_probe_command(),
-            ],
-        )?
-        .map(|said| probe_bool(modern_wsl, &said))
-        .transpose()?;
+        let installed = ask(modern_wsl_service, "powershell", &wsl_service_args)?
+            .map(|said| probe_bool(modern_wsl_service, &said))
+            .transpose()?;
+        modern_wsl = installed;
         if installed == Some(false) {
             return Ok(Some(for_this_account(Blocker::WslAbsent)));
         }
@@ -747,17 +748,41 @@ fn blocker_with(
     }
 
     // Inbox WSL predates --version. A positively inspected kernel file is enough, so do not run
-    // an unsupported command in that case. An executed probe failing is never "no kernel".
+    // an unsupported command in that case. An executed probe failing is never "no kernel" on its
+    // own; only with WslService absent too (below).
     if kernel_file_exists()? {
         return Ok(None);
     }
-    let Some(version_output) = ask(
+    let version_output = match ask(
         "the WSL version (wsl.exe --version)",
         "wsl.exe",
         &["--version"],
-    )?
-    else {
-        return Ok(None);
+    ) {
+        Ok(Some(said)) => said,
+        Ok(None) => return Ok(None),
+        /*
+         * The inbox `wsl.exe` that ships with Windows does not know `--version` (Microsoft:
+         * "wsl --version" fails on the in-Windows WSL) and exits with an error. That failure,
+         * on a machine with no kernel file and without the current WSL's WslService (which
+         * replaced the inbox LxssManager), is the inbox WSL with no kernel: `wsl --update`
+         * installs the current WSL and its kernel. Seen on Windows with only the inbox WSL,
+         * where OpenBot 1.1.0 stopped on "could not check the WSL version" instead.
+         * With WslService present, or unknown, the failure stays the detection error it was.
+         */
+        Err(problem) => {
+            let modern = match modern_wsl {
+                Some(known) => Some(known),
+                None => ask(modern_wsl_service, "powershell", &wsl_service_args)
+                    .ok()
+                    .flatten()
+                    .and_then(|said| probe_bool(modern_wsl_service, &said).ok()),
+            };
+            return if modern == Some(false) {
+                Ok(Some(Blocker::WslNoKernel))
+            } else {
+                Err(problem)
+            };
+        }
     };
     if !wsl_kernel_present(&version_output, false) {
         return Ok(Some(Blocker::WslNoKernel));
@@ -1399,6 +1424,181 @@ pub(crate) fn free_space(folder: &str) -> Option<u64> {
     Some(free)
 }
 
+/*
+The drive types that `GetDriveTypeW` returns (WinBase.h). They are written here because the
+`windows` crate keeps them in a module this crate does not turn on, and because the rule that uses
+them is tested on every platform.
+*/
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_REMOVABLE: u32 = 2;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_FIXED: u32 = 3;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_REMOTE: u32 = 4;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DRIVE_CDROM: u32 = 5;
+
+/// The reason `wsl_disk_judge` gives for a file system that cannot hold a WSL disk.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const OTHER_FILE_SYSTEM: &str = "uses a file system other than NTFS or ReFS";
+
+/// Whether a drive of this type and file system can hold a WSL disk. WSL keeps a distribution's
+/// disk only on a fixed local drive with NTFS or ReFS. The reason completes "F: ...".
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wsl_disk_judge(drive_type: u32, file_system: &str) -> Result<(), &'static str> {
+    match drive_type {
+        DRIVE_FIXED => {}
+        DRIVE_REMOTE => return Err("is a network drive"),
+        DRIVE_REMOVABLE => return Err("is a removable drive"),
+        DRIVE_CDROM => return Err("is a CD or DVD drive"),
+        _ => return Err("is not a fixed local drive"),
+    }
+    if file_system.eq_ignore_ascii_case("NTFS") || file_system.eq_ignore_ascii_case("ReFS") {
+        Ok(())
+    } else {
+        Err(OTHER_FILE_SYSTEM)
+    }
+}
+
+/// Whether the drive of `folder` can hold a WSL disk. The error is a short reason that names
+/// the drive, for example "F: is a network drive" or "F: uses exFAT". The folder does not have
+/// to exist. A `\\?\` prefix is allowed.
+pub fn holds_wsl_disk(folder: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        holds_wsl_disk_with(folder, read_volume)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = folder;
+        Err("not Windows".into())
+    }
+}
+
+/// `holds_wsl_disk`, with `volume` to read the drive type and file system at a drive root
+/// (`F:\`). The file system is empty when Windows cannot read it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn holds_wsl_disk_with(
+    folder: &Path,
+    volume: impl FnOnce(&str) -> (u32, String),
+) -> Result<(), String> {
+    let Some(drive) = drive_of(&folder.to_string_lossy()) else {
+        return Err(format!(
+            "{} is not on a drive with a letter",
+            folder.display()
+        ));
+    };
+    let (drive_type, file_system) = volume(&format!(r"{drive}\"));
+    wsl_disk_judge(drive_type, &file_system).map_err(|reason| {
+        if reason == OTHER_FILE_SYSTEM && !file_system.is_empty() {
+            format!("{drive} uses {file_system}")
+        } else {
+            format!("{drive} {reason}")
+        }
+    })
+}
+
+/// The drive type and file system name of the volume at `root` (`F:\`).
+#[cfg(target_os = "windows")]
+fn read_volume(root: &str) -> (u32, String) {
+    use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumeInformationW};
+    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+    let root = windows::core::PCWSTR(wide.as_ptr());
+    // MAX_PATH + 1, the size Microsoft gives for the file system name buffer.
+    let mut name = [0u16; 261];
+    // SAFETY: `wide` is a NUL-terminated path that outlives the call.
+    let drive_type = unsafe { GetDriveTypeW(root) };
+    // SAFETY: as above, and `name` is a buffer the call writes into, no more than its length.
+    let read = unsafe { GetVolumeInformationW(root, None, None, None, None, Some(&mut name)) };
+    let file_system = match read {
+        Ok(()) => {
+            let end = name
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(name.len());
+            String::from_utf16_lossy(&name[..end])
+        }
+        Err(_) => String::new(),
+    };
+    (drive_type, file_system)
+}
+
+/// Whether this WSL can move a distribution (`wsl --manage <distro> --move`). Some builds exit
+/// with an error code from `--help`, so the text decides, not the exit code.
+pub fn wsl_can_move() -> bool {
+    let Ok(output) = crate::quiet::output_within(
+        crate::quiet::command("wsl.exe").arg("--help"),
+        PROBE_LIMITS.wsl_version,
+    ) else {
+        return false;
+    };
+    let help = format!(
+        "{}\n{}",
+        decode_probe_text(&output.stdout).unwrap_or_default(),
+        decode_probe_text(&output.stderr).unwrap_or_default()
+    );
+    help_lists_move(&help)
+}
+
+/// Whether `wsl --help` lists the `--move` option.
+fn help_lists_move(help: &str) -> bool {
+    help.split(|character: char| character.is_whitespace() || character == ',')
+        .any(|word| word == "--move")
+}
+
+/// Move the WSL disk of `distribution` into the folder `to`, which is made first.
+///
+/// WSL is shut down first, which stops every distribution on this computer, Docker Desktop's
+/// too. On a live run `wsl --terminate` was not enough: the move failed with
+/// ERROR_SHARING_VIOLATION until `wsl --shutdown`. It stops at the first step that fails, and
+/// the error includes what WSL said.
+pub fn move_distribution(distribution: &str, to: &Path) -> Result<(), String> {
+    move_distribution_with(distribution, to, |args| {
+        crate::quiet::command("wsl.exe").args(args).output()
+    })
+}
+
+/// `move_distribution`, with `run` to run `wsl.exe` with the given arguments.
+fn move_distribution_with(
+    distribution: &str,
+    to: &Path,
+    mut run: impl FnMut(&[&std::ffi::OsStr]) -> std::io::Result<std::process::Output>,
+) -> Result<(), String> {
+    use std::ffi::OsStr;
+    std::fs::create_dir_all(to)
+        .map_err(|error| format!("could not make the folder {}: {error}", to.display()))?;
+    let steps: [&[&OsStr]; 2] = [
+        &[OsStr::new("--shutdown")],
+        &[
+            OsStr::new("--manage"),
+            OsStr::new(distribution),
+            OsStr::new("--move"),
+            to.as_os_str(),
+        ],
+    ];
+    for args in steps {
+        let shown = args
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let output = run(args).map_err(|error| format!("could not run `wsl {shown}`: {error}"))?;
+        if !output.status.success() {
+            let text = |bytes: &[u8]| {
+                decode_probe_text(bytes)
+                    .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned())
+            };
+            let said = format!("{}\n{}", text(&output.stdout), text(&output.stderr));
+            return Err(format!(
+                "`wsl {shown}` failed ({}): {}",
+                output.status,
+                said.trim()
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1967,6 +2167,11 @@ mod tests {
         let mut probe = 0;
         let result = blocker_with(
             |program, args| {
+                // The current WSL is installed, so a failed `wsl --version` stays an error.
+                if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                    assert_eq!(probe, 6, "asked for the WSL service before `wsl --version`");
+                    return Ok(probe_output(0, "True", ""));
+                }
                 assert_probe_call(probe, program, args);
                 let current = probe;
                 probe += 1;
@@ -2227,6 +2432,95 @@ mod tests {
         assert_eq!(probe, 5);
     }
 
+    /// The inbox `wsl.exe` refuses `--version`, in UTF-16 with exit -1, as OpenBot 1.1.0 met it on
+    /// a Windows machine with only the inbox WSL. With no kernel file and no WslService, that is
+    /// the inbox WSL without a kernel: the screen whose fix runs `wsl --update`, not "could not
+    /// check the WSL version". With WslService present, the same failure stays a detection error.
+    #[test]
+    fn the_inbox_wsl_refusing_version_offers_the_update_instead_of_a_failed_check() {
+        let inbox_refusal = || {
+            let mut output = probe_output(-1, "", "");
+            output.stdout = "Invalid command line option: --version\r\n\
+                Copyright (c) Microsoft Corporation. All rights reserved.\r\n\r\n\
+                Usage: wsl.exe [Argument] [Options...] [CommandLine]\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect();
+            output
+        };
+        for (service, legacy, expected) in [
+            ("False", "1", Ok(Some(Blocker::WslNoKernel))),
+            ("True", "1", Err("the WSL version (wsl.exe --version)")),
+        ] {
+            let mut probe = 0;
+            let mut asked_service = 0;
+            let result = blocker_with(
+                |program, args| {
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        asked_service += 1;
+                        return Ok(probe_output(0, service, ""));
+                    }
+                    assert_probe_call(probe, program, args);
+                    let mut outputs = PROBE_OUTPUTS;
+                    outputs[2] = legacy;
+                    let output = if probe == 5 {
+                        inbox_refusal()
+                    } else {
+                        probe_output(0, outputs[probe], "")
+                    };
+                    probe += 1;
+                    Ok(output)
+                },
+                || Ok(false),
+            );
+            assert_eq!(probe, 6, "service {service}");
+            match expected {
+                Ok(blocker) => {
+                    assert_eq!(result, Ok(blocker), "service {service}");
+                    assert!(blocker.unwrap().fix().is_some());
+                    assert!(blocker.unwrap().instruction().contains("wsl --update"));
+                }
+                Err(operation) => {
+                    let error = result.expect_err("a modern WSL failing --version is an error");
+                    assert!(error.said.contains(operation), "{}", error.said);
+                    assert!(error
+                        .detail
+                        .unwrap()
+                        .contains("Invalid command line option: --version"));
+                }
+            }
+            assert_eq!(asked_service, 1, "service {service}");
+        }
+    }
+
+    /// With the WSL feature off, the service was already asked; it is not asked twice.
+    #[test]
+    fn a_known_current_wsl_is_not_asked_about_again_after_a_failed_version() {
+        let mut asked_service = 0;
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                    asked_service += 1;
+                    return Ok(probe_output(0, "True", ""));
+                }
+                assert_probe_call(probe, program, args);
+                let mut outputs = PROBE_OUTPUTS;
+                outputs[2] = "2";
+                let output = if probe == 5 {
+                    probe_output(1, "", "refused")
+                } else {
+                    probe_output(0, outputs[probe], "")
+                };
+                probe += 1;
+                Ok(output)
+            },
+            || Ok(false),
+        );
+        assert!(result.is_err());
+        assert_eq!(asked_service, 1);
+    }
+
     fn child_probe_output(
         code: &str,
         stdout: &str,
@@ -2271,6 +2565,9 @@ mod tests {
             let mut calls = Vec::new();
             let result = blocker_with(
                 |program, args| {
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        return child_probe_output("0", "True", "");
+                    }
                     assert_probe_call(probe, program, args);
                     calls.push(serde_json::json!({ "program": program, "args": args }));
                     let stdout = PROBE_OUTPUTS[probe];
@@ -3060,5 +3357,187 @@ mod tests {
             "Invalid command line option: --version",
             true
         ));
+    }
+
+    /// The drive types are the values in WinBase.h, written here so the rule runs off Windows.
+    #[test]
+    fn the_drive_types_are_the_values_windows_returns() {
+        assert_eq!(
+            (DRIVE_REMOVABLE, DRIVE_FIXED, DRIVE_REMOTE, DRIVE_CDROM),
+            (2, 3, 4, 5)
+        );
+    }
+
+    /// A WSL disk needs a fixed local drive with NTFS or ReFS. Any other drive gets a short reason.
+    #[test]
+    fn only_a_fixed_ntfs_or_refs_drive_can_hold_a_wsl_disk() {
+        assert_eq!(wsl_disk_judge(DRIVE_FIXED, "NTFS"), Ok(()));
+        assert_eq!(wsl_disk_judge(DRIVE_FIXED, "ReFS"), Ok(()));
+        assert_eq!(
+            wsl_disk_judge(DRIVE_REMOTE, "NTFS"),
+            Err("is a network drive")
+        );
+        assert_eq!(
+            wsl_disk_judge(DRIVE_REMOVABLE, "NTFS"),
+            Err("is a removable drive")
+        );
+        assert_eq!(
+            wsl_disk_judge(DRIVE_FIXED, "exFAT"),
+            Err("uses a file system other than NTFS or ReFS")
+        );
+        assert_eq!(
+            wsl_disk_judge(DRIVE_FIXED, "FAT32"),
+            Err("uses a file system other than NTFS or ReFS")
+        );
+    }
+
+    /// The saved install folder has the `\\?\` prefix. Its drive is still found, the volume is
+    /// read at that drive's root, and the reason names the drive.
+    #[test]
+    fn the_reason_names_the_drive_of_a_prefixed_install_folder() {
+        let folder = Path::new(r"\\?\F:\openbot");
+        let judged = |drive_type: u32, file_system: &'static str| {
+            let mut roots = Vec::new();
+            let said = holds_wsl_disk_with(folder, |root| {
+                roots.push(root.to_owned());
+                (drive_type, file_system.to_owned())
+            });
+            (said, roots)
+        };
+        assert_eq!(
+            judged(DRIVE_FIXED, "NTFS"),
+            (Ok(()), vec![r"F:\".to_owned()])
+        );
+        assert_eq!(
+            judged(DRIVE_REMOTE, "NTFS").0,
+            Err("F: is a network drive".to_owned())
+        );
+        assert_eq!(
+            judged(DRIVE_FIXED, "exFAT").0,
+            Err("F: uses exFAT".to_owned())
+        );
+        // The file system could not be read.
+        assert_eq!(
+            judged(DRIVE_FIXED, "").0,
+            Err("F: uses a file system other than NTFS or ReFS".to_owned())
+        );
+    }
+
+    /// A folder on a network share has no drive letter, so nothing is read.
+    #[test]
+    fn a_folder_without_a_drive_letter_cannot_hold_a_wsl_disk() {
+        let said = holds_wsl_disk_with(Path::new(r"\\server\share\openbot"), |_| {
+            panic!("no volume is read for a folder without a drive letter")
+        });
+        assert_eq!(
+            said,
+            Err(r"\\server\share\openbot is not on a drive with a letter".to_owned())
+        );
+    }
+
+    /// The real Win32 calls: the temporary folder is on the system's own fixed NTFS drive.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_temporary_folders_drive_can_hold_a_wsl_disk() {
+        assert_eq!(holds_wsl_disk(&std::env::temp_dir()), Ok(()));
+    }
+
+    /// WSL 2.x lists `--move` under `--manage`. Older builds have `--manage` without it.
+    #[test]
+    fn wsl_can_move_only_when_its_help_lists_move() {
+        let modern = "    --manage <Distro> <Options...>\n\
+                      \x20       Changes distro specific options.\n\n\
+                      \x20       Options:\n\
+                      \x20           --move <Location>\n\
+                      \x20               Move the distribution to a new location.\n\n\
+                      \x20           --set-sparse, -s <true|false>\n";
+        let older = "    --manage <Distro> <Options...>\n\
+                     \x20       Changes distro specific options.\n\n\
+                     \x20       Options:\n\
+                     \x20           --set-sparse, -s <true|false>\n";
+        assert!(help_lists_move(modern));
+        assert!(!help_lists_move(older));
+        assert!(!help_lists_move(""));
+    }
+
+    /// Runs the move with a stand-in for `wsl.exe` that answers each call with the next output,
+    /// and returns what the move said and the arguments of each call.
+    fn move_with(
+        to: &Path,
+        mut answers: Vec<std::process::Output>,
+    ) -> (Result<(), String>, Vec<Vec<String>>) {
+        let mut calls = Vec::new();
+        let said = move_distribution_with("podman-openbot", to, |args| {
+            calls.push(
+                args.iter()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect(),
+            );
+            Ok(answers.remove(0))
+        });
+        (said, calls)
+    }
+
+    fn utf16(text: &str) -> Vec<u8> {
+        text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+    }
+
+    /// `wsl --terminate` was not enough on a live run: the move failed with
+    /// ERROR_SHARING_VIOLATION until `wsl --shutdown`. So it shuts WSL down first, then moves.
+    #[test]
+    fn the_move_shuts_wsl_down_then_moves_into_a_folder_it_made() {
+        let to = temp_root("wsl-move").join("engine");
+        let (said, calls) = move_with(&to, vec![probe_output(0, "", ""), probe_output(0, "", "")]);
+        let made = to.is_dir();
+        let _ = std::fs::remove_dir_all(to.parent().unwrap());
+        assert_eq!(said, Ok(()));
+        assert_eq!(
+            calls,
+            vec![
+                vec!["--shutdown".to_owned()],
+                vec![
+                    "--manage".to_owned(),
+                    "podman-openbot".to_owned(),
+                    "--move".to_owned(),
+                    to.display().to_string(),
+                ],
+            ]
+        );
+        assert!(made, "the target folder was made before the move");
+    }
+
+    /// A failed shutdown stops the move before it starts, and WSL's words come back.
+    #[test]
+    fn a_failed_shutdown_stops_before_the_move() {
+        let to = temp_root("wsl-move-shutdown");
+        let (said, calls) = move_with(&to, vec![probe_output(1, "", "The service is busy.")]);
+        let _ = std::fs::remove_dir_all(&to);
+        assert_eq!(calls, vec![vec!["--shutdown".to_owned()]]);
+        let said = said.expect_err("a failed shutdown is an error");
+        assert!(said.contains("wsl --shutdown"), "{said}");
+        assert!(said.contains("The service is busy."), "{said}");
+    }
+
+    /// WSL writes UTF-16 to a pipe. A failed move comes back as readable text.
+    #[test]
+    fn a_failed_move_says_what_wsl_said() {
+        let to = temp_root("wsl-move-failed");
+        let mut refused = probe_output(1, "", "");
+        refused.stdout = utf16(
+            "The process cannot access the file because it is being used by another process.\r\n\
+             Error code: Wsl/Service/MoveDistro/ERROR_SHARING_VIOLATION\r\n",
+        );
+        let (said, calls) = move_with(&to, vec![probe_output(0, "", ""), refused]);
+        let _ = std::fs::remove_dir_all(&to);
+        assert_eq!(calls.len(), 2);
+        let said = said.expect_err("a failed move is an error");
+        assert!(
+            said.contains("wsl --manage podman-openbot --move"),
+            "{said}"
+        );
+        assert!(
+            said.contains("Wsl/Service/MoveDistro/ERROR_SHARING_VIOLATION"),
+            "{said}"
+        );
     }
 }

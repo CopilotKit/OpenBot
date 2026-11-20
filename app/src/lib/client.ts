@@ -13,6 +13,12 @@
  */
 
 import { CLIENT_HEADER, clientToken } from "@openbot/shared/client-version";
+import {
+  pendingWrite,
+  renewalRequired,
+  renewHostedSignIn,
+  SIGN_IN_HEADER,
+} from "@/lib/auth/renewal";
 import { noteRefusal } from "@/lib/client-version/refusal";
 import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
 
@@ -91,7 +97,8 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     response = await fetch(path, {
       ...init,
       headers: withClientName(init.headers),
-      credentials: "include",
+      // The session's cookie, unless the caller asks as nobody (`readDeployment` for somebody in no organization).
+      credentials: init.credentials ?? "include",
     });
   } catch (error) {
     noteNoAnswer(error);
@@ -171,6 +178,8 @@ export class ClientError extends Error {
 async function refusal(
   response: Response,
   fallback: string | undefined,
+  /** The request that was refused, as it was sent, for a write a renewal sends again. */
+  sent?: { path: string; init: RequestInit },
 ): Promise<ClientError> {
   const body = (await response.json().catch(() => null)) as {
     error?: unknown;
@@ -184,7 +193,7 @@ async function refusal(
       : typeof body?.detail === "string"
         ? body.detail
         : undefined;
-  return new ClientError(
+  const error = new ClientError(
     message ?? fallback ?? "That request failed.",
     response.status,
     typeof body?.code === "string" ? body.code : undefined,
@@ -192,6 +201,16 @@ async function refusal(
       ? (body as Record<string, unknown>)
       : undefined,
   );
+  /*
+   * A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the
+   * background, and the write it interrupted is sent again once the page is back.
+   */
+  if (renewalRequired(error))
+    renewHostedSignIn(
+      response.headers.get(SIGN_IN_HEADER),
+      sent ? pendingWrite(sent.path, sent.init) : null,
+    );
+  return error;
 }
 
 /**
@@ -207,7 +226,7 @@ export async function clientRequest(
   fallback?: string,
 ): Promise<Response> {
   const response = await request(path, init);
-  if (!response.ok) throw await refusal(response, fallback);
+  if (!response.ok) throw await refusal(response, fallback, { path, init });
   return response;
 }
 

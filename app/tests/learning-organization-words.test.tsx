@@ -347,3 +347,64 @@ test("an install's first organization reads as it always did", async () => {
     cleanup();
   }
 });
+
+/*
+ * REPORTED: every organization now learns in a backend project of its own, with the `openbot`
+ * container assigned in it as `default`'s always was, so the server names no container kept for an
+ * organization alone (`organizationSpaceId` null) in any of them. Every organization but the first
+ * then read "Deployment default", as if its Bots learned into a container the deployment shares.
+ * Where the person works in one of several organizations, the default is that organization's.
+ */
+test("in an organization of its own project, with no container named for it, the default is still the organization's", async () => {
+  setCurrentOrganization(HARBOR.id);
+  serve(
+    harbor({
+      settings: {
+        enabled: true,
+        defaultTarget: { containerId: "openbot" },
+        bots: { "ops-bot": { containerId: "ops-learning" } },
+      },
+      automatic: { state: "assigned", containerId: "openbot" },
+      organizationSpaceId: null,
+    }),
+  );
+  const view = page();
+  const user = userEvent.setup({ document });
+
+  await view.findByText(
+    'Bots in Harbor Finance learn into its "openbot" container, which OpenBot assigned automatically. You can change it here.',
+  );
+  const shown = view.getByRole("combobox", { name: "Show the container for" });
+  expect(shown.textContent).toContain("This organization's default");
+  expect(
+    view.getByRole("combobox", { name: "Desk Bot participation" }).textContent,
+  ).toContain("Use this organization's default");
+  // The ids are names an admin reads in the backend, and stay as they are.
+  expect(
+    (view.getByLabelText("Default container ID") as HTMLInputElement).value,
+  ).toBe("openbot");
+  expect(
+    (view.getByLabelText("Ops Bot container ID") as HTMLInputElement).value,
+  ).toBe("ops-learning");
+  expect(drawn()).not.toMatch(/deployment default/i);
+
+  await user.click(shown);
+  await view.findByRole("option", { name: "This organization's default" });
+  expect(drawn()).not.toMatch(/deployment default/i);
+});
+
+test("in an organization of its own project whose container isn't there yet, the organization is told so", async () => {
+  setCurrentOrganization(HARBOR.id);
+  serve(
+    harbor({
+      settings: { enabled: true, defaultTarget: null, bots: {} },
+      automatic: { state: "absent", containerId: "openbot", canCreate: true },
+      organizationSpaceId: null,
+    }),
+  );
+  const view = page();
+  await view.findByText(
+    'Harbor Finance has no "openbot" Learning container yet. Nothing is collected.',
+  );
+  expect(drawn()).not.toMatch(/deployment default/i);
+});

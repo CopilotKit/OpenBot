@@ -310,6 +310,29 @@ export const getUpdateOrganizationMockHandler = (
   );
 };
 
+export const getDeleteOrganizationMockHandler = (
+  overrideResponse?:
+    | void
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<void> | void),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/profile",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      if (typeof overrideResponse === "function") {
+        await overrideResponse(info);
+      }
+
+      return new HttpResponse(null, { status: 204 });
+    },
+    options,
+  );
+};
+
 export const getUpdateOrganizationMemberMockHandler = (
   overrideResponse?:
     | OrganizationMemberResponse
@@ -573,6 +596,7 @@ export const getOrganizationsMock = () => [
   getCreateOrganizationMockHandler(),
   getListOrganizationMembersMockHandler(),
   getUpdateOrganizationMockHandler(),
+  getDeleteOrganizationMockHandler(),
   getUpdateOrganizationMemberMockHandler(),
   getRemoveOrganizationMemberMockHandler(),
   getListOrganizationInvitationsMockHandler(),

@@ -29,6 +29,7 @@ export default defineConfig({
           "Memory",
           "Organization settings",
           "Organizations",
+          "People",
           "Routines",
           "Skills",
           "Tasks",

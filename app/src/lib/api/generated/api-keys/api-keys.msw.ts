@@ -15,6 +15,7 @@ export const getListApiKeysResponseMock = (): ApiKeyPage => ({
       createdAt: "2026-11-14T09:00:00.000Z",
       expiresAt: "2027-02-12T09:00:00.000Z",
       lastUsedAt: "2026-11-14T09:05:12.000Z",
+      organizationId: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
     },
   ],
   nextCursor: null,
@@ -28,6 +29,7 @@ export const getCreateApiKeyResponseMock = (): CreatedApiKey => ({
     createdAt: "2026-11-14T09:00:00.000Z",
     expiresAt: "2027-02-12T09:00:00.000Z",
     lastUsedAt: null,
+    organizationId: "Jq3xT9mLw2Vb8RnC5sYd0fKe",
   },
   key: "obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg",
 });

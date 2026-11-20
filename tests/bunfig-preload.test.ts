@@ -29,12 +29,19 @@ function preloadedScripts(bunfigPath: string): string[] {
 
 describe("bunfig preload", () => {
   const rootBunfig = resolve(repositoryRoot, "bunfig.toml");
-  const appBunfig = resolve(repositoryRoot, "app", "bunfig.toml");
 
-  test("the root and app configs preload the same scripts", () => {
-    expect(existsSync(appBunfig)).toBe(true);
-    expect(preloadedScripts(appBunfig)).toEqual(preloadedScripts(rootBunfig));
-  });
+  /*
+   * Every package whose tests render Base UI and are run from inside it as well as from the root. The extension went
+   * without one too: from inside extension/ the popup's Discard dialog never mounted, and its two tests failed there
+   * while passing from the root.
+   */
+  for (const directory of ["app", "extension"]) {
+    test(`the root and ${directory} configs preload the same scripts`, () => {
+      const bunfig = resolve(repositoryRoot, directory, "bunfig.toml");
+      expect(existsSync(bunfig)).toBe(true);
+      expect(preloadedScripts(bunfig)).toEqual(preloadedScripts(rootBunfig));
+    });
+  }
 
   test("every preloaded script exists", () => {
     const scripts = preloadedScripts(rootBunfig);

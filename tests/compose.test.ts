@@ -114,6 +114,8 @@ function runLangGraphAguiModelProbe(
       join(dir, "fastapi", "__init__.py"),
       [
         "class FastAPI:",
+        "    def add_middleware(self, *_args, **_kwargs):",
+        "        pass",
         "    def middleware(self, *_args, **_kwargs):",
         "        def decorator(fn):",
         "            return fn",

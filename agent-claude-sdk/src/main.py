@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .adapter import OpenBotClaudeAgentAdapter
+from .run_model_proxy import PROXY_PATH, forward
+from run_model_key import RunModelKey  # On the path run_model_proxy puts shared/ on.
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -44,11 +46,15 @@ def _refuse_both_credentials() -> None:
 _refuse_both_credentials()
 
 app = FastAPI()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_proxy.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")
 async def refuse_without_the_server_token(request: Request, call_next):
-    if request.url.path != "/health":
+    # Claude Code's own model calls come back here on a secret path of their query's, from this
+    # container's loopback, and carry no server token. See run_model_proxy.py.
+    if request.url.path != "/health" and not request.url.path.startswith(PROXY_PATH):
         expected = (os.environ.get("MANAGED_AGENT_TOKEN") or "").strip()
         offered = (request.headers.get(TOKEN_HEADER) or "").strip()
         if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
@@ -59,6 +65,11 @@ async def refuse_without_the_server_token(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"ok": True, "harness": "claude-agent-sdk"}
+
+
+@app.api_route(PROXY_PATH + "{secret}/{path:path}", methods=["GET", "POST"])
+async def run_model(request: Request, secret: str, path: str):
+    return await forward(request, secret, path)
 
 
 add_claude_fastapi_endpoint(

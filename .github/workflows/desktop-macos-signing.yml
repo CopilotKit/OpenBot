@@ -67,7 +67,9 @@ permissions:
 
 concurrency:
   group: desktop-macos-signing-${{ github.ref }}
-  cancel-in-progress: false
+  # A pull request's newer push replaces its dry run, freeing a macOS runner. Signing runs (tags,
+  # main, dispatch) never cancel.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Everything about the updater that can be checked without a certificate, checked on every push.

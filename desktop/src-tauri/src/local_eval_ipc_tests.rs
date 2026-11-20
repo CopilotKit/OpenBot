@@ -638,4 +638,310 @@ process.stdout.write(JSON.stringify({{ token, keys: JSON.stringify({{ [kid]: key
         assert_eq!(std::fs::read_to_string(&env_file).unwrap(), changed);
         std::fs::remove_dir_all(root).unwrap();
     }
+
+    /// `serve`, on a unix socket: the API a Podman machine forwards to the Mac.
+    #[cfg(target_os = "macos")]
+    fn serve_unix(
+        socket: &Path,
+        answer: impl Fn(&str) -> (&'static str, String) + Send + 'static,
+    ) {
+        let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let mut reader = std::io::BufReader::new(stream);
+                let mut request = String::new();
+                if reader.read_line(&mut request).unwrap_or(0) == 0 {
+                    continue;
+                }
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                let (status, body) = answer(&path);
+                let _ = write!(
+                    reader.get_mut(),
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+    }
+
+    /**
+    A STACK WHOSE PODMAN MACHINE WAS REMOVED IS FORGOTTEN, AND SETUP CAN RUN AGAIN.
+
+    Found on a Mac. OpenBot's Podman machine was removed with the back end's cluster in it, after
+    a `local delete` that the stopped machine refused (`docker_unavailable`), so the CLI still had
+    the stack on record. Then the stack's private folder was deleted too, and OpenBot was set up
+    again on a new machine. Every setup stopped with "Setup stopped / OpenBot can't run on this
+    computer as it's set up." (`unsupported_engine`) until the record was removed by hand: with
+    the folder gone so is the stack's `engine.json`, the CLI takes the stack for a Docker one, and
+    refuses it, and refuses `local delete` too, on the Podman OpenBot names.
+
+    The real CLI this app pins, against a stand-in for OpenBot's new machine (its API on a unix
+    socket, and `podman` and k3d that list no cluster), for each way a person gets there:
+    - the machine removed, the stack's folder kept: setup fails (`local_command_failed`), the
+      cluster is gone from OpenBot's own machine, and the stack is forgotten;
+    - the folder deleted too: setup is refused (`unsupported_engine`), and the stack is forgotten.
+    Forgotten means the CLI's own `local delete` completed: no record and no folder are left, so the
+    next setup makes a new stack.
+    */
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_stack_whose_podman_machine_was_removed_is_forgotten_and_setup_runs_again() {
+        if crate::test_support::isolated_process(
+            "tests::local_eval_ipc::a_stack_whose_podman_machine_was_removed_is_forgotten_and_setup_runs_again",
+        ) {
+            return;
+        }
+        const LOST: &str = "local-e4ed9c0727ed2b153d71ebbe";
+        let entry = pinned_cli();
+        let node = on_path("node");
+        let root = crate::test_support::temp_root("local-eval-machine-removed");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let home = root.join("home");
+        let bin = root.join("bin");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&installation).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let executable = |path: &Path, script: String| {
+            std::fs::write(path, script).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+
+        // OpenBot's new machine: rootful Podman that answers, with no cluster in it.
+        let socket = std::env::temp_dir().join(format!("obm-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        serve_unix(&socket, |path| match path {
+            "/_ping" => ("200 OK", "OK".into()),
+            "/info" => ("200 OK", serde_json::json!({
+                "NCPU": 8,
+                "MemTotal": 16_u64 * 1024 * 1024 * 1024,
+                "OperatingSystem": "fedora",
+                "OSType": "linux",
+                "SecurityOptions": ["name=seccomp,profile=default"],
+            }).to_string()),
+            "/version" => ("200 OK", serde_json::json!({
+                "Platform": { "Name": "linux/arm64/fedora-42" },
+                "Os": "linux",
+                "Components": [{ "Name": "Podman Engine" }],
+            }).to_string()),
+            "/v4.0.0/libpod/info" => ("200 OK", serde_json::json!({
+                "host": { "security": { "rootless": false } },
+            }).to_string()),
+            _ => ("404 Not Found", r#"{"message":"no such container"}"#.into()),
+        });
+        let inspect = root.join("inspect.json");
+        std::fs::write(
+            &inspect,
+            serde_json::json!([{
+                "Name": "openbot",
+                "Rootful": true,
+                "ConnectionInfo": { "PodmanSocket": { "Path": socket } },
+            }])
+            .to_string(),
+        )
+        .unwrap();
+        executable(
+            &bin.join("podman"),
+            format!(
+                "#!/bin/sh\ncase \"$*\" in\n  \"machine inspect openbot\") cat '{}' ;;\n  *\"ps --all --format\"*) exit 0 ;;\n  *) echo \"podman $* is not part of this test\" >&2; exit 1 ;;\nesac\n",
+                inspect.display()
+            ),
+        );
+
+        // The CLI's private Helm and k3d, as an earlier setup left them: k3d lists no cluster.
+        let configuration = home.join("Library/Preferences/copilotkit-config-nodejs");
+        let tools = configuration.join("local-evaluation").join("tools");
+        let (os, arch, helm_arch) = match std::env::consts::ARCH {
+            "aarch64" => ("darwin", "arm64", "arm64"),
+            _ => ("darwin", "x64", "amd64"),
+        };
+        let k3d_bytes = "#!/bin/sh\nif [ \"$*\" = \"cluster list --output json\" ]; then echo '[]'; exit 0; fi\necho \"k3d $* is not part of this test\" >&2\nexit 1\n";
+        let staging = root.join("helm-archive");
+        std::fs::create_dir_all(staging.join(format!("{os}-{helm_arch}"))).unwrap();
+        let helm_bytes = "#!/bin/sh\nexit 0\n";
+        std::fs::write(staging.join(format!("{os}-{helm_arch}/helm")), helm_bytes).unwrap();
+        let helm_archive = root.join("helm.tgz");
+        let packed = std::process::Command::new("tar")
+            .env("COPYFILE_DISABLE", "1")
+            .arg("-czf")
+            .arg(&helm_archive)
+            .arg("-C")
+            .arg(&staging)
+            .arg(format!("{os}-{helm_arch}/helm"))
+            .status()
+            .unwrap();
+        assert!(packed.success(), "the stand-in Helm archive was not made");
+        let k3d_file = root.join("k3d");
+        std::fs::write(&k3d_file, k3d_bytes).unwrap();
+        let tool = |name: &str, version: &str, download: &Path, binary: &[u8]| {
+            let digest = sha256(download);
+            let folder = tools.join(format!("{name}-{version}-{os}-{arch}-{digest}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::copy(download, folder.join("download")).unwrap();
+            std::fs::write(folder.join(name), binary).unwrap();
+            std::fs::set_permissions(folder.join(name), std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            serde_json::json!({
+                "version": version,
+                "url": format!("https://github.com/example/{name}/releases/{version}"),
+                "sha256": digest,
+            })
+        };
+        let k3d = tool("k3d", "5.8.3", &k3d_file, k3d_bytes.as_bytes());
+        let helm = tool("helm", "3.18.4", &helm_archive, helm_bytes.as_bytes());
+        let mut installed = release("0.17.0-rc.4", "42", "41");
+        installed["platforms"] =
+            serde_json::json!([{ "os": os, "arch": arch, "tools": { "k3d": k3d, "helm": helm } }]);
+
+        // The CLI's record of the stack OpenBot made, ready, as the removed machine left it.
+        let record = serde_json::json!({
+            "id": LOST,
+            "appPaths": [installation],
+            "release": installed,
+            "ports": { "api": 51796, "dashboard": 51798, "gateway": 51797, "kubernetes": 46443 },
+            "step": "ready",
+            "project": { "organizationId": ORGANIZATION, "projectId": "1", "projectSlug": "local-app" },
+        });
+        let config_file = configuration.join("config.json");
+        let stack_folder = configuration.join("local-evaluation").join(LOST);
+        let (token, keys) = minted_licence(&node);
+        let recorded = || {
+            std::fs::write(
+                &config_file,
+                serde_json::json!({ "localStacks": { LOST: record } }).to_string(),
+            )
+            .unwrap();
+        };
+        let with_private_files = || {
+            std::fs::create_dir_all(&stack_folder).unwrap();
+            std::fs::write(
+                stack_folder.join("setup.json"),
+                serde_json::json!({ "licenseToken": token }).to_string(),
+            )
+            .unwrap();
+            let mut secrets: serde_json::Map<String, serde_json::Value> = [
+                "database",
+                "databaseAdmin",
+                "redis",
+                "oidcClient",
+                "session",
+                "serviceToken",
+                "learningToken",
+                "objectAccess",
+                "objectSecret",
+                "gatewayRunner",
+                "gatewaySession",
+                "beamCookie",
+                "channelEncryption",
+            ]
+            .into_iter()
+            .map(|name| (name.to_owned(), serde_json::json!("e".repeat(64))))
+            .collect();
+            secrets.insert(
+                "apiKey".into(),
+                serde_json::json!(format!("cpk-local_1111111111111111_{}", "e".repeat(64))),
+            );
+            std::fs::write(
+                stack_folder.join("secrets.json"),
+                serde_json::Value::Object(secrets).to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                stack_folder.join("engine.json"),
+                r#"{"version":1,"engine":"podman"}"#,
+            )
+            .unwrap();
+        };
+
+        let program = root.join("node");
+        executable(
+            &program,
+            format!(
+                "#!/bin/sh\nBAKED_LICENSE_KEYS_JSON='{keys}'\nexport BAKED_LICENSE_KEYS_JSON\nexec '{}' \"$@\"\n",
+                node.display()
+            ),
+        );
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM", &program);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_PROGRAM_SHA256", sha256(&program));
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY", &entry);
+        std::env::set_var("OPENBOT_DEV_LOCAL_EVAL_ENTRY_SHA256", sha256(&entry));
+        std::env::remove_var("OPENBOT_DEV_LOCAL_EVAL_INTELLIGENCE");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(bin.clone()).chain(std::env::split_paths(
+                    &std::env::var_os("PATH").unwrap_or_default(),
+                )),
+            )
+            .unwrap(),
+        );
+        std::env::remove_var("DOCKER_HOST");
+        std::env::remove_var("CONTAINER_HOST");
+        std::env::remove_var("DOCKER_CONTEXT");
+        std::env::set_var("DO_NOT_TRACK", "1");
+        std::env::set_var("COPILOTKIT_TELEMETRY_DISABLED", "1");
+        local_eval::use_engine(&engine::Address::new(
+            engine::Engine::Podman,
+            Some("openbot-root".into()),
+        ));
+
+        let cli = local_eval::installed().unwrap();
+        let cancel = local_eval::Cancel::default();
+        let stacks = || {
+            let text = std::fs::read_to_string(&config_file).unwrap();
+            let config: serde_json::Value = serde_json::from_str(&text).unwrap();
+            config["localStacks"].clone()
+        };
+        let forgotten = |label: &str, reason: local_eval::Reason, outcome: local_eval::Outcome| {
+            let report = local_eval::setup(
+                &cli,
+                &installation,
+                None,
+                local_eval::Limits::for_setup(),
+                &cancel,
+            )
+            .unwrap_or_else(|failure| panic!("{label}: setup failed to run: {failure:?}"));
+            assert_eq!(
+                (report.outcome, report.reason),
+                (outcome, Some(reason)),
+                "{label}: {report:?}"
+            );
+            let recovered =
+                local_eval::recover_lost_stack(&cli, &report, &installation, &cancel).unwrap();
+            assert_eq!(recovered, local_eval::Recovered::Forgotten, "{label}");
+            assert_eq!(stacks(), serde_json::json!({}), "{label}: the record is kept");
+            assert!(!stack_folder.exists(), "{label}: the private folder is kept");
+        };
+
+        // The machine removed, the stack's private folder kept.
+        recorded();
+        with_private_files();
+        forgotten(
+            "machine removed",
+            local_eval::Reason::LocalCommandFailed,
+            local_eval::Outcome::Failed,
+        );
+
+        // The private folder deleted too, the record left.
+        recorded();
+        forgotten(
+            "folder deleted too",
+            local_eval::Reason::UnsupportedEngine,
+            local_eval::Outcome::Blocked,
+        );
+
+        let _ = std::fs::remove_file(&socket);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

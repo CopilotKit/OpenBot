@@ -14,6 +14,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
+from run_model_key import RunModelKey
 
 from agno.agent import Agent
 from agno.models.litellm import LiteLLM
@@ -81,6 +82,8 @@ agent = Agent(
 )
 
 app = AgentOS(agents=[agent], interfaces=[AGUI(agent=agent)]).get_app()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

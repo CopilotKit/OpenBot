@@ -16,7 +16,7 @@ import {
 import {
   OpenBotError,
   type OpenBotRequestInit,
-  ORGANIZATION_ID,
+  DEFAULT_ORGANIZATION_ID,
   openbotRaw,
   openbotRequest,
 } from "../src/shared/openbot-client";
@@ -187,11 +187,13 @@ afterAll(() => {
 
 test("the generated client reaches OpenBot only at the API's addresses, in its one organization", () => {
   expect({
-    connections: getExchangeRecorderConnectCodeUrl(ORGANIZATION_ID),
-    currentConnection: getDeleteCurrentRecorderConnectionUrl(ORGANIZATION_ID),
-    me: getGetRecorderIdentityUrl(ORGANIZATION_ID),
-    learning: getGetRecorderLearningUrl(ORGANIZATION_ID),
-    activity: getReportRecorderActivityUrl(ORGANIZATION_ID),
+    connections: getExchangeRecorderConnectCodeUrl(DEFAULT_ORGANIZATION_ID),
+    currentConnection: getDeleteCurrentRecorderConnectionUrl(
+      DEFAULT_ORGANIZATION_ID,
+    ),
+    me: getGetRecorderIdentityUrl(DEFAULT_ORGANIZATION_ID),
+    learning: getGetRecorderLearningUrl(DEFAULT_ORGANIZATION_ID),
+    activity: getReportRecorderActivityUrl(DEFAULT_ORGANIZATION_ID),
   }).toEqual(API);
 });
 
@@ -199,7 +201,7 @@ test("each of the Recorder's operations goes out through the mutator: its addres
   const target = { openbotUrl, token: "obr_t" };
 
   const grant = await exchangeRecorderConnectCode(
-    ORGANIZATION_ID,
+    DEFAULT_ORGANIZATION_ID,
     {
       code: "obc_abc",
       label: "Work laptop",
@@ -224,7 +226,9 @@ test("each of the Recorder's operations goes out through the mutator: its addres
   });
   expect(seen?.key).toMatch(/^[0-9a-f]{32}$/);
 
-  expect(await getRecorderIdentity(ORGANIZATION_ID, { target })).toEqual({
+  expect(
+    await getRecorderIdentity(DEFAULT_ORGANIZATION_ID, { target }),
+  ).toEqual({
     user: ada,
     connectionId: "c1",
   });
@@ -235,14 +239,16 @@ test("each of the Recorder's operations goes out through the mutator: its addres
     key: null,
   });
 
-  expect(await getRecorderLearning(ORGANIZATION_ID, { target })).toEqual({
+  expect(
+    await getRecorderLearning(DEFAULT_ORGANIZATION_ID, { target }),
+  ).toEqual({
     learning: { state: "assigned", containerId: "space-1" },
   });
   expect(seen).toMatchObject({ method: "GET", path: API.learning });
 
   const activity = { phase: "recording" as const, actions: 3 };
   expect(
-    await reportRecorderActivity(ORGANIZATION_ID, activity, { target }),
+    await reportRecorderActivity(DEFAULT_ORGANIZATION_ID, activity, { target }),
   ).toBeUndefined();
   expect(seen).toMatchObject({
     method: "POST",
@@ -253,7 +259,7 @@ test("each of the Recorder's operations goes out through the mutator: its addres
   expect(seen?.key).toMatch(/^[0-9a-f]{32}$/);
 
   expect(
-    await deleteCurrentRecorderConnection(ORGANIZATION_ID, { target }),
+    await deleteCurrentRecorderConnection(DEFAULT_ORGANIZATION_ID, { target }),
   ).toBeUndefined();
   expect(seen).toMatchObject({
     method: "DELETE",
@@ -266,16 +272,16 @@ test("each of the Recorder's operations goes out through the mutator: its addres
 test("every request names the Recorder and the OpenBot release it was built from, a read and a write, through the generated client and openbotRaw", async () => {
   const target = { openbotUrl, token: "obr_t" };
   const named = `recorder/${RELEASE}`;
-  await getRecorderIdentity(ORGANIZATION_ID, { target });
+  await getRecorderIdentity(DEFAULT_ORGANIZATION_ID, { target });
   expect(seen).toMatchObject({ path: API.me, client: named });
   await reportRecorderActivity(
-    ORGANIZATION_ID,
+    DEFAULT_ORGANIZATION_ID,
     { phase: "recording", actions: 1 },
     { target },
   );
   expect(seen).toMatchObject({ path: API.activity, client: named });
   await exchangeRecorderConnectCode(
-    ORGANIZATION_ID,
+    DEFAULT_ORGANIZATION_ID,
     {
       code: "obc_abc",
       label: "Work laptop",
@@ -290,7 +296,7 @@ test("every request names the Recorder and the OpenBot release it was built from
 
 test("a call that names no OpenBot is refused before any request is made", async () => {
   const { urls } = await recordFetch(async () => {
-    await expect(getRecorderIdentity(ORGANIZATION_ID)).rejects.toThrow(
+    await expect(getRecorderIdentity(DEFAULT_ORGANIZATION_ID)).rejects.toThrow(
       "Name the OpenBot",
     );
   });
