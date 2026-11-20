@@ -114,6 +114,19 @@ test("a working task whose conversation is not in the list is still listed", () 
   ]);
 });
 
+test("a task working only because its Bot is answering the person is not a row", () => {
+  // The server reads a task the person is replying in as working, answering them
+  // (`answeringYou`): that reply shows in its conversation, and nothing runs on its own.
+  const rows = atWork(
+    [channel({ id: "t1-channel", busy: true, work: [] })],
+    [
+      listed("working", { channelId: "t1-channel", answeringYou: true }),
+      listed("working", { id: "t2", channelId: "t2-channel" }),
+    ],
+  );
+  expect(rows.map((row) => row.channelId)).toEqual(["t2-channel"]);
+});
+
 test("idle conversations and tasks that are not working are left out", () => {
   const rows = atWork(
     [channel({ id: "c1", busy: false, work: [] })],
