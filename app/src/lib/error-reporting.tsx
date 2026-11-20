@@ -3,10 +3,12 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { CompanySignInPage } from "@/components/auth/company-sign-in-page";
 import { NoOrganizationPage } from "@/components/organizations/no-organization-page";
 import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
 import { idempotencyKey } from "@/lib/api/request";
+import { heldOutBySso } from "@/lib/auth/held-out";
 import { desktopShell } from "@/lib/desktop/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
@@ -124,11 +126,14 @@ export function installAppErrorReporting(): void {
 export function ReportedErrorComponent(props: ErrorComponentProps) {
   const { error } = props;
   const none = inNoOrganization(error);
+  const heldOut = heldOutBySso(error);
   useEffect(() => {
-    // Somebody in no organization is an answer, not a fault: there is nothing to tell OpenBot.
-    if (!none) reportAppError("error_boundary", error);
-  }, [error, none]);
+    // Somebody in no organization, or held out until they sign in through their company, is an answer, not a fault:
+    // there is nothing to tell OpenBot.
+    if (!none && !heldOut) reportAppError("error_boundary", error);
+  }, [error, none, heldOut]);
   // Wherever it was found, it is answered with its own page, never the router's error screen.
+  if (heldOut) return <CompanySignInPage refusal={error.message} />;
   if (none) return <NoOrganizationPage />;
   return <ErrorComponent {...props} />;
 }

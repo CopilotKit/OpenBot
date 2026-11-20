@@ -7,6 +7,7 @@ import {
   type QueryKey,
   type QueryObserverOptions,
 } from "@tanstack/react-query";
+import { heldOutBySso } from "@/lib/auth/held-out";
 import {
   holdReadsWhileConnectionLost,
   retryWhileConnectionLost,
@@ -77,7 +78,8 @@ focusManager.setEventListener((handleFocus) => {
  * retries off is held the same way.
  *
  * Being in no organization is an answer, not a failure: asking again at once says the same and only
- * holds the page back, so it is never retried. Said here rather than in one query's options, where it
+ * holds the page back, so it is never retried. So is being held out until signing in through the
+ * company (`heldOutBySso`). Said here rather than in one query's options, where it
  * would replace the retry rule this client was given.
  */
 class OpenBotQueryClient extends QueryClient {
@@ -127,7 +129,7 @@ class OpenBotQueryClient extends QueryClient {
       ...retryWhileConnectionLost<TError>(
         this,
         (failureCount, error) => {
-          if (inNoOrganization(error)) return false;
+          if (inNoOrganization(error) || heldOutBySso(error)) return false;
           if (typeof retry === "function") return retry(failureCount, error);
           if (typeof retry === "number") return failureCount < retry;
           return retry;

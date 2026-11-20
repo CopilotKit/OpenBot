@@ -190,10 +190,11 @@ function NothingToSee({
   page?: { url?: string; title?: string } | undefined;
 }) {
   if (!settled && !problem && blocked)
-    return (
+    // Inside the tile's own button nothing is drawn: the tile draws it beside the button, over the screen, so its
+    // link is a link of its own (`BlockedTile`).
+    return inButton ? null : (
       <ComputerBlocked
         className="absolute inset-0"
-        inline={inButton}
         refusal={blocked}
         title={`Can't start ${owner} computer`}
       />
@@ -696,7 +697,8 @@ export function ComputerView({
    */
   const botBrowser = useQuery({
     ...botBrowserStateQueryOptions(computerId),
-    enabled: expanded && !settled,
+    // Not for a computer refused a start, which has no browser to read.
+    enabled: expanded && !settled && !startBlocked,
   });
   /*
    * Read again the moment the wheel changes hands, rather than up to a second later: the bar and Record go live, or
@@ -910,7 +912,22 @@ export function ComputerView({
               />
             )}
           </button>
-          {!settled && !(driving && !control?.transitioning) ? (
+          {/*
+            A computer refused a start: said over the tile, beside its button rather than in it, so the admin's way to
+            Computers is a link that can be pressed. Compact, so the whole sentence and the link fit the tile.
+          */}
+          {!settled && startBlocked ? (
+            <ComputerBlocked
+              className="absolute inset-0 bg-background"
+              compact
+              refusal={startBlocked}
+              title={`Can't start ${owner} computer`}
+            />
+          ) : null}
+          {/* Nothing to take on a computer that was refused a start: there is no screen to drive. */}
+          {!settled &&
+          !startBlocked &&
+          !(driving && !control?.transitioning) ? (
             // Solid, not frosted: a blur over a screen that keeps changing is redrawn with every frame of it.
             <div
               className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border bg-popover py-1.5 pr-1.5 pl-3 text-popover-foreground shadow-lg"
@@ -1289,14 +1306,17 @@ export function ComputerView({
                         </span>
                       ) : null}
                     </span>
-                    <ComputerControlButton computerId={computerId} />
+                    {/* A computer refused a start has no screen to take, and so nothing to record either. */}
+                    {startBlocked ? null : (
+                      <ComputerControlButton computerId={computerId} />
+                    )}
                   </div>
                 )}
                 {/*
                   Record, under the wheel, because it is only for the person holding it. Branched on
                   the data first, so a read that fails after one has answered keeps what it showed.
                 */}
-                {settled ? null : botBrowser.data ? (
+                {settled || startBlocked ? null : botBrowser.data ? (
                   <BotRecordPanel botId={computerId} state={botBrowser.data} />
                 ) : botBrowser.error ? (
                   <p className="text-destructive text-sm" role="alert">
