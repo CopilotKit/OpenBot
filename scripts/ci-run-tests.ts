@@ -1,7 +1,7 @@
 /**
  * Runs the test files ci.yml's `changes` job picked (scripts/ci-changes.ts), for `tests (changed
  * files)`: the suite's tests with `bun test`, and the browser tests in a real browser, the way
- * `app (real browser)` runs them.
+ * `app (real browser)` and its WebKit and desktop setup window jobs run them.
  *
  * Each group has to pass and has to run at least one test: a file that throws while it is imported
  * registers nothing and would otherwise pass, which is the failure the suite's floor guards against
