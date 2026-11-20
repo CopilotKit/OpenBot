@@ -40,8 +40,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and `INTELLIGENCE_PLATFORM_TOKEN` (or `INTELLIGENCE_PLATFORM_TOKEN_FILE`), the platform service
   token its Intelligence was given, before upgrading. At the first start each organization it held
   is given an Intelligence organization of its own, with its members and Bots where they were. Left
-  as it was, it refuses to start and says what to set. Unset, an OpenBot keeps one organization, as
-  before. See [configuration](docs/configuration.md#general-variables).
+  as it was, or with the old setting removed and no authority named, it refuses to start, naming the
+  organizations and what to set: on `local` their Bots could not answer. An OpenBot that only ever
+  held one organization changes nothing, and keeps it. See
+  [configuration](docs/configuration.md#general-variables).
 - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
   removed no earlier than its sunset, and only once nothing uses it.
   - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.

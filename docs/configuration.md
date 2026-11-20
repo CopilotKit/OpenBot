@@ -173,7 +173,10 @@ through `config.extraEnv`.
 
 **`OPENBOT_MULTIPLE_ORGANIZATIONS`**, which 1.1.2 and earlier read, is no longer read. An OpenBot
 that still sets it to `true` or `1` with no `OPENBOT_ORGANIZATION_AUTHORITY` refuses to start and
-says what to set, rather than keep one of the organizations it held.
+says what to set, rather than keep one of the organizations it held. On `local`, an OpenBot that
+holds organizations besides `default` with no Intelligence organization of their own, such as the
+ones it held on 1.1.2, refuses to start too and names them, since their Bots could not answer there:
+`intelligence-platform` keeps them.
 
 The component catalogue has separate per-Bot grants. Its sortable data table (`showTable`),
 interactive form (`askForm`), and other compiled or playground-authored components remain governed
