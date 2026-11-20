@@ -13,47 +13,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **One migration, expand only.** `0138_management_enrollment` adds one table for connecting to
   managed updates (below), which 1.1.2 never reads, so 1.1.2 upgrades with its servers rolling one
   by one, with no downtime, and goes back to 1.1.2 the same way.
-
-### Kubernetes
-
-- **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
-  code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
-  organization your licence names. Once it's approved, it shows one `helm install` of
-  the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
-  OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
-  organization `default` see it, and only on a team install you run yourself.
-  - The `openbot` chart turns this on by default (`server.managementEnrollment.enabled`). Nothing is
-    connected or called until an admin clicks Connect. The server's internal status port is now on,
-    open only to the agent's own pod (`openbot-agent` in `openbot-system`) until the agent manages
-    the release. The server gets a projected token of its own service account and the cluster's CA,
-    and checks the agent's token against the cluster's own keys. No role is granted.
-  - With `networkPolicy.enabled`, also set `networkPolicy.kubernetesApiCidr`, so the server can read
-    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false`.
-- **The management agent can connect without copying a secret.** With `enrollment.serverUrl` set to
-  OpenBot's internal status port and no install id, the agent proves itself to the OpenBot server
-  with a short-lived service account token, collects the one-time enrollment token the server holds
-  once an admin connected the install, makes its own key, trades a certificate request for its
-  certificate and writes both to its own Secret, which it reuses after a restart. `helm uninstall`
-  leaves that Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at
-  start and, handed the new install's token, enrolls again and replaces the old certificate. The
-  key never leaves the cluster, and nothing secret is logged. Until you choose how the database is
-  backed up (`backup.kind`), the agent refuses every upgrade that changes the database, before
-  touching anything.
-
-## 1.1.2
-
-**Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
-unless you rely on task threads.
-
-- **No migrations.** The database stays at `0137_ai_connections`, where 1.1.1 left it, so 1.1.1
-  upgrades to 1.1.2 with its servers rolling one by one, with no downtime, and goes back to 1.1.1
-  the same way. Upgrading from 1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before
-  upgrading first.
-- **Task threads are off unless you turn them on.** No Bot hands a person's request to a task
-  thread any more: every Bot does the work in the conversation, including one set to hand work to
-  agents. Set `OPENBOT_TASK_THREADS=on` on the server (also `true` or `1`) to bring them back as
-  they were. Nothing is removed: a Bot keeps what it is set to, and task cards and threads already
-  in conversations still show and can still be followed up or stopped.
 - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
   removed no earlier than its sunset, and only once nothing uses it.
   - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.
@@ -103,6 +62,48 @@ unless you rely on task threads.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
+
+### Kubernetes
+
+- **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
+  code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
+  organization your licence names. Once it's approved, it shows one `helm install` of
+  the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
+  OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
+  organization `default` see it, and only on a team install you run yourself.
+  - The `openbot` chart turns this on by default (`server.managementEnrollment.enabled`). Nothing is
+    connected or called until an admin clicks Connect. The server's internal status port is now on,
+    open only to the agent's own pod (`openbot-agent` in `openbot-system`) until the agent manages
+    the release. The server gets a projected token of its own service account and the cluster's CA,
+    and checks the agent's token against the cluster's own keys. No role is granted.
+  - With `networkPolicy.enabled`, also set `networkPolicy.kubernetesApiCidr`, so the server can read
+    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false`.
+- **The management agent can connect without copying a secret.** With `enrollment.serverUrl` set to
+  OpenBot's internal status port and no install id, the agent proves itself to the OpenBot server
+  with a short-lived service account token, collects the one-time enrollment token the server holds
+  once an admin connected the install, makes its own key, trades a certificate request for its
+  certificate and writes both to its own Secret, which it reuses after a restart. `helm uninstall`
+  leaves that Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at
+  start and, handed the new install's token, enrolls again and replaces the old certificate. The
+  key never leaves the cluster, and nothing secret is logged. Until you choose how the database is
+  backed up (`backup.kind`), the agent refuses every upgrade that changes the database, before
+  touching anything.
+
+## 1.1.2
+
+**Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
+unless you rely on task threads.
+
+- **No migrations.** The database stays at `0137_ai_connections`, where 1.1.1 left it, so 1.1.1
+  upgrades to 1.1.2 with its servers rolling one by one, with no downtime, and goes back to 1.1.1
+  the same way. Upgrading from 1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before
+  upgrading first.
+- **Task threads are off unless you turn them on.** No Bot hands a person's request to a task
+  thread any more: every Bot does the work in the conversation, including one set to hand work to
+  agents. Set `OPENBOT_TASK_THREADS=on` on the server (also `true` or `1`) to bring them back as
+  they were. Nothing is removed: a Bot keeps what it is set to, and task cards and threads already
+  in conversations still show and can still be followed up or stopped.
+- **Deprecated:** nothing.
 
 ### Bots and models
 
