@@ -67,7 +67,7 @@ export function ManagementPage() {
   if (management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
-        <Notice>Couldn't load managed updates. Reload the page.</Notice>
+        <Notice>Couldn't load managed updates. Try again in a moment.</Notice>
       </PageShell>
     );
   if (!management.data.applies)
