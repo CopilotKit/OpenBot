@@ -37,10 +37,9 @@ export function applySidebarOpen(open: boolean, effects: SidebarEffects) {
  * going from a conversation to Settings never moves the edge of the page. 340px before anybody drags
  * it: the app's roster needs that for its two-line message previews, and the other shells match it.
  *
- * Dragged on the sidebar's edge (`SidebarRail`). Never narrower than what its own footer needs, which
- * the rail measures as the drag starts, nor than `SIDEBAR_MIN_WIDTH`; never wider than
- * `SIDEBAR_MAX_WIDTH`, past which a roster stops being a column beside the work and becomes the work,
- * nor than `SIDEBAR_MAX_SHARE` of the window.
+ * Dragged on the sidebar's edge (`SidebarRail`). Never narrower than `SIDEBAR_MIN_WIDTH` (plus the
+ * strip beside one); never wider than `SIDEBAR_MAX_WIDTH`, past which a roster stops being a column
+ * beside the work and becomes the work, nor than `SIDEBAR_MAX_SHARE` of the window.
  */
 export const SIDEBAR_WIDTH = "340px";
 export const SIDEBAR_WIDTH_STORAGE_KEY = "openbot-sidebar-width";
@@ -49,15 +48,22 @@ export const SIDEBAR_WIDTH_STORAGE_KEY = "openbot-sidebar-width";
  * written, so a width somebody dragged before survives; admin's and settings' old widths are not.
  */
 export const LEGACY_APP_SIDEBAR_WIDTH_KEY = "openbot-sidebar-width:app";
-export const SIDEBAR_MIN_WIDTH = 220;
+/**
+ * The narrowest a panel may be dragged: room for an icon and the first words of a name, each row
+ * cut short with an ellipsis. Low on purpose. "It stops way too wide": the floor was 220px, and
+ * once a footer was measured into it, wider still, which on a large screen left a column of empty
+ * space a person could not take back, and zoomed in to read, half the window. How narrow is the
+ * person's call; the floor only keeps the panel from closing up altogether (hiding it is a click).
+ */
+export const SIDEBAR_MIN_WIDTH = 160;
 export const SIDEBAR_MAX_WIDTH = 480;
 /**
  * The most of the window the sidebar takes, whatever width was dragged or remembered. Every width
  * here is in the page's pixels, and zooming in (OpenBot Desktop's View menu, a browser's zoom) makes
- * the window fewer of them wide while the sidebar keeps its count: a 340px sidebar is about a quarter of a
- * 1440px window and, zoomed to 175%, two-fifths of the 820px it becomes. So the sidebar is held to a
- * share of the window as well, and the remembered width comes back whole once the window is wide
- * enough again. Never under the floor, which wins in a window too narrow for both.
+ * the window fewer of them wide while the sidebar keeps its count: a 480px sidebar is a third of a
+ * 1440px window and, zoomed to 175%, well over half of the 820px it becomes. So the sidebar is held
+ * to a share of the window as well, and the remembered width comes back whole once the window is
+ * wide enough again. Never under the floor, which wins in a window too narrow for both.
  */
 export const SIDEBAR_MAX_SHARE = 0.4;
 
@@ -87,13 +93,11 @@ export function storedSidebarWidth(
 
 /**
  * The narrowest a dragged sidebar may be: the panel's own floor (`SIDEBAR_MIN_WIDTH`) plus the
- * strip beside it, or what the footer needs to show whole (`footerNeeds`), whichever is more.
+ * strip beside it. Never what its content would like: a floor measured from a footer's widest
+ * button is how the sidebar stopped too wide to be dragged any narrower.
  */
-export function sidebarFloor(
-  stripWidth: number,
-  footerNeeds: number | null,
-): number {
-  return Math.max(SIDEBAR_MIN_WIDTH + stripWidth, footerNeeds ?? 0);
+export function sidebarFloor(stripWidth: number): number {
+  return SIDEBAR_MIN_WIDTH + stripWidth;
 }
 
 /**

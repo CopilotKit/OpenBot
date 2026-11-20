@@ -111,20 +111,16 @@ describe("sidebar width", () => {
  * allowed to be on its own.
  */
 describe("the floor a drag stops at", () => {
-  test("is the panel's floor with no strip and no footer to fit", () => {
-    expect(sidebarFloor(0, null)).toBe(220);
+  test("is the panel's floor with no strip", () => {
+    expect(sidebarFloor(0)).toBe(160);
   });
 
   test("adds the strip's width to the panel's floor", () => {
-    expect(sidebarFloor(64, null)).toBe(284);
-  });
-
-  test("is what a footer needs, where that is more", () => {
-    expect(sidebarFloor(64, 300)).toBe(300);
+    expect(sidebarFloor(48)).toBe(208);
   });
 
   test("holds a drag narrower than the panel's floor at it", () => {
-    expect(clampSidebarWidth(200, sidebarFloor(64, null))).toBe(284);
+    expect(clampSidebarWidth(100, sidebarFloor(48))).toBe(208);
   });
 });
 
@@ -167,17 +163,17 @@ describe("the page's Show sidebar button", () => {
 });
 
 /*
- * Admin and Settings share the width and may be dragged to 220px, which beside the strip would
+ * Admin and Settings share the width and may be dragged to 160px, which beside the strip would
  * leave the panel narrower than it may ever be dragged. And however wide it was left, the sidebar
  * takes no more than two-fifths of the window: zoomed in, the window is fewer of the page's pixels
  * wide and the sidebar would otherwise keep its count of them.
  */
 test("the shared width is drawn between the floor and two-fifths of the window", () => {
-  expect(sidebarWidthStyle("220px", { besideStrip: true })).toBe(
-    "clamp(calc(220px + var(--sidebar-width-icon)), 220px, 40vw)",
+  expect(sidebarWidthStyle("160px", { besideStrip: true })).toBe(
+    "clamp(calc(160px + var(--sidebar-width-icon)), 160px, 40vw)",
   );
   expect(sidebarWidthStyle("480px", { besideStrip: false })).toBe(
-    "clamp(220px, 480px, 40vw)",
+    "clamp(160px, 480px, 40vw)",
   );
 });
 
@@ -188,16 +184,16 @@ test("the shared width is drawn between the floor and two-fifths of the window",
  */
 describe("the widest a drag goes", () => {
   test("is the fixed maximum in a wide window", () => {
-    expect(sidebarCeiling(1440, 268)).toBe(480);
+    expect(sidebarCeiling(1440, 208)).toBe(480);
   });
 
   test("is two-fifths of a zoomed-in window", () => {
-    expect(sidebarCeiling(820, 268)).toBe(328);
-    expect(clampSidebarWidth(600, 268, sidebarCeiling(820, 268))).toBe(328);
+    expect(sidebarCeiling(820, 208)).toBe(328);
+    expect(clampSidebarWidth(600, 208, sidebarCeiling(820, 208))).toBe(328);
   });
 
   test("is never under the floor", () => {
-    expect(sidebarCeiling(600, 268)).toBe(268);
-    expect(clampSidebarWidth(100, 268, sidebarCeiling(600, 268))).toBe(268);
+    expect(sidebarCeiling(400, 208)).toBe(208);
+    expect(clampSidebarWidth(100, 208, sidebarCeiling(400, 208))).toBe(208);
   });
 });

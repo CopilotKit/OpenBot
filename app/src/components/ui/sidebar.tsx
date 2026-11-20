@@ -338,48 +338,17 @@ const SidebarResizeContext = React.createContext<SidebarResize | null>(null);
 const SidebarResizeProvider = SidebarResizeContext.Provider;
 
 /**
- * The narrowest the sidebar can be: what its widest footer button's own content needs, plus the
- * paddings around it, and never under `SIDEBAR_MIN_WIDTH`. Beside a strip (`data-slot="strip"`) the
- * strip's width is added to that floor, and the strip's own footer is not the one measured: the
- * panel is what the floor is for. Measured from what is drawn, never from a rem constant.
+ * The narrowest the sidebar can be: `SIDEBAR_MIN_WIDTH`, plus the strip's width beside a strip
+ * (`data-slot="strip"`), measured from what is drawn, never from a rem constant.
  */
-function footerWidth(panel: HTMLElement): number {
+function narrowest(panel: HTMLElement): number {
   const strip = panel.querySelector<HTMLElement>('[data-slot="strip"]');
-  const stripWidth = strip ? strip.getBoundingClientRect().width : 0;
-  const footer = Array.from(
-    panel.querySelectorAll<HTMLElement>('[data-slot="sidebar-footer"]'),
-  ).find((one) => !strip?.contains(one));
-  if (!footer) return sidebarFloor(stripWidth, null);
-  const around =
-    panel.getBoundingClientRect().width - footer.getBoundingClientRect().width;
-  const footerStyle = getComputedStyle(footer);
-  const footerPadding =
-    Number.parseFloat(footerStyle.paddingLeft) +
-    Number.parseFloat(footerStyle.paddingRight);
-  let widest = 0;
-  for (const button of footer.querySelectorAll<HTMLElement>(
-    '[data-sidebar="menu-button"]',
-  )) {
-    const style = getComputedStyle(button);
-    const gap = Number.parseFloat(style.columnGap) || 0;
-    const children = Array.from(button.children) as HTMLElement[];
-    // `scrollWidth`, not the drawn width: a truncated label still reports what it needs.
-    const content =
-      children.reduce((sum, child) => sum + child.scrollWidth, 0) +
-      gap * Math.max(0, children.length - 1);
-    widest = Math.max(
-      widest,
-      content +
-        Number.parseFloat(style.paddingLeft) +
-        Number.parseFloat(style.paddingRight),
-    );
-  }
-  return sidebarFloor(stripWidth, Math.ceil(widest + footerPadding + around));
+  return sidebarFloor(strip ? strip.getBoundingClientRect().width : 0);
 }
 
 /**
- * The sidebar's edge. Dragged, it resizes the sidebar between what its footer needs and the shell's
- * maximum, which a narrow or zoomed-in window lowers (`sidebarCeiling`); clicked without moving, it
+ * The sidebar's edge. Dragged, it resizes the sidebar between its floor (`sidebarFloor`) and the
+ * shell's maximum, which a narrow or zoomed-in window lowers (`sidebarCeiling`); clicked without moving, it
  * hides or shows the sidebar as it always did. A press counts as a drag once it has moved 3px, so a
  * click with a slight wobble still toggles.
  */
@@ -412,7 +381,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const startWidth = panel.getBoundingClientRect().width;
-        const min = footerWidth(panel);
+        const min = narrowest(panel);
         drag.current = {
           startX: event.clientX,
           startWidth,

@@ -5,16 +5,19 @@ import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
 
 /**
- * The sidebar's edge narrows the sidebar, and the sidebar never takes most of the window, at any
- * zoom.
+ * The sidebar's edge narrows the sidebar well past where it used to stop, and the sidebar never
+ * takes most of the window, at any zoom.
  *
  * Reported from OpenBot Desktop on a Mac: "Cannot drag sidebar to make it smaller. This is
  * especially painful when you need to zoom in to read the text because zooming in zooms the entire
- * screen instead of just the text so the sidebar gets proportionally larger." Zooming a window in
- * makes it fewer of the page's pixels wide, and the sidebar kept its count of them: a width dragged
- * out to 480px at 100% was 480px of a window zoomed to 175% (about 820 of the page's pixels), well
- * over half of it, and a drag could take it back out there. It is now held to two-fifths of the
- * window, the remembered width coming back whole once the window is wide again.
+ * screen instead of just the text so the sidebar gets proportionally larger", and then "it stops way
+ * too wide" and, zoomed in to read, "the sidebar takes up half the screen and i can't make it any
+ * smaller". Two causes. The floor was high: 220px for a panel (268px beside the strip), and a
+ * footer's widest button measured into it raised it further. And zooming a window in makes it fewer
+ * of the page's pixels wide while the sidebar kept its count of them: a width dragged out to 480px
+ * at 100% was 480px of a window zoomed to 175% (about 820 of the page's pixels), well over half of
+ * it. The floor is now 160px a panel, and the sidebar is held to two-fifths of the window, the
+ * remembered width coming back whole once the window is wide again.
  *
  * Rendered in a real browser, because the width is the browser's to resolve (a CSS `clamp` against
  * the window's width) and the drag is real pointer events on the edge. The sidebars are the shells'
@@ -40,10 +43,13 @@ const ZOOMED = { width: 820, height: 540 };
 /** Two-fifths of the zoomed window: `SIDEBAR_MAX_SHARE` in app/src/lib/sidebar.ts. */
 const ZOOMED_MOST = Math.floor(ZOOMED.width * 0.4);
 
-/** The narrowest each shape may be dragged: the panel's floor, plus the 3rem strip beside one. */
+/**
+ * The narrowest each shape may be dragged: the panel's floor, plus the 3rem strip beside one; and
+ * where a drag stopped before (`was`), which it now goes well past.
+ */
 const SHAPES = [
-  { name: "app", strip: true, floor: 220 + 48 },
-  { name: "admin-settings", strip: false, floor: 220 },
+  { name: "app", strip: true, floor: 160 + 48, was: 220 + 48 },
+  { name: "admin-settings", strip: false, floor: 160, was: 220 },
 ] as const;
 type Shape = (typeof SHAPES)[number];
 
@@ -209,11 +215,15 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
           await shot(page, `${engine}-${shape.name}-zoomed`);
 
           await drag(page, -400);
-          expect(await measured(page)).toEqual({
+          const narrowed = await measured(page);
+          expect(narrowed).toEqual({
             width: shape.floor,
             window: ZOOMED.width,
             stored: String(shape.floor),
           });
+          // Well under half the zoomed window, and past where the drag used to stop.
+          expect(narrowed.width / narrowed.window).toBeLessThan(0.3);
+          expect(narrowed.width).toBeLessThan(shape.was - 40);
           await shot(page, `${engine}-${shape.name}-zoomed-narrowed`);
 
           // Out again as far as it goes: two-fifths of the window, not the 480px of a wide one.
@@ -264,6 +274,30 @@ describe.skipIf(!asked)("the sidebar's edge at any zoom", () => {
           await page.setViewportSize(WIDE);
           await drag(page, 600);
           expect(await measured(page)).toMatchObject({ width: 480 });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 120_000);
+
+    /*
+     * "It stops way too wide": at 100% on a large screen, a drag goes past the old floor down to the
+     * new one, and the next page drawn starts at that width.
+     */
+    test(`${shape.name}: at 100%, the edge drags past where it used to stop`, async () => {
+      for (const [engine, browser] of engines) {
+        const page = await open(browser, shape, WIDE);
+        try {
+          await drag(page, -600);
+          expect(await measured(page)).toEqual({
+            width: shape.floor,
+            window: WIDE.width,
+            stored: String(shape.floor),
+          });
+          await page.reload();
+          await page.locator('[data-slot="sidebar-rail"]').waitFor();
+          expect(await measured(page)).toMatchObject({ width: shape.floor });
+          await shot(page, `${engine}-${shape.name}-wide-narrowed`);
         } finally {
           await page.close();
         }
