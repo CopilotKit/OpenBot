@@ -96,9 +96,10 @@ function IdentityProvidersPage() {
         </PageEmpty>
       </PageShell>
     );
-  const registered = providers.data?.managedHere
-    ? providers.data.providers
-    : [];
+  const listed = providers.data?.managedHere ? providers.data.providers : [];
+  // This organization's own, to register and remove; and, outside `default`, the deployment's, which count here too.
+  const registered = listed.filter((provider) => !provider.deployment);
+  const deploymentWide = listed.filter((provider) => provider.deployment);
 
   function submit(submission: React.FormEvent) {
     submission.preventDefault();
@@ -200,6 +201,36 @@ function IdentityProvidersPage() {
           </PageRows>
         )}
       </PageSection>
+      {/*
+       * Read-only: set up for everybody who signs in to OpenBot, they count for this organization's Require SSO as its
+       * own do, and only whoever runs OpenBot changes them.
+       */}
+      {deploymentWide.length > 0 ? (
+        <PageSection
+          description="Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
+          title="For all of OpenBot"
+        >
+          <PageRows>
+            {deploymentWide.map((provider, index) => (
+              <StaggerItem index={index} key={provider.providerId}>
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconBuildingBank />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{provider.providerId}</ItemTitle>
+                    <ItemDescription>
+                      {provider.protocol.toUpperCase()} · {provider.domain} ·{" "}
+                      {provider.issuer}
+                    </ItemDescription>
+                  </ItemContent>
+                </Item>
+                {index !== deploymentWide.length - 1 && <Separator />}
+              </StaggerItem>
+            ))}
+          </PageRows>
+        </PageSection>
+      ) : null}
       {/* Requiring SSO is the deployment's too: drawn once the server has answered for the providers. */}
       {providers.isPending ? null : (
         <SignInSection organizationOnly={organizationOnly} />
