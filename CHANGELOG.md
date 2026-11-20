@@ -51,7 +51,8 @@ unless you rely on task threads.
   organization's members. Where it keeps one, the rule still holds for everybody.
 - **Members who haven't opened OpenBot yet.** On a hosted OpenBot, an organization's members list
   includes people who are members at OpenBot by CopilotKit and haven't opened OpenBot yet, marked
-  `notOpenedYet`. They can't be given another role or removed until they do.
+  `notOpenedYet`. An owner or an admin can remove them; they can't be given another role until they
+  open OpenBot.
 - **The Recorder can say which organization it records into.** Who a Recorder acts as carries its
   `organization`, with its id and name, and a new Recorder connection carries `organizationName`.
 - **Search an organization's members.** `listOrganizationMembers` takes `search`, which narrows the
