@@ -39,6 +39,11 @@ const deploymentSentWith: {
  * only org_work, and `default` is not found for their session, as an organization they are not in never is.
  */
 let outsideDefault = false;
+/**
+ * The signed-in person was removed from org_work while the app was open: their list holds only default, and org_work
+ * is not found for them, as an organization they are not in never is.
+ */
+let removedFromWork = false;
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
 /** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
@@ -163,6 +168,39 @@ const server = Bun.serve({
       body: text ? JSON.parse(text) : null,
     });
     const route = `${request.method} ${url.pathname}`;
+    if (removedFromWork && url.pathname.startsWith(`${ORG}/`))
+      return Response.json(
+        {
+          type: "https://open.bot/errors/organization-not-found",
+          title: "Not found.",
+          status: 404,
+          detail: "Couldn't find that organization.",
+          code: "ORGANIZATION_NOT_FOUND",
+          category: "not_found",
+          retryable: false,
+          requestId: "req_example",
+          traceId: "trace_example",
+        },
+        {
+          status: 404,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
+    if (route === `GET ${MINE}` && removedFromWork)
+      return Response.json({
+        organizations: [
+          {
+            id: "default",
+            slug: "default",
+            name: "Acme",
+            role: "member",
+            active: false,
+            personal: false,
+          },
+        ],
+        canCreate: false,
+        nextCursor: null,
+      });
     // Only a live session reads the person's organizations. A cookie sign-in left behind (an unfinished sign-in's
     // state, an expired session) is refused as OpenBot refuses it.
     if (
@@ -285,10 +323,11 @@ const secure = new Map<string, string>();
 mock.module("../src/auth", () => ({
   serverUrl,
   authClient: { getCookie: () => cookie },
+  // Each person's pick, kept by who they are, as src/auth.ts keeps it in the phone's secure store.
   organizationStore: {
-    read: async () => secure.get("organization") ?? null,
-    write: async (id: string) => {
-      secure.set("organization", id);
+    read: async (person: string) => secure.get(person) ?? null,
+    write: async (person: string, id: string) => {
+      secure.set(person, id);
     },
   },
 }));
@@ -318,12 +357,14 @@ const {
   ORGANIZATION_ID,
   organizationChoices,
   readDeployment,
+  setSignedInPerson,
 } = await import("../src/api");
 const { listInvitations } = await import(
   "../src/api/generated/organizations/organizations"
 );
 const { NOT_IN_ORGANIZATION } = await import("../src/organization");
 const { onSessionRefused } = await import("../src/session-refused");
+const { onOrganizationGone } = await import("../src/organization-gone");
 
 const { checkVersion } = await import("../src/version-check");
 const { onUpdateRequired } = await import("../src/client-version");
@@ -335,6 +376,8 @@ beforeEach(() => {
   deploymentAsked.length = 0;
   deploymentSentWith.length = 0;
   outsideDefault = false;
+  removedFromWork = false;
+  setSignedInPerson("ada");
   cookie = COOKIE;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
 });
@@ -765,4 +808,68 @@ test("picking another organization sends every request after it there, and the p
     NOT_IN_ORGANIZATION,
   );
   expect([...secure.values()]).toEqual(["default"]);
+});
+
+/*
+ * REPORTED (fused end-to-end run, Android): removed from the organization they worked in while the app was open, the
+ * person stayed in it, ticked, with "Couldn't find that organization.", and every list kept asking it until the app was
+ * opened again. Now its "not found" makes the phone forget it: the next request reads their organizations again and
+ * goes to another of theirs, and Home is told so it reads them again too.
+ */
+test("removed from the organization they work in, the next request goes to another of theirs, and Home is told", async () => {
+  setSignedInPerson("cy");
+  cookie = "better-auth.session_token=signed-in-then-removed";
+  const heard: string[] = [];
+  const stop = onOrganizationGone(() => heard.push("gone"));
+  try {
+    await getBot(ORGANIZATION_ID, "a b");
+    expect(seen.at(-1)?.path).toBe(`${ORG}/bots/a%20b`);
+
+    removedFromWork = true;
+    const refused = await getBot(ORGANIZATION_ID, "a b").catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toMatchObject({
+      status: 404,
+      code: "ORGANIZATION_NOT_FOUND",
+    });
+    expect(heard).toEqual(["gone"]);
+
+    seen.length = 0;
+    const answer = await getBot(ORGANIZATION_ID, "a b");
+    expect(answer.bot.id).toBe("a b");
+    expect(seen.map((request) => request.path)).toEqual([
+      MINE,
+      "/api/v2/organizations/default/bots/a%20b",
+    ]);
+    expect((await organizationChoices()).currentId).toBe("default");
+  } finally {
+    stop();
+  }
+});
+
+/*
+ * REPORTED (fused end-to-end run): the pick was kept for the phone, not the person, so a phone two people share opened
+ * in the last person's organization when the next one was a member of it too.
+ */
+test("on a phone two people share, each opens in their own pick, never the last person's", async () => {
+  // Ada picks default.
+  setSignedInPerson("ada");
+  cookie = "better-auth.session_token=signed-in-ada";
+  await chooseOrganization("default");
+  expect(secure.get("ada")).toBe("default");
+
+  // Ben signs in on the same phone. He is in default too, and works where the server says he does: org_work.
+  setSignedInPerson("ben");
+  cookie = "better-auth.session_token=signed-in-ben";
+  seen.length = 0;
+  await getBot(ORGANIZATION_ID, "a b");
+  expect(seen.at(-1)?.path).toBe(`${ORG}/bots/a%20b`);
+
+  // Ada again: her own pick.
+  setSignedInPerson("ada");
+  cookie = "better-auth.session_token=signed-in-ada-again";
+  seen.length = 0;
+  await getBot(ORGANIZATION_ID, "a b");
+  expect(seen.at(-1)?.path).toBe("/api/v2/organizations/default/bots/a%20b");
 });

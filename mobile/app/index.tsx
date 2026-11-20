@@ -18,6 +18,7 @@ import {
 import { listConversations } from "../src/api/generated/conversations/conversations";
 import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
 import { registerPush, unregisterPush } from "../src/notifications";
+import { onOrganizationGone } from "../src/organization-gone";
 import { useLoad } from "../src/use-load";
 export default function Home() {
   const { data: session, isPending } = authClient.useSession();
@@ -52,6 +53,20 @@ export default function Home() {
     [session?.user.id, workingIn],
   );
   const conversations = useLoad(loadConversations, Boolean(session));
+  /*
+   * The organization they work in went away while the app was open (they were removed, or it was deleted): their
+   * organizations are read again, and everything below follows the one they work in now.
+   */
+  const { refresh: refreshOrganizations } = organizations;
+  useEffect(
+    () =>
+      onOrganizationGone(() => {
+        setOlder([]);
+        setOlderCursor(undefined);
+        void refreshOrganizations();
+      }),
+    [refreshOrganizations],
+  );
   const nextCursor =
     olderCursor === undefined ? conversations.data?.nextCursor : olderCursor;
   const allConversations = Array.from(
@@ -95,34 +110,41 @@ export default function Home() {
           : "Sign in to OpenBot"}
       </Text>
       <Text>{serverUrl}</Text>
-      {session && (organizations.data?.organizations.length ?? 0) > 1 && (
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontSize: 20, fontWeight: "600" }}>Organization</Text>
-          {organizations.data?.organizations.map((organization) => {
-            const current = organization.id === workingIn;
-            return (
-              <Button
-                key={organization.id}
-                accessibilityState={{ selected: current }}
-                disabled={busy || current}
-                title={`${current ? "✓ " : ""}${organization.name ?? organization.id}`}
-                onPress={() => {
-                  void act(async () => {
-                    await chooseOrganization(organization.id);
-                    setOlder([]);
-                    setOlderCursor(undefined);
-                    setPushRegistered(false);
-                    await organizations.refresh();
-                  });
-                }}
-              />
-            );
-          })}
-        </View>
-      )}
-      {(error || optionsError || conversations.error) && (
+      {session &&
+        !organizations.error &&
+        (organizations.data?.organizations.length ?? 0) > 1 && (
+          <View style={{ gap: 8 }}>
+            <Text style={{ fontSize: 20, fontWeight: "600" }}>
+              Organization
+            </Text>
+            {organizations.data?.organizations.map((organization) => {
+              const current = organization.id === workingIn;
+              return (
+                <Button
+                  key={organization.id}
+                  accessibilityState={{ selected: current }}
+                  disabled={busy || current}
+                  title={`${current ? "✓ " : ""}${organization.name ?? organization.id}`}
+                  onPress={() => {
+                    void act(async () => {
+                      await chooseOrganization(organization.id);
+                      setOlder([]);
+                      setOlderCursor(undefined);
+                      setPushRegistered(false);
+                      await organizations.refresh();
+                    });
+                  }}
+                />
+              );
+            })}
+          </View>
+        )}
+      {(error ||
+        optionsError ||
+        organizations.error ||
+        conversations.error) && (
         <Text accessibilityRole="alert" style={{ color: "#b42318" }}>
-          {error || optionsError || conversations.error}
+          {error || optionsError || organizations.error || conversations.error}
         </Text>
       )}
       {!session ? (
