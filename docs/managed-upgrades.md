@@ -68,8 +68,9 @@ install keeps its identity: there is never a second agent or a second install.
    `upgrades: on`, and from then on it upgrades only to a release the service names, inside your
    maintenance window, with a verified backup first when the database changes.
 
-If a cluster already runs Flux, see the `openbot-agent` chart's README before step 4: the controllers
-it installs watch `openbot-system` only, and your Flux must not also reconcile that namespace.
+If a cluster already runs Flux, see the `openbot-agent` chart's README before step 4: install with
+`--skip-crds` (Helm 4 would otherwise rewrite your Flux's CRDs to the chart's versions), and keep your
+Flux off `openbot-system`, where the controllers it installs work.
 
 To stop managed upgrades again, `helm uninstall openbot-agent` (OpenBot stays installed and
 upgradable with plain Helm), then set `management.agent.enabled=true` on the product release to have
