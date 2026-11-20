@@ -151,7 +151,12 @@ fn connection_keeping_openbot(
 /// deployment folder's name. Any project's `postgres-data` counts: a false yes keeps the
 /// connection a release up to 0.2.0 would have used, and a false no is the one that loses data.
 fn holds_openbot(connection: &str) -> bool {
-    podman(&[
+    holds_openbot_with(connection, &podman)
+}
+
+/// `holds_openbot`, with podman run by `run`.
+fn holds_openbot_with(connection: &str, run: &dyn Fn(&[&str]) -> Result<String, String>) -> bool {
+    run(&[
         "--connection",
         connection,
         "volume",
@@ -213,8 +218,17 @@ fn pipe_address(pipe: &str) -> String {
 /// A connection that is not a machine's (a remote host somebody added) answers with an error, and
 /// the caller then leaves the engine to find its own way.
 pub fn machine_behind(connection: &str) -> Result<MachineFacts, String> {
+    machine_behind_with(connection, &podman)
+}
+
+/// `machine_behind`, with podman run by `run`: for a caller that must not wait on a stalled
+/// machine (`engine::detect_by`).
+pub fn machine_behind_with(
+    connection: &str,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Result<MachineFacts, String> {
     let machine = machine_of(connection);
-    machine_facts(&podman(&["machine", "inspect", machine])?, machine)
+    machine_facts(&run(&["machine", "inspect", machine])?, machine)
 }
 
 /// The connection for a machine found by name, in the mode it runs in, or where its OpenBot
@@ -223,12 +237,22 @@ pub fn machine_behind(connection: &str) -> Result<MachineFacts, String> {
 /// A machine that cannot be inspected keeps its bare name, which is how it was addressed before
 /// machines were rootful.
 pub fn connection_of_machine(machine: &str) -> String {
-    let rootful = podman(&["machine", "inspect", machine])
+    connection_of_machine_with(machine, &podman)
+}
+
+/// `connection_of_machine`, with podman run by `run`.
+pub fn connection_of_machine_with(
+    machine: &str,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> String {
+    let rootful = run(&["machine", "inspect", machine])
         .and_then(|listing| machine_facts(&listing, machine))
         .ok()
         .and_then(|facts| facts.rootful)
         .unwrap_or(false);
-    connection_keeping_openbot(machine, rootful, holds_openbot)
+    connection_keeping_openbot(machine, rootful, |connection| {
+        holds_openbot_with(connection, run)
+    })
 }
 
 /// A `podman` command, run so that the person's default connection stays as they had it (see
