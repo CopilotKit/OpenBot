@@ -73,17 +73,22 @@ paths:
       operationId: startManagementEnrollment
       summary: Start connecting this OpenBot to CopilotKit management
       description: >-
-        Ask CopilotKit's management service to connect this OpenBot, by its
-        licence. OpenBot sends its CopilotKit licence and its name; a team
-        licence is accepted at once, with no code to approve, and OpenBot
-        collects the install's one-time token on its own. Where OpenBot's
-        chart installed the management agent, the agent picks the token up
-        and the answer is connecting (agentInstalledByChart true); otherwise
-        it is waiting-for-agent, with the Helm command that installs the
-        agent, with nothing secret in it. It also ends an opt-out: after an
-        administrator disconnected OpenBot, this is how managed updates are
-        turned back on, and OpenBot connects by itself again from then on.
-        A licence the service refuses answers 409 with the service's
+        Ask CopilotKit's management service to connect this OpenBot. OpenBot
+        sends its CopilotKit licence and its name. Where OpenBot's own chart
+        installs the management agent (agentInstalledByChart true), it
+        connects by licence: a team licence is accepted at once, with no code
+        to approve, OpenBot collects the install's one-time token on its own,
+        the agent picks it up, and the answer is connecting. This also ends
+        an opt-out: after an administrator disconnected OpenBot, this is how
+        managed updates are turned back on, and OpenBot connects by itself
+        again from then on. Where the chart turned the agent off, it is the
+        approval flow: OpenBot gets back a short code and the page where
+        somebody signed in to CopilotKit, as an admin of the organization the
+        licence names, approves it (the OAuth device authorization grant, RFC
+        8628); OpenBot then waits for the approval on its own, and once
+        approved the answer carries the Helm command that installs the agent,
+        with nothing secret in it. Read getManagementEnrollment to follow
+        either. A licence the service refuses answers 409 with the service's
         sentence, and the state keeps lastErrorCode. Started again while it
         is already under way, it changes nothing and answers where it stands.
         Already connected answers 409. Only an administrator of the organization
