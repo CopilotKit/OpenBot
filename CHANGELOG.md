@@ -92,6 +92,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   backed up (`backup.kind`), the agent refuses every upgrade that changes the database, before
   touching anything.
 
+### Bots and models
+
+- **Every harness OpenBot ships calls the model gateway with its run's own token, where the server
+  sends one.** One harness serves every organization of an OpenBot, and the key in its environment
+  names one organization. A run that brings its own token (`forwardedProps.openbotModelRoute`; on
+  Mastra the `OpenBot model route` context entry) calls the gateway with it, so the call is answered
+  on that run's organization's AI connection. CrewAI, LlamaIndex, Agno, LangChain, Google ADK,
+  Pydantic AI, Microsoft Agent Framework, Strands, AG2, Langroid, the Claude Agent SDK on a key and
+  Mastra all do. Only calls to the gateway carry it, and the token never reaches the model or a
+  framework's own state. A run that brings none keeps the environment's key, so OpenBot Desktop
+  behaves as before.
+- **A Claude plan's query is kept per organization on the LangGraph (TypeScript) engine.** The same
+  conversation id for a Bot of the same id in two organizations is two Claude queries now, not one
+  shared transcript. A run with no organization keeps the query name it always had.
+
 ## 1.1.2
 
 **Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
