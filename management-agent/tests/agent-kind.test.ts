@@ -12,7 +12,8 @@
  *  4. a signed rollback is refused because the release's policy says restore-backup;
  *  5. a release whose image does not exist: backup, Flux fails the upgrade, recovery-required;
  *     then, as a person recovers (journal.json removed, the desired version set back to the
- *     accepted release), the agent pins Flux back to the accepted chart and verifies it.
+ *     accepted release), the agent pins Flux back to the accepted chart, restarts every workload
+ *     of the release so none keeps the old database server's address, and verifies it.
  *
  * Opt-in, because it needs a cluster it may write to and the release builds. On a kind cluster
  * with a plain-HTTP registry on the kind network:
@@ -168,6 +169,18 @@ async function desire(build: Build) {
   };
 }
 const latest = () => service.heartbeats.at(-1);
+/** Seconds between the agent's heartbeats here, so each step it waits on comes round sooner than
+ * the minute a real install uses. */
+const HEARTBEAT_SECONDS = 5;
+/** Waits for `count` more heartbeats than have arrived so far: that many full agent cycles. */
+async function moreHeartbeats(count: number) {
+  const seen = service.heartbeats.length;
+  await until(
+    `${count} more heartbeats`,
+    () => service.heartbeats.length >= seen + count,
+    10,
+  );
+}
 const pinned = () =>
   json<{ spec: { ref?: { digest?: string } } }>(
     "-n",
@@ -228,6 +241,7 @@ run("management agent on a real cluster", () => {
       installId,
       commandPublicKey: service.publicKey,
       cloud: "other",
+      heartbeatIntervalSeconds: HEARTBEAT_SECONDS,
       management: {
         url: `https://${host}:${port}`,
         credentialsSecret: "openbot-agent-credentials",
@@ -440,11 +454,14 @@ run("management agent on a real cluster", () => {
         ).toBe(false);
     expect(pinned()).toBe(from.digest);
     // Three more heartbeats, and still one backup attempt: the product is not quiesced every minute.
-    await Bun.sleep(200_000);
+    // Each heartbeat is followed by that cycle's reconcile, so four more heartbeats mean three
+    // whole cycles, each of which decided against trying again.
+    await moreHeartbeats(4);
     const backups = kubectl("-n", SYSTEM, "get", "jobs", "-o", "name")
       .split("\n")
       .filter((name) => name.includes("openbot-backup-"));
     expect(backups).toHaveLength(1);
+    expect(latest()?.upgrade.state).toBe("idle");
     expect(latest()?.upgrade.journal ?? "").toContain("retried");
 
     // A person fixes the backup's database address; a restarted agent tries again straight away.
@@ -607,7 +624,9 @@ run("management agent on a real cluster", () => {
     const broken = push(version, base);
     expect(broken.digest).not.toBe(to.digest);
 
-    // So the failed upgrade fails in minutes rather than after the bundle's 20 minutes.
+    // So the failed upgrade fails in 90 seconds rather than after the bundle's 20 minutes. The
+    // return to the accepted release runs under it too: its images are already on the node, so it
+    // is ready well inside that.
     const timeout = (value: string) =>
       shAsync("helm", [
         "upgrade",
@@ -619,7 +638,7 @@ run("management agent on a real cluster", () => {
         "--set",
         `product.timeout=${value}`,
       ]);
-    await timeout("4m");
+    await timeout("90s");
 
     const state = () =>
       json<{ data: Record<string, string> }>(
@@ -657,6 +676,17 @@ run("management agent on a real cluster", () => {
       () => latest()?.upgrade.state === "recovery-required",
       5,
     );
+    // Flux attempted the failed chart once. A failure-count reset sent with the new digest made
+    // helm-controller upgrade to it a second time straight after the first attempt failed. A few
+    // more heartbeats first, so a second attempt has had the time to start before it is counted.
+    await moreHeartbeats(3);
+    const brokenAttempts = () =>
+      (
+        JSON.parse(
+          sh("helm", ["history", "openbot", "-n", PRODUCT, "-o", "json"]),
+        ) as { chart: string }[]
+      ).filter((revision) => revision.chart.includes("-broken"));
+    expect(brokenAttempts()).toHaveLength(1);
     // Left as it failed: Flux on the failed chart, the pins naming the missing image.
     expect(pinned()).toBe(broken.digest);
     expect(
@@ -674,6 +704,7 @@ run("management agent on a real cluster", () => {
     // The person recovers as the journal says. The failed release's image never ran, so the
     // database is the one the accepted release left and restoring the backup changes nothing here.
     // The desired version goes back to the accepted release, then journal.json is removed.
+    const recoveredAt = Date.now();
     await desire(to);
     kubectl(
       "-n",
@@ -704,8 +735,10 @@ run("management agent on a real cluster", () => {
     expect(restored.fromVersion).toBe(`chart ${broken.digest}`);
     expect(restored.toVersion).toBe(to.version);
     expect(restored.backupReference).toBe("none");
-    // Returning to the accepted release takes no second backup.
+    // Returning to the accepted release takes no second backup, and the failed chart was never
+    // tried again on the way.
     expect(backups()).toHaveLength(backupsBefore + 1);
+    expect(brokenAttempts()).toHaveLength(1);
 
     const release = json<{
       status: {
@@ -720,6 +753,37 @@ run("management agent on a real cluster", () => {
     const accepted = JSON.parse(state()["state.json"] ?? "{}");
     expect(accepted.accepted.version).toBe(to.version);
     expect(accepted.accepted.digest).toBe(to.digest);
+
+    // Every workload of the release was restarted after the recovery. A restore repoints the
+    // release at a new database server; the upgrade rewrites the connection Secrets, but a
+    // workload whose pod template does not change (Intelligence's) would keep the old server's
+    // address it read at start and go on writing there.
+    const workloads = json<{
+      items: {
+        kind: string;
+        metadata: { name: string };
+        spec: {
+          template: { metadata: { annotations?: Record<string, string> } };
+        };
+      }[];
+    }>(
+      "-n",
+      PRODUCT,
+      "get",
+      "deployment,statefulset",
+      "-l",
+      "app.kubernetes.io/instance=openbot",
+    ).items;
+    expect(workloads.length).toBeGreaterThan(1);
+    // One minute of slack for the cluster's clock against this machine's.
+    const restarted = (annotations?: Record<string, string>) =>
+      Date.parse(annotations?.["kubectl.kubernetes.io/restartedAt"] ?? "") >=
+      recoveredAt - 60_000;
+    expect(
+      workloads
+        .filter((w) => !restarted(w.spec.template.metadata.annotations))
+        .map((w) => `${w.kind}/${w.metadata.name}`),
+    ).toEqual([]);
 
     // The server runs the accepted release's image again, with its replicas back.
     const image = JSON.parse(to.manifest).artifacts.images.openbot.reference;
