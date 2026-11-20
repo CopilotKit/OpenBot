@@ -37,8 +37,9 @@ import { settleReactWork } from "./settle-react-work";
  * Harbor Legal is an organization of its own beside the deployment's first, `default`, and Ines
  * runs it. Each test answers the requests the page makes the way the server does.
  *
- * - Identity providers are the deployment's, so the server refuses Harbor's admin the list
- *   (`PERMISSION_DENIED`). The page says so plainly, with nothing to press that would be refused.
+ * - Harbor's identity providers are Harbor's own, which its admin registers, and they sign in its members. Only
+ *   `default`'s are the deployment's, refused to an admin there who doesn't run OpenBot (`PERMISSION_DENIED`). The
+ *   page says so plainly, with nothing to press that would be refused.
  * - What the deployment offers is answered in an organization the person is in, and not found at
  *   `default` when they are not in it. The app still learns it, from one of their own.
  * - A tab still drawn in Harbor after a switch elsewhere names Harbor on every runtime request, so
@@ -51,7 +52,7 @@ const INES = { id: "ines", email: "ines@harbor.test" };
 const MALLORY = { id: "mallory", email: "mallory@harbor.test" };
 const BOT = "agent_harbor_contracts";
 
-/** The deployment's refusal of an admin of any organization but `default` (organizations/request.ts). */
+/** The deployment's refusal, in `default`, of an admin there who doesn't run OpenBot. */
 const DEPLOYMENT_ADMINS_ONLY = {
   type: "https://open.bot/errors/permission-denied",
   title: "Permission denied.",
@@ -150,10 +151,31 @@ function show(Page: ComponentType, client = freshClient()) {
   );
 }
 
-test("Harbor's admin reads that identity providers are set up for all of OpenBot, with no error and nothing to press", async () => {
+test("Harbor's admin registers Harbor's own identity providers, which sign in Harbor's members", async () => {
   setCurrentOrganization(HARBOR.id);
   answer = (path) =>
     path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
+      ? Response.json({ identityProviders: [], nextCursor: null })
+      : problem(NOT_FOUND);
+  const view = identityProviders();
+  await view.findByText("No identity providers yet");
+  // Not everybody who signs in to OpenBot: this organization's members.
+  view.getByText(
+    "Configure your company’s SAML or OpenID Connect provider for this organization’s members. Email domains determine which provider people use to sign in.",
+  );
+  expect(
+    view.getAllByRole("button", { name: "Add a provider" }).length,
+  ).toBeGreaterThan(0);
+  expect(view.queryByText("Set up for all of OpenBot")).toBeNull();
+  expect(document.body.textContent).not.toMatch(
+    /apply to everyone who signs in here/,
+  );
+});
+
+test("an admin of `default` who doesn't run OpenBot reads that its identity providers are set up for all of OpenBot, with no error and nothing to press", async () => {
+  setCurrentOrganization("default");
+  answer = (path) =>
+    path === "/api/v2/organizations/default/identity-providers"
       ? problem(DEPLOYMENT_ADMINS_ONLY)
       : problem(NOT_FOUND);
   const view = identityProviders();

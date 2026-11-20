@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { identityProviderWords } from "@/lib/identity-providers/words";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { ControlsSection } from "./controls-section";
 
@@ -24,9 +25,17 @@ function deprovisioning(severalOrganizations: boolean): string {
     : "Deprovisioning ends sessions, blocks the address, retires connector credentials and stops their computers.";
 }
 
-/** Admin, Identity providers: whether SSO is the only way in, and directory provisioning. */
-export function SignInSection() {
+/**
+ * Admin, Identity providers: whether SSO is the only way in, and directory provisioning. `organizationOnly` outside
+ * `default`, where requiring SSO is this organization's rule about its members.
+ */
+export function SignInSection({
+  organizationOnly = false,
+}: {
+  organizationOnly?: boolean;
+}) {
   const severalOrganizations = useOrganizationChoices()?.canCreate === true;
+  const words = identityProviderWords(organizationOnly);
   return (
     <ControlsSection
       description="Addresses in INITIAL_ADMIN_EMAILS can always use social sign-in as an emergency way in. Each of those sign-ins shows in Activity."
@@ -41,9 +50,7 @@ export function SignInSection() {
             <ItemContent>
               <ItemTitle>Require SSO</ItemTitle>
               <ItemDescription>
-                {data.settings.ssoRequired
-                  ? "People can only sign in through a registered SAML or OpenID Connect provider."
-                  : "People can also sign in with Google, Microsoft or Okta."}
+                {data.settings.ssoRequired ? words.ssoOn : words.ssoOff}
               </ItemDescription>
             </ItemContent>
             <ItemActions>

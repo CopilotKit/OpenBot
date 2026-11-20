@@ -38,6 +38,9 @@ import {
   registerIdentityProviderMutationOptions,
 } from "@/lib/identity-providers/mutations";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
+import { identityProviderWords } from "@/lib/identity-providers/words";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
+import { ONLY_ORGANIZATION } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/identity-providers")({
@@ -56,6 +59,11 @@ const EMPTY = {
 };
 
 function IdentityProvidersPage() {
+  const organization = useCurrentOrganizationId();
+  // Outside `default`, an organization's providers are its own: they apply to its members.
+  const organizationOnly =
+    organization !== undefined && organization !== ONLY_ORGANIZATION;
+  const words = identityProviderWords(organizationOnly);
   const providers = useQuery(identityProviderListQueryOptions());
   const register = useMutation(
     registerIdentityProviderMutationOptions(queryClient),
@@ -131,7 +139,7 @@ function IdentityProvidersPage() {
           </Button>
         ) : undefined
       }
-      description="Configure your company’s SAML or OpenID Connect provider. Email domains determine which provider people use to sign in."
+      description={words.description}
       title="Identity providers"
     >
       <PageSection
@@ -193,7 +201,9 @@ function IdentityProvidersPage() {
         )}
       </PageSection>
       {/* Requiring SSO is the deployment's too: drawn once the server has answered for the providers. */}
-      {providers.isPending ? null : <SignInSection />}
+      {providers.isPending ? null : (
+        <SignInSection organizationOnly={organizationOnly} />
+      )}
 
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent>
@@ -246,8 +256,7 @@ function IdentityProvidersPage() {
                 />
                 {/* Said out loud because it is the field that decides who this applies to. */}
                 <p className="text-muted-foreground text-xs">
-                  Anybody with an address at this domain signs in here. Separate
-                  several with commas.
+                  {words.domainHelp}
                 </p>
               </div>
 
