@@ -338,6 +338,8 @@ run("management agent on a real cluster", () => {
     const [repository, tag] = (env.OPENBOT_AGENT_E2E_IMAGE ?? "").split(":");
     const values = {
       installId,
+      // The agent's own release, which runs upgrades with Flux beside it.
+      managedUpgrades: true,
       commandPublicKey: service.publicKey,
       cloud: "other",
       heartbeatIntervalSeconds: HEARTBEAT_SECONDS,

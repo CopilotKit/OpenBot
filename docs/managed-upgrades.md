@@ -59,6 +59,7 @@ install keeps its identity: there is never a second agent or a second install.
 
    ```sh
    helm install openbot-agent oci://ghcr.io/copilotkit/charts/openbot-agent -n openbot-system \
+     --set managedUpgrades=true \
      --set enrollment.serverUrl=http://<release>-server-internal.<namespace>.svc:9464 \
      --values my-agent-values.yaml
    ```
