@@ -959,11 +959,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       await routeCalendar(page);
       await open(page);
       await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      await page
-        .getByText("Self-Hosted on your own cloud or on-prem.", {
-          exact: false,
-        })
-        .click();
+      await page.getByText("Your own cloud or on-prem. Book a call.").click();
       await page
         .locator(
           '.booking-calendar[data-ready] iframe[title="Booking calendar"]',

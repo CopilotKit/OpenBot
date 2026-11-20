@@ -18,9 +18,8 @@ export const SELF_CONTAINED_SUMMARY =
 /** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
 export const CLOUD_SUMMARY = "We run it for you. Sign in and start right away.";
 
-/** OpenBot for Business: Self-Hosted on a company's own cloud or on-prem, which books a call. */
-export const BUSINESS_SUMMARY =
-  "Self-Hosted on your own cloud or on-prem. Book a call to see it.";
+/** OpenBot for Business: on a company's own cloud or on-prem, which books a call. */
+export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
 
 /** The clouds a company runs OpenBot for Business on, by their vendored marks (`shared/marks`). */
 const CLOUDS = [

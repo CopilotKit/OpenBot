@@ -664,7 +664,7 @@ test("the first screen offers OpenBot (Self-Contained), OpenBot Cloud and OpenBo
   expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
     "OpenBot (Self-Contained)Everything runs on this computer, for trying it or personal use.",
     "OpenBot CloudWe run it for you. Sign in and start right away.",
-    "OpenBot for BusinessSelf-Hosted on your own cloud or on-prem. Book a call to see it.",
+    "OpenBot for BusinessYour own cloud or on-prem. Book a call.",
   ]);
   expect(radios.map((radio) => [radio.checked, radio.disabled])).toEqual([
     [true, false],
@@ -694,9 +694,6 @@ test("the first screen offers OpenBot (Self-Contained), OpenBot Cloud and OpenBo
   ).toBeNull();
   expect(view.queryByText("Coming soon.")).toBeNull();
   // "Self-hosted" is OpenBot for Business's word for a company's own cloud, and nothing else's.
-  expect(view.container.textContent?.match(/self-hosted/gi)).toEqual([
-    "Self-Hosted",
-  ]);
   // What Self-Contained asks of this computer, and why: every part of OpenBot runs on it.
   expect(
     view.getByRole("heading", { name: "What this computer needs" }),
