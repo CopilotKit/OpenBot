@@ -1195,7 +1195,8 @@ paths:
         at one of the organization's identity providers, for an app that has
         no browser session to carry, such as the phone. The app opens it in
         the system browser, and the person signs in through the provider
-        there. The address carries a ticket, never the app's own sign-in. The
+        there. Sent with returnTo app, the browser goes back to the phone app
+        once the account is linked. The address carries a ticket, never the app's own sign-in. The
         ticket is the person's, for this organization and this provider,
         lasts two minutes, and opens once. Signing in through the provider
         then links the company account as a signed-in browser's sign-in does:
@@ -1223,6 +1224,10 @@ paths:
               okta:
                 value:
                   providerId: acme-okta
+              fromThePhone:
+                value:
+                  providerId: acme-okta
+                  returnTo: app
       responses:
         '201':
           description: The address to open in the system browser, shown this once.
@@ -1848,6 +1853,15 @@ components:
           minLength: 1
           maxLength: 256
           description: The identity provider to sign in through, one getCompanySignIn lists.
+        returnTo:
+          type: string
+          enum: [app]
+          description: >-
+            app when the phone app asks: once the company account is linked,
+            the browser is sent back to the app at
+            openbotmobile://company-sign-in/linked, which ends its sign-in
+            session. Without it the browser stays on a page saying the
+            account is linked. Nothing else is a place to go back to.
     CompanySignInTicket:
       type: object
       required: [url, expiresAt]

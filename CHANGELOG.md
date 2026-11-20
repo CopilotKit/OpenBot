@@ -92,7 +92,8 @@ unless you rely on task threads.
   count for that organization's Require SSO only while it has no identity provider of its own.
   An app links a company account through `createCompanySignInTicket`
   (`POST .../people/me/company-sign-in/tickets`): a two-minute address, opened once in the system
-  browser, that signs in through the chosen provider and links the account there.
+  browser, that signs in through the chosen provider and links the account there. With
+  `returnTo: app`, the browser goes back to the phone app once the account is linked.
 - **Members who haven't opened OpenBot yet.** On a hosted OpenBot, an organization's members list
   includes people who are members at OpenBot by CopilotKit and haven't opened OpenBot yet, marked
   `notOpenedYet`. An owner or an admin can remove them; they can't be given another role until they

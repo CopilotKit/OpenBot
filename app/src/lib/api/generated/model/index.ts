@@ -602,6 +602,7 @@ export * from "./createCheckInParams";
 export * from "./createCheckInRequest";
 export * from "./createCompanySignInTicketHeaders";
 export * from "./createCompanySignInTicketRequest";
+export * from "./createCompanySignInTicketRequestReturnTo";
 export * from "./createConversationHeaders";
 export * from "./createConversationJoinTokenHeaders";
 export * from "./createConversationRequest";
