@@ -144,10 +144,17 @@ export type MoreAppsRow = {
 /** Where the personal edition's one person turns connecting apps on: Settings, Setup. */
 const PERSONAL_SET_UP = "Set it up in Settings under Setup.";
 
+/**
+ * Who sets connecting apps up on a hosted OpenBot (`managePaths().hosted`), where an organization
+ * admin holds no environment: OpenBot by CopilotKit, which runs it.
+ */
+const HOSTED_SET_UP = "OpenBot by CopilotKit sets it up.";
+
 export function moreAppsRow(
   provider: PluginsProvider,
   configured: boolean,
   edition: Edition = "team",
+  hosted = false,
 ): MoreAppsRow {
   const { directoryLabel, envVar } = VOCABULARY[provider];
   if (!configured) {
@@ -156,7 +163,9 @@ export function moreAppsRow(
       description:
         edition === "personal"
           ? `Not set up yet. ${PERSONAL_SET_UP}`
-          : `Not set up. Set ${envVar} on this deployment to browse its apps.`,
+          : hosted
+            ? `Not set up yet. ${HOSTED_SET_UP}`
+            : `Not set up. Set ${envVar} on this deployment to browse its apps.`,
       linked: false,
     };
   }
@@ -200,6 +209,7 @@ export function brokeredReach(
   _provider: PluginsProvider,
   personal?: BrokeredApp,
   takesKey = false,
+  hosted = false,
 ): {
   description: string;
   badge: string;
@@ -209,7 +219,7 @@ export function brokeredReach(
     return {
       description: takesKey
         ? "Each person connects their own account with a key from the app, and a Bot sees only what that person can see."
-        : "This deployment holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.",
+        : `${hosted ? "OpenBot" : "This deployment"} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
       badge,
     };
   }
@@ -244,11 +254,14 @@ export function brokeredKeyMissing(
   provider: PluginsProvider,
   edition: Edition = "team",
   reader: "admin" | "person" = "admin",
+  hosted = false,
 ): string {
   if (edition === "personal")
     return `Connecting apps isn't set up yet, so you can't connect or disconnect this account here. ${PERSONAL_SET_UP}`;
   if (reader === "person")
     return "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.";
+  if (hosted)
+    return `Connecting apps isn't set up yet, so this account can't be connected or disconnected here. ${HOSTED_SET_UP} The app stays turned on, and its tool grants still stand.`;
   return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
 }
 

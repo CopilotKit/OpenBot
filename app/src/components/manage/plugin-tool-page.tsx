@@ -213,7 +213,9 @@ export function PluginToolPage({
                         {held
                           ? canCallBack(bot)
                             ? `Can call this tool. Every call is still checked against boundaries and logged in ${paths.auditLabel}.`
-                            : "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page, or set AGENT_TOOL_TOKEN."
+                            : paths.hosted
+                              ? "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page."
+                              : "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page, or set AGENT_TOOL_TOKEN."
                           : "Can't call this tool. The Bot never sees it."}
                       </ItemDescription>
                     </ItemContent>
