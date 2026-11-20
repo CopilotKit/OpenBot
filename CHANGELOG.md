@@ -10,9 +10,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **One migration, expand only.** `0138_management_enrollment` adds one table for connecting to
-  managed updates (below), which 1.1.2 never reads, so 1.1.2 upgrades with its servers rolling one
-  by one, with no downtime, and goes back to 1.1.2 the same way.
+- **Migrations run at start: eleven, and none removes anything.** The database moves from
+  `0137_ai_connections`, where 1.1.2 left it, to `0148_recorder_capture_passes`. A 1.1.2 server
+  works against the new schema, so 1.1.2 upgrades with its servers rolling one by one, with no
+  downtime, and goes back to 1.1.2 the same way.
+  - `0138_management_enrollment` keeps the connection to managed updates (below).
+  - `0139_organization_intelligence` binds each organization to its own Intelligence organization,
+    project and key.
+  - `0140_hosted_organization_authority` records who each person is at a hosted OpenBot's
+    organization authority.
+  - `0141_person_spaces_per_organization` keeps a person's own Learning space under one id in every
+    organization.
+  - `0142_deployment_audit_events` adds the installation's own audit trail.
+  - `0143_crossorg_data` gives what crossed organizations its organization: the phones registered
+    for push, a person's preferences and onboarding, and calls to the vendor accounts the deployment
+    shares.
+  - `0144_crossorg_data_keys` and `0147_member_search_indexes` build their indexes concurrently,
+    outside a transaction, so writes go on while they build.
+  - `0145_retired_tables_recopy` copies into their new homes the rows an older replica wrote to the
+    fourteen tables `0096_data_model_copy` folded, after that copy ran, and stops the start if any
+    of them cannot arrive. Nothing is dropped.
+  - `0146_pg_trgm` creates PostgreSQL's `pg_trgm` extension, for member search. It is a trusted
+    extension, so the role that owns OpenBot's database creates it without a superuser.
+  - `0148_recorder_capture_passes` keeps the passes that let a Recorder's socket through the
+    gateway relay.
 - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
   removed no earlier than its sunset, and only once nothing uses it.
   - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.
