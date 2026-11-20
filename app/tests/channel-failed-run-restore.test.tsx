@@ -12,6 +12,7 @@ import {
   type ChannelPage,
   channelKeys,
 } from "@/lib/channels/queries";
+import { quietRunPeriod, RUN_ENDED_UNHEARD } from "@/lib/copilot/quiet-run";
 import { TURN_CUT_OFF } from "@/lib/copilot/stopped-turn";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
@@ -66,7 +67,9 @@ type RunPlan =
   /** The back end answers the run request with a server error. */
   | { kind: "breaks" }
   /** The run request never reaches a back end at all. */
-  | { kind: "unreachable" };
+  | { kind: "unreachable" }
+  /** The run request is taken and nothing of it ever comes back: its server died under it. */
+  | { kind: "silent" };
 
 let originalFetch: typeof fetch;
 let plans: RunPlan[] = [];
@@ -135,6 +138,10 @@ function run(input: RunAgentInput): Response {
   if (plan.kind === "breaks")
     return NativeResponse.json({ error: "Bad gateway" }, { status: 502 });
   if (plan.kind === "unreachable") throw new TypeError("Failed to fetch");
+  if (plan.kind === "silent")
+    return new NativeResponse(new ReadableStream<Uint8Array>(), {
+      headers: { "content-type": "text/event-stream" },
+    });
   const started = {
     type: "RUN_STARTED",
     threadId: input.threadId,
@@ -358,6 +365,22 @@ beforeAll(() => {
         )
       )
         return NativeResponse.json({ sessions: [], nextCursor: null });
+      // Whether the conversation has a run going, as a quiet run asks: none, here.
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/join-tokens$/.test(
+          url.pathname,
+        )
+      )
+        return NativeResponse.json(
+          {
+            joinToken: "jt",
+            expiresAt: "2026-11-20T00:00:30.000Z",
+            threadId: channel.threadId,
+            runId: null,
+            realtime: { clientUrl: "ws://localhost/client", topic: "thread" },
+          },
+          { status: 201 },
+        );
       const thread = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (thread)
         return NativeResponse.json({
@@ -681,6 +704,36 @@ test("a turn whose backend stops answering after a browser step says so, and off
     expect(live.queryByTestId("transcript-stopped")).toBeNull(),
   );
 });
+
+/*
+ * Found on WebKit with the server killed right after the browser sent the run carrying a save's
+ * result: nothing of that run ever came, the watch was still resting from the run before, and the
+ * server's "no run going" read as the step still being taken. "Thinking" for good, with Stop up.
+ */
+test("a run started after a browser step that never answers ends the turn once the server has no run", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    plans = [{ kind: "calls", tool: STEP }, { kind: "silent" }];
+    const live = open();
+    await send(live, "Write the plan as six files");
+    const shown = await live.findByTestId(
+      "transcript-stopped",
+      {},
+      // The quiet period, and then the stored thread read back (up to five and a half seconds).
+      { timeout: 15_000 },
+    );
+    expect(within(shown).getByRole("alert").textContent).toBe(
+      RUN_ENDED_UNHEARD,
+    );
+    within(shown).getByRole("button", { name: "Carry on" });
+    await waitFor(() =>
+      expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+    );
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 20_000);
 
 test("a turn that fails in a run after its browser steps says so, as one that fails at once does", async () => {
   // The Bot works through browser steps, each answered here and sent back in a run of its own, and
