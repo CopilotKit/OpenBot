@@ -155,6 +155,37 @@ channels:
         $ref: "#/components/messages/ScreenKey"
       screenText:
         $ref: "#/components/messages/ScreenText"
+  windowsComputerScreen:
+    address: /api/v2/organizations/{organizationId}/windows-computer/screen
+    title: A Windows computer's screen
+    description: >-
+      Experimental. The screen of the caller's Windows computer, live and
+      view-only: the whole screen, not masked, so whatever is open on it is
+      shown, other programs and notifications included. Frames are whole
+      pictures, so a viewer shows the newest and needs nothing before it.
+      Nothing typed or clicked in the viewer reaches the computer; the person
+      takes it over and hands it back with the Windows computer operations
+      in the REST API, and uses its own mouse and keyboard. Only the person
+      the Windows computer is set up for may watch it. One viewer at a time:
+      a newer one replaces the older, which is told so.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      screenHello:
+        $ref: "#/components/messages/ScreenHello"
+      screenFrame:
+        $ref: "#/components/messages/ScreenFrame"
+      screenError:
+        $ref: "#/components/messages/ScreenError"
+      screenFrameReceived:
+        $ref: "#/components/messages/ScreenFrameReceived"
   botTerminal:
     address: /api/v2/organizations/{organizationId}/computers/{botId}/terminal
     title: A Bot's terminal
@@ -486,6 +517,32 @@ operations:
       - $ref: "#/channels/botScreen/messages/screenWheel"
       - $ref: "#/channels/botScreen/messages/screenKey"
       - $ref: "#/channels/botScreen/messages/screenText"
+  sendWindowsComputerScreen:
+    action: send
+    title: Show a Windows computer's screen
+    summary: The screen's pictures, and why something could not be shown.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersRead"
+    channel:
+      $ref: "#/channels/windowsComputerScreen"
+    messages:
+      - $ref: "#/channels/windowsComputerScreen/messages/screenHello"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenFrame"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenError"
+  receiveWindowsComputerScreenReceipts:
+    action: receive
+    title: Take a viewer's receipts
+    summary: Each picture's receipt. Nothing else is taken.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersRead"
+    channel:
+      $ref: "#/channels/windowsComputerScreen"
+    messages:
+      - $ref: "#/channels/windowsComputerScreen/messages/screenFrameReceived"
   sendBotTerminal:
     action: send
     title: Show a Bot's terminal
