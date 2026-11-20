@@ -3,11 +3,13 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { NoOrganizationPage } from "@/components/organizations/no-organization-page";
 import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
 import { idempotencyKey } from "@/lib/api/request";
 import { desktopShell } from "@/lib/desktop/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
+import { inNoOrganization } from "@/lib/organizations/queries";
 
 /**
  * ERRORS THE APP DID NOT HANDLE, TOLD TO OPENBOT.
@@ -121,8 +123,12 @@ export function installAppErrorReporting(): void {
 /** The router's own error screen, as before, reporting the error it shows once. */
 export function ReportedErrorComponent(props: ErrorComponentProps) {
   const { error } = props;
+  const none = inNoOrganization(error);
   useEffect(() => {
-    reportAppError("error_boundary", error);
-  }, [error]);
+    // Somebody in no organization is an answer, not a fault: there is nothing to tell OpenBot.
+    if (!none) reportAppError("error_boundary", error);
+  }, [error, none]);
+  // Wherever it was found, it is answered with its own page, never the router's error screen.
+  if (none) return <NoOrganizationPage />;
   return <ErrorComponent {...props} />;
 }
