@@ -2086,6 +2086,41 @@ test("a status call that runs out of time is asked again, and the backend that a
   );
 });
 
+/**
+ * Found on the Windows pass of the fix above: after the backend's CPU was held back for four and a
+ * half minutes, its first answer once it caught up was degraded, its checks still failing, and the
+ * wait ended at once with "OpenBot is running but not working properly". Coming back from a slow
+ * spell, degraded is waited on like a backend still starting.
+ */
+test("a degraded answer after a status call ran out of time is waited on, and the ready one after it starts OpenBot", async () => {
+  const answers: unknown[] = [
+    "timeout",
+    report({ readiness: "degraded", licence: "valid", checksPassed: false }),
+    ready,
+  ];
+  invokeHandler = async (command) => {
+    if (command !== "run_local_eval") throw new Error(`unexpected ${command}`);
+    const next = answers.shift() ?? ready;
+    if (next === "timeout") throw "timeout";
+    return next;
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0, 0],
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(statusCalls()).toHaveLength(3);
+  expect(document.body.textContent).not.toContain(
+    "OpenBot is running but not working properly",
+  );
+});
+
 test("a backend that never answers a status call says so, and Retry checks again", async () => {
   invokeHandler = async (command) => {
     if (command === "run_local_eval") throw "timeout";

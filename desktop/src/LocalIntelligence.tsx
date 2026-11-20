@@ -161,8 +161,13 @@ function isReady(report: LocalReport): boolean {
  * do not come back by themselves, and their rows say what to do. Not one the CLI did not say the
  * services of, as an older one does not: nothing says it is on its way.
  */
-function servicesComingUp(report: LocalReport): boolean {
-  if (
+/**
+ * Degraded with nothing that waiting will not change: no reason, no shortfall, no update on record,
+ * and a licence that is valid or not said. What a backend still coming up, or coming back from a
+ * slow spell, reports while its checks catch up.
+ */
+function degradedWhileStarting(report: LocalReport): boolean {
+  return !(
     report.outcome !== "completed" ||
     report.reason !== null ||
     report.readiness !== "degraded" ||
@@ -170,9 +175,11 @@ function servicesComingUp(report: LocalReport): boolean {
     report.shortfall ||
     (report.licence !== "valid" && report.licence !== "unknown") ||
     report.stack?.unfinishedUpdate
-  ) {
-    return false;
-  }
+  );
+}
+
+function servicesComingUp(report: LocalReport): boolean {
+  if (!degradedWhileStarting(report)) return false;
   return (report.stack?.observed?.services ?? []).some(
     (service) =>
       !service.ready &&
@@ -752,6 +759,11 @@ export function useLocalSequence({
       return call({ attempt: started.attempt, answer }, token);
     };
     let slow = false;
+    // Whether any status call in this wait ran out of time. A backend coming back from a slow spell
+    // says degraded while its checks catch up: found on the Windows pass of this fix, after the
+    // backend's CPU was held back for four and a half minutes, the first answer was degraded and
+    // the wait ended at once with "OpenBot is running but not working properly".
+    let wasSlow = false;
     for (let tries = 0; ; tries += 1) {
       const found = await status();
       if (!found) return null;
@@ -766,6 +778,7 @@ export function useLocalSequence({
           return null;
         }
         slow = true;
+        wasSlow = true;
         update({ detail: BACKEND_SLOW_SAID });
         if (!(await pause(pollDelays[tries], token))) return null;
         continue;
@@ -892,7 +905,8 @@ export function useLocalSequence({
       }
       const waking =
         woken && found.readiness === "degraded" && unfinished !== null;
-      const comingUp = servicesComingUp(found);
+      const comingUp =
+        servicesComingUp(found) || (wasSlow && degradedWhileStarting(found));
       if (
         !waking &&
         !comingUp &&
