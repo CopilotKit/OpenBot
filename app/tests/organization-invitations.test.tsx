@@ -646,17 +646,32 @@ describe("the words and the controls", () => {
     ).toBeNull();
   });
 
-  test("somebody who hasn't opened OpenBot yet is offered no role and no removal, whatever else the answer says", () => {
-    // Removable and with roles to give, as a server that got it wrong might say: still nothing.
-    const wrong = {
-      ...notOpened("cpk_ola", "Ola Berg", "ola@example.com", "member"),
-      removable: true,
-      assignableRoles: ["admin"],
-    };
-    for (const role of ["owner", "admin"])
-      expect(memberControl(wrong, { id: "dana", role })).toBeNull();
-    expect(givableRoles(wrong)).toEqual([]);
-    expect(givableRoles({ ...wrong, notOpenedYet: undefined })).toEqual([
+  test("somebody who hasn't opened OpenBot yet is offered no role, and removal only where the server says they can be removed", () => {
+    const waiting = notOpened(
+      "cpk_ola",
+      "Ola Berg",
+      "ola@example.com",
+      "member",
+    );
+    for (const role of ["owner", "admin"]) {
+      // As the server answers today: not removable, so no Remove.
+      expect(memberControl(waiting, { id: "dana", role })).toBeNull();
+      // Once it says they can be removed, Remove is offered like on any other row.
+      expect(
+        memberControl({ ...waiting, removable: true }, { id: "dana", role }),
+      ).toBe("remove");
+    }
+    // A plain member removes nobody, not-opened or not.
+    expect(
+      memberControl(
+        { ...waiting, removable: true },
+        { id: "dana", role: "member" },
+      ),
+    ).toBeNull();
+    // Roles to give, as a server that got it wrong might say: still no Role menu.
+    const withRoles = { ...waiting, assignableRoles: ["admin"] };
+    expect(givableRoles(withRoles)).toEqual([]);
+    expect(givableRoles({ ...withRoles, notOpenedYet: undefined })).toEqual([
       "admin",
     ]);
   });
@@ -1071,7 +1086,7 @@ describe("organization settings, for its owner", () => {
     });
   });
 
-  test("somebody who hasn't opened OpenBot yet is listed with their role, and their row offers nothing", async () => {
+  test("somebody who hasn't opened OpenBot yet is listed with their role, and their row offers nothing while the server says they can't be removed", async () => {
     server.hosted = true;
     server.members = [
       ...server.members,
@@ -1111,6 +1126,50 @@ describe("organization settings, for its owner", () => {
     ).toBeTruthy();
     expect(page.getByRole("button", { name: "Remove Lee Park" })).toBeTruthy();
     expect(sentWrites()).toEqual([]);
+  });
+
+  test("somebody who hasn't opened OpenBot yet is removed, after asking, once the server says they can be", async () => {
+    server.hosted = true;
+    server.members = [
+      ...server.members,
+      {
+        ...notOpened("cpk_cara", "Cara Invitee", "", "member"),
+        removable: true,
+      },
+    ];
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    const row = (
+      await page.findByText("Cara Invitee", {
+        selector: "[data-slot=item-title] span",
+      })
+    ).closest("[data-slot=item]") as HTMLElement;
+    expect(
+      within(row).getByText("Member · Hasn't opened OpenBot yet"),
+    ).toBeTruthy();
+    // Still no Role menu: only Remove.
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map(
+          (button) => button.getAttribute("aria-label") ?? button.textContent,
+        ),
+    ).toEqual(["Remove Cara Invitee"]);
+
+    await app.person.click(
+      within(row).getByRole("button", { name: "Remove Cara Invitee" }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Remove Cara Invitee from Acme?",
+    });
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(page.queryByText("Cara Invitee")).toBeNull());
+    expect(writes.at(-1)).toMatchObject({
+      request: `DELETE /api/v2/organizations/${ACME.id}/members/cpk_cara`,
+      keyed: true,
+    });
   });
 
   test("offers a Role menu where the server says a role can be given, and changing a member to an admin applies at once", async () => {
