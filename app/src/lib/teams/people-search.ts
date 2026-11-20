@@ -7,11 +7,13 @@
 type Named = { name: string | null; email: string };
 
 /**
- * The rest of a person's name, or else their address, after what was typed, when one of them starts
- * with it, ignoring case: what the box shows selected after the caret, so Tab or Enter takes it and
- * typing on replaces it. Empty when neither starts with it, or nothing is typed.
+ * A person's name, or else their address, when it starts with what was typed, ignoring case, and is
+ * longer: what the box completes to. It is written as the person's own (typing "ma" completes to
+ * "Marcus Bell"), as the WAI-ARIA combobox example writes the option's own text, with the part not
+ * typed selected after the caret, so Tab takes it and typing on replaces it. Empty when neither
+ * starts with it, or nothing is typed.
  */
-export function completionAfter(person: Named, typed: string): string {
+export function completionOf(person: Named, typed: string): string {
   if (typed.trim() === "") return "";
   const wanted = typed.toLowerCase();
   for (const whole of [person.name, person.email]) {
@@ -20,7 +22,7 @@ export function completionAfter(person: Named, typed: string): string {
       whole.length > typed.length &&
       whole.toLowerCase().startsWith(wanted)
     )
-      return whole.slice(typed.length);
+      return whole;
   }
   return "";
 }
