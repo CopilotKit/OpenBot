@@ -14,6 +14,7 @@ import {
   EnrollmentProblem,
   EnrollmentStart,
   EnrollmentStarted,
+  ENROLLMENT_REFUSAL_CODES,
   enrollmentTokenPath,
   Heartbeat,
   HeartbeatReply,
@@ -246,6 +247,24 @@ function opensslPems() {
 }
 
 describe("enrollment contract", () => {
+  test("a refusal names one of the codes a server reports, and a repeat start names the install", () => {
+    expect(ENROLLMENT_REFUSAL_CODES).toEqual([
+      "invalid-licence",
+      "not-team",
+      "blocked",
+      "not-entitled",
+      "already-enrolled",
+    ]);
+    const repeat = {
+      type: "about:blank",
+      title: "This server is already connected.",
+      status: 409,
+      code: "already-enrolled",
+      installId: "6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11",
+    };
+    expect(EnrollmentProblem.parse(repeat)).toEqual(repeat);
+  });
+
   const installId = "6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11";
   const token = "e1_Q2hhbmdlIG1lIGlzIG5vdCBhIHRva2VuIGJ1dCBpdCBpcyBsb25n";
   const pems = opensslPems();
@@ -264,6 +283,15 @@ describe("enrollment contract", () => {
       EnrollmentStart.safeParse({ ...start, serverUrl: "file:///etc/passwd" })
         .success,
     ).toBe(false);
+    // The licence approves a start in licence mode; approval is the default.
+    for (const mode of ["approval", "licence"] as const)
+      expect(EnrollmentStart.parse({ ...start, mode })).toEqual({
+        ...start,
+        mode,
+      });
+    expect(EnrollmentStart.safeParse({ ...start, mode: "auto" }).success).toBe(
+      false,
+    );
     const started = {
       requestId: "0b7f4f2e-3a49-4f61-9d2c-6c1d5a7e8f90",
       userCode: "BDFH-KLMN",
