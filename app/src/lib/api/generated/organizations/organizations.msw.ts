@@ -28,7 +28,7 @@ export const getListOrganizationsResponseMock = (): OrganizationPage => ({
     {
       id: "Wm4pZ7tKc1Xb9RnQ2sYd6hLe",
       slug: "dana",
-      name: "Dana's organization",
+      name: "Dana’s organization",
       role: "owner",
       active: true,
       personal: true,
