@@ -96,6 +96,7 @@ import {
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import {
+  asksToCarryOn,
   failedRunReason,
   followLastRun,
   laterRunFailure,
@@ -2194,11 +2195,14 @@ export function ChannelChat({
             stopped={runError ?? undefined}
             /*
              * A turn cut off part way (its backend stopped answering, its run ended unheard, its
-             * stream broke) is carried on with one press: a short message, as the person, so the Bot
-             * picks the work up with everything it did in front of it.
+             * stream broke, or the server says its reply came back incomplete or its model's
+             * connection dropped and asks for the Bot to carry on) is carried on with one press: a
+             * short message, as the person, so the Bot picks the work up with everything it did in
+             * front of it.
              */
             onCarryOn={
-              runError !== null && CUT_OFF.has(runError)
+              runError !== null &&
+              (CUT_OFF.has(runError) || asksToCarryOn(runError))
                 ? () => askFromComponent(CARRY_ON)
                 : undefined
             }

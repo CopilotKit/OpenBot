@@ -394,6 +394,49 @@ describe("self-serve enrollment", () => {
     }
   });
 
+  test("while running: Disconnect then Connect keeps the new install's token, and the agent's next start enrolls for it", async () => {
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    const { secret, first, cert: certA } = await enrolledSecret(a);
+    try {
+      const make = async (serverUrl: string, logs: string[] = []) =>
+        new Enrollment({ ...config(await tokenFile()), serverUrl }, secret, {
+          log: (message, fields) =>
+            logs.push(JSON.stringify({ message, ...fields })),
+          sleep: async () => {},
+          retryMs: 0,
+        });
+      // Nothing new (OpenBot answers 410 for A's token): the running agent changes nothing.
+      expect(await (await make(first.url)).newInstallWaiting(a)).toBe(false);
+      expect(secret.data?.["tls.crt"]).toBe(certA);
+      // The admin disconnected (A's certificate revoked) and connected again: OpenBot holds B's.
+      const second = internalWith(b);
+      try {
+        const logs: string[] = [];
+        expect(await (await make(second.url, logs)).newInstallWaiting(a)).toBe(
+          true,
+        );
+        // Kept before the agent starts again, since OpenBot hands it out once.
+        expect(secret.data?.["enrollment-token"]).toBe(
+          second.token.enrollmentToken,
+        );
+        expect(secret.data?.["install-id"]).toBe(b);
+        expect(logs.join("\n")).not.toContain(second.token.enrollmentToken);
+        // The next start enrolls for B with the kept token, and never asks OpenBot again.
+        const done = await (await make(second.url)).run();
+        expect(done.installId).toBe(b);
+        expect(commonName(done.credentials.cert)).toBe(b);
+        expect(second.internal.answers.map((answer) => answer.status)).toEqual([
+          200,
+        ]);
+      } finally {
+        second.internal.stop();
+      }
+    } finally {
+      first.internal.stop();
+    }
+  });
+
   test("a certificate for another key is refused and never written", async () => {
     const id = crypto.randomUUID();
     const { internal, url } = internalWith(id);
