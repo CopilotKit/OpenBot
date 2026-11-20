@@ -12217,6 +12217,8 @@ fn watch_connections<R: tauri::Runtime>(
         // Since when the server has not answered, and whether setup has been shown for it.
         let mut unanswered_since: Option<std::time::Instant> = None;
         let mut setup_shown = false;
+        // Whether the log has said, for this silence, that the server is up and left to finish.
+        let mut busy_said = false;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -12236,9 +12238,13 @@ fn watch_connections<R: tauri::Runtime>(
             }
             let polled = desktop_connection::poll(&client, server_port, &token);
             if polled.is_ok() {
+                if busy_said {
+                    log::info!("[watch] OpenBot is answering again");
+                }
                 poll_failed = false;
                 unanswered_since = None;
                 setup_shown = false;
+                busy_said = false;
             }
             match polled {
                 Ok(Some(connection)) => {
@@ -12263,6 +12269,18 @@ fn watch_connections<R: tauri::Runtime>(
                         Ok(Unanswered::Stopped) => setup_shown = true,
                         // Still up after all: ask again only after as long a silence again.
                         Ok(Unanswered::Running) => unanswered_since = None,
+                        // Up and not answering: left to finish, and asked about again after as
+                        // long a silence again. Said once a silence, not every ten seconds.
+                        Ok(Unanswered::Busy(said)) => {
+                            if !busy_said {
+                                log::info!(
+                                    "[watch] OpenBot hasn't answered for {}s, and {said}, so it is left to finish",
+                                    since.elapsed().as_secs()
+                                );
+                            }
+                            busy_said = true;
+                            unanswered_since = None;
+                        }
                         Ok(Unanswered::NotNow) => {}
                         Err(error) => log::warn!("[watch] could not show setup: {error}"),
                     }
@@ -12279,8 +12297,44 @@ enum Unanswered {
     Stopped,
     /// OpenBot is running after all.
     Running,
+    /// OpenBot is not answering, and its engine says it is up: busy, or on an engine that is slow.
+    /// The window stays where it is. What the engine said, for the log.
+    Busy(&'static str),
     /// Not the watcher's to decide now: setup is at work, the run is over, or it needs recovery.
     NotNow,
+}
+
+/// How long the watcher gives the engine to say whether the `server` container is up. An engine
+/// that takes longer is there and slow, which is no reason to start OpenBot again.
+const ENGINE_ASKED_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// What the window says when the watcher finds OpenBot's server stopped and staying stopped, so the
+/// person sees what happened in place of a Start that runs by itself.
+fn server_stopped_problem(container: &stack::ServerContainer) -> Option<Problem> {
+    match container {
+        stack::ServerContainer::Exited {
+            out_of_memory: true,
+            code,
+        } => Some(Problem::with(
+            "OpenBot stopped because it ran out of memory. Start it again to continue.",
+            format!(
+                "The engine stopped OpenBot's server container for using too much memory (exit code {}).",
+                code.map_or("unknown".to_owned(), |code| code.to_string())
+            ),
+        )),
+        stack::ServerContainer::Exited { code, .. } => Some(Problem::with(
+            "OpenBot stopped unexpectedly. Start it again to continue.",
+            format!(
+                "OpenBot's server container stopped with exit code {} and was not restarted.",
+                code.map_or("unknown".to_owned(), |code| code.to_string())
+            ),
+        )),
+        stack::ServerContainer::Missing => Some(Problem::with(
+            "OpenBot stopped unexpectedly. Start it again to continue.",
+            "OpenBot's server container is no longer there.",
+        )),
+        stack::ServerContainer::Running | stack::ServerContainer::Restarting => None,
+    }
 }
 
 /**
@@ -12299,6 +12353,15 @@ fn show_setup_when_stopped<R: tauri::Runtime>(
     generation: u64,
 ) -> Result<Unanswered, String> {
     let shell = app.state::<Shell>();
+    /*
+     * The engine's word on the server container, asked before setup's lock so a Start never waits
+     * on a slow engine. Not answering is not the same as not running. Found in a dogfooding report
+     * (Desktop 1.1.2, macOS): the engine stalled for minutes, the server's container stayed up, and
+     * this watcher, asking only the server, sent the window to setup, which started OpenBot again
+     * by itself. That Start recreated the server and ended the Bot turns that were running.
+     */
+    let engine_says = held_engine(&shell, root)
+        .map(|address| stack::server_container(&address, root, ENGINE_ASKED_WITHIN));
     // Busy means setup is at work (a Start, a Stop, an update): it decides what the window shows.
     let _startup = match shell.startup.try_lock() {
         Ok(guard) => guard,
@@ -12315,9 +12378,38 @@ fn show_setup_when_stopped<R: tauri::Runtime>(
     if owned_app(&shell, root, &ports).is_some() {
         return Ok(Unanswered::Running);
     }
+    let stopped = match &engine_says {
+        Some(Ok(stack::ServerContainer::Running)) => {
+            return Ok(Unanswered::Busy("its server container is up"))
+        }
+        Some(Ok(stack::ServerContainer::Restarting)) => {
+            return Ok(Unanswered::Busy(
+                "the engine is restarting its server container",
+            ))
+        }
+        Some(Err(stack::ServerContainerUnknown::Slow)) => {
+            return Ok(Unanswered::Busy(
+                "the engine is too slow to say whether its server container is up",
+            ))
+        }
+        Some(Ok(container)) => {
+            log::info!("[watch] the engine says OpenBot's server container stopped: {container:?}");
+            server_stopped_problem(container)
+        }
+        // The engine itself is gone (Docker quit, its machine stopped): setup, as before.
+        Some(Err(stack::ServerContainerUnknown::Unreachable(error))) => {
+            log::info!("[watch] the engine could not be asked about OpenBot's server: {error}");
+            None
+        }
+        None => None,
+    };
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there")?;
+    // Said on setup, which then waits for the person's Start (`last_failure`).
+    if let Some(problem) = stopped {
+        *shell.last_failure.lock().unwrap() = Some(problem);
+    }
     if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
         return Ok(Unanswered::Stopped);
     }
@@ -16186,6 +16278,211 @@ mod tests {
         shell
             .generation
             .store(4, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The bug (Desktop 1.1.2, macOS, a dogfooding report): the container engine stalled for
+    /// minutes while the person was away. The server's container stayed up, but nothing it was
+    /// asked was answered, and after ten seconds the watcher, asking only the server, sent the
+    /// window to setup. Setup started OpenBot again by itself, which recreates the server and ends
+    /// every Bot turn that was running. The window showed "Starting OpenBot" with no reason given.
+    ///
+    /// Now the watcher asks the engine too. A server container that is up stays as it is and the
+    /// window stays on OpenBot. One that stopped and stays stopped sends the window to setup with
+    /// what happened, which then waits for the person's Start.
+    #[test]
+    fn a_server_that_stops_answering_while_its_container_is_up_is_left_running() {
+        // It replaces PATH with a fake engine, which the tests running beside it would see.
+        if test_support::isolated_process(
+            "tests::a_server_that_stops_answering_while_its_container_is_up_is_left_running",
+        ) {
+            return;
+        }
+        use std::io::{BufRead, BufReader, Write};
+        let path = SerializedPath::set_with("docker", "server-up");
+        let root = temp_root("server-quiet-under-window");
+        std::fs::create_dir_all(&root).unwrap();
+        let engine = fake_engine(&root.join("engine-record"));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::fs::write(root.join(".env"), format!("SERVER_PORT={port}\n")).unwrap();
+        let setup = "http://tauri.localhost/setup";
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        remember_selected_root(&shell, &root);
+        *shell.setup_url.lock().unwrap() = Some(setup.into());
+        // Start held this run's containers on this engine.
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: root.clone(),
+            address: engine,
+        });
+        shell
+            .generation
+            .store(5, std::sync::atomic::Ordering::SeqCst);
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let home = "http://127.0.0.1:3010/";
+        window.navigate(home.parse().unwrap()).unwrap();
+
+        // The server answers the watcher's first few asks, then nothing more is answered.
+        let server = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                }
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnull").unwrap();
+            }
+        });
+        watch_connections(
+            app.handle().clone(),
+            root.clone(),
+            "synthetic-run-token".into(),
+            5,
+            port,
+        );
+        server.join().unwrap();
+
+        // Unanswered for well past the point where the watcher used to give up on it.
+        let quiet = std::time::Instant::now();
+        let asked_engine = || {
+            std::fs::read_to_string(root.join("engine-record"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.ends_with("\tcompose ps -a --format json server"))
+                .count()
+        };
+        while asked_engine() == 0 || quiet.elapsed() < SERVER_GONE_AFTER * 2 {
+            assert!(
+                quiet.elapsed() < SERVER_GONE_AFTER * 2 + std::time::Duration::from_secs(10),
+                "the watcher never asked the engine about the server"
+            );
+            assert_eq!(
+                window.url().unwrap().as_str(),
+                home,
+                "a server whose container is up is not a stopped OpenBot"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(window.url().unwrap().as_str(), home);
+        assert!(last_failure_now(app.handle()).is_none());
+
+        // Then the engine stops it for memory, and Docker does not start it again.
+        path.write_binary("docker", "server-oom");
+        let stopped = std::time::Instant::now();
+        while window.url().unwrap().as_str() != setup {
+            assert!(
+                stopped.elapsed() < SERVER_GONE_AFTER * 2 + std::time::Duration::from_secs(10),
+                "the window was still on {} after the server's container stopped",
+                window.url().unwrap()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // Setup says what happened, and waits for the person's Start rather than starting itself.
+        let problem = last_failure_now(app.handle()).expect("setup is told why OpenBot stopped");
+        assert_eq!(
+            problem.said,
+            "OpenBot stopped because it ran out of memory. Start it again to continue."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("exit code 137"),
+            "{problem:?}"
+        );
+        app.state::<Shell>()
+            .generation
+            .store(6, std::sync::atomic::Ordering::SeqCst);
+        drop(path);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Found on the real Mac pass of this fix, under Podman: with the engine's machine stalled (its
+    /// VM process stopped, as an overloaded or sleeping machine is), `compose ps` failed after about
+    /// 14 seconds with an ssh handshake reset rather than running out of time. Read as an engine
+    /// that is gone, it sent the window to setup, which started OpenBot again: the same
+    /// "Starting OpenBot · Starting the software OpenBot runs on" the report showed. A machine whose
+    /// own record still says it is running is a slow engine; one that says stopped is gone.
+    #[test]
+    fn a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone() {
+        // It replaces PATH with a fake engine, which the tests running beside it would see.
+        if test_support::isolated_process(
+            "tests::a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone",
+        ) {
+            return;
+        }
+        let root = temp_root("server-container-machine");
+        std::fs::create_dir_all(&root).unwrap();
+        let engine = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+
+        let stalled = SerializedPath::set_only_with("podman", "machine-stalled");
+        assert_eq!(
+            stack::server_container(&engine, &root, ENGINE_ASKED_WITHIN),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        drop(stalled);
+
+        let stopped = SerializedPath::set_only_with("podman", "machine-stopped");
+        assert!(matches!(
+            stack::server_container(&engine, &root, ENGINE_ASKED_WITHIN),
+            Err(stack::ServerContainerUnknown::Unreachable(said)) if said.contains("handshake failed")
+        ));
+        drop(stopped);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Found on the Windows pass of this fix: after the engine's machine had been stalled, a
+    /// `podman compose ps` the watcher made never returned, and the watcher stopped for good. It
+    /// never said OpenBot was answering again, and would not have noticed it stop. Every engine call
+    /// the watcher makes now gives up at its limit.
+    #[test]
+    fn an_engine_that_never_answers_does_not_hold_the_watcher() {
+        if test_support::isolated_process(
+            "tests::an_engine_that_never_answers_does_not_hold_the_watcher",
+        ) {
+            return;
+        }
+        let root = temp_root("engine-never-answers");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = SerializedPath::set_only_with("docker", "engine-hung");
+        path.write_binary("podman", "machine-hung");
+        let docker = engine::Address::new(engine::Engine::Docker, None);
+        let podman = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+        let limit = std::time::Duration::from_secs(1);
+        let asked = std::time::Instant::now();
+
+        // What `owned_app` asks: whether the server publishes the ports.
+        assert!(stack::server_publishes_within(&docker, &root, &[3001, 3010], limit).is_err());
+        // What the watcher asks: the server container's state.
+        assert_eq!(
+            stack::server_container(&docker, &root, limit),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        // And, when that fails, whether the machine still says it runs. Measured on a Mac with the
+        // machine's VM process stopped: `machine inspect` waits on it too. Not saying in time is
+        // the slow machine it looks like, and the window stays on OpenBot.
+        assert_eq!(
+            stack::server_container(&podman, &root, limit),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        assert!(
+            asked.elapsed() < std::time::Duration::from_secs(30),
+            "the engine calls took {:?}",
+            asked.elapsed()
+        );
+        drop(path);
         std::fs::remove_dir_all(root).unwrap();
     }
 
