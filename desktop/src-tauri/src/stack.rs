@@ -3849,7 +3849,10 @@ pub fn server_container(
         "{} compose ps -a --format json server",
         engine.engine.binary()
     );
-    let mut listing = compose_command(engine, root, &Secrets::new());
+    // As the project the installation recorded, never decided here: deciding asks the engine with
+    // no time limit (`service_log_by` gives the same reason).
+    let project = saved_project(root).unwrap_or_else(desktop_project);
+    let mut listing = compose_command_as(engine, root, &Secrets::new(), &project);
     listing.args(["ps", "-a", "--format", "json", "server"]);
     let output = match crate::quiet::output_within(&mut listing, limit) {
         Ok(output) => output,
