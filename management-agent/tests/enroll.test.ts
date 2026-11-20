@@ -166,13 +166,16 @@ describe("self-serve enrollment", () => {
     });
     expect(fleet.heartbeats.at(-1)?.installId).toBe(installId);
 
-    // A restart: the Secret is read, nobody is asked again.
+    // A restart: the Secret is read; OpenBot, asked once, has handed the token out already (410),
+    // and the enrollment service is not asked at all.
     const asked = openbot.answers.length;
     const issued = enroll.issued.length;
     const again = await enrollment(file, secret, logs).run();
     expect(again.credentials.cert).toBe(credentials.cert);
     expect(again.installId).toBe(installId);
-    expect(openbot.answers.length).toBe(asked);
+    expect(openbot.answers.slice(asked).map((answer) => answer.status)).toEqual(
+      [410],
+    );
     expect(enroll.issued.length).toBe(issued);
 
     // Nothing secret reached a log line.
@@ -285,6 +288,109 @@ describe("self-serve enrollment", () => {
       expect((await attempt(await tokenFile())).kind).toBe("ready");
     } finally {
       internal.stop();
+    }
+  });
+
+  /** A Secret holding install `id`'s certificate and key, enrolled through its own OpenBot. */
+  async function enrolledSecret(id: string) {
+    const first = internalWith(id);
+    const secret = new MemorySecret();
+    const done = await new Enrollment(
+      { ...config(await tokenFile()), serverUrl: first.url },
+      secret,
+      { log: () => {}, sleep: async () => {}, retryMs: 0 },
+    ).run();
+    expect(done.installId).toBe(id);
+    return { secret, first, cert: done.credentials.cert };
+  }
+
+  test("connecting again after an uninstall: a Secret left with the old install's certificate is replaced by the new install's", async () => {
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    const { secret, first, cert: certA } = await enrolledSecret(a);
+    // `helm uninstall` left the Secret; the admin connected again, so OpenBot holds B's token.
+    const second = internalWith(b);
+    try {
+      const logs: string[] = [];
+      const make = async () =>
+        new Enrollment(
+          { ...config(await tokenFile()), serverUrl: second.url },
+          secret,
+          {
+            log: (message, fields) =>
+              logs.push(JSON.stringify({ message, ...fields })),
+            sleep: async () => {},
+            retryMs: 0,
+          },
+        );
+      const done = await (await make()).run();
+      expect(done.installId).toBe(b);
+      expect(commonName(done.credentials.cert)).toBe(b);
+      expect(secret.data?.["tls.crt"]).toBe(done.credentials.cert);
+      expect(secret.data?.["tls.crt"]).not.toBe(certA);
+      expect(secret.data?.["tls.key"]).toBe(done.credentials.key);
+      expect(secret.data?.["enrollment-token"]).toBeUndefined();
+      expect(secret.data?.["install-id"]).toBeUndefined();
+      expect(
+        enroll.issued.filter((entry) => entry.installId === b),
+      ).toHaveLength(1);
+      // A restart after that: OpenBot answers 410, the agent stays B and enrolls nothing.
+      const again = await (await make()).run();
+      expect(again.installId).toBe(b);
+      expect(again.credentials.cert).toBe(done.credentials.cert);
+      expect(second.internal.answers.map((answer) => answer.status)).toEqual([
+        200, 410,
+      ]);
+      const logged = logs.join("\n");
+      expect(logged).not.toContain(second.token.enrollmentToken);
+      expect(logged).not.toContain("PRIVATE KEY");
+      expect(logged).not.toContain("BEGIN CERTIFICATE");
+    } finally {
+      first.internal.stop();
+      second.internal.stop();
+    }
+  });
+
+  test("a start with credentials keeps them when OpenBot answers 410, has no token, refuses or does not answer", async () => {
+    const a = crypto.randomUUID();
+    const { secret, first, cert: certA } = await enrolledSecret(a);
+    const empty = new FakeOpenBotInternal({ jwks, issuer: ISSUER });
+    const emptyUrl = `http://127.0.0.1:${empty.start()}`;
+    const gone = new FakeOpenBotInternal({ jwks, issuer: ISSUER });
+    const goneUrl = `http://127.0.0.1:${gone.start()}`;
+    gone.stop();
+    try {
+      const start = async (serverUrl: string, file?: string) =>
+        new Enrollment(
+          { ...config(file ?? (await tokenFile())), serverUrl },
+          secret,
+          { log: () => {}, sleep: async () => {}, retryMs: 0 },
+        ).run();
+      const writes = secret.writes;
+      const issued = enroll.issued.length;
+      // 410: A's token was collected already.
+      expect((await start(first.url)).installId).toBe(a);
+      expect(first.internal.answers.at(-1)?.status).toBe(410);
+      // 404: nothing to hand out.
+      expect((await start(emptyUrl)).installId).toBe(a);
+      expect(empty.answers.at(-1)?.status).toBe(404);
+      // 403: another service account is refused.
+      const refused = await start(
+        emptyUrl,
+        await tokenFile("system:serviceaccount:openbot:openbot-server"),
+      );
+      expect(refused.installId).toBe(a);
+      expect(empty.answers.at(-1)?.status).toBe(403);
+      // Not answering: OpenBot is down.
+      const down = await start(goneUrl);
+      expect(down.installId).toBe(a);
+      expect(down.credentials.cert).toBe(certA);
+      expect(secret.data?.["tls.crt"]).toBe(certA);
+      expect(secret.writes).toBe(writes);
+      expect(enroll.issued.length).toBe(issued);
+    } finally {
+      first.internal.stop();
+      empty.stop();
     }
   });
 
