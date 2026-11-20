@@ -100,9 +100,11 @@ unless you rely on task threads.
     port and no install id, the agent proves itself to the OpenBot server with a short-lived
     service account token, collects the one-time enrollment token the server holds once an admin
     connected the install, makes its own key, trades a certificate request for its certificate and
-    writes both to its own Secret, which it reuses after a restart. The key never leaves the
-    cluster, and nothing secret is logged. Until you choose how the database is backed up
-    (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
+    writes both to its own Secret, which it reuses after a restart. `helm uninstall` leaves that
+    Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at start and,
+    handed the new install's token, enrolls again and replaces the old certificate. The key never
+    leaves the cluster, and nothing secret is logged. Until you choose how the database is backed
+    up (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
     anything.
 - **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
   code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
