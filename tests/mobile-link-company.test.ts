@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { linkCompanyAccount, RETURN_ADDRESS } from "../mobile/src/link-company";
+import { homeView } from "../mobile/src/home-view";
+import {
+  linkCompanyAccount,
+  onCompanyLinked,
+  RETURN_ADDRESS,
+  reportCompanyLinked,
+} from "../mobile/src/link-company";
 
 // The phone links the person's company account through a single-use ticket: the system browser has no OpenBot session,
 // so signing in through the provider there with POST /api/auth/sign-in/sso linked nothing.
@@ -36,6 +42,35 @@ test("a tap asks for a ticket for that provider and opens it at once in the syst
     "https://openbot.example/ticket/1",
     "https://openbot.example/ticket/2",
   ]);
+});
+
+test("the browser's session ends at OpenBot's linked deep link, and that link opening the app reads the company sign-in again, which leaves the held state once met", async () => {
+  // The address OpenBot's linked page sends the browser to, exactly, with nothing appended.
+  expect(RETURN_ADDRESS).toBe("openbotmobile://company-sign-in/linked");
+  const opened: string[] = [];
+  await linkCompanyAccount("harbor-okta", {
+    ticket: async () => ({ url: "https://openbot.example/ticket/1" }),
+    open: async (_url, returnTo) => {
+      opened.push(returnTo);
+    },
+  });
+  expect(opened).toEqual(["openbotmobile://company-sign-in/linked"]);
+
+  // Opened outside the session (the linked page's Open OpenBot), its screen says so, and Home reads it again.
+  let readAgain = 0;
+  const stop = onCompanyLinked(() => {
+    readAgain++;
+  });
+  reportCompanyLinked();
+  stop();
+  reportCompanyLinked();
+  expect(readAgain).toBe(1);
+  expect(homeView(true, undefined, { required: true, met: false })).toBe(
+    "held-out",
+  );
+  expect(homeView(true, undefined, { required: true, met: true })).toBe(
+    "working",
+  );
 });
 
 test("a provider that no longer counts is answered as stale, so the providers are read again, and nothing opens", async () => {

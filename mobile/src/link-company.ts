@@ -8,8 +8,32 @@
  * Imports nothing that needs a phone: the two platform steps are given to it, so it can be tested.
  */
 
-/** What the browser comes back to, as a sign-in's return does. */
-export const RETURN_ADDRESS = "openbotmobile://";
+/**
+ * Where OpenBot's "linked" page sends the browser once the company account is linked: the system browser's session
+ * ends there and the app is back in front. Exactly this, with nothing appended. A sign-in that failed or was refused
+ * ends on OpenBot's own page instead, and the person closes it: either way the app reads the company sign-in again.
+ */
+export const RETURN_ADDRESS = "openbotmobile://company-sign-in/linked";
+
+/*
+ * The same address can open the app outside the browser's session too (the linked page's Open OpenBot button, after
+ * the session ended): its screen says so here, and Home reads the company sign-in again and leaves the held state.
+ */
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+/** The browser came back from linking the company account. */
+export function reportCompanyLinked(): void {
+  for (const listener of [...listeners]) listener();
+}
+
+/** Hear each time it happens. Returns how to stop hearing. */
+export function onCompanyLinked(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 export type LinkSteps = {
   /** Ask OpenBot for a ticket for this provider; resolves to the address to open. */

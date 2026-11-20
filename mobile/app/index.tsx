@@ -30,7 +30,7 @@ import {
 } from "../src/auth";
 import { HELD_OUT, linkButtons } from "../src/company-sign-in";
 import { homeView } from "../src/home-view";
-import { linkCompanyAccount } from "../src/link-company";
+import { linkCompanyAccount, onCompanyLinked } from "../src/link-company";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { onOrganizationGone } from "../src/organization-gone";
 import { onRenewalNeedsClick } from "../src/renewal";
@@ -101,6 +101,19 @@ export default function Home() {
    */
   const [renewal, setRenewal] = useState<string | null>(null);
   useEffect(() => onRenewalNeedsClick(setRenewal), []);
+  /*
+   * Back from linking the company account by OpenBot's deep link, outside the browser's session: the company sign-in
+   * is read again, so a hold that lifted leaves the held state.
+   */
+  const { refresh: refreshCompanySignIn } = companySignIn;
+  useEffect(
+    () =>
+      onCompanyLinked(() => {
+        void refreshOrganizations();
+        void refreshCompanySignIn();
+      }),
+    [refreshOrganizations, refreshCompanySignIn],
+  );
   useEffect(
     () =>
       onOrganizationGone(() => {
