@@ -488,6 +488,23 @@ test.each(["a reload", "coming back from another conversation"])(
   },
 );
 
+/*
+ * Found with the server killed and started again in the middle of a long turn: the backend ends that
+ * run "Runner connection dropped", and the conversation opened again said only that.
+ */
+test("a conversation whose server dropped its run says the turn was cut off after a reload, with Carry on", async () => {
+  plans = [{ kind: "fails", message: "Runner connection dropped" }];
+  const live = open();
+  await send(live, "Write the plan as six files");
+  await live.findByTestId("transcript-stopped");
+  live.unmount();
+  const back = open();
+  await settled(back, "Write the plan as six files");
+  const restored = await back.findByTestId("transcript-stopped");
+  expect(within(restored).getByRole("alert").textContent).toBe(TURN_CUT_OFF);
+  within(restored).getByRole("button", { name: "Carry on" });
+});
+
 test("a failure that a later run answered is not shown after a reload", async () => {
   plans = [
     { kind: "fails", message: REJECTED },

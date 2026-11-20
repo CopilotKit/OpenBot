@@ -30,6 +30,11 @@ describe("a later run of a turn that fails", () => {
     expect(TURN_CUT_OFF).not.toContain("wasn't sent");
   });
 
+  test("a run its server dropped, read back from the stored history, says the turn was cut off", () => {
+    // The exact words the backend's event store ends such a run with.
+    expect(stoppedReason("Runner connection dropped")).toBe(TURN_CUT_OFF);
+  });
+
   test("passes on any other failure in its own words", () => {
     expect(laterRunFailure(new Error("The model refused the request."))).toBe(
       "The model refused the request.",

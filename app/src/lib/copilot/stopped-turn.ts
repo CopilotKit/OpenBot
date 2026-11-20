@@ -34,12 +34,20 @@ export function stoppedReason(reported: unknown): string {
   if (refused) return refused;
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
+  if (RUNNER_DROPPED.test(said.trim())) return TURN_CUT_OFF;
   return said.trim() || "The Bot stopped without saying why.";
 }
 
 /** Said under a turn cut off part way because OpenBot's backend stopped answering. Its work stands. */
 export const TURN_CUT_OFF =
   "The Bot stopped before it finished because OpenBot's backend stopped answering. What it saved is shown here.";
+
+/**
+ * How the backend's event store ends a run whose server went away under it, word for word. Found
+ * with the server killed and started again in the middle of a long turn: the conversation, opened
+ * again, said only "Runner connection dropped", in words nobody using OpenBot can act on.
+ */
+const RUNNER_DROPPED = /^Runner connection dropped\.?$/i;
 
 /** Whether a run ended because something here aborted it: Stop, Send now, or a step held for a person. */
 function aborted(reported: unknown): boolean {
