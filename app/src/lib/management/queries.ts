@@ -8,18 +8,26 @@ import { ClientError } from "@/lib/client";
  *
  * `not-connected`, `waiting-for-approval` (a code waits for somebody signed in to CopilotKit to
  * approve it), `waiting-for-agent` (approved; the admin runs the Helm command and the agent picks
- * up its one-time token from OpenBot itself) and `connected` (the agent reports in). The server's
- * list is open: a state this app doesn't know reads as not connected, so a newer server never
- * breaks the screen.
+ * up its one-time token from OpenBot itself), `connected` (the agent reports in), `connecting`
+ * (OpenBot connects by itself, by its licence, and the agent its chart installed is collecting its
+ * token) and `opted-out` (an admin turned managed updates off, so OpenBot doesn't connect by
+ * itself). The server's list is open: a state this app doesn't know reads as not connected, so a
+ * newer server never breaks the screen.
  */
 export type ManagementState =
   | "not-connected"
   | "waiting-for-approval"
   | "waiting-for-agent"
-  | "connected";
+  | "connected"
+  | "connecting"
+  | "opted-out";
 
 export type ManagementStatus = {
   state: ManagementState;
+  /** OpenBot's chart installs the agent: it connects by itself, and Disconnect needs no Helm. */
+  agentInstalledByChart?: boolean;
+  /** Once connected: `on`, or `not-set-up` when upgrading needs a one-time setup first. */
+  upgrades?: string;
   userCode?: string;
   verificationUri?: string;
   verificationUriComplete?: string;
@@ -37,7 +45,10 @@ export type ManagementStatus = {
   agentVersion?: string;
   /** What went wrong with the last attempt, in the server's own sentence. */
   lastError?: string;
-  /** not-entitled: the licence doesn't include managed updates, so Connect isn't offered. */
+  /**
+   * not-entitled: the licence doesn't include managed updates, so Connect isn't offered.
+   * invalid-licence and unreachable: lastError says what to do.
+   */
   lastErrorCode?: string;
 };
 
@@ -58,6 +69,8 @@ const KNOWN: readonly ManagementState[] = [
   "waiting-for-approval",
   "waiting-for-agent",
   "connected",
+  "connecting",
+  "opted-out",
 ];
 
 export const managementKeys = {
@@ -67,7 +80,11 @@ export const managementKeys = {
 
 /** Whether the state means OpenBot is waiting on somebody, so the screen keeps asking. */
 export function managementWaiting(state: ManagementState | undefined) {
-  return state === "waiting-for-approval" || state === "waiting-for-agent";
+  return (
+    state === "waiting-for-approval" ||
+    state === "waiting-for-agent" ||
+    state === "connecting"
+  );
 }
 
 export function managementQueryOptions() {

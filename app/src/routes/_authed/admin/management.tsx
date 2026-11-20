@@ -4,11 +4,13 @@ import {
   IconCircleCheck,
   IconClock,
   IconCloudCog,
+  IconCloudOff,
   IconFingerprint,
   IconHeartbeat,
   IconInfoCircle,
   IconLock,
   IconTag,
+  IconTool,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -42,6 +44,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   helmLines,
   MANAGEMENT_SENTENCE,
+  UPGRADES_SETUP_URL,
   windowText,
 } from "@/lib/management/format";
 import {
@@ -75,6 +78,20 @@ const APPROVE_STEP =
   "Open the approval page and sign in to CopilotKit as an admin of the organization your licence belongs to. Check the code matches, then approve it. This page moves on by itself.";
 const INSTALL_STEP =
   "Run this command where kubectl reaches OpenBot's cluster. It holds nothing secret. This page updates itself when the agent reports in.";
+/** Where OpenBot's chart installs the agent, OpenBot connects by itself, by its licence. */
+const BY_ITSELF =
+  "OpenBot connects by itself with its licence, and tries again every hour.";
+const CONNECTING =
+  "OpenBot is connecting with its licence, and the management agent installed with it is reporting in for the first time. This page updates itself.";
+const TURNED_OFF =
+  "An admin turned managed updates off, so OpenBot doesn't connect by itself.";
+const UPGRADES_NOT_SET_UP =
+  "The agent reports in, and upgrades need a one-time setup in OpenBot's cluster first.";
+
+const APPROVE_FLOW =
+  "To connect, you approve a code with the CopilotKit account your licence is under, then install the management agent with one Helm command.";
+
+type Confirming = "disconnect" | "stop-approved" | "stop-connecting";
 
 /**
  * Admin, Managed updates: connecting a self-hosted OpenBot to CopilotKit's management service, in
@@ -95,10 +112,8 @@ export function ManagementPage() {
   const start = useMutation(startManagementMutationOptions(queryClient));
   const cancel = useMutation(cancelManagementMutationOptions(queryClient));
   const failure = start.error ?? cancel.error;
-  // Disconnect, and Stop once the code is approved, both cost a new code and a new approval.
-  const [confirming, setConfirming] = useState<
-    "disconnect" | "stop-approved" | null
-  >(null);
+  // Disconnect, and Stop once the code is approved or while connecting by itself, all ask first.
+  const [confirming, setConfirming] = useState<Confirming | null>(null);
 
   if (management.isPending) return <PageShell title={TITLE}>{null}</PageShell>;
   if (management.error)
@@ -118,6 +133,12 @@ export function ManagementPage() {
     );
 
   const status = management.data.status;
+  const byChart = status.agentInstalledByChart === true;
+  const connectButton = (
+    <Button disabled={start.isPending} onClick={() => start.mutate()}>
+      {start.isPending ? "Connecting…" : "Connect"}
+    </Button>
+  );
   const notEntitled =
     status.state === "not-connected" && status.lastErrorCode === "not-entitled";
   const cancelButton = (
@@ -140,7 +161,32 @@ export function ManagementPage() {
   return (
     <PageShell description={DESCRIPTION} title={TITLE}>
       {notice ? <Notice>{notice}</Notice> : null}
-      {status.state === "waiting-for-approval" ? (
+      {status.state === "connecting" ? (
+        <PageEmpty
+          action={
+            <Button
+              disabled={cancel.isPending}
+              onClick={() => setConfirming("stop-connecting")}
+              size="sm"
+              variant="outline"
+            >
+              {cancel.isPending ? "Stopping…" : "Stop"}
+            </Button>
+          }
+          icon={IconCloudCog}
+          title="Connecting"
+        >
+          {CONSENT} {WINDOW_AGREED} {CONNECTING}
+        </PageEmpty>
+      ) : status.state === "opted-out" ? (
+        <PageEmpty
+          action={connectButton}
+          icon={IconCloudOff}
+          title="Turned off"
+        >
+          {TURNED_OFF} {CONSENT} {WINDOW_AGREED} Connect turns them back on.
+        </PageEmpty>
+      ) : status.state === "waiting-for-approval" ? (
         <WaitingForApproval cancelButton={cancelButton} status={status} />
       ) : status.state === "waiting-for-agent" ? (
         <WaitingForAgent cancelButton={cancelButton} status={status} />
@@ -156,6 +202,7 @@ export function ManagementPage() {
               {cancel.isPending ? "Disconnecting…" : "Disconnect"}
             </Button>
           }
+          byChart={byChart}
           status={status}
         />
       ) : notEntitled ? (
@@ -174,20 +221,16 @@ export function ManagementPage() {
         </PageEmpty>
       ) : (
         <PageEmpty
-          action={
-            <Button disabled={start.isPending} onClick={() => start.mutate()}>
-              {start.isPending ? "Connecting…" : "Connect"}
-            </Button>
-          }
+          action={connectButton}
           icon={IconCloudCog}
           title="Not connected"
         >
-          {CONSENT} {WINDOW_AGREED} To connect, you approve a code with the
-          CopilotKit account your licence is under, then install the management
-          agent with one Helm command.
+          {CONSENT} {WINDOW_AGREED}{" "}
+          {byChart ? <>{BY_ITSELF} Connect tries now.</> : APPROVE_FLOW}
         </PageEmpty>
       )}
       <ConfirmDialog
+        byChart={byChart}
         confirming={confirming}
         onClose={() => setConfirming(null)}
         onConfirm={() => {
@@ -199,17 +242,30 @@ export function ManagementPage() {
   );
 }
 
-/** Disconnect, or Stop once the code is approved: both cost a new code and a new approval. */
+/**
+ * Disconnect, Stop once the code is approved, or Stop while OpenBot connects by itself. With the
+ * agent OpenBot's chart installs, Connect turns managed updates back on with no code to approve.
+ */
 function ConfirmDialog({
+  byChart,
   confirming,
   onClose,
   onConfirm,
 }: {
-  confirming: "disconnect" | "stop-approved" | null;
+  byChart: boolean;
+  confirming: Confirming | null;
   onClose: () => void;
   onConfirm: () => void;
 }) {
   const disconnect = confirming === "disconnect";
+  const again = byChart
+    ? "Connect turns them back on."
+    : "Connecting again needs a new code and a new approval.";
+  const description = disconnect
+    ? `OpenBot stops getting managed updates, and you upgrade it yourself. ${again}`
+    : confirming === "stop-connecting"
+      ? "OpenBot stops connecting and doesn't try again by itself. Connect turns managed updates back on."
+      : "The code is already approved. Stopping forgets it, and connecting again needs a new code and a new approval.";
   return (
     <Dialog
       onOpenChange={(open) => (open ? undefined : onClose())}
@@ -222,11 +278,7 @@ function ConfirmDialog({
           </DialogTitle>
         </DialogHeader>
         <DialogBody className="mt-4">
-          <DialogDescription>
-            {disconnect
-              ? "OpenBot stops getting managed updates, and you upgrade it yourself. Connecting again needs a new code and a new approval."
-              : "The code is already approved. Stopping forgets it, and connecting again needs a new code and a new approval."}
-          </DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogBody>
         <DialogFooter className="mt-4">
           <Button onClick={onClose} size="sm" type="button" variant="outline">
@@ -386,9 +438,11 @@ function WaitingForAgent({
 }
 
 function Connected({
+  byChart,
   status,
   disconnectButton,
 }: {
+  byChart: boolean;
   status: ManagementStatus;
   disconnectButton: React.ReactNode;
 }) {
@@ -418,6 +472,15 @@ function Connected({
       value: status.agentVersion ?? "Not reported",
       icon: IconTag,
     },
+    ...(status.upgrades === "on" || status.upgrades === "not-set-up"
+      ? [
+          {
+            title: "Upgrades",
+            value: status.upgrades === "on" ? "On" : "Not set up",
+            icon: IconTool,
+          },
+        ]
+      : []),
     {
       title: "Maintenance window",
       value: status.window ? windowText(status.window) : "Not reported yet",
@@ -458,19 +521,44 @@ function Connected({
           </div>
         ))}
       </PageRows>
-      <PageSection
-        description="Uninstall the management agent with Helm, then choose Disconnect. OpenBot keeps running as it is, and you upgrade it yourself from then on."
-        title="Disconnect"
-      >
-        <PageCard className="mt-4" footer={disconnectButton}>
-          <div className="flex items-start gap-3">
-            <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words rounded bg-muted px-3 py-2 font-mono text-xs leading-relaxed">
-              {UNINSTALL}
-            </pre>
-            <CopyButton label="Copy the uninstall command" text={UNINSTALL} />
-          </div>
-        </PageCard>
-      </PageSection>
+      {status.upgrades === "not-set-up" ? (
+        <p className="mt-3 flex items-start gap-1.5 text-muted-foreground text-sm">
+          <IconInfoCircle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {UPGRADES_NOT_SET_UP}{" "}
+            <a
+              className="underline underline-offset-2"
+              href={UPGRADES_SETUP_URL}
+              rel="noreferrer"
+              target="_blank"
+            >
+              How to set up upgrades
+            </a>
+          </span>
+        </p>
+      ) : null}
+      {byChart ? (
+        // The chart's agent: nothing to uninstall. Disconnect stops managed updates on its own.
+        <PageSection
+          action={disconnectButton}
+          description="Managed updates stop, and you upgrade OpenBot yourself. The agent stays in the cluster without them. Connect turns them back on."
+          title="Disconnect"
+        />
+      ) : (
+        <PageSection
+          description="Uninstall the management agent with Helm, then choose Disconnect. OpenBot keeps running as it is, and you upgrade it yourself from then on."
+          title="Disconnect"
+        >
+          <PageCard className="mt-4" footer={disconnectButton}>
+            <div className="flex items-start gap-3">
+              <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words rounded bg-muted px-3 py-2 font-mono text-xs leading-relaxed">
+                {UNINSTALL}
+              </pre>
+              <CopyButton label="Copy the uninstall command" text={UNINSTALL} />
+            </div>
+          </PageCard>
+        </PageSection>
+      )}
     </>
   );
 }
