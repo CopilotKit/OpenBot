@@ -49,7 +49,7 @@ export function replyNotice(
   if (!isBotReply(activity)) return null;
   if (notify !== "all") return null;
   const agentId = activity.lastMessageAgentId;
-  const bot = bots?.find((each) => each.agentId === agentId);
+  const bot = bots?.find((each) => each.botId === agentId);
   const name = bot?.name ?? agents?.find((each) => each.id === agentId)?.name;
   // A server older than `firstLine` sends only the preview, every line run into one.
   const body =

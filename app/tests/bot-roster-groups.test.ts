@@ -4,6 +4,9 @@ import { groupRoster } from "@/lib/agents/roster";
 
 function bot(overrides: Partial<AgentProfile> & { id: string }): AgentProfile {
   return {
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
     name: overrides.id,
     title: "Title",
     roleDescription: "Role",

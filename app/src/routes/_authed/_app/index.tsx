@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   Link,
+  redirect,
   useNavigate,
   useRouter,
   useSearch,
@@ -14,16 +15,25 @@ import {
   type ComposerDraft,
   toAgentOptions,
 } from "@/components/channels/composer";
+import { heldFileOf } from "@/components/channels/composer/attachments";
+import { ModelPicker } from "@/components/channels/composer/model-picker";
 import { WorkingNow } from "@/components/channels/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/toast";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
-import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
+import {
+  type AgentProfile,
+  agentListQueryOptions,
+  agentQueryOptions,
+  isSharedWithYou,
+} from "@/lib/agents/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { whyNoModelChoice } from "@/lib/bot-agents/queries";
 import {
   beginPendingStart,
   endPendingStart,
@@ -38,13 +48,44 @@ import {
   routeMessage,
 } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useAttachmentLimits,
+} from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
+import {
+  type ConversationModel,
+  modelCatalogueQueryOptions,
+} from "@/lib/models/queries";
+import { useDraftModel } from "@/lib/models/run-model";
 import { newId } from "@/lib/new-id";
+import { takeInvitationLink } from "@/lib/organizations/invitation-link";
 import { useAnyBotSkillCommands } from "@/lib/plugins/skill-commands";
+import { queryClient } from "@/query-client";
 
 /** How many Bots the home page shows before pointing to the rest. Two rows of two. */
 const EXPLORE_SHOWN = 4;
+
+/**
+ * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
+ * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. The
+ * action opens that Bot's Agents page, where what it runs on is shown.
+ */
+function sayModelNotUsed(
+  bot: AgentProfile,
+  why: "own-agent" | "hands-to-agents",
+  openAgents: () => void,
+) {
+  toast.add({
+    id: "home-model-not-used",
+    type: "info",
+    title:
+      why === "hands-to-agents"
+        ? `${bot.name} hands work to agents, so it uses the model set on its Agents page.`
+        : `${bot.name} runs on its own agent, so it doesn't use the model you picked.`,
+    actionProps: { children: "Open Agents", onClick: openAgents },
+  });
+}
 
 export const Route = createFileRoute("/_authed/_app/")({
   /*
@@ -55,6 +96,16 @@ export const Route = createFileRoute("/_authed/_app/")({
   // The edition decides whether there is an Explore section at all, so it is read before the page draws and the
   // composer never moves when it arrives.
   beforeLoad: async ({ context }) => {
+    /*
+     * Somebody who opened an invitation's link before signing in lands here once they have, and
+     * is handed on to the invitation they came for (lib/organizations/invitation-link.ts).
+     */
+    const invitationId = takeInvitationLink();
+    if (invitationId)
+      throw redirect({
+        to: "/invitations/$invitationId",
+        params: { invitationId },
+      });
     await editionOf(context.queryClient);
   },
   component: RouteComponent,
@@ -70,6 +121,7 @@ function RouteComponent() {
   } = useQuery(agentListQueryOptions());
   const explore = agents?.filter(isSharedWithYou);
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const attachmentLimits = useAttachmentLimits();
   /*
    * The personal edition has nobody to share a Bot with. Its Explore lists the Bots included with
    * OpenBot, and when there are none it shows nothing: "Nobody has shared a Bot with you yet" was
@@ -119,6 +171,42 @@ function RouteComponent() {
     agents,
     agents?.find((agent) => agent.visibility === "public"),
   );
+  /*
+   * The model and thinking effort to run on, picked before OpenBot has picked the Bot. It starts on
+   * the catalogue's default and is saved with the conversation the Bot answers in, before the first
+   * message runs, as `/channel/new` saves it.
+   */
+  const models = useQuery(modelCatalogueQueryOptions());
+  const draftModel = useDraftModel(models.data);
+
+  /**
+   * The pick to save with a new conversation with `agentId`, and the line to say once it has started
+   * when that Bot takes no pick (`whyNoModelChoice`). Nothing to save, and nothing to say, while the
+   * pick is the default. A Bot that could not be read takes the pick, as the hook reads it.
+   */
+  const pickFor = async (
+    agentId: string,
+  ): Promise<{ pick: ConversationModel | null; notUsed?: () => void }> => {
+    const pick = draftModel.requested;
+    if (!pick) return { pick: null };
+    const bot =
+      agents?.find((agent) => agent.id === agentId) ??
+      (await queryClient
+        .fetchQuery(agentQueryOptions(agentId))
+        .catch(() => undefined));
+    const why = bot ? await whyNoModelChoice(queryClient, bot) : null;
+    if (!bot || !why) return { pick };
+    return {
+      pick: null,
+      notUsed: () =>
+        sayModelNotUsed(bot, why, () => {
+          void router.navigate({
+            params: { agentId: bot.id },
+            to: "/bots/$agentId/agents",
+          });
+        }),
+    };
+  };
 
   /**
    * Pick the Bot and make the channel behind the placeholder `pendingId`.
@@ -139,7 +227,15 @@ function RouteComponent() {
       if (draft.agentId) {
         // Recorded and started as one sequence, shared with `/channel/new`: the person already
         // decided, and the trail has to say so wherever they decided it.
-        await startChosen(draft.agentId, draft.text, undefined, pendingId);
+        const { pick, notUsed } = await pickFor(draft.agentId);
+        await startChosen(
+          draft.agentId,
+          draft.text,
+          pick,
+          pendingId,
+          draft.attachments,
+        );
+        notUsed?.();
         return;
       }
       let agentId: string | undefined;
@@ -155,8 +251,12 @@ function RouteComponent() {
         agentId = fallback?.id;
       }
       if (!agentId)
-        throw new Error("There's no Bot to send this to. Reload the page.");
-      await start(agentId, draft.text, undefined, pendingId);
+        throw new Error(
+          "There's no Bot to send this to. Try again in a moment.",
+        );
+      const { pick, notUsed } = await pickFor(agentId);
+      await start(agentId, draft.text, pick, pendingId, draft.attachments);
+      notUsed?.();
     } catch (caught) {
       stashFailedStart({
         text: draft.text,
@@ -164,6 +264,9 @@ function RouteComponent() {
           caught instanceof Error
             ? caught.message
             : "Couldn't start the conversation. Try again.",
+        files: draft.attachments
+          .map(heldFileOf)
+          .filter((file) => file !== undefined),
       });
       if (router.state.location.pathname === pendingStartPath(pendingId))
         await navigate({ replace: true, to: "/" });
@@ -198,11 +301,13 @@ function RouteComponent() {
           }}
         >
           <StarterSuggestions
-            agentId={fallback?.id}
+            bot={fallback}
             disabled={pending}
             onSelect={async (message) => {
               if (!fallback) return;
-              await startChosen(fallback.id, message);
+              const { pick, notUsed } = await pickFor(fallback.id);
+              await startChosen(fallback.id, message, pick);
+              notUsed?.();
             }}
           />
           <Composer
@@ -213,8 +318,22 @@ function RouteComponent() {
             // The box reads its words once, when it mounts; a start that fails while this page is
             // open is a new box with them in it.
             key={restores}
+            // Files wait in the box until the message has a conversation to go to; see `start`.
+            holdsFilesUntilSent
+            attachmentLimits={attachmentLimits}
+            modelPicker={
+              <ModelPicker
+                catalogue={models.data}
+                disabled={!fallback}
+                onChange={draftModel.choose}
+                value={draftModel.value}
+              />
+            }
             {...(restored
-              ? { initialValue: restored.text }
+              ? {
+                  initialValue: restored.text,
+                  ...(restored.files ? { initialFiles: restored.files } : {}),
+                }
               : asked
                 ? { initialValue: asked, autoFocus: true }
                 : {})}
@@ -261,8 +380,8 @@ function RouteComponent() {
               className="mt-2 w-full max-w-2xl text-sm text-destructive"
               role="alert"
             >
-              Couldn't load your Bots, so there's no one to send this to. Reload
-              the page.
+              Couldn't load your Bots, so there's no one to send this to. Try
+              again in a moment.
             </p>
           ) : null}
         </div>

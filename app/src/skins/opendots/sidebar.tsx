@@ -22,6 +22,7 @@ import {
 } from "@/components/app-sidebar/app-sidebar";
 import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
 import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { BrandName } from "@/components/edition/brand-name";
 import { NavigationTarget } from "@/components/edition/team-features-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { Button } from "@/components/ui/button";
@@ -35,9 +36,9 @@ import { Input } from "@/components/ui/input";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { groupRoster } from "@/lib/agents/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
-import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { untitledLine } from "@/lib/channels/label";
+import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
+import { conversationTitle, untitledLine } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import {
   type ChannelSummary,
@@ -46,6 +47,10 @@ import {
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { memoriesQueryOptions } from "@/lib/memory";
+import {
+  COMMAND_MENU_KEYS,
+  openCommandMenu,
+} from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -126,7 +131,9 @@ function Wordmark({ onNavigate }: { onNavigate: () => void }) {
       onClick={onNavigate}
       to="/"
     >
-      <span className="truncate">{productName}</span>
+      <span className="truncate">
+        <BrandName>{productName}</BrandName>
+      </span>
     </Link>
   );
 }
@@ -193,7 +200,7 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots. Reload the page.
+          Couldn't load your Bots. Try again in a moment.
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -361,9 +368,9 @@ function ThreadRow({
       <DeleteConversationDialog
         channelId={channel.id}
         leave={open ? () => navigate({ to: "/" }) : undefined}
-        name={channel.name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={conversationTitle(channel)}
       />
     </>
   );
@@ -439,7 +446,7 @@ function RecentChats({
       >
         {channels.isPending ? null : channels.error ? (
           <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations. Reload the page.
+            Couldn't load your conversations. Try again in a moment.
           </p>
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -481,6 +488,13 @@ function Count({ value }: { value: number | undefined }) {
   );
 }
 
+/** The shared list's entries OpenDots draws its own way: Bots as its list, Routines and Memory as its screens. */
+const OPENDOTS_OWN: ReadonlySet<string> = new Set([
+  "bots",
+  "routines",
+  "memory",
+]);
+
 function WorkspaceLinks({
   place,
   onNavigate,
@@ -508,7 +522,10 @@ function WorkspaceLinks({
    * is no rail. Bots is the row under the list of Bots above.
    */
   const drawerOnly = "md:hidden";
-  const navigation = useNavigationItems().filter((item) => item.id !== "bots");
+  // Routines and Memories are OpenDots' own rows above, so the shared list's are left out.
+  const navigation = useNavigationItems().filter(
+    (item) => !OPENDOTS_OWN.has(item.id),
+  );
   return (
     <nav
       aria-label="Workspace"
@@ -538,6 +555,21 @@ function WorkspaceLinks({
           <Count value={memories.data?.length} />
         </Link>
       ) : null}
+      {/* The rail has its own at desktop width. */}
+      <button
+        aria-keyshortcuts={COMMAND_MENU_KEYS}
+        className={cn(row("search"), drawerOnly)}
+        onClick={() => {
+          onNavigate();
+          openCommandMenu();
+        }}
+        type="button"
+      >
+        <IconSearch />
+        <span className="min-w-0 flex-1 truncate text-left">
+          Command palette
+        </span>
+      </button>
       {/* OpenBot's own destinations, from the one list every frame reads. */}
       {navigation.map((item) => (
         <NavigationTarget
@@ -548,6 +580,7 @@ function WorkspaceLinks({
           onClick={onNavigate}
         >
           <item.icon />
+          {/* The label alone, no trademark sign: "OpenBot for Business" only just fits this rail. */}
           <span className="min-w-0 flex-1 truncate">{item.label}</span>
         </NavigationTarget>
       ))}
@@ -621,7 +654,16 @@ export function OpenDotsSidebar({
 }) {
   const channels = useInfiniteQuery(channelListQueryOptions());
   return (
-    <div className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto">
+    /*
+     * In OpenBot Desktop on macOS the window's buttons sit over the sidebar's top-left corner
+     * (`data-desktop-titlebar`, macOS only), so it then starts 32px lower, below them, level with
+     * the rail beside it, and that strip moves the window, as the rail's does (`data-desktop-drag`).
+     * The drawer a narrow window opens is this sidebar too.
+     */
+    <div
+      data-desktop-drag=""
+      className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]"
+    >
       <Wordmark onNavigate={onNavigate} />
       <Link
         {...newChat}

@@ -122,7 +122,8 @@ jobs:
           scripts/publish-signed-windows.test.ts scripts/signing-workflows.test.ts
           scripts/sign-windows-update.test.ts
           ../scripts/release-latest.test.ts ../scripts/release-download-names.test.ts
-          ../scripts/downloads-sync.test.ts scripts/release-cli-bundle.test.ts
+          ../scripts/downloads-sync.test.ts ../scripts/release-older-installers.test.ts
+          scripts/release-cli-bundle.test.ts
           scripts/verify-mac-arch.test.ts scripts/staple-with-retry.test.ts
         working-directory: desktop
       - name: Importing the Developer ID intermediate twice succeeds
@@ -301,7 +302,7 @@ jobs:
       # must come from the tree and the lockfiles, not from anything an earlier run left behind.
       # The standard library for the architecture this job builds, which on the Apple silicon
       # runner is a second target for the Intel build.
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.platform.rust-target }}
@@ -489,6 +490,8 @@ jobs:
       RELEASE_TAG: ${{ inputs.release-tag || github.ref_name }}
       # Empty on a pushed tag, which therefore never moves Latest.
       MAKE_LATEST: ${{ inputs.make-latest }}
+      # Tags kept from Latest for a staged rollout (scripts/release-make-latest.sh).
+      HOLD_LATEST: ${{ vars.RELEASE_HOLD_LATEST }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

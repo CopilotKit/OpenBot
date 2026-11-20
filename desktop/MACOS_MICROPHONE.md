@@ -35,7 +35,9 @@ providers:
 2. Start dictation and approve OpenBot's macOS microphone prompt. Speak a short
    phrase, stop, and verify the transcription. If permission was already denied,
    enable OpenBot under System Settings → Privacy & Security → Microphone and
-   reopen the app.
+   reopen the app. Without a transcription provider, dictation uses the same
+   on-device recognizer as narration (step 5), so macOS asks for speech
+   recognition before the microphone (`app/src/lib/dictation/live.ts`).
 3. Start and stop an OpenAI voice conversation, then a Grok voice conversation.
    Verify each receives spoken input and releases the microphone after stopping.
 4. Repeat with microphone permission denied and verify that the UI reports the
@@ -58,8 +60,8 @@ providers:
    states, the microphone's format, its loudness every 5 s (speech near the
    microphone is louder than about -35 dBFS), each phrase's first words and its
    final character count, any recognizer error code, and the end. A phrase that
-   reached the page and went on to the Recorder shows as a `POST` to
-   `/api/browser/narration` answered 200 in the web view's network log:
+   reached the page and went on to the Recorder shows as a `POST` to a path
+   ending `/browser/narration` answered 200 in the web view's network log:
    `/usr/bin/log show --predicate 'process == "com.apple.WebKit.Networking" AND eventMessage CONTAINS "transaction summary"'`.
 
 Record the tested app build, macOS version, prompt result, and results for all

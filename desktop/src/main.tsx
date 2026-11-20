@@ -1,11 +1,23 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { startHeartbeat } from "./heartbeat";
+import {
+  isSecurityFloorPage,
+  SecurityFloorGate,
+  SecurityFloorNotice,
+} from "./SecurityFloor";
 import { isShuttingDownPage, ShuttingDownWindow } from "./ShuttingDown";
 import { isStatusPage, StatusWindow } from "./StatusWindow";
 import "@fontsource-variable/inter";
 import "./styles.css";
 import { UpdateOffer } from "./UpdateOffer";
+
+/** The setup page's heartbeat while its setup, start and update screens show (`heartbeat.ts`). */
+function SetupHeartbeat() {
+  useEffect(() => startHeartbeat(), []);
+  return null;
+}
 
 const root = document.getElementById("root");
 if (!root)
@@ -23,11 +35,14 @@ createRoot(root).render(
       <ShuttingDownWindow />
     ) : isStatusPage(window.location.hash) ? (
       <StatusWindow />
+    ) : isSecurityFloorPage(window.location.hash) ? (
+      <SecurityFloorNotice />
     ) : (
-      <>
+      <SecurityFloorGate>
+        <SetupHeartbeat />
         <UpdateOffer />
         <App />
-      </>
+      </SecurityFloorGate>
     )}
   </StrictMode>,
 );

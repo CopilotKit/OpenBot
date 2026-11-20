@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import type { Attachment } from "@copilotkit/react-core/v2";
 
 /**
  * What a transcript shows while a brand-new channel is still joining.
@@ -42,12 +43,21 @@ export type FirstMessage = {
    * there and gives the Bot its instructions, for the first message as for every later one.
    */
   text: string;
+  /**
+   * The files the first message carries, already stored in the new channel (`uploadHeldFiles`),
+   * so it is sent with them as any later message would be.
+   */
+  attachments: readonly Attachment[];
 };
 
 const firstMessages = new Map<string, FirstMessage>();
 
-export function stashFirstMessage(channelId: string, text: string): void {
-  firstMessages.set(channelId, { text });
+export function stashFirstMessage(
+  channelId: string,
+  text: string,
+  attachments: readonly Attachment[] = [],
+): void {
+  firstMessages.set(channelId, { text, attachments });
 }
 
 /** Read the pending first message and forget it. Null for a channel opened any other way. */

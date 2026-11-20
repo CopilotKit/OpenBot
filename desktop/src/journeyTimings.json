@@ -1,0 +1,88 @@
+{
+  "setup": {
+    "ends": [
+      ["engine-check", 0],
+      ["release-download", 3],
+      ["docker-check", 6],
+      ["resource-check", 6],
+      ["engine-storage-check", 13],
+      ["chart-download", 15],
+      ["chart-render", 15],
+      ["cluster-discovery", 16],
+      ["cluster-create", 27],
+      ["kubeconfig", 29],
+      ["ownership-check", 31],
+      ["runtime-inspect", 32],
+      ["runtime-identity-write", 32],
+      ["image-download", 46],
+      ["system-image-download", 71],
+      ["system-image-tag", 72],
+      ["secrets-apply", 82],
+      ["dependencies-install", 85],
+      ["dependencies-wait", 112],
+      ["hook-apply", 128],
+      ["migration-apply", 128],
+      ["migration-wait", 143],
+      ["hook-wait", 149],
+      ["bootstrap-result", 149],
+      ["services-start", 183],
+      ["service-status", 187]
+    ],
+    "download": [32, 80]
+  },
+  "update": {
+    "ends": [
+      ["release-download", 1],
+      ["chart-download", 3],
+      ["chart-render", 3],
+      ["cluster-discovery", 4],
+      ["kubeconfig", 4],
+      ["runtime-identity-write", 6],
+      ["image-download", 7],
+      ["system-image-download", 10],
+      ["system-image-tag", 11],
+      ["secrets-apply", 15],
+      ["update-schedules", 15],
+      ["update-suspend", 16],
+      ["update-quiesce", 17],
+      ["update-quiesce-wait", 48],
+      ["update-jobs", 49],
+      ["update-agent-stop", 49],
+      ["update-agent-wait", 50],
+      ["dependencies-install", 57],
+      ["dependencies-wait", 67],
+      ["hook-apply", 68],
+      ["migration-apply", 69],
+      ["migration-wait", 75],
+      ["hook-wait", 80],
+      ["bootstrap-result", 81],
+      ["services-start", 115],
+      ["service-status", 117]
+    ],
+    "download": [6, 11]
+  },
+  "start": {
+    "ends": [
+      ["env", 1],
+      ["ports", 2],
+      ["deployment", 3],
+      ["images", 4],
+      ["installation", 4],
+      ["services", 13],
+      ["carry-over", 14],
+      ["migrate", 18],
+      ["answering", 25]
+    ]
+  },
+  "release": {
+    "begins": [
+      ["stopping", "Stopping OpenBot.", 2],
+      ["backing_up", "Backing up your data.", 8],
+      ["downloading", "Downloading the update.", 21],
+      ["installing", "Installing the update.", 71],
+      ["starting", "Starting OpenBot.", 73]
+    ],
+    "length": 108,
+    "download": [21, 71]
+  }
+}

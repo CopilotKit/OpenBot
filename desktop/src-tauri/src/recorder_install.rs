@@ -331,6 +331,59 @@ pub fn stable_host_path(
     current_exe: &Path,
     appimage: Option<&Path>,
 ) -> Result<PathBuf, Problem> {
+    stable_host_path_with(os, current_exe, appimage, translocation_mount)
+}
+
+/// The mount a translocated app runs from, as `statfs` reports it for `path`: where it is mounted
+/// (`f_mntonname`) and what is mounted there (`f_mntfromname`). Gatekeeper's App Translocation
+/// mounts the app's real folder read-only, with `nullfs`, at a random folder under
+/// `AppTranslocation`, and the app runs from `<that folder>/d/<App>.app`. Apple's own Security code
+/// finds a translocated app's original path the same way (`libsecurity_translocate`).
+#[cfg(target_os = "macos")]
+fn translocation_mount(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut mount = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and `mount` is a valid place for one `statfs` to be written.
+    if unsafe { libc::statfs(path.as_ptr(), mount.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: `statfs` returned 0, so it filled `mount`.
+    let mount = unsafe { mount.assume_init() };
+    let text = |chars: &[libc::c_char]| {
+        // SAFETY: both fields are fixed arrays the kernel NUL-terminates.
+        let said = unsafe { std::ffi::CStr::from_ptr(chars.as_ptr()) };
+        PathBuf::from(std::ffi::OsStr::from_bytes(said.to_bytes()))
+    };
+    Some((text(&mount.f_mntonname), text(&mount.f_mntfromname)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn translocation_mount(_path: &Path) -> Option<(PathBuf, PathBuf)> {
+    None
+}
+
+/// Where a translocated Mac app really is: `/Applications/OpenBot.app/Contents/MacOS/openbot-desktop`
+/// for `<mount>/d/OpenBot.app/Contents/MacOS/openbot-desktop`, when `<mount>` holds the app copied
+/// from `/Applications/OpenBot.app`. None when the path is not inside that mount.
+fn untranslocated(current_exe: &Path, mounted_on: &Path, mounted_from: &Path) -> Option<PathBuf> {
+    let inside = current_exe.strip_prefix(mounted_on).ok()?;
+    let mut parts = inside.components();
+    // `d`, then the bundle itself, which the mount's source names.
+    let (Some(_), Some(bundle)) = (parts.next(), parts.next()) else {
+        return None;
+    };
+    (mounted_from.file_name() == Some(bundle.as_os_str()) && mounted_from.is_absolute())
+        .then(|| mounted_from.join(parts.as_path()))
+}
+
+/// `stable_host_path`, with how a path's mount is read given, so a test can name a translocation.
+fn stable_host_path_with(
+    os: Os,
+    current_exe: &Path,
+    appimage: Option<&Path>,
+    mount_of: impl Fn(&Path) -> Option<(PathBuf, PathBuf)>,
+) -> Result<PathBuf, Problem> {
     let exe = current_exe.to_string_lossy();
     match os {
         Os::Linux => {
@@ -344,9 +397,18 @@ pub fn stable_host_path(
                 Ok(current_exe.to_path_buf())
             }
         }
-        Os::Mac if exe.contains("/AppTranslocation/") => Err(Problem::plain(
-            "Move OpenBot Desktop to Applications to let the Recorder find it.",
-        )),
+        /*
+         * Gatekeeper runs a downloaded app that still carries its quarantine from a random,
+         * read-only copy until Finder moves it: one copied into Applications with `cp` or `ditto`
+         * runs translocated too. That copy is gone once the app quits, so the manifest names the
+         * app where it really is. Only a copy still on the disk image it came on asks to be moved.
+         */
+        Os::Mac if exe.contains("/AppTranslocation/") => mount_of(current_exe)
+            .and_then(|(on, from)| untranslocated(current_exe, &on, &from))
+            .filter(|original| !original.starts_with("/Volumes"))
+            .ok_or_else(|| {
+                Problem::plain("Move OpenBot Desktop to Applications to let the Recorder find it.")
+            }),
         Os::Mac | Os::Windows => Ok(current_exe.to_path_buf()),
     }
 }
@@ -928,6 +990,65 @@ mod tests {
         );
     }
 
+    /// OpenBot Desktop 1.0.0, copied into Applications with `ditto` from its disk image and opened:
+    /// Gatekeeper ran it translocated, and the Recorder said "Move OpenBot Desktop to Applications"
+    /// to an app that was in Applications. The mount is as `mount` showed it that night. Unix paths,
+    /// which Windows does not count as absolute.
+    #[cfg(unix)]
+    #[test]
+    fn a_translocated_app_that_is_in_applications_names_its_real_path() {
+        let mount = "/private/var/folders/15/cbm93f0549jbtwnp4vn063r00000gn/T/AppTranslocation/E35D6529-FB65-4C85-BC60-D38960D7E85A";
+        let exe = PathBuf::from(format!(
+            "{mount}/d/OpenBot.app/Contents/MacOS/openbot-desktop"
+        ));
+        let mounted = |from: &'static str| {
+            move |path: &Path| {
+                assert!(path.starts_with(mount), "{}", path.display());
+                Some((PathBuf::from(mount), PathBuf::from(from)))
+            }
+        };
+        assert_eq!(
+            stable_host_path_with(Os::Mac, &exe, None, mounted("/Applications/OpenBot.app"))
+                .unwrap(),
+            PathBuf::from("/Applications/OpenBot.app/Contents/MacOS/openbot-desktop")
+        );
+        assert_eq!(
+            stable_host_path_with(
+                Os::Mac,
+                &exe,
+                None,
+                mounted("/Users/a/Applications/OpenBot.app")
+            )
+            .unwrap(),
+            PathBuf::from("/Users/a/Applications/OpenBot.app/Contents/MacOS/openbot-desktop")
+        );
+        // Still on the disk image, which goes when it is ejected: that one is asked to move.
+        assert_eq!(
+            stable_host_path_with(Os::Mac, &exe, None, mounted("/Volumes/OpenBot/OpenBot.app"))
+                .unwrap_err()
+                .said,
+            "Move OpenBot Desktop to Applications to let the Recorder find it."
+        );
+        // A mount that is not this app's, or none at all, is never guessed through.
+        for unrelated in [
+            stable_host_path_with(Os::Mac, &exe, None, mounted("/Applications/Other.app")),
+            stable_host_path_with(Os::Mac, &exe, None, |_| None),
+        ] {
+            assert!(unrelated.is_err());
+        }
+    }
+
+    /// The real `statfs` on this Mac: a folder that is not translocated is its own mount's, never
+    /// an AppTranslocation one.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn statfs_reads_the_mount_a_path_is_on() {
+        let (on, from) = translocation_mount(Path::new("/Applications")).unwrap();
+        assert!(on.is_absolute(), "{}", on.display());
+        assert!(!from.as_os_str().is_empty());
+        assert!(!on.to_string_lossy().contains("AppTranslocation"));
+    }
+
     #[test]
     fn installed_paths_are_returned_unchanged() {
         let mac = Path::new("/Applications/OpenBot.app/Contents/MacOS/openbot-desktop");
@@ -1069,6 +1190,53 @@ mod tests {
             "{stop}"
         );
         assert!(stop.contains("Stop-Process -Force"));
+    }
+
+    /// On a fresh Windows box the Installing page sat still on "Output folder" for about two
+    /// minutes: the stop started PowerShell and WMI to look for processes under a cli-bundle
+    /// folder that wasn't there yet. The stop runs only when this installation has that folder,
+    /// which it does on an update or a reinstall over a bundled CLI, and a running node.exe keeps.
+    #[test]
+    fn the_bundled_cli_stop_runs_only_when_there_is_a_cli_bundle_to_stop() {
+        let stop = nsis_macro("OPENBOT_STOP_BUNDLED_CLI");
+        let lines: Vec<&str> = stop
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with(';'))
+            .collect();
+        assert_eq!(
+            lines.first().copied(),
+            Some(r#"${If} ${FileExists} "$INSTDIR\cli-bundle\*.*""#),
+            "{stop}"
+        );
+        assert_eq!(lines.last().copied(), Some("${EndIf}"), "{stop}");
+        assert_eq!(stop.matches("${If}").count(), 1, "{stop}");
+        assert_eq!(stop.matches("${EndIf}").count(), 1, "{stop}");
+        // Everything it runs is inside the check: the folder handed on, PowerShell, its result.
+        for step in ["System::Call", "nsExec::Exec", "Pop $0"] {
+            let at = lines
+                .iter()
+                .position(|line| line.starts_with(step))
+                .unwrap_or_else(|| panic!("no {step} in {stop}"));
+            assert!(
+                at > 0 && at < lines.len() - 1,
+                "{step} runs outside the check"
+            );
+        }
+        // It is the same folder the script stops processes under.
+        assert!(stop.contains(r#"("OPENBOT_CLI_BUNDLE", "$INSTDIR\cli-bundle")"#));
+        // And it still runs on every install and uninstall, after the old version is removed.
+        let preinstall = nsis_macro("NSIS_HOOK_PREINSTALL");
+        assert!(
+            preinstall.find("OPENBOT_UNINSTALL_OLD_VERSION").unwrap()
+                < preinstall
+                    .find("!insertmacro OPENBOT_STOP_BUNDLED_CLI")
+                    .unwrap(),
+            "{preinstall}"
+        );
+        assert!(
+            nsis_macro("NSIS_HOOK_PREUNINSTALL").contains("!insertmacro OPENBOT_STOP_BUNDLED_CLI")
+        );
     }
 
     /// The text of `hooks.nsh`'s macro `name`, between `!macro name` and `!macroend`.
@@ -1371,16 +1539,23 @@ mod tests {
 
     #[test]
     fn keeping_the_host_installed_returns_at_once() {
-        let started = std::time::Instant::now();
+        // The install is let go only once the call has returned. One run before the call returned would wait out its
+        // patience unreleased, however fast or slow the computer.
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (report, reported) = std::sync::mpsc::channel();
         let handle = keep_recorder_host_installed(
-            || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
+            move || {
+                let _ = report.send(released.recv_timeout(Duration::from_secs(30)).is_ok());
                 Ok(vec![])
             },
             None,
         );
-        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        let _ = release.send(());
         handle.join().unwrap();
+        assert!(
+            reported.recv().unwrap(),
+            "the install ran before the call returned"
+        );
     }
 
     #[test]

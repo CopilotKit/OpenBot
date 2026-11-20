@@ -7,12 +7,25 @@ import {
   outcomeForPerson,
 } from "@openbot/shared/approval-outcomes";
 import type { DecisionToolName } from "@openbot/shared/decision-tools";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
+import {
+  type ApprovalDecision,
+  type ApprovalInboxData,
+  approvalInboxOptions,
+} from "@/lib/approvals";
 import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
+import { fileSize, sentFileOf } from "./sent-file";
 
 /**
- * What a Bot has been doing on its computer, other than browsing.
+ * What a Bot has been doing on its computer: the pages it opened and acted on, the commands it ran,
+ * and the files it read and saved.
+ *
+ * BROWSING TOO. The pane used to leave the browser to the screen above it, so a Bot that spent a run
+ * searching and reading pages left it on "Nothing yet" while the screen changed page after page. The
+ * screen shows only where the browser is now; this lists every page opened, every click and every
+ * field filled in, in the words the transcript uses for them.
  *
  * The screen answers "what is it looking at" and nothing answered "what is it doing". A shell
  * command rendered in the transcript as one grey line, `Ran a command  rg --version`, with the output
@@ -42,22 +55,43 @@ export type ComputerActivity = {
   /** The tool call it was. A call read again is this same entry, never a second one. */
   id: string;
   /**
-   * When it finished, for the timestamp beside it. Only for a call this page watched: one it started
-   * running, or one the person answered here. One already done when its conversation was opened says
-   * what was done, not when: the time the page read it would be a guess drawn as a fact.
+   * When it finished, for the timestamp beside it. From the step's own answer, which says when it
+   * finished (`finishedAt`, see `withFinishedAt` in `shared/computer-control.ts`), whether the
+   * browser ran it or the server did after an approval. Otherwise only for a call this page watched:
+   * one the person answered here (when they answered), or one it started running. A step whose
+   * answer is a sentence, or from before answers said when, opened later says what was done, not
+   * when: the time the page read it would be a guess drawn as a fact.
    */
   at?: number;
-  kind: "command" | "read_file" | "write_file" | "list_files";
-  /** The command, or the path. What the line says it acted on. */
+  kind:
+    | "command"
+    | "read_file"
+    | "write_file"
+    | "list_files"
+    | "send_file"
+    | "browser";
+  /**
+   * For a browser step, which one it was (`computer_navigate`, `computer_click` and so on). The pane
+   * names it as the transcript does (`ownToolLabel` in `shared/tool-name.ts`).
+   */
+  step?: BrowserStepName;
+  /** The command, or the path. For a browser step, the page, the element or the key. What the line says it acted on. */
   subject: string;
   /** What came back. Empty when a command printed nothing, which is worth showing as itself. */
   output: string;
   /** Present for a command. Non-zero is drawn as a failure. */
   exitCode?: number;
+  /**
+   * A step the computer did not carry out: a page that would not load, an element that was gone, a
+   * file that was not saved (its computer was held for a person, say).
+   */
+  failed?: boolean;
   /** A boundary refused it, or it was not carried out. Drawn differently from a command that ran and failed. */
   refused?: boolean;
   /** Refused because the person declined it, so the line says declined rather than what it would have done. */
   declined?: boolean;
+  /** The person allowed it on its card, and how: the line says so, as it says a step was declined. */
+  allowed?: AllowedDecision;
   /**
    * It was handed to the person and they did it themselves. Done, so not drawn as refused, and
    * nothing ran on the computer for it, so not drawn as a command that printed nothing either.
@@ -68,11 +102,65 @@ export type ComputerActivity = {
   timedOut?: boolean;
 };
 
+/** How a person allowed a step on its card. */
+export type AllowedDecision = Extract<
+  ApprovalDecision,
+  "allow_once" | "allow_conversation" | "allow_always"
+>;
+
 /** What a call did, without the bookkeeping the pane adds to it. */
 export type ActivityDetails = Omit<ComputerActivity, "id" | "at">;
 
-/** One computer call in a conversation: what it did, or null while it waits for its answer. */
-export type ConversationCall = { id: string; did: ActivityDetails | null };
+/**
+ * One computer call in a conversation: what it did, or null while it waits for its answer, and when
+ * it finished when its answer says so.
+ */
+export type ConversationCall = {
+  id: string;
+  did: ActivityDetails | null;
+  finishedAt?: number;
+  /** When the person answered it on its card, for a step whose answer is a sentence that says no time. */
+  decidedAt?: number;
+};
+
+/** What the person answered on a step's card, and when, by the step's call. */
+export type StepDecision = { decision: ApprovalDecision; at?: number };
+export type StepDecisions = ReadonlyMap<string, StepDecision>;
+const NO_DECISIONS: StepDecisions = new Map();
+
+/**
+ * The person's answers on the cards of this owner's recent steps, by call, from the approvals inbox
+ * the conversation already reads. The card says what was answered while it shows; once answered it
+ * folds away, and the step's own answer is the computer's, or a sentence for the Bot, neither of
+ * which says how the person answered or, for a sentence, when. So "Allow for this conversation" left
+ * no line in Activity, and a step declined there had no time once the conversation was opened again.
+ */
+export function decisionsIn(
+  inbox: ApprovalInboxData | undefined,
+): StepDecisions {
+  const decisions = new Map<string, StepDecision>();
+  for (const request of inbox?.requests ?? []) {
+    const id = request.action.toolCallId;
+    if (!id || !request.decision) continue;
+    const at = request.decidedAt ? Date.parse(request.decidedAt) : Number.NaN;
+    decisions.set(id, {
+      decision: request.decision,
+      ...(Number.isFinite(at) ? { at } : {}),
+    });
+  }
+  return decisions;
+}
+
+function allowedBy(
+  decision: StepDecision | undefined,
+): AllowedDecision | undefined {
+  const answered = decision?.decision;
+  return answered === "allow_once" ||
+    answered === "allow_conversation" ||
+    answered === "allow_always"
+    ? answered
+    : undefined;
+}
 
 /**
  * The most recent entries per computer.
@@ -127,6 +215,12 @@ const WIPED_KEPT = 1000;
  * was stamped with the time the page was loaded, a different one on each reload.
  */
 const asked = new Set<string>();
+/**
+ * When the person answered a step held for them here: when a step they declined or did themselves
+ * happened. Its answer reaches this page later, once the turn the server carried on with is over, and
+ * timed by that arrival it read as after the steps the server took following it.
+ */
+const answeredHere = new Map<string, number>();
 const listeners = new Set<() => void>();
 
 /** A stable empty array, so `useSyncExternalStore` does not see a new value on every render. */
@@ -139,11 +233,14 @@ function notify(): void {
 function sameDetails(entry: ComputerActivity, details: ActivityDetails) {
   return (
     entry.kind === details.kind &&
+    entry.step === details.step &&
+    entry.failed === details.failed &&
     entry.subject === details.subject &&
     entry.output === details.output &&
     entry.exitCode === details.exitCode &&
     entry.refused === details.refused &&
     entry.declined === details.declined &&
+    entry.allowed === details.allowed &&
     entry.doneByPerson === details.doneByPerson &&
     entry.truncated === details.truncated &&
     entry.timedOut === details.timedOut
@@ -287,13 +384,15 @@ export function recordActivity(
     if (!call?.did) continue;
     const existing = present.get(call.id);
     if (existing) {
-      if (!sameDetails(existing, call.did)) {
+      // The server's answer can arrive after the browser's placeholder, with when it finished.
+      const at = existing.at ?? call.finishedAt ?? call.decidedAt;
+      if (!sameDetails(existing, call.did) || at !== existing.at) {
         next ??= [...current];
         const position = next.findIndex((entry) => entry.id === call.id);
         next[position] = {
           ...call.did,
           id: call.id,
-          ...(existing.at === undefined ? {} : { at: existing.at }),
+          ...(at === undefined ? {} : { at }),
         };
       }
       after = call.id;
@@ -304,7 +403,15 @@ export function recordActivity(
     // A conversation that cannot place the wipe: only what this page watched is from after it.
     if (since === null && !asked.has(call.id)) continue;
     next ??= [...current];
-    const at = asked.delete(call.id) ? Date.now() : undefined;
+    const watched = asked.delete(call.id);
+    const answeredAt = answeredHere.get(call.id);
+    answeredHere.delete(call.id);
+    // When the step says it finished, when the person answered it here, or when this page saw its answer arrive.
+    const at =
+      call.finishedAt ??
+      call.decidedAt ??
+      answeredAt ??
+      (watched ? Date.now() : undefined);
     const entry: ComputerActivity = {
       ...call.did,
       id: call.id,
@@ -338,17 +445,131 @@ export function noteWatched(toolCallId: string): void {
   asked.add(toolCallId);
 }
 
+/** A step held for the person, answered by them here, now. Watched, and timed by the answer. */
+export function noteAnswered(toolCallId: string): void {
+  asked.add(toolCallId);
+  answeredHere.set(toolCallId, Date.now());
+}
+
 export function activityFor(computerId: string): ComputerActivity[] {
   return byComputer.get(computerId) ?? NONE;
 }
 
-/** The four calls that act on the computer behind the screen, and what the pane calls each. */
+/** The calls that act on the computer behind the screen, and what the pane calls each. */
 const KINDS: Record<string, ComputerActivity["kind"]> = {
   computer_run_command: "command",
   computer_read_file: "read_file",
   computer_write_file: "write_file",
   computer_list_files: "list_files",
+  computer_send_file: "send_file",
 };
+
+/**
+ * The browser steps, which the pane lists as well.
+ *
+ * Every step the computer's browser takes for a Bot (`COMPUTER_TOOLS` in `server/src/computer/schema.ts`),
+ * reading a page included: a run that only researches is all reading, and it is still what the Bot did.
+ */
+const BROWSER_STEPS = [
+  "computer_navigate",
+  "computer_read",
+  "computer_snapshot",
+  "computer_screenshot",
+  "computer_click",
+  "computer_type",
+  "computer_key",
+  "computer_scroll",
+] as const;
+export type BrowserStepName = (typeof BROWSER_STEPS)[number];
+const BROWSER: ReadonlySet<string> = new Set(BROWSER_STEPS);
+
+function isBrowserStep(name: string): name is BrowserStepName {
+  return BROWSER.has(name);
+}
+
+/**
+ * The computer turning a browser step away until the Bot looks at the page again, after a person
+ * handed the browser back. An instruction to the Bot, not something it did: the transcript leaves it
+ * out (`awaitingFreshLook` in `browser-activity.ts`), and so does the pane.
+ */
+function awaitingFreshLook(answer: ToolOutcome): boolean {
+  return (
+    answer.ok === false &&
+    answer.snapshotRequired === true &&
+    answer.handoffStatus === undefined
+  );
+}
+
+/** The name the computer resolved for the element a click or a field acted on, if it gave one. */
+function elementName(result: ToolOutcome): string | undefined {
+  const element = result.element;
+  if (!element || typeof element !== "object") return undefined;
+  const name = (element as { name?: unknown }).name;
+  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+}
+
+function textOf(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * What one answered browser step did, as the pane draws it.
+ *
+ * The subject is what it acted on: the page's address, the element's label, the key. NEVER WHAT WAS
+ * TYPED. The computer declines to echo a field's value back for that reason, since a form is where a
+ * password or a card number goes, and the arguments that carry it are not read here.
+ *
+ * THE LABEL, EVEN FOR A STEP THAT DID NOT RUN. The computer names the element in its answer, and a
+ * step the person declined or did themselves has no such answer, only a sentence. It drew the ref
+ * instead ("Declined f2e13", "Clicked on page e14"), a handle only the Bot can read. The snapshot the
+ * Bot took the ref from names it too (`label`, see `snapshotLabelsOf`), so that name is used, and the
+ * ref only when neither says.
+ */
+export function browserDetails(
+  step: BrowserStepName,
+  args: Record<string, unknown>,
+  result: ToolOutcome,
+  /** What the snapshot the ref came from calls the element, when the step's own answer does not. */
+  label?: string,
+): ActivityDetails {
+  const notTheBot = {
+    ...(result.refused === true ? { refused: true } : {}),
+    ...(result.declined === true ? { declined: true } : {}),
+    ...(result.doneByPerson === true ? { doneByPerson: true } : {}),
+  };
+  const failed =
+    result.ok === false &&
+    result.refused !== true &&
+    result.doneByPerson !== true;
+  const page = textOf(result.url);
+  const subject =
+    step === "computer_navigate"
+      ? (page ?? textOf(args.url) ?? "")
+      : step === "computer_click" || step === "computer_type"
+        ? (elementName(result) ?? label ?? textOf(args.ref) ?? "")
+        : step === "computer_key"
+          ? (textOf(args.key) ?? "")
+          : step === "computer_scroll"
+            ? typeof args.deltaY === "number" && args.deltaY < 0
+              ? "up"
+              : "down"
+            : (page ?? "");
+  // A step that did not happen says why. One that did says nothing more, except the title of a page opened.
+  const output =
+    failed || result.refused === true || result.doneByPerson === true
+      ? outputOf(result)
+      : step === "computer_navigate"
+        ? (textOf(result.title) ?? "")
+        : "";
+  return {
+    kind: "browser",
+    step,
+    subject,
+    output,
+    ...(failed ? { failed: true } : {}),
+    ...notTheBot,
+  };
+}
 
 /** CopilotKit's stand-in for a frontend tool's answer that has not been given yet. */
 const FORWARDED_TO_CLIENT = "Forwarded to client";
@@ -424,7 +645,13 @@ const answers = new Map<
 >();
 const done = new Map<
   string,
-  { args: string; answer: ToolOutcome; did: ActivityDetails }
+  {
+    args: string;
+    answer: ToolOutcome;
+    did: ActivityDetails;
+    /** A browser step's arguments, read, and the label its snapshot gives its ref. */
+    browser?: { args: Record<string, unknown>; label: string | undefined };
+  }
 >();
 
 function answerOf(message: {
@@ -456,6 +683,83 @@ function didOf(
     answer,
     did: detailsOf(kind, argumentsOf(call.function.arguments), answer),
   }).did;
+}
+
+function browserDidOf(
+  step: BrowserStepName,
+  call: { id: string; function: { arguments: string } },
+  answer: ToolOutcome,
+  labels: SnapshotLabels,
+): ActivityDetails {
+  const known = done.get(call.id);
+  const sameArgs = known?.args === call.function.arguments;
+  const args =
+    sameArgs && known?.browser
+      ? known.browser.args
+      : argumentsOf(call.function.arguments);
+  const label = labelFrom(labels, args);
+  if (
+    known &&
+    sameArgs &&
+    known.answer === answer &&
+    known.browser?.label === label
+  )
+    return known.did;
+  return remember(done, call.id, {
+    args: call.function.arguments,
+    answer,
+    browser: { args, label },
+    did: browserDetails(step, args, answer, label),
+  }).did;
+}
+
+/**
+ * The label each snapshot gave each ref, by the snapshot's id: `{ snapshotId, elements: [{ ref,
+ * name }] }` is what `computer_snapshot` answers (`SnapshotResult` in `server/src/computer/schema.ts`).
+ */
+type SnapshotLabels = Map<number, Map<string, string>>;
+
+/** Each snapshot's labels, read once per answer: the conversation is read on every change. */
+const labelled = new WeakMap<
+  ToolOutcome,
+  { snapshotId: number; labels: Map<string, string> } | null
+>();
+
+function snapshotLabelsOf(
+  answer: ToolOutcome,
+): { snapshotId: number; labels: Map<string, string> } | null {
+  const known = labelled.get(answer);
+  if (known !== undefined) return known;
+  let read: { snapshotId: number; labels: Map<string, string> } | null = null;
+  if (typeof answer.snapshotId === "number" && Array.isArray(answer.elements)) {
+    const labels = new Map<string, string>();
+    for (const element of answer.elements) {
+      if (!element || typeof element !== "object") continue;
+      const { ref, name } = element as { ref?: unknown; name?: unknown };
+      const label = textOf(name);
+      if (typeof ref === "string" && label) labels.set(ref, label);
+    }
+    read = { snapshotId: answer.snapshotId, labels };
+  }
+  labelled.set(answer, read);
+  return read;
+}
+
+/** What the snapshot a step's ref came from calls that element. */
+function labelFrom(
+  labels: SnapshotLabels,
+  args: Record<string, unknown>,
+): string | undefined {
+  if (typeof args.ref !== "string" || typeof args.snapshotId !== "number")
+    return undefined;
+  return labels.get(args.snapshotId)?.get(args.ref);
+}
+
+/** When the server finished a step it ran, from its answer (`finishedAt`), as a time. */
+function finishedAtOf(answer: ToolOutcome | undefined): number | undefined {
+  if (typeof answer?.finishedAt !== "string") return undefined;
+  const at = Date.parse(answer.finishedAt);
+  return Number.isFinite(at) ? at : undefined;
 }
 
 function argumentsOf(text: string): Record<string, unknown> {
@@ -556,8 +860,31 @@ export function detailsOf(
           : typeof result.bytes === "number"
             ? `${result.bytes} bytes${args.append === true ? ", appended" : ""}`
             : "",
+      // Not saved: the line must not say "Saved" about a file the computer never wrote.
+      ...(result.ok === false &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
       ...notTheBot,
     };
+  if (kind === "send_file") {
+    const sent = sentFileOf(result);
+    return {
+      kind,
+      subject: path,
+      output: sent
+        ? `${sent.name}, ${fileSize(sent.sizeBytes)}`
+        : outputOf(result),
+      // Not sent: the line must not say "Sent" about a file nobody received.
+      ...(result.ok === false &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
+      ...notTheBot,
+    };
+  }
   return {
     kind,
     subject: kind === "list_files" ? path || "the workspace" : path,
@@ -633,14 +960,20 @@ function declinedCommand(command: string): ActivityDetails {
  */
 export function conversationActivity(
   messages: readonly Message[],
+  decisions: StepDecisions = NO_DECISIONS,
 ): ConversationCall[] {
   const computerCalls = new Set<string>();
+  const browserCalls = new Set<string>();
+  const snapshots = new Set<string>();
   const askingAbout = new Map<string, string>();
   for (const message of messages) {
     if (message.role !== "assistant") continue;
     for (const call of message.toolCalls ?? []) {
       if (KINDS[call.function.name]) computerCalls.add(call.id);
-      else if (call.function.name === ASK_APPROVAL) {
+      else if (isBrowserStep(call.function.name)) {
+        browserCalls.add(call.id);
+        if (call.function.name === "computer_snapshot") snapshots.add(call.id);
+      } else if (call.function.name === ASK_APPROVAL) {
         const command = commandAskedAbout(call);
         if (command) askingAbout.set(call.id, command);
       }
@@ -649,11 +982,20 @@ export function conversationActivity(
   // Only the computer's answers, and the person's on those cards: another tool's can be long, and nothing here reads it.
   const answered = new Map<string, ToolOutcome>();
   const decided = new Map<string, "approved" | "declined">();
+  const labels: SnapshotLabels = new Map();
   for (const message of messages) {
     if (message.role !== "tool") continue;
-    if (computerCalls.has(message.toolCallId)) {
+    if (
+      computerCalls.has(message.toolCallId) ||
+      browserCalls.has(message.toolCallId)
+    ) {
       const answer = answerOf(message);
       if (answer) answered.set(message.toolCallId, answer);
+      const named =
+        answer && snapshots.has(message.toolCallId)
+          ? snapshotLabelsOf(answer)
+          : null;
+      if (named) labels.set(named.snapshotId, named.labels);
     } else if (askingAbout.has(message.toolCallId)) {
       const decision = decisionIn(message.content);
       if (decision) decided.set(message.toolCallId, decision);
@@ -673,12 +1015,25 @@ export function conversationActivity(
         });
         continue;
       }
-      const kind = KINDS[call.function.name];
-      if (!kind) continue;
+      const name = call.function.name;
+      const browser = isBrowserStep(name);
+      const kind = KINDS[name];
+      if (!browser && !kind) continue;
       const answer = answered.get(call.id);
+      if (browser && answer && awaitingFreshLook(answer)) continue;
+      const did = !answer
+        ? null
+        : browser
+          ? browserDidOf(name, call, answer, labels)
+          : didOf(kind as ComputerActivity["kind"], call, answer);
+      const decision = decisions.get(call.id);
+      const allowed = allowedBy(decision);
+      const finishedAt = finishedAtOf(answer);
       calls.push({
         id: call.id,
-        did: answer ? didOf(kind, call, answer) : null,
+        did: did && allowed ? { ...did, allowed } : did,
+        ...(finishedAt === undefined ? {} : { finishedAt }),
+        ...(decision?.at === undefined ? {} : { decidedAt: decision.at }),
       });
     }
   }
@@ -705,19 +1060,31 @@ export function useConversationActivity(
   messages: readonly Message[],
 ): void {
   const { copilotkit } = useCopilotKit();
+  // The person's answers on the steps' cards: the same inbox the conversation's cards read.
+  const decisions = useQuery({
+    ...approvalInboxOptions(),
+    select: decisionsIn,
+  }).data;
   useEffect(
     () =>
       copilotkit.subscribe({
         onToolExecutionStart: ({ toolCallId, toolName }) => {
           // A card's handler starts when it is drawn to be answered, here.
-          if (KINDS[toolName] || toolName === ASK_APPROVAL)
+          if (
+            KINDS[toolName] ||
+            isBrowserStep(toolName) ||
+            toolName === ASK_APPROVAL
+          )
             noteWatched(toolCallId);
         },
       }).unsubscribe,
     [copilotkit],
   );
   useEffect(() => {
-    recordActivity(computerId, conversationActivity(messages));
+    recordActivity(
+      computerId,
+      conversationActivity(messages, decisions ?? NO_DECISIONS),
+    );
     // And which of the panel's views the Bot is working in: see panel-view.ts.
     followView(computerId, latestView(messages));
   });

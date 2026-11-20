@@ -9,10 +9,52 @@ behind the design. The code comments named here hold the details; this page is t
 The desktop app installs and runs OpenBot for one person on one computer, with CopilotKit
 Intelligence running on the same computer. The person needs no terminal, no developer tools and no
 container engine of their own. The app is standalone: there is no hosted or self-hosted
-Intelligence option, no organization sign-in and no Bot picker. It installs the default Bot.
+Intelligence option, no organization sign-in and no Bot picker. It installs the default Bot. The
+one other thing it can do is show an OpenBot that already runs somewhere else, described next.
 
-First-release platforms are Apple silicon macOS and Windows x64. Windows on ARM cannot run
-WSL 2 inside a virtual machine on Apple silicon, so test Windows builds on an x64 machine.
+Installers are published for Apple silicon and Intel Macs and for Windows x64. On an Intel Mac the
+app cannot install Podman, because Podman publishes its Mac installer for Apple silicon only, so
+that person needs Docker Desktop or Podman Desktop first (`install::podman_download`). Windows on
+ARM cannot run WSL 2 inside a virtual machine on Apple silicon, so test Windows builds on an x64
+machine.
+
+## On this computer, or connected to an OpenBot
+
+At setup, and later from Settings, a person chooses where OpenBot runs. **On this computer** is
+everything the rest of this page describes. **Connect to an OpenBot** takes one address, such as
+`https://openbot.example.com`, and shows that OpenBot in the app's window. Nothing is installed or
+started on the computer, and no account, license or model key is asked for. The choice is kept in
+`connection.json` in the app's configuration folder (`connected/choice.rs`), and switching back
+leaves a local installation, its folder and its data exactly as they were.
+
+The person signs in to that OpenBot in their own browser: OAuth 2.1 authorization code with PKCE
+and a redirect to `http://127.0.0.1:<port>/callback` (`connected/sign_in.rs`). The refresh token is
+kept in the operating system's credential store (Keychain, Credential Manager or the Secret
+Service) and the access token only in memory; neither is written to a file or a log, and the page
+never holds one. The window loads the app from a relay on `127.0.0.1` (`connected/relay.rs`), which
+passes each request on to the one address the person typed and refreshes the token before it ends.
+The access token and the organisation the person picked are added only to requests for OpenBot's
+API (`/api/...` and `/.well-known/...`); the app's pages and files, and anything else the same host
+name serves, such as another service's socket, are passed on without them. The relay answers only its own `127.0.0.1:<port>`, only to the
+window (a secret made for each run, carried in a cookie the relay sets), and never follows a
+redirect to another host.
+
+What is about OpenBot on this computer is not there while the app is connected:
+
+| On this computer | Connected to an OpenBot |
+|---|---|
+| Start, Stop and Restart, the Status window, and their tray and menu items | Not shown. The tray and menu have Show Window, Open Log Folder, Sign Out and Quit. |
+| Installing and updating OpenBot's services (downloads, the engine, the upgrade at Start) | Never run. The app still updates itself. |
+| The local Intelligence, the account sign-in and the 30-day license | Not asked for. The OpenBot it connects to has its own. |
+| Model keys and model sign-ins kept on this computer | Not shown. That OpenBot's admin sets its models. |
+| Settings, Computer: services, memory and the engine | One Connection section: the address, Sign out, and using OpenBot on this computer. The app's version, updates and log folder stay. |
+| Local folder access for Bots, and this computer as a Bot's computer | Not started. Bots use the computers that OpenBot gives them. |
+| The connection watcher and Learning's model on this computer | Not started. |
+| Quit stopping everything | Quit closes the app. Nothing on the computer runs because of it. |
+
+Dictation, notifications, zoom, the window's place, the theme, `openbot://` links and outside
+links opening in the browser work the same either way. An OpenBot running on this computer when
+the person connects to another is stopped first, as Stop stops it.
 
 ## The flow
 
@@ -25,12 +67,14 @@ sequenceDiagram
   participant W as Window (App.tsx)
   participant N as Native side (src-tauri)
   participant C as Intelligence CLI (bundled)
-  P->>W: Get started (Welcome)
+  P->>W: Install (Welcome)
   W->>N: prepare_installation (Install starts at once)
   N->>N: engine, deployment download, image pulls
-  P->>W: Sign in to CopilotKit (Account)
-  W->>N: sign_in_to_copilotkit, local_eval_terms
-  N->>C: local login, terms
+  W->>N: sign_in_to_copilotkit (Account opens)
+  N->>C: login (no engine needed; opens the browser)
+  Note over W,N: macOS only, when Podman needs installing: the window says the password prompt<br/>is coming and why, and it comes up by itself a moment later
+  W->>N: local_eval_terms, once an engine answers
+  N->>C: onboard local-terms
   P->>W: Accept the evaluation agreement
   Note over W,N: Once the engine answers, Intelligence setup is queued
   W->>N: set_up_local_eval
@@ -44,10 +88,16 @@ sequenceDiagram
   Note over W: The window becomes OpenBot
 ```
 
-1. **Welcome.** The first click starts Install in the default folder, `~/OpenBot`. Install needs
-   no account, so it runs while the person signs in.
-2. **Account.** The person signs in to CopilotKit in the browser and accepts the local evaluation
-   agreement. Nothing licensed is set up before this acceptance.
+1. **Welcome.** The big downloads start as soon as this screen shows, before any click: the
+   engine machine image, Podman's installer and Compose, the deployment and OpenBot's images, each
+   checked against its pin, into a cache Install then uses (`src-tauri/src/early_downloads.rs`).
+   The first click starts Install in the default folder, `~/OpenBot`. Install needs no account, so
+   it runs while the person signs in.
+2. **Account.** The browser sign-in opens as soon as the step does: the CLI's `login` needs no
+   container engine, and answers at once for a sign-in it already has. Then the person accepts the
+   local evaluation agreement, which the CLI reads only once an engine answers (`onboard
+   local-terms` checks the engine first), so on a new computer the step waits for Install here and
+   says what Install is doing. Nothing licensed is set up before this acceptance.
 3. **Install.** The app makes a container engine answer, lays out the deployment, and pulls the
    images. The screen shows each image, its size and the download speed
    (`desktop/src/SetupProgress.tsx`, `src-tauri/src/pull_metrics.rs`). Intelligence setup starts
@@ -63,13 +113,58 @@ A return visit with a recorded local stack goes straight to Start. Any other sav
 including an installation that an earlier app connected to a hosted Intelligence, starts at the
 first screen and keeps its finished install.
 
+## Usage data and account attribution
+
+The last setup screen, Finishing setup, ends with a usage-data checkbox, checked by default. It
+says OpenBot shares diagnostics like errors, hangs, updates and available memory, never any
+content, and links [Desktop telemetry](../desktop/TELEMETRY.md). Once the person signs in, the
+data is linked to their OpenBot account (their CopilotKit sign-in), as that document says. The
+checkbox and **Settings > General > Privacy > Share usage data** are one setting, and either turns
+it off. Off is the same opt-out as launching with `COPILOTKIT_TELEMETRY_DISABLED=1`: it is
+kept for the next launch, the desktop's own events and identity are deleted at once, every CLI call
+gets the variable, no `telemetry link` runs, and the server gets it the next time OpenBot starts.
+With `COPILOTKIT_TELEMETRY_DISABLED` or `DO_NOT_TRACK` set at launch, the switch shows off and
+cannot be turned on.
+
+After a successful CopilotKit sign-in, an existing-account check, app setup, or a successful Start,
+the native shell runs the bundled CLI's `telemetry link --installation-id <UUID> --json` on a
+background worker. The CLI uses its verified Ops session to return an opaque account fingerprint.
+Desktop saves that binding before calling again with `--account-id <hash>`. Ops emits the existing
+identity-link event; the telemetry sink aliases the desktop UUID to the Clerk person in PostHog. The
+desktop never reads CLI credential files or adds email addresses to product events.
+
+The first account keeps the existing installation UUID, so its anonymous setup history can join the
+account. A different account gets a new UUID before linking. A signed-out CLI result clears a
+previous binding and rotates the UUID. Queued events keep the UUID they were recorded under,
+including queues written by older desktop versions. The personal-edition runtime receives the
+current UUID through `CPK_TELEMETRY_ID` when it starts. Only the native desktop launch selects the
+separate telemetry Compose override; shared Compose and Enterprise charts are unchanged. The handoff
+adds no readable PII or user content. Opaque account linking is pseudonymous, not anonymous.
+
+Nothing here can keep OpenBot from opening. Sign-in and Start never wait for `telemetry link`: Start
+hands the runtime the identity as it stands and links afterwards, so an account change found then
+reaches the runtime at the next Start. Required CLI calls preempt optional linking, and duplicate
+hooks do not queue. Each of at most two CLI calls has an eight-second budget plus 250 ms kill grace;
+a failure logs a fixed deferred message and retries at the next hook. Once a link is confirmed for
+an installation and account, later hooks in the same launch skip it until the next sign-in, which
+keeps the CLI's own analytics to one link per account per launch; a terminal logout is noticed at the
+next sign-in or launch. If the optional Compose settings probe fails or a telemetry override cannot
+be written, Start logs it and continues without the override, opted out or not.
+
+A successful CLI response means Ops accepted the authenticated verify request. Aliases are
+best-effort and require the Ops telemetry sink to be enabled. The bundled CLI is pinned to a
+`CLI_ENV=production` build that includes `telemetry link` (`desktop/intelligence-cli.json`).
+Validate a real sign-in, task and restart under one PostHog person, then switch accounts and verify
+that the second person's activity remains separate. Production delivery has not been established by
+the local tests.
+
 ## Who owns what
 
 | Owner | Owns |
 |---|---|
 | Window (`desktop/src`) | Screens, order, what the person reads. Holds no credentials. |
 | Native side (`desktop/src-tauri`) | Engine install, deployment layout, images, Compose, host processes, secrets, Stop and Quit. |
-| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, licence, readiness and its endpoints. |
+| Intelligence CLI (`copilotkit`, bundled) | Intelligence topology, sign-in, license, readiness and its endpoints. |
 
 **The CLI owns Intelligence.** The app runs the CLI as a bounded child process
 (`src-tauri/src/local_eval.rs`) and never reads its credential files or probes its containers to
@@ -82,29 +177,117 @@ fill a gap. Three rules hold that boundary:
   `--mode openbot`, so the sign-in page explains OpenBot's setup, only when the CLI's own
   `login --help` lists it: an older CLI refuses an unknown flag.
 - **Only allowlisted facts cross into the window.** Raw stdout and stderr never reach the window or
-  a log. Readiness and licence come only from the exact values of `local status`; anything else
+  a log. Readiness and license come only from the exact values of `local status`; anything else
   reads as unknown, and unknown keeps chat closed.
 
 ## Decisions and the reasons for them
 
-- **Install before sign-in.** Downloading software needs no account, and it is the slow part.
-  Starting it on the first click means the person signs in while it runs.
-- **Licence work after acceptance.** Intelligence setup waits for the evaluation agreement, and
+- **Install before sign-in, sign-in before the engine.** Downloading software needs no account, and
+  it is the slow part. Starting it on the first click means the person signs in while it runs. The
+  sign-in waits for nothing: someone who leaves while Podman installs has still signed in.
+- **No password prompt without an explanation first, and no click before one.** On macOS, Podman's
+  package needs an administrator, so macOS asks for the person's password. Install downloads the
+  package, says "Your Mac will ask for your password so OpenBot can install what it needs to run.",
+  leaves it a moment to be read (`install::BEFORE_PROMPT`), and raises the prompt by itself. An
+  install step informs the person and moves forward. The prompt says why in OpenBot's words
+  (`do shell script ... with prompt`). Closing it without a password is said plainly, with Try
+  again, and Install asks again by itself after a short wait (`install::GoAhead`,
+  `ASK_AGAIN_AFTER`). Windows installs Podman for the person's own account with no prompt. When
+  WSL is missing, the Windows blocker says what Windows will ask and starts the change by itself;
+  a declined administrator prompt is asked again the same way. The restart after it is the one
+  step that waits for the person's click: OpenBot never restarts the computer on its own, because
+  the person may have unsaved work open.
+- **On Windows, the engine's disk follows the install folder.** OpenBot's Podman machine is a WSL
+  disk of about 40 GB. By default, Podman puts that disk in the user profile, usually on C:, for
+  every install folder.
+  - **`XDG_DATA_HOME`, on `podman machine init` only:** on Windows, Podman reads it for its data
+    folder, and init puts a new machine's disk there. No flag or `containers.conf` key sets this
+    location. OpenBot sets it to `<install>\engine` (the machine home) for init alone
+    (`engine::podman_command`, `use_machine_home` in `main.rs`). Every later command finds the disk
+    through WSL and the absolute paths in the machine's config, which stays in
+    `%USERPROFILE%\.config`.
+  - **Every other Podman command keeps Podman's default data folder.** Podman keeps state there
+    that the person's own Podman and the uninstaller share: the API proxy's record
+    (`win-sshproxy.tid`, which stop reads to end the proxy on `\\.\pipe\podman-openbot`), and the
+    user-mode networking distribution `podman-net-usermode` with its count of machines and its lock.
+    For the same reason, init runs without `--user-mode-networking`, and `podman machine set
+    --user-mode-networking` turns it on right after, so `podman-net-usermode` is made in the default
+    folder, not in the install folder.
+  - **A drive that cannot hold a WSL disk** (a network share, a removable drive, exFAT, FAT32)
+    keeps the disk in the user profile (`windows::holds_wsl_disk`). Install does not stop, and the
+    `create-machine` row says where the disk is. An installation saved on Docker Desktop has no
+    machine home.
+  - **The space check measures the machine's drive:** the WSL `BasePath` of an existing machine,
+    else the machine home, else the user profile (`early_downloads::disk_place`).
+  - **An existing machine moves only on a click.** The move runs `wsl --shutdown`, which stops
+    every WSL distro on the computer, Docker Desktop included. If the install folder's drive has
+    room and this WSL supports `wsl --manage --move`, the space message offers **Move OpenBot's
+    storage to F:** (`move_engine_here`, `[engine move]` in the log).
+  - **The download cache stays in `~/OpenBot/openbot-engine`.** It holds Compose, which
+    `podman compose` runs. If the cache moves, every existing install loses `podman compose` until
+    Install runs again.
+- **License work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in
   order: a Docker that answers; on macOS and Windows a stopped Docker Desktop that has run before,
   which it opens; otherwise Podman, which it installs and runs as a rootful machine, because k3d
   needs a rootful engine. The choice is saved with the installation, and later runs use only that
   engine (`src-tauri/src/install.rs`, `acquire.rs`).
+- **The person's own Podman machine is left as it is.** A machine made with `podman machine init`
+  is rootless, which local Intelligence can't run on, and on Windows any machine but OpenBot's lacks
+  the networking OpenBot's containers need to reach Intelligence (user-mode networking and the
+  host-gateway setting). So OpenBot passes such a machine over and makes and uses its own rootful
+  machine, `openbot`, as on a computer with none (`engine::passed_over_machine`). On Windows it runs
+  beside the person's, which keeps running untouched. While `openbot` starts, the app holds the name
+  of Docker's default pipe, `\\.\pipe\docker_engine`, which Podman otherwise gives to the first
+  machine that starts, so `openbot` gets only its own pipe (`acquire::DOCKER_PIPE`). On a Mac, where Podman runs one machine at a
+  time, a rootless machine of the person's is the only kind passed over: the window says OpenBot
+  needs its own and offers to pause theirs while OpenBot runs, and nothing is paused until they
+  choose **Pause my Podman**. Quit then stops `openbot` and starts theirs again with the containers
+  that were running in it (`src-tauri/src/own_machine.rs`). A rootful machine on a Mac, and Docker,
+  are used as before. The person's default Podman connection is never changed.
+- **An engine too old to run OpenBot is updated for the person.** At setup and at every Start,
+  before Compose reads the project, the app reads the engine's version and its Compose version and
+  compares them with the minimums in `src-tauri/src/engine_versions.rs`: Compose 2.27.2 (the first
+  with `config --environment`, which Start uses), Docker Engine 20.10 and, on macOS and Windows,
+  Podman 6.1. A Podman that is too old gets OpenBot's own pinned installer run over it, and an old
+  Compose gets OpenBot's own placed in front of it; machines and their data are kept. Every Podman
+  machine running before the update, the person's own included, is running afterwards with its
+  Docker API answering: on Windows each is stopped before the MSI and started after it, and any
+  whose API does not answer is stopped and started, with the containers that were running in it
+  (`install::update_podman`). The row says why: "The Podman on this computer is too old for
+  OpenBot, so OpenBot is updating it." Nothing is called updated until the engine answers. At every
+  check on macOS and Windows, a Podman machine that answers `podman` (over SSH) while its Docker API,
+  the pipe or socket Compose uses, does not is stopped and started once ("Restarting the software
+  OpenBot runs on."), and one that still does not answer is a failure with Try again
+  (`engine_versions::ensure`, `acquire::engine_answers`). The machine is the one OpenBot reaches,
+  through Podman's default connection when detection found it there (`acquire::machine_reached`). A
+  relaunch does the same before the back end is asked (`wake_engine`), whose own check says only
+  that Docker is unavailable, and Stop and Quit do it once before both their stops (`compose
+  down` and the back end's `local stop`). The install's `engine` row is said done only after this
+  check, so the back end's setup, which starts on it, never runs against an engine about to be
+  updated. While a row says the engine is updating, the account's license check is not asked; one
+  refused before that waits for the engine instead of asking again. A Docker
+  Desktop that is too old (4.31 and earlier) is updated to Docker's newest release with Docker's
+  own installer command line, after its checksum and Docker's signature are checked
+  (`src-tauri/src/docker_desktop_update.rs`). The containers running before Docker Desktop is quit
+  are started again once it answers. Docker's terms are never accepted for the person. Only
+  what cannot be updated (a Docker that is not Docker Desktop, an old Podman on an Intel Mac, a
+  macOS or Windows too old for the newest Docker Desktop) is one plain step. Linux is left as it is.
+  `cargo run --example engine_update_check` shows what the app would do on a machine without
+  changing anything.
 - **Everything fetched is pinned.** Engine installers, Compose, the CLI and Node are pinned by
-  digest. A mismatch is refused, never run.
+  digest. A mismatch is refused, never run. Docker Desktop's update is the exception, because only
+  Docker's newest release is offered: it is checked against its build's published checksum and
+  Docker's code signature instead.
 - **A small installer, a downloaded deployment.** The installer is the app and the bundled CLI.
   The deployment is `docker-compose.yml`, out of the release's source tarball at a tag, laid out
-  under the installation folder; everything else, server, app, worker, computer and tenant package,
+  under the installation folder; everything else, server, app, computer and tenant package,
   runs from the images that release's `container-images.json` names by digest
   (`src-tauri/src/deployment.rs`). Nothing runs on the host: the person's own browser runs on the
   one computer and is shown in the OpenBot window, as hosted OpenBot shows it.
-  A new deployment takes the latest release. An existing one keeps its version through Install
+  A new deployment takes the latest release, or the app's own release when the app is newer
+  (`src-tauri/src/deployment_release.rs`). An existing one keeps its version through Install
   and Repair; the first Start after the app updates itself upgrades it to the app's own release
   (`src-tauri/src/upgrade.rs`, [desktop updates](desktop-updates.md)).
 - **The app's own Compose project.** Every new installation runs as the Compose project
@@ -118,8 +301,10 @@ fill a gap. Three rules hold that boundary:
 - **Images download in parallel, with progress.** Four images download at once
   (`IMAGE_PULLS_AT_ONCE`). The screen shows what is downloading and how fast, so a slow network
   looks slow, not stuck.
-- **A dropped download is tried again.** A file download whose connection fails, or whose server
-  answers 5xx or 429, is tried up to three times (`deployment::get`). A 404 is reported at once.
+- **A dropped download is tried again.** A file that downloads.copilotkit.ai keeps a copy of is
+  asked of it first, once, then of GitHub. A GitHub download whose connection fails, goes 30
+  seconds without a byte, or whose server answers 5xx or 429, is tried up to six times, waiting
+  longer each time, about four minutes at worst (`deployment::get`). A 404 is reported at once.
   `install.rs` still checks the digest of whatever arrives.
 - **Secrets stay out of `.env`.** `.env` holds settings a person can read. Model keys and service
   tokens go to an owner-only file on macOS and Linux and to DPAPI on Windows, and reach processes
@@ -155,6 +340,10 @@ fill a gap. Three rules hold that boundary:
 | `~/OpenBot/.env` | Settings only. A person's own `COMPOSIO_API_KEY` goes here and always wins |
 | Protected store (see `vault.rs`) | Model keys, service tokens and a provisioned Composio key |
 | `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files, and the browser profile earlier versions kept in `local-computer` |
+| `<install>\engine` (Windows) | The disk of the Podman machine `openbot`: `containers\podman\machine\wsl\wsldist\openbot\ext4.vhdx`. It holds the images, containers and data, about 40 GB (`engine::machine_home`) |
+| `%USERPROFILE%\.local\share\containers\...` (Windows) | The same disk, when the install folder's drive cannot hold a WSL disk: a network share, a removable drive, exFAT or FAT32 |
+| `%USERPROFILE%\.config` (Windows) | Podman's config for the machine, with absolute paths to its disk |
+| `~/OpenBot/openbot-engine` | The engine download cache: the Podman installer and Compose. It stays here for every install folder (`early_downloads::cache`) |
 
 ## Apps through Composio
 
@@ -179,8 +368,10 @@ with apps unavailable.
 
 An installer bundles the Intelligence CLI chosen in `desktop/intelligence-cli.json` and a Node
 runtime pinned by version and SHA-256. Internal builds and release candidates also pin the
-deployment and its images to the exact commit they were built from, and refuse to start a
-deployment from another release; see [Releasing](releasing.md) once that change is merged.
+deployment and its images to the exact commit they were built from, and Start moves an
+installation on another release to that pin, as it does for a stable app's own release
+(`src-tauri/src/upgrade.rs`). See [Releasing](releasing.md#internal-builds) and
+[Desktop updates](desktop-updates.md#the-upgrade).
 
 ## Where to start in the code
 
@@ -191,8 +382,8 @@ deployment from another release; see [Releasing](releasing.md) once that change 
 | CLI process boundary | `desktop/src-tauri/src/local_eval.rs`, `local_eval_state.rs` |
 | Engine | `desktop/src-tauri/src/install.rs`, `acquire.rs`, `docker_desktop.rs`, `engine.rs` |
 | Deployment and release | `desktop/src-tauri/src/deployment.rs`, `deployment_release.rs`, `preparation.rs` |
-| Compose and processes | `desktop/src-tauri/src/stack.rs`, `supervise.rs` |
-| Image downloads | `desktop/src-tauri/src/pull_metrics.rs`, `desktop/src/SetupProgress.tsx` |
+| Compose and processes | `desktop/src-tauri/src/stack.rs` |
+| Downloads | `desktop/src-tauri/src/early_downloads.rs`, `early_images.rs`, `pull_metrics.rs`, `desktop/src/SetupProgress.tsx` |
 | Secrets | `desktop/src-tauri/src/vault.rs`, `saved_intent.rs` |
 | Windows installer hooks | `desktop/src-tauri/windows/hooks.nsh` |
 

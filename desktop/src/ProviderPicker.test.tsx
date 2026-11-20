@@ -1,6 +1,6 @@
+import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   act,
@@ -108,8 +108,17 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 
+// The window's event listeners, by event, so a test can say what the native side reports.
+const listeners = new Map<string, (event: { payload: unknown }) => void>();
+
 mock.module("@tauri-apps/api/event", () => ({
-  listen: async () => () => {},
+  listen: async (
+    name: string,
+    handler: (event: { payload: unknown }) => void,
+  ) => {
+    listeners.set(name, handler);
+    return () => listeners.delete(name);
+  },
 }));
 
 mock.module("./Mark", () => ({
@@ -321,6 +330,70 @@ test("a finished sign-in shows its tick for a second, and choosing another row t
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1300)));
   expect(choices).toEqual([]);
   expect(view.queryByText(/✓/)).toBeNull();
+});
+
+/*
+ * A first sign-in to a plan downloads that plan's image, which Install leaves to the plan. The
+ * native side reports the download on the `images` row as Install does, and the model screen shows
+ * it as Install shows a download, its size and all, until the sign-in's link is ready.
+ */
+test("a plan sign-in that downloads its image shows the download as Install does", async () => {
+  const begun = deferred<string>();
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_claude_sign_in") return begun.promise;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker(() => {});
+  await pick(view, /Anthropic/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "begin_claude_sign_in"),
+    ).toBe(true),
+  );
+  await act(async () => {
+    listeners.get("setup:progress")?.({
+      payload: {
+        step: "images",
+        ok: true,
+        running: true,
+        detail: "Downloading OpenBot.",
+        downloads: {
+          bytes: 120_000_000,
+          size: 480_000_000,
+          done: 0,
+          total: 1,
+          bytesPerSecond: 20_000_000,
+        },
+      },
+    });
+  });
+  const shown = await view.findByRole("list", { name: "Sign-in download" });
+  expect(shown.textContent).toContain("Downloading OpenBot.");
+  expect(shown.querySelector(".step-spinner")).not.toBeNull();
+  expect(
+    shown.querySelector("progress[aria-label='Download progress']"),
+  ).not.toBeNull();
+  // Downloaded: the screen goes back to saying what the sign-in is doing.
+  await act(async () => {
+    listeners.get("setup:progress")?.({
+      payload: {
+        step: "images",
+        ok: true,
+        running: false,
+        detail: "OpenBot is downloaded.",
+      },
+    });
+  });
+  expect(view.queryByRole("list", { name: "Sign-in download" })).toBeNull();
+  expect(view.getByRole("status").textContent).toBe("OpenBot is downloaded.");
+  await act(async () => {
+    begun.resolve("https://claude.test");
+  });
 });
 
 test("a pending plan sign-in completion is ignored after switching provider rows", async () => {
@@ -1467,4 +1540,44 @@ test("a chosen provider's text leaves room for Change", async () => {
   const room = Number(rule.match(/padding-right:\s*(\d+)px/)?.[1] ?? 0);
   // Change is about 50px wide, 16px in from the edge, with a gap before the text.
   expect(room).toBeGreaterThanOrEqual(80);
+});
+
+/*
+ * Windows G: under "Anthropic API key" the window said "A Claude plan carries a separate monthly
+ * pool of Agent SDK credits...". That is about signing in with a plan, and an API key has no such
+ * pool. It is said with the plan sign-in only.
+ */
+test("the Claude plan's caution is said with the plan sign-in, not under the API key", async () => {
+  const cautioned: Provider[] = [
+    {
+      ...providers[1],
+      caution: {
+        says: "A Claude plan carries a separate monthly pool of Agent SDK credits. When that pool is empty, Bots stop until it renews or you add API credits.",
+        reads_more_at:
+          "https://support.anthropic.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan",
+      },
+    },
+  ];
+  invokeHandler = async (command) => {
+    if (command === "providers") return cautioned;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /^Anthropic/);
+  expect(view.getByRole("tab", { selected: true }).textContent).toBe(
+    "Sign in with my plan",
+  );
+  expect(view.getByText(/separate monthly pool/)).toBeTruthy();
+  expect(view.getByRole("link", { name: "What this means" })).toBeTruthy();
+
+  await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+  expect(view.getByLabelText("Anthropic API key")).toBeTruthy();
+  expect(view.queryByText(/separate monthly pool/)).toBeNull();
+  expect(view.queryByRole("link", { name: "What this means" })).toBeNull();
+
+  await userEvent.click(
+    view.getByRole("tab", { name: "Sign in with my plan" }),
+  );
+  expect(view.getByText(/separate monthly pool/)).toBeTruthy();
 });

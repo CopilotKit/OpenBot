@@ -1,5 +1,18 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
+import {
+  getConversation,
+  listConversations,
+} from "@/lib/api/generated/conversations/conversations";
+import type {
+  Conversation,
+  ConversationSummary,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * A channel as the browser sees it.
@@ -66,7 +79,10 @@ export type ChannelWork =
 
 /** A channel plus what the roster renders about it. */
 export type ChannelSummary = AgentChannel & {
-  /** A few words about the conversation, or null. The roster falls back to `name`. */
+  /**
+   * What the conversation is called, or null: the name its owner gave it, else a few words the
+   * server wrote about it. The roster falls back to `opening`, then `name`.
+   */
   summary: string | null;
   /**
    * The person's first words in the conversation, as one plain line, or null. What it is called
@@ -81,6 +97,11 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** ISO-8601 when this member last had the channel open, or null for never. The caller's, only. */
   lastReadAt: string | null;
+  /**
+   * Whether this member started the conversation and so may rename it. The server's answer, which
+   * it enforces too. Absent from a server that predates renaming, which reads as no.
+   */
+  canRename?: boolean;
   /**
    * Whether a turn is running in this channel right now.
    *
@@ -100,6 +121,14 @@ export type ChannelSummary = AgentChannel & {
 export const channelKeys = {
   all: ["channels"] as const,
   list: () => ["channels", "list"] as const,
+  /** Every search of the roster, to refetch them together. Never a prefix of `list`. */
+  searches: () => ["channels", "search"] as const,
+  /**
+   * One search, by its normalised text (see `normalizeChannelSearch`) and page size. Its own key,
+   * so a search never writes into the roster's pages and the roster never into a search's.
+   */
+  search: (query: string, limit: number) =>
+    ["channels", "search", { query, limit }] as const,
   /** Every channel read by id, to refetch them together. */
   details: () => ["channels", "detail"] as const,
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
@@ -125,15 +154,78 @@ export function channelListQueryOptions() {
   return infiniteQueryOptions({
     queryKey: channelKeys.list(),
     initialPageParam: "",
-    queryFn: async ({ pageParam }): Promise<ChannelPage> => {
-      const suffix = pageParam
-        ? `?cursor=${encodeURIComponent(pageParam as string)}`
-        : "";
-      const response = await client(`/api/channels${suffix}`, {
-        fallback: "Couldn't load your conversations.",
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          pageParam ? { cursor: pageParam as string } : undefined,
+          { fallback: "Couldn't load your conversations." },
+        ),
+      ),
+    getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
+    select: (data): ChannelSummary[] =>
+      data.pages.flatMap((page) => page.channels),
+  });
+}
+
+/** How many results one page of a search asks for: the server's own default. */
+export const CHANNEL_SEARCH_PAGE = 20;
+
+/** The fewest characters, in code points, that are sent to the server as a search. */
+export const CHANNEL_SEARCH_MIN_CODE_POINTS = 2;
+
+/**
+ * What the server compares a search as: trimmed, and composed so an accent typed as two code points
+ * is the same search as one typed as one. The server does this too; doing it here as well means two
+ * spellings of one search share a cache entry.
+ */
+export function normalizeChannelSearch(text: string): string {
+  return text.trim().normalize("NFC");
+}
+
+/** Whether this text is long enough to search history with. One character matches nearly everything. */
+export function isChannelSearchable(text: string): boolean {
+  return (
+    Array.from(normalizeChannelSearch(text)).length >=
+    CHANNEL_SEARCH_MIN_CODE_POINTS
+  );
+}
+
+/**
+ * Every conversation of this person's that matches `query`, searched by the server a page at a time.
+ *
+ * The server searches the roster's own text (name, summary, opening and latest message) across the
+ * person's whole history. It does not search inside every message of a transcript, which is why
+ * the sidebar says what it searches.
+ *
+ * Disabled until the text is searchable, so a caller can hold this with whatever is in the box. A
+ * request is abandoned through the query's signal once its key goes out of use, and a slower answer
+ * to an earlier search cannot land on a later one, because each search is its own cache entry.
+ * Pages are flattened like the roster's.
+ *
+ * Shared by the sidebar and the command menu.
+ */
+export function channelSearchInfiniteQueryOptions(
+  query: string,
+  limit: number = CHANNEL_SEARCH_PAGE,
+) {
+  const normalized = normalizeChannelSearch(query);
+  return infiniteQueryOptions({
+    queryKey: channelKeys.search(normalized, limit),
+    enabled: isChannelSearchable(normalized),
+    initialPageParam: "",
+    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            q: normalized,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't search your conversations.", signal },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -143,10 +235,59 @@ export function channelListQueryOptions() {
 export function channelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: channelKeys.detail(channelId),
-    queryFn: async (): Promise<AgentChannel> => {
-      return client(`/api/channels/${channelId}`, "channel", {
-        fallback: "Couldn't load this conversation.",
-      });
-    },
+    queryFn: async (): Promise<AgentChannel> =>
+      channelOf(
+        (
+          await getConversation(organizationId(), channelId, {
+            fallback: "Couldn't load this conversation.",
+          })
+        ).conversation,
+      ),
   });
+}
+
+/**
+ * A conversation as the sidebar's list already holds it, or undefined when the list has not read it.
+ * Nothing is asked: for a screen to name a conversation while its own read is still on its way, as
+ * it is for as long as OpenBot Desktop can't reach the OpenBot it is connected to.
+ */
+export function listedChannel(
+  queryClient: QueryClient,
+  channelId: string,
+): ChannelSummary | undefined {
+  return queryClient
+    .getQueryData<InfiniteData<ChannelPage>>(channelKeys.list())
+    ?.pages.flatMap((page) => page.channels)
+    .find((one) => one.id === channelId);
+}
+
+/**
+ * A conversation as the API answers it, in the names the app's screens and its socket events use:
+ * the API calls a conversation's Bots `botIds`.
+ */
+export function channelOf({ botIds, ...rest }: Conversation): AgentChannel {
+  return { ...rest, agentIds: botIds, work: rest.work as ChannelWork[] };
+}
+
+function channelSummaryOf({
+  botIds,
+  lastMessageBotId,
+  ...rest
+}: ConversationSummary): ChannelSummary {
+  return {
+    ...rest,
+    agentIds: botIds,
+    lastMessageAgentId: lastMessageBotId,
+    work: rest.work as ChannelWork[],
+  };
+}
+
+function channelPageOf(page: {
+  conversations: ConversationSummary[];
+  nextCursor: string | null;
+}): ChannelPage {
+  return {
+    channels: page.conversations.map(channelSummaryOf),
+    nextCursor: page.nextCursor,
+  };
 }

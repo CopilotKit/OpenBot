@@ -502,33 +502,8 @@ done"#;
     /// An engine command, to its end or `limit`. Its exit status and at most `cap` bytes of stdout.
     fn run(&self, args: &[&str], limit: Duration, cap: usize) -> Option<(bool, Vec<u8>)> {
         let mut command = (self.engine)();
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        let mut child = command.spawn().ok()?;
-        let stdout = child.stdout.take()?;
-        let (sender, received) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stdout.take(cap as u64).read_to_end(&mut bytes);
-            let _ = sender.send(bytes);
-        });
-        let until = Instant::now() + limit;
-        let status = loop {
-            if let Some(status) = child.try_wait().ok()? {
-                break status;
-            }
-            if Instant::now() >= until {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        let bytes = received.recv_timeout(Duration::from_secs(5)).ok()?;
-        Some((status.success(), bytes))
+        command.args(args);
+        run_within(command, limit, cap)
     }
 
     /// `args` run in the node.
@@ -716,6 +691,41 @@ pub fn disk_pressure_of(json: &[u8]) -> Option<bool> {
         })
         .collect();
     (!said.is_empty()).then(|| said.contains(&true))
+}
+
+/// An engine command, to its end or `limit`: its exit status and at most `cap` bytes of stdout.
+/// One still running at `limit` is killed and gives no answer.
+pub(crate) fn run_within(
+    mut command: Command,
+    limit: Duration,
+    cap: usize,
+) -> Option<(bool, Vec<u8>)> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let (sender, received) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.take(cap as u64).read_to_end(&mut bytes);
+        let _ = sender.send(bytes);
+    });
+    let until = Instant::now() + limit;
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let bytes = received.recv_timeout(Duration::from_secs(5)).ok()?;
+    Some((status.success(), bytes))
 }
 
 /// What every k3d node on the engine says of `DiskPressure` (`Node::disk_pressure`): true when
@@ -924,6 +934,111 @@ pub fn download(
     done
 }
 
+/// Keeps an image from the kubelet's image garbage collection: containerd's CRI reports an image
+/// with this label as pinned, and the kubelet never removes a pinned image (containerd
+/// `pkg/cri/labels`, `PinnedImageLabelKey`; kubelet `image_gc_manager.go`).
+pub const PINNED: &str = "io.cri-containerd.pinned";
+
+/// The OpenBot release an image was downloaded ahead of, on the images `download_ahead` pinned.
+pub const READY_FOR: &str = "ai.copilotkit.openbot.ready-for";
+
+/**
+Download `images` into the stack's node ahead of an update, while the back end keeps running, and
+keep them there for it: OpenBot Desktop's background download of an announced release
+(`update_ready`).
+
+Unlike `download`, it never starts or stops the node. A node that is not running is
+`Done::Unavailable`, and the next try finds it running. Each image it downloads is labelled
+`PINNED`, because the kubelet removes images no container runs once the node's disk is 85% used,
+and these run nothing until the update; and `READY_FOR` the release, so a download for any other
+release takes the pin off again (`unpin_ready_for_other`).
+*/
+pub fn download_ahead(
+    node: &Node,
+    images: &CliImages,
+    release: &str,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    shown: &mut dyn FnMut(Download),
+) -> Result<Done, Stop> {
+    if node.running(limits) != Some(true) {
+        return Ok(Done::Unavailable);
+    }
+    let (done, planned) = download_planned(node, images, limits, cancelled, shown)?;
+    let ready_for = format!("{READY_FOR}={release}");
+    let pinned = format!("{PINNED}=pinned");
+    for reference in &planned {
+        let labelled = node
+            .exec(
+                &["ctr", "images", "label", reference, &pinned, &ready_for],
+                limits.call,
+                4096,
+            )
+            .is_some_and(|(ok, _)| ok);
+        if !labelled {
+            log::warn!("[local images] could not keep a downloaded image for the update");
+        }
+    }
+    Ok(done)
+}
+
+/**
+How many bytes of `images` the running node does not hold yet; `Some(0)` when it holds them all.
+None when the node is not running, or what the images are made of cannot be read.
+*/
+pub fn missing_bytes(node: &Node, images: &CliImages, limits: Limits) -> Option<u64> {
+    if node.running(limits) != Some(true) {
+        return None;
+    }
+    let planned = match plan(node, images, limits, &|| Ok(()), true).ok()? {
+        Planned::NothingToDo => return Some(0),
+        Planned::Unavailable => return None,
+        Planned::Images(planned) => planned,
+    };
+    let content = node.content(limits)?;
+    let progress = Progress::of(&planned);
+    Some(
+        progress
+            .blobs
+            .iter()
+            .map(|(blob, size)| size - content.held(blob, *size))
+            .sum(),
+    )
+}
+
+/**
+Take the pin off every image `download_ahead` kept for a release other than `keep`, so the kubelet
+may remove it again once nothing runs it: a release the app has since updated to, or one a newer
+release replaced before anybody installed it. How many it unpinned; none from a node that does not
+answer.
+*/
+pub fn unpin_ready_for_other(node: &Node, keep: Option<&str>, limits: Limits) -> usize {
+    let listed = |filter: &str| -> Option<HashSet<String>> {
+        let (ok, out) = node.exec(&["ctr", "images", "ls", "-q", filter], limits.call, 4 << 20)?;
+        ok.then(|| lines(&out).map(str::to_owned).collect())
+    };
+    let Some(mut ours) = listed(&format!("labels.\"{READY_FOR}\"")) else {
+        return 0;
+    };
+    if let Some(keep) = keep {
+        match listed(&format!("labels.\"{READY_FOR}\"=={keep}")) {
+            Some(kept) => ours.retain(|reference| !kept.contains(reference)),
+            None => return 0,
+        }
+    }
+    let cleared = (format!("{PINNED}="), format!("{READY_FOR}="));
+    ours.iter()
+        .filter(|reference| {
+            node.exec(
+                &["ctr", "images", "label", reference, &cleared.0, &cleared.1],
+                limits.call,
+                4096,
+            )
+            .is_some_and(|(ok, _)| ok)
+        })
+        .count()
+}
+
 fn download_into(
     node: &Node,
     images: &CliImages,
@@ -931,6 +1046,17 @@ fn download_into(
     cancelled: &dyn Fn() -> bool,
     shown: &mut dyn FnMut(Download),
 ) -> Result<Done, Stop> {
+    download_planned(node, images, limits, cancelled, shown).map(|(done, _)| done)
+}
+
+/// `download_into`, with the images it downloaded, by the references it pulled them as.
+fn download_planned(
+    node: &Node,
+    images: &CliImages,
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    shown: &mut dyn FnMut(Download),
+) -> Result<(Done, Vec<String>), Stop> {
     let check = || {
         if cancelled() {
             Err(Stop::Cancelled)
@@ -942,12 +1068,12 @@ fn download_into(
     // there. A node where it cannot be written downloads from the registry, as before.
     node.apply_mirror(limits);
     let planned = match plan(node, images, limits, &check, true)? {
-        Planned::Unavailable => return Ok(Done::Unavailable),
-        Planned::NothingToDo => return Ok(Done::NothingToDo),
+        Planned::Unavailable => return Ok((Done::Unavailable, Vec::new())),
+        Planned::NothingToDo => return Ok((Done::NothingToDo, Vec::new())),
         Planned::Images(planned) => planned,
     };
     let Some(content) = node.content(limits) else {
-        return Ok(Done::Unavailable);
+        return Ok((Done::Unavailable, Vec::new()));
     };
     let mut progress = Progress::of(&planned);
     progress.observe(&content, shown);
@@ -965,7 +1091,13 @@ fn download_into(
     if let Some(content) = node.content(limits) {
         progress.observe(&content, shown);
     }
-    Ok(Done::Downloaded)
+    Ok((
+        Done::Downloaded,
+        planned
+            .into_iter()
+            .map(|(reference, _)| reference)
+            .collect(),
+    ))
 }
 
 /// Each image the CLI will pull, with the blobs it is made of for the node, by digest and size.
@@ -1499,6 +1631,21 @@ fn main() {
                 ["ctr", "images", "ls", "-q"] => {}
                 ["uname", "-m"] => out(b"aarch64\n"),
                 ["ctr", "content", "fetch-object", "--hosts-dir", _, reference] => {
+                    // The first `together` lookups each wait until all of them have begun: that many
+                    // are running at once. One that waits out its patience instead says so in `alone`.
+                    let together: usize = String::from_utf8(read("together")).unwrap().trim().parse().unwrap();
+                    let claim = |n: usize| std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("lookup-{n}"))).is_ok();
+                    let slot = (1..).find(|n| claim(*n)).unwrap();
+                    if slot <= together {
+                        let last = dir.join(format!("lookup-{together}"));
+                        let patience = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                        while !last.exists() && std::time::Instant::now() < patience {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        if !last.exists() {
+                            std::fs::write(dir.join("alone"), format!("lookup {slot} of {together}\n")).unwrap();
+                        }
+                    }
                     if reference.ends_with(&String::from_utf8(read("manifest-digest")).unwrap().trim().to_owned()) {
                         out(&read("manifest"));
                     } else {
@@ -1519,7 +1666,10 @@ fn main() {
     arrived. Before saying anything, the release's 16 images were looked up one after another,
     about 34 calls into the node at a second and a half each. Here each call takes a second: one
     after another that is over 36 seconds before the first figure, and at `LOOKUPS_AT_ONCE` about
-    eleven. The first figure is the whole release's size, with what the captured ingests hold.
+    eleven. What makes it seconds is that the lookups run together, so that is what this proves:
+    the first lookups wait for each other in the engine, which they can only all do if they run at
+    once, however fast or slow the computer. The first figure is the whole release's size, with
+    what the captured ingests hold.
     */
     #[test]
     fn a_first_setups_download_is_shown_within_seconds_of_its_node_appearing() {
@@ -1553,16 +1703,19 @@ fn main() {
                 .map(|n| format!("docker.io/example/fixed-{n}@{index_digest}"))
                 .collect(),
         };
+        // The release's five tagged images are its first lookups, and all five run at once.
+        let together = images.tagged.len();
+        std::fs::write(root.join("together"), together.to_string()).unwrap();
         let engine = || crate::quiet::command(&engine_binary);
         let limits = Limits {
             stall: Duration::from_secs(60),
             image: Duration::from_secs(60),
             poll: Duration::from_millis(100),
-            call: Duration::from_secs(30),
+            call: Duration::from_secs(60),
         };
-        let started = Instant::now();
-        let give_up = started + Duration::from_secs(25);
-        let mut first: Option<(Duration, Download)> = None;
+        // Only so a follow that never shows anything ends; nothing here is timed.
+        let give_up = Instant::now() + Duration::from_secs(300);
+        let mut first: Option<Download> = None;
         let shown = std::sync::atomic::AtomicBool::new(false);
         follow_new_stack(
             &engine,
@@ -1571,16 +1724,16 @@ fn main() {
             limits,
             &|| shown.load(std::sync::atomic::Ordering::SeqCst) || Instant::now() >= give_up,
             &mut |download| {
-                first.get_or_insert((started.elapsed(), download));
+                first.get_or_insert(download);
                 shown.store(true, std::sync::atomic::Ordering::SeqCst);
             },
         );
+        let alone = std::fs::read_to_string(root.join("alone")).ok();
+        let met = root.join(format!("lookup-{together}")).exists();
         let _ = std::fs::remove_dir_all(&root);
-        let (after, download) = first.expect("a figure was shown");
-        assert!(
-            after < Duration::from_secs(20),
-            "first figure after {after:?}"
-        );
+        let download = first.expect("a figure was shown");
+        assert_eq!(alone, None, "a lookup ran without the others");
+        assert!(met, "fewer than {together} lookups began");
         // The image's config and twelve layers, once however many images share them.
         let manifest: Value = serde_json::from_slice(
             &std::fs::read(format!("{fixtures}app-api-0.16.0-rc.9-linux-arm64.raw")).unwrap(),
@@ -1892,6 +2045,20 @@ pub(crate) mod live {
 
         pub(crate) fn node(&self) -> Node<'static> {
             Node::for_stack(&engine, &self.stack)
+        }
+
+        /// The address of the network the node, the registry and the proxy share, on the engine's
+        /// bridge: the proxy answers on its port 5000.
+        pub(crate) fn bridge_address(&self) -> String {
+            docker(&[
+                "inspect",
+                "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                &self.registry,
+            ])
+            .1
+            .trim()
+            .to_owned()
         }
 
         /// The node stopped, as Quit leaves a stack, or whether it is running.

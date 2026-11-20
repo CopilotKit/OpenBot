@@ -20,12 +20,12 @@ import { DISCLOSURE_SHORT } from "../ui/disclosure";
 const LEARNING_SENTENCES: Partial<Record<LearningSpaceState["state"], string>> =
   {
     unassigned:
-      "Learning will not see this recording: Automatic Learning is off in this OpenBot. It still goes to OpenBot's back end.",
+      "Learning will not see this recording: Automatic Learning is off in this OpenBot. It still goes to OpenBot's backend.",
     missing:
-      "Learning will not see this recording: your Learning space could not be made. Ask an admin to check Admin, Automatic Learning. It still goes to OpenBot's back end.",
+      "Learning will not see this recording: your Learning space could not be made. Ask an admin to check Admin, Automatic Learning. It still goes to OpenBot's backend.",
     // OpenBot could not read its Learning settings, or your space was still being made, so it named none.
     unverified:
-      "Learning may not see this recording: OpenBot could not reach your Learning space just now. It still goes to OpenBot's back end.",
+      "Learning may not see this recording: OpenBot could not reach your Learning space just now. It still goes to OpenBot's backend.",
   };
 
 /**

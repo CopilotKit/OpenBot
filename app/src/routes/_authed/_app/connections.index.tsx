@@ -4,13 +4,17 @@ import {
   IconBrandNotion,
   IconCheck,
   IconChevronRight,
-  IconKey,
   IconLock,
   IconPlug,
+  IconPlus,
   IconSearch,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  type LinkOptions,
+} from "@tanstack/react-router";
 import * as React from "react";
 import {
   PageEmpty,
@@ -25,12 +29,13 @@ import {
   linkedNotice,
   visibleLinkedNotice,
 } from "@/components/settings/linked-notice";
-import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Item,
   ItemActions,
@@ -39,12 +44,15 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
+import {
+  appSetupQueryOptions,
+  appsQueryOptions,
+  catalogueQueryOptions,
+} from "@/lib/apps/queries";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
   connectionRows,
-  personalAppsNeedingSetup,
   personalConnectionRows,
 } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -55,16 +63,18 @@ import {
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
+  addedByUrlListedOn,
   brokeredAccountsListedOn,
   serversListedFor,
   sharedAccountsListedOn,
 } from "@/lib/plugins/listed";
-import { moreAppsRow } from "@/lib/plugins/provider-vocabulary";
+import {
+  directoryProvider,
+  moreAppsRow,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   connectionsQueryOptions,
   personalConnections,
-  pluginsPageQueryOptions,
-  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
@@ -291,7 +301,13 @@ function RouteComponent() {
     });
   }, [outcome, authorized, linked, navigate]);
   const [search, setSearch] = React.useState("");
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const apps = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
+  /* The three reads the apps on this page come from, waited for and failed together. */
+  const appReads = [apps, catalogue, setup];
+  const appsError = appReads.find((read) => read.error)?.error ?? null;
+  const appsFetching = appReads.some((read) => read.isFetching);
   const connections = useQuery(connectionsQueryOptions());
 
   /*
@@ -303,7 +319,7 @@ function RouteComponent() {
       (row) => row.serverId,
     ),
   );
-  const added = new Set((plugins.data?.servers ?? []).map((s) => s.id));
+  const added = new Set((apps.data ?? []).map((s) => s.id));
 
   /*
    * Only vendors reached as a person, and only ones an administrator has enabled.
@@ -312,7 +328,7 @@ function RouteComponent() {
    * so listing it here would offer a choice you do not have. And a vendor nobody has enabled cannot
    * be connected at all, because there is no OAuth client to consent against.
    */
-  const yours = (plugins.data?.catalogue ?? []).filter(
+  const yours = (catalogue.data ?? []).filter(
     (entry) => entry.auth === "user-oauth" && added.has(entry.key),
   );
 
@@ -326,31 +342,40 @@ function RouteComponent() {
    * EXCEPT THE ONES THAT NEED NO ACCOUNT, WHICH IS THE SAME RULE THE `user-oauth` FILTER ABOVE IS.
    * That one keeps out a vendor with a shared token because it "has nothing for you to decide"; a
    * Composio `NO_AUTH` app has exactly as little, one layer further in. There is no account to make:
-   * `/servers/:id/connect` refuses to create one and the call gate lets it through with no row, so
+   * connectApp refuses to create one and the call gate lets it through with no row, so
    * a row for it here can never turn green. What an admin enabling Hacker News put on every
    * person's page was a permanently grey "Not connected" that reads as an unfinished task, opening
    * a page that says the app needs no account and draws no button — the list and the page it opens
    * contradicting each other, with the list the more believable of the two.
    *
-   * ASKED OF THE RECORDED SCHEME, which this read already carries and the detail route already
-   * consumes. Anything that is not the vendor's `NO_AUTH` is an app somebody connects, an
-   * unrecorded scheme included: a row whose column was never written is far likelier to be a key or
-   * consent app, and dropping it here would hide a connection somebody does have.
+   * ASKED OF THE APP'S `connectsWith`, which this read already carries and the detail route already
+   * consumes. Anything that is not `nothing` is an app somebody connects, one OpenBot couldn't read
+   * included: such an app is far likelier to take a key or a sign-in, and dropping it here would
+   * hide a connection somebody does have.
    */
-  const listed = plugins.data ? serversListedFor(plugins.data) : [];
+  const listed =
+    apps.data && setup.data
+      ? serversListedFor({
+          servers: apps.data,
+          directoryAvailable: setup.data.directoryAvailable,
+          directoryProvider: directoryProvider(setup.data),
+        })
+      : [];
   /*
    * THE PERSONAL EDITION LISTS EVERY APP HERE, added or not, because the one person is the one who
    * adds it: a tile's press adds the app and connects it in one go (`useConnectApp`).
    */
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  /** Undefined until it answers, and on a failed read: neither edition's guidance is assumed. */
+  const edition = capabilities.data?.edition;
+  const personal = edition === "personal";
   const connectApp = useConnectApp();
   const paths = useManagePaths();
   // The broker's directory of more apps, as one more tile, where a broker is set up.
-  const provider = pluginsProvider(plugins.data);
+  const provider = directoryProvider(setup.data);
   const moreApps = moreAppsRow(
     provider,
-    plugins.data?.composioConfigured ?? false,
+    setup.data?.directoryAvailable ?? false,
     paths.edition,
   );
   const browse = personal && moreApps.linked ? moreApps : null;
@@ -358,25 +383,13 @@ function RouteComponent() {
     arrival.authorized,
     paths.edition,
   );
-  /*
-   * Apps that need a key or an OAuth client typed first stay out of the personal grid until asked
-   * for, or searched for by name. See `personalConnectionRows`.
-   */
-  const [showSetup, setShowSetup] = React.useState(false);
   const query = search.trim().toLocaleLowerCase();
-  const needingSetup = personal
-    ? personalAppsNeedingSetup({
-        catalogue: plugins.data?.catalogue ?? [],
-        added,
-        connected,
-      })
-    : 0;
   const rows = personal
     ? personalConnectionRows({
-        everything: showSetup || query !== "",
-        catalogue: plugins.data?.catalogue ?? [],
+        catalogue: catalogue.data ?? [],
         added,
         brokered: brokeredAccountsListedOn(listed),
+        byUrl: addedByUrlListedOn(listed),
         connected,
         links: links.data ?? [],
         providers: providers.data,
@@ -385,6 +398,7 @@ function RouteComponent() {
         catalogue: yours,
         brokered: brokeredAccountsListedOn(listed),
         shared: sharedAccountsListedOn(listed),
+        byUrl: addedByUrlListedOn(listed),
         connected,
         links: links.data ?? [],
         providers: providers.data,
@@ -392,19 +406,51 @@ function RouteComponent() {
   const matching = rows.filter((row) =>
     `${row.title} ${row.summary}`.toLocaleLowerCase().includes(query),
   );
-  const inUse = rows.filter((row) => row.state !== "available").length;
+  /*
+   * The personal edition answers two questions, one section each: what your Bots use, and what you
+   * can add. Every app you could add is in the second, the ones that need a key included, and the
+   * broker's directory is its last tile.
+   */
+  const yourApps = matching.filter((row) => row.state !== "available");
+  const toAdd = matching.filter((row) => row.state === "available");
   /*
    * The apps decide whether there is a list at all, and the account links only add to it: a failed
    * links read costs the GitHub and Slack rows and says so, not the whole page.
    */
   const loading =
-    plugins.isPending ||
+    appReads.some((read) => read.isPending) ||
     connections.isPending ||
     links.isPending ||
-    providers.isPending;
+    providers.isPending ||
+    // Which rows there are depends on the edition, so the team list never flashes before the personal one.
+    capabilities.isPending;
+  /*
+   * Whether the apps are on screen at all: loaded, read without error, and something matches the
+   * search. A search that matches nothing says so once, with no section or directory tile under it.
+   */
+  const showingApps =
+    !loading &&
+    !appsError &&
+    !connections.error &&
+    rows.length > 0 &&
+    matching.length > 0;
 
   return (
     <PageShell
+      /*
+       * The page's one verb: an MCP server OpenBot doesn't list, added by its address. Its own screen,
+       * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
+       */
+      action={
+        <Button
+          render={(props) => <Link {...props} to="/connections/new" />}
+          size="sm"
+          variant="outline"
+        >
+          <IconPlus />
+          Add server
+        </Button>
+      }
       className="@container"
       description={
         personal
@@ -450,155 +496,241 @@ function RouteComponent() {
         </p>
       ) : null}
       {/*
-       * One section, so it carries no heading of its own: "Your connections" under "Connections"
-       * said the same thing twice, 48px apart, and the description now sits under the page title.
+       * The first section has no heading of its own: in the team edition it is the page's one list,
+       * and "Your connections" under "Connections" said the same thing twice. It holds the search,
+       * which filters every section under it. In the personal edition Your apps and Add an app
+       * follow as sections of their own.
        */}
       <PageSection>
         {/*
-         * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
-         * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
+         * BOTH APP READS DECIDE THIS. Apps that loaded (listApps, the catalogue, getAppSetup) beside a
+         * listConnections that failed would leave the `connected` set empty and every row
          * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
          * nothing is listed rather than a list that may be wrong.
          */}
-        {loading ? null : plugins.error || connections.error ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load your connections. Reload the page, or ask an admin if
-            it keeps happening.
-          </p>
+        {loading ? (
+          <ConnectionsLoading />
+        ) : appsError || connections.error ? (
+          /*
+           * A failed read is not missing setup, so Retry comes first. Only the team edition has an
+           * admin to ask; a personal owner is pointed at Setup, which is theirs.
+           */
+          <div className="mt-4 flex flex-col items-start gap-3" role="alert">
+            <p className="text-destructive text-sm">
+              {edition === "team"
+                ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
+                : edition === "personal"
+                  ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
+                  : "Couldn't load your connections. Try again."}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                disabled={appsFetching || connections.isFetching}
+                onClick={() => {
+                  for (const read of appReads)
+                    if (read.error) void read.refetch();
+                  if (connections.error) void connections.refetch();
+                }}
+                size="sm"
+                variant="outline"
+              >
+                {appsFetching || connections.isFetching ? "Retrying…" : "Retry"}
+              </Button>
+              {edition === "personal" ? (
+                <Button
+                  render={<Link to="/settings/setup" />}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Open Setup
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : rows.length === 0 ? (
-          <PageEmpty icon={IconPlug} title="No apps yet">
-            Apps show up here once an admin turns them on.
+          <PageEmpty
+            action={
+              edition === "personal" ? (
+                <Button
+                  render={<Link to="/settings/setup" />}
+                  size="sm"
+                  variant="outline"
+                >
+                  Open Setup
+                </Button>
+              ) : undefined
+            }
+            icon={IconPlug}
+            title="No apps yet"
+          >
+            {edition === "team"
+              ? "Apps show up here once an admin turns them on."
+              : edition === "personal"
+                ? "Apps show up here once OpenBot is set up to reach them."
+                : "Apps show up here once they're turned on."}
           </PageEmpty>
         ) : (
           <>
-            <div className="flex items-center gap-3">
-              <InputGroup className="h-9 flex-1 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
-                <InputGroupAddon>
-                  <IconSearch aria-hidden="true" className="size-4" />
-                </InputGroupAddon>
-                <InputGroupInput
-                  aria-label="Search connections"
-                  placeholder="Search connections"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </InputGroup>
-              <p className="shrink-0 text-xs text-muted-foreground">
-                {inUse} in use · {rows.length} in all
-              </p>
-            </div>
+            <InputGroup className="h-9 border-transparent bg-muted/60 shadow-none dark:bg-muted/60">
+              <InputGroupAddon>
+                <IconSearch aria-hidden="true" className="size-4" />
+              </InputGroupAddon>
+              <InputGroupInput
+                aria-label="Search connections"
+                placeholder="Search connections"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </InputGroup>
             {matching.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground" role="status">
+              <PageEmpty icon={IconSearch} title="No matches">
                 Nothing matches “{search.trim()}”.
-              </p>
-            ) : (
-              /*
-               * A grid of separate cards, where every other list is one `PageRows` card of divided
-               * rows. The accepted exception: connections are apps you pick out by their mark, so
-               * they are laid out as tiles two across rather than read down as a list.
-               */
-              <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
-                {matching.map((row) => (
-                  <ConnectionItem
-                    key={row.key}
-                    onPress={
-                      row.state === "available" &&
-                      (row.action === "connect" || row.action === "add")
-                        ? () =>
-                            void connectApp.run(
-                              row.key,
-                              row.action as "connect" | "add",
-                            )
-                        : undefined
-                    }
-                    pending={connectApp.pending === row.key}
-                    row={row}
-                  />
-                ))}
-                {browse ? (
-                  <Item
-                    className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
-                    data-testid="account-browse"
-                    render={<Link {...paths.brokerDirectory(provider)} />}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RowMark className="size-9">
-                      <IconApps className="size-4" />
-                    </RowMark>
-                    <ItemContent className="min-w-0 gap-0.5">
-                      <ItemTitle className="block w-auto truncate">
-                        {browse.title}
-                      </ItemTitle>
-                      <ItemDescription className="line-clamp-1 text-xs">
-                        {browse.description}
-                      </ItemDescription>
-                    </ItemContent>
-                  </Item>
-                ) : null}
-              </div>
+              </PageEmpty>
+            ) : personal ? null : (
+              <ConnectionGrid connectApp={connectApp} rows={matching} />
             )}
-            {needingSetup > 0 && !showSetup && query === "" ? (
-              <Button
-                className="mt-3"
-                onClick={() => setShowSetup(true)}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Show {needingSetup === 1 ? "1 app" : `${needingSetup} apps`}{" "}
-                that need setup
-              </Button>
-            ) : null}
           </>
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Reload the
-            page.
+            Couldn't load GitHub and Slack, so they aren't listed. Try again in
+            a moment.
           </p>
         ) : null}
       </PageSection>
-      {/*
-       * The rest of what a Bot signs in with. Saved logins and keys live under Settings; these rows
-       * are a way in from beside the apps that use them, in the personal edition.
-       */}
-      {personal ? (
-        <PageSection title="Sign-ins and keys">
-          <PageRows>
-            <Item render={<Link to="/settings/passwords" />} size="sm">
-              <ItemMedia variant="icon">
-                <IconLock />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Saved logins</ItemTitle>
-                <ItemDescription>
-                  Website logins you saved when signing a Bot in.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </ItemActions>
-            </Item>
-            <Separator />
-            <Item render={<Link {...paths.credentials()} />} size="sm">
-              <ItemMedia variant="icon">
-                <IconKey />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>Keys</ItemTitle>
-                <ItemDescription>
-                  API keys and tokens your apps and models use.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </ItemActions>
-            </Item>
-          </PageRows>
+      {showingApps && personal && yourApps.length > 0 ? (
+        <PageSection title="Your apps">
+          <ConnectionGrid connectApp={connectApp} rows={yourApps} />
         </PageSection>
       ) : null}
+      {showingApps && personal && (toAdd.length > 0 || browse) ? (
+        <PageSection title="Add an app">
+          <ConnectionGrid connectApp={connectApp} rows={toAdd}>
+            {browse ? (
+              <BrowseTile
+                browse={browse}
+                link={paths.brokerDirectory(provider)}
+              />
+            ) : null}
+          </ConnectionGrid>
+        </PageSection>
+      ) : null}
+      {/*
+       * The rest of what a Bot signs in with. Saved logins and keys live in the Vault, under
+       * Settings; this row is a way in from beside the apps that use them.
+       */}
+      <PageSection>
+        <PageRows>
+          <Item render={<Link to="/settings/vault" />} size="sm">
+            <ItemMedia variant="icon">
+              <IconLock />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Vault</ItemTitle>
+              <ItemDescription>
+                {personal
+                  ? "Your saved logins and the keys your apps and models use."
+                  : "Website logins you saved when signing a Bot in."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
     </PageShell>
+  );
+}
+
+/**
+ * Tiles two across, where every other list is one `PageRows` card of divided rows. The accepted
+ * exception: connections are apps you pick out by their mark, so they are laid out as tiles rather
+ * than read down as a list. In the personal edition, pressing a tile that is not in use connects or
+ * adds it. `children` go after the tiles.
+ */
+function ConnectionGrid({
+  rows,
+  connectApp,
+  children,
+}: {
+  rows: ConnectionRow[];
+  connectApp: ReturnType<typeof useConnectApp>;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+      {rows.map((row) => (
+        <ConnectionItem
+          key={row.key}
+          onPress={
+            row.state === "available" &&
+            (row.action === "connect" || row.action === "add")
+              ? () =>
+                  void connectApp.run(row.key, row.action as "connect" | "add")
+              : undefined
+          }
+          pending={connectApp.pending === row.key}
+          row={row}
+        />
+      ))}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The page's shape before the apps and your accounts have both answered: the search box and a grid
+ * of tiles as tall as real ones. No tile says Connect or Connected until both reads are in, so an
+ * account you have is never shown as one you don't.
+ */
+function ConnectionsLoading() {
+  return (
+    <div aria-label="Loading your connections" role="status">
+      <div aria-hidden="true">
+        <Skeleton className="h-9 w-full rounded-md bg-muted/60 motion-reduce:animate-none" />
+        <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
+          {["a", "b", "c", "d"].map((key) => (
+            <div
+              className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-card px-3"
+              key={key}
+            >
+              <Skeleton className="size-8 rounded-md motion-reduce:animate-none" />
+              <Skeleton className="h-3.5 w-28 motion-reduce:animate-none" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The broker's directory of more apps, as the last tile of Add an app. */
+function BrowseTile({
+  browse,
+  link,
+}: {
+  browse: { title: string; description: string };
+  link: LinkOptions;
+}) {
+  return (
+    <Item
+      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
+      data-testid="account-browse"
+      render={<Link {...link} />}
+      size="sm"
+      variant="outline"
+    >
+      <RowMark className="size-9">
+        <IconApps className="size-4" />
+      </RowMark>
+      <ItemContent className="min-w-0 gap-0.5">
+        <ItemTitle className="block w-auto truncate">{browse.title}</ItemTitle>
+        <ItemDescription className="line-clamp-1 text-xs">
+          {browse.description}
+        </ItemDescription>
+      </ItemContent>
+    </Item>
   );
 }
 
@@ -687,9 +819,11 @@ function ConnectionStateLabel({
     );
   }
   if (state === "team") {
-    return <span className="text-xs text-muted-foreground">Team account</span>;
+    return (
+      <span className="text-xs text-muted-foreground">Shared account</span>
+    );
   }
-  return (
+  const pill = (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
       {pending
         ? row.action === "add"
@@ -700,4 +834,19 @@ function ConnectionStateLabel({
           : ACTION_LABEL[row.action ?? "connect"]}
     </span>
   );
+  // Added and not signed in to: said in words, beside the press that connects it.
+  if (state === "available" && row.notConnected && !pending) {
+    return (
+      <span className="flex items-center gap-2">
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="tile-not-connected"
+        >
+          Not connected
+        </span>
+        {pill}
+      </span>
+    );
+  }
+  return pill;
 }

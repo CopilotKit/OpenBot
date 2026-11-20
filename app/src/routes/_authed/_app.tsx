@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { UpdateBanner } from "@/components/layout/update-banner";
@@ -31,9 +32,10 @@ function RouteComponent() {
      * rounded corners on screen. A growable shell lets the transcript's scroller size against the
      * page, grow it, and grow again. Admin and settings use the same panel.
      */
-    <SidebarShell className="h-svh overflow-hidden" name="app" width="340px">
+    <SidebarShell className="h-svh overflow-hidden">
       <AppSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
+        <ConnectionBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <Outlet />

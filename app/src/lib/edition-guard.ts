@@ -16,7 +16,7 @@ export async function editionOf(
  * A `beforeLoad` for a page only the personal edition has: anywhere else it sends the person to
  * `to`, the page that holds the same thing there.
  */
-export function personalOnly(to: "/connections" | "/settings") {
+export function personalOnly(to: "/connections" | "/settings" | "/skills") {
   return async ({ context }: { context: { queryClient: QueryClient } }) => {
     if ((await editionOf(context.queryClient)) !== "personal") {
       throw redirect({ to });

@@ -1,8 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-/** Memory moved from Settings to Capabilities. */
+/** Settings → Memory is Memory in the main menu now, which sends the personal edition on itself. */
 export const Route = createFileRoute("/_authed/settings/memory")({
   beforeLoad: () => {
-    throw redirect({ to: "/capabilities/memory", replace: true });
+    throw redirect({ to: "/memory", replace: true });
   },
 });

@@ -1,0 +1,92 @@
+[
+  {
+    "name": "openbot-desktop_data",
+    "id": "e7a4ec37cf89f21d47ff84b1ee03ced359eb4f2ec3e05c01b03e18bc7acf81ce",
+    "driver": "bridge",
+    "network_interface": "podman2",
+    "created": "2026-11-11T01:37:33.955462657Z",
+    "subnets": [
+      {
+        "subnet": "10.89.1.0/24",
+        "gateway": "10.89.1.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": true,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {
+      "793a4cc482d0970fb2464f9a99b301c10211b298ae0ae161a216edb98ca13f6f": {
+        "name": "server",
+        "interfaces": {
+          "eth1": {
+            "subnets": [
+              {
+                "ipnet": "10.89.1.2/24",
+                "gateway": "10.89.1.1"
+              }
+            ],
+            "mac_address": "aa:5a:79:93:b4:0d"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "openbot-desktop_default",
+    "id": "69db15440d68ada66268c11e200b3cfcc244151863de39f95c8e5aa751e2c45c",
+    "driver": "bridge",
+    "network_interface": "podman1",
+    "created": "2026-11-11T01:37:33.825490963Z",
+    "subnets": [
+      {
+        "subnet": "10.89.0.0/24",
+        "gateway": "10.89.0.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": true,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {
+      "793a4cc482d0970fb2464f9a99b301c10211b298ae0ae161a216edb98ca13f6f": {
+        "name": "server",
+        "interfaces": {
+          "eth0": {
+            "subnets": [
+              {
+                "ipnet": "10.89.0.2/24",
+                "gateway": "10.89.0.1"
+              }
+            ],
+            "mac_address": "2e:cb:c6:6b:95:09"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "podman",
+    "id": "2f259bab93aaaaa2542ba43ef33eb990d0999ee1b9924b557b7be53c0b7a1bb9",
+    "driver": "bridge",
+    "network_interface": "podman0",
+    "created": "2026-11-11T01:37:41.033747275Z",
+    "subnets": [
+      {
+        "subnet": "10.88.0.0/16",
+        "gateway": "10.88.0.1"
+      }
+    ],
+    "ipv6_enabled": false,
+    "internal": false,
+    "dns_enabled": false,
+    "ipam_options": {
+      "driver": "host-local"
+    },
+    "containers": {}
+  }
+]

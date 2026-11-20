@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import type { UpdateReadiness } from "../../shared/desktop-updates";
 import { asProblem } from "./Problem";
+import { useUpdateOpenBotShowing } from "./UpdateOpenBot";
 
 /**
  * What the shell offers. The same answer OpenBot's own page reads for its update banner, so the
@@ -18,6 +20,11 @@ export type AppUpdate = {
   } | null;
   /** False on a build that never updates itself: an internal or candidate build, or one without the updater. */
   updatesItself: boolean;
+  /**
+   * How ready the newer version is: downloading in the background while this one runs, or all
+   * here. Null before the shell starts on it; absent from a shell older than the field.
+   */
+  ready?: UpdateReadiness | null;
 };
 
 /**
@@ -48,6 +55,7 @@ export function UpdateOffer() {
   const [declined, setDeclined] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const standingBack = useUpdateOpenBotShowing();
 
   useEffect(() => {
     let current = true;
@@ -95,15 +103,21 @@ export function UpdateOffer() {
   }, []);
 
   const version = offer?.version;
+  // The window says an OpenBot needs this update, with its own Update and restart: one is enough.
+  if (standingBack) return null;
   if (!offer || !version || version === declined) return null;
   const progress = offer.installing;
+  const ready = offer.ready;
 
   return (
     <section className="update-offer" aria-labelledby="update-offer-title">
-      <h2 id="update-offer-title">OpenBot {version} is available</h2>
+      <h2 id="update-offer-title">
+        {ready?.state === "ready"
+          ? `OpenBot ${version} is ready to install`
+          : `OpenBot ${version} is available`}
+      </h2>
       <p>
-        You are running {offer.current}. Updating downloads the new version and
-        restarts OpenBot.
+        You are running {offer.current}. {readiness(ready)}
       </p>
       <div className="row">
         <button
@@ -131,6 +145,24 @@ export function UpdateOffer() {
       )}
     </section>
   );
+}
+
+/**
+ * What updating takes from here: the new version downloading in the background while this one
+ * runs, all of it here already, or the download still to do.
+ */
+export function readiness(ready: AppUpdate["ready"]): string {
+  if (ready?.state === "ready") {
+    return "Installing it takes a few minutes and restarts OpenBot.";
+  }
+  if (ready?.state === "preparing") {
+    const share =
+      ready.total > 0
+        ? Math.min(99, Math.floor((ready.done / ready.total) * 100))
+        : 0;
+    return `OpenBot is downloading it in the background (${share}%).`;
+  }
+  return "Updating downloads the new version and restarts OpenBot.";
 }
 
 /** "Downloading… 25%", then "Restarting…" once it is installed. */

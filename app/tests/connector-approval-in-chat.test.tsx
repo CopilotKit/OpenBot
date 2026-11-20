@@ -6,6 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, within } from "@testing-library/react";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import { queryClient } from "@/query-client";
+import { approvalInboxResponse } from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -33,14 +34,16 @@ beforeAll(() => {
             : input.url,
         "http://localhost",
       );
-      if (url.pathname === "/api/approvals")
-        return Response.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: false,
           requests: inbox,
           rules: [],
           teamRules: [],
           questions: [],
         });
+        if (approvals) return approvals;
+      }
       return Response.json({ error: "not served" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -114,7 +117,8 @@ test("an app's call OpenBot asks about draws its card in the conversation", asyn
         policy: {
           behaviour: "ask",
           source: "safety",
-          reason: "Sending something to other people always asks you first.",
+          reason: "Sending something to other people asks you first.",
+          kind: "sending",
         },
       },
     },
@@ -124,10 +128,53 @@ test("an app's call OpenBot asks about draws its card in the conversation", asyn
     await view.findByRole("region", { name: "Waiting for your approval" }),
   );
   expect(
-    card.getByText("Sending something to other people always asks you first."),
+    card.getByText("Sending something to other people asks you first."),
   ).toBeTruthy();
+  // Open by default: a send offers every answer, the conversation's among them.
+  for (const name of [
+    "Allow once",
+    "Allow for this conversation",
+    "Always allow here",
+    "Deny",
+  ])
+    expect(card.getByRole("radio", { name })).toBeTruthy();
+});
+
+test("a send the admin set to ask every time offers Allow once and Deny only", async () => {
+  inbox = [
+    {
+      id: "approval-2",
+      status: "pending",
+      createdAt: "2026-11-05T10:00:00.000Z",
+      action: {
+        botId: "personal-assistant",
+        toolRef: "arcade-GoogleCalendar/CreateEvent",
+        effect: "write",
+        scope: "arcade-GoogleCalendar",
+        threadId: "thread-1",
+        toolCallId: CALL,
+        args: { summary: "Spec review" },
+        target: {},
+        policy: {
+          behaviour: "ask",
+          source: "safety",
+          reason:
+            "Sending something to other people asks you every time. Your admin set this.",
+          kind: "sending",
+          closed: true,
+        },
+      },
+    },
+  ];
+  const view = draw();
+  const card = within(
+    await view.findByRole("region", { name: "Waiting for your approval" }),
+  );
   expect(card.getByRole("radio", { name: "Allow once" })).toBeTruthy();
   expect(card.getByRole("radio", { name: "Deny" })).toBeTruthy();
+  expect(
+    card.queryByRole("radio", { name: "Allow for this conversation" }),
+  ).toBeNull();
   expect(card.queryByRole("radio", { name: "Always allow here" })).toBeNull();
 });
 

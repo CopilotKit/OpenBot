@@ -1,13 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   ModelAllowlistSection,
   ModelChoiceSection,
   ModelUsageSection,
   ProviderSection,
 } from "@/components/admin/controls/model-sections";
-import { availableModelsQueryOptions } from "@/lib/models/queries";
 import { PageShell } from "@/components/layout/page-shell";
+import { availableModelsQueryOptions } from "@/lib/models/queries";
 
 export const Route = createFileRoute("/_authed/admin/providers")({
   component: ProvidersPage,
@@ -28,7 +28,7 @@ export function ProvidersPage() {
     <PageShell
       description={
         team
-          ? "See which provider serves your Bots' models, and choose which models people may pick. All changes appear in Audit."
+          ? "See which provider serves your Bots' models, and choose which models people may pick. All changes appear in Activity."
           : "See which provider serves your Bots' models and what they ran on."
       }
       title="Providers"

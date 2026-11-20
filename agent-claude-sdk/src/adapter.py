@@ -9,18 +9,32 @@ segments of the same running SDK query, resolving hooks by tool-use ID.
 
 It also keeps a failed tool call failed in the history that ends the turn; see
 `_keep_failures`, and passes a reply Claude Code recovered from a broken stream on once; see
-`_OneReply`.
+`_OneReply`. A large tool result reaches the model whole up to `INLINE_RESULT_CHARS`, the model can
+open one Claude Code saved to a file (`own_tool_results_only`), and the history keeps it whole
+either way (`_keep_saved_results`).
+
+A turn fits the model's window: the model's own window decides, not one Claude Code assumes
+(`UNKNOWN_MODEL_WINDOW`), a full Bot looks up its app tools rather than being sent all of them
+(`TOOL_SEARCH`), and a turn the model still refuses as too long is tried once more with every tool
+result cut (`_pump`).
 """
 
 import asyncio
+import hashlib
 import json
 import logging
+import os
+import re
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import get_args
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, RunStartedEvent
 from ag_ui_claude_sdk import ClaudeAgentAdapter
+from ag_ui_claude_sdk.utils import (
+    convert_agui_tool_to_claude_sdk,
+    create_state_management_tool,
+)
 from claude_agent_sdk import (
     AssistantMessage,
     CLIConnectionError,
@@ -30,13 +44,15 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ThinkingBlock,
+    ToolAnnotations,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
+    create_sdk_mcp_server,
 )
 from claude_agent_sdk.types import StreamEvent
 
-from .replay import run_replayed_query, system_instructions
+from .replay import RESULT_CHARS, cut_note, run_replayed_query, system_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +65,215 @@ AG_UI_TOOL_PREFIX = "mcp__ag_ui__"
 # `puppeteer` server").
 AG_UI_TOOLS = f"{AG_UI_TOOL_PREFIX}*"
 
+# The most characters a tool's name may have at the model provider, Anthropic's limit.
+#
+# Claude Code names each of OpenBot's tools `mcp__ag_ui__<name>`, so a name over 52 characters goes
+# past it. An app's actions are named `mcp__<app>__<ACTION>`, and many are that long:
+# `mcp__composio-slack__SLACK_FETCH_CONVERSATION_HISTORY` is 53 before the prefix. Such a tool
+# cannot be loaded or called, and a request that carries it is refused.
+TOOL_NAME_LIMIT = 64
+
+
+def callable_name(name):
+    """The name a tool is given in Claude Code: its own when it fits, otherwise cut and ended with a
+    short hash of the whole, so two long names that share a start never meet.
+
+    The same name always gives the same answer, so a call is named back to the tool it is
+    (`offered_names`) on every run.
+    """
+    room = TOOL_NAME_LIMIT - len(AG_UI_TOOL_PREFIX)
+    if len(name) <= room:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{name[: room - len(digest) - 1].rstrip('_')}_{digest}"
+
+
+def offered_names(tool_names):
+    """The name each tool is offered by, keyed by the name Claude Code calls it, where they differ."""
+    return {
+        callable_name(name): name for name in tool_names if callable_name(name) != name
+    }
+
+
+# Where Claude Code reads that an MCP tool loads with the session rather than behind its tool
+# search (code.claude.com/docs/en/mcp, "Mark a tool to load upfront or stay deferred").
+ALWAYS_LOAD = "anthropic/alwaysLoad"
+
+
+def loaded_upfront(input_data):
+    """The tools Claude Code is to hold from the start of the session instead of finding them.
+
+    Claude Code defers every MCP tool behind `ToolSearch`, OpenBot's own included, so a Bot searched
+    before it could remember a fact or draw a chart, and searched again on a follow-up for the very
+    app action it had just used. Loaded upfront:
+    - OpenBot's own tools, the ones not named after an app (`mcp__<app>__<ACTION>`): a Bot's memory,
+      its routines, its questions to the person, its computer and the components it draws. Few, and
+      used on most turns.
+    - Every tool this conversation has already called: what a follow-up is most likely to need.
+    - Every tool OpenBot's own search found in this conversation (`found`).
+
+    An app's other actions, the hundreds, stay behind the search.
+    """
+    names = {tool.name for tool in input_data.tools or []}
+    called = {
+        call.function.name
+        for message in input_data.messages or []
+        if getattr(message, "role", None) == "assistant"
+        for call in getattr(message, "tool_calls", None) or []
+    }
+    return {
+        name
+        for name in names
+        if not name.startswith("mcp__") or name in called or name in found(input_data)
+    }
+
+
+# The first line of every answer OpenBot's `search_tools` gives, naming the tools it found.
+TOOLS_FOUND_LINE = "Tools found:"
+
+
+def found(input_data):
+    """The tools OpenBot's own search found in this conversation, read from its answers' first line.
+
+    The model was told it can call them from its next step; held behind Claude Code's ToolSearch, it
+    had to search for each a second time first.
+    """
+    names = set()
+    for message in input_data.messages or []:
+        if getattr(message, "role", None) != "tool":
+            continue
+        content = getattr(message, "content", None)
+        if not isinstance(content, str):
+            continue
+        # A replayed answer may arrive JSON-encoded once more.
+        if content.startswith('"'):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                continue
+        first = content.split("\n", 1)[0]
+        if first.startswith(TOOLS_FOUND_LINE):
+            names.update(
+                name.strip() for name in first[len(TOOLS_FOUND_LINE) :].split(",") if name.strip()
+            )
+    return names
+
+
+def _loaded_upfront_in(server_config, names):
+    """The `ag_ui` server with `ALWAYS_LOAD` set on the tools named, by their callable names.
+
+    The SDK builds a tool's `_meta` from its annotations and has no field for this, so the server's
+    own tool listing is wrapped and the flag added to what it lists. A server built some other way
+    is left as it is, and every tool stays behind the search, as before.
+    """
+    server = server_config.get("instance")
+    entry = server.get_request_handler("tools/list") if hasattr(server, "get_request_handler") else None
+    if entry is None or not names:
+        if names:
+            logger.warning("Could not mark tools to load upfront; every tool stays behind ToolSearch.")
+        return server_config
+    listed = entry.handler
+
+    async def listing(context, params):
+        result = await listed(context, params)
+        for tool in result.tools:
+            if tool.name in names:
+                tool.meta = {**(tool.meta or {}), ALWAYS_LOAD: True}
+        return result
+
+    server.add_request_handler("tools/list", entry.params_type, listing)
+    return server_config
+
+# How large a result of one of OpenBot's tools Claude Code keeps in the conversation, in characters.
+#
+# Claude Code keeps a tool result over 50,000 characters out of the conversation: it saves it to a
+# file (`<config>/projects/<cwd>/<session>/tool-results/`) and shows the model a 2 KB preview and the
+# path. Every OpenBot tool reaches this harness as an MCP tool, so a page of email, an app's tool
+# list or a file the Bot read from its computer (up to 64,000 bytes) crossed it, and the turn's
+# history then kept the preview in place of the result. Claude Code lets an MCP tool raise its own
+# threshold, to at most 500,000, with `anthropic/maxResultSizeChars` (`ToolAnnotations` in the SDK).
+# 100,000 is what Claude Code otherwise lets an MCP tool return (`MAX_MCP_OUTPUT_TOKENS`, 25,000
+# tokens at the four characters a token it counts), so a result is never cut there and kept here.
+# A replay holds no result longer than this either (`RESULT_CHARS` in `replay`).
+INLINE_RESULT_CHARS = RESULT_CHARS
+
+# How many times Claude Code retries a failed API request on its own (code.claude.com/docs/en/errors:
+# `CLAUDE_CODE_MAX_RETRIES`, 10 by default, lowered "to surface failures faster in scripts").
+#
+# A delegated task's turn is retried by the server, which sorts the failure first and waits as long
+# as the provider asked. Under that, Claude Code's own ten retries multiply the server's and spend
+# the task's time before the server hears of the failure at all. So a run the server says it
+# retries itself (`forwardedProps.openbotSendOnce`) starts its query with none, and the failure is
+# handed back. Every other run keeps Claude Code's own retries.
+MAX_RETRIES = "CLAUDE_CODE_MAX_RETRIES"
+
+
+def sends_once(forwarded_props) -> bool:
+    """Whether the server retries this run itself, and so wants each request sent once."""
+    props = forwarded_props if isinstance(forwarded_props, dict) else {}
+    return props.get("openbotSendOnce") is True
+
+
+# Claude Code's switch for a model ID it does not know (code.claude.com/docs/en/env-vars).
+#
+# The Claude Code this harness ships (2.1.259, in claude-agent-sdk 0.2.152) predates Opus 5.5,
+# Sonnet 5.5 and Haiku 5.5 (added in 2.1.280, 2.1.284 and 2.1.293), so it does not know the model
+# OpenBot runs it on. Since 2.1.223 it holds a session on an unknown ID to the window it assumes for
+# one, 200K tokens, and those models have 1M ("prompt is too long: … tokens > 1000000 maximum",
+# measured on each). A Bot holding a few apps' tools and its instructions was near 200K before its
+# first tool result came back, so the request after it was refused by Claude Code itself, without
+# being sent: "Prompt is too long", on the first question of a conversation. Claude Code's own
+# compaction could not help, because a replay is one first prompt and there is no earlier exchange
+# to summarise (fixed upstream in 2.1.269). With this set, the provider's window decides.
+UNKNOWN_MODEL_WINDOW = "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"
+
+# The largest message the SDK reads from Claude Code, in bytes (`ClaudeAgentOptions.max_buffer_size`).
+#
+# Claude Code reports each tool result to the SDK whole, as one JSON line, even one it saved to a file
+# and showed the model only a preview of. The SDK's default is 1 MiB, and a web page larger than that
+# ended the turn with "Failed to decode JSON: JSON message exceeded maximum buffer size of 1048576
+# bytes" (measured live with a 1.19 MB page). Twice what the server inlines into one run
+# (`MAX_INLINED_BYTES_PER_RUN`, 32 MiB), for the JSON escaping around it.
+MESSAGE_BUFFER_BYTES = 64 * 1024 * 1024
+
+# Claude Code's file-reading tool, given to a full Bot for its own saved tool results and nothing else.
+READ_TOOL = "Read"
+
+# Claude Code's search over the MCP tools a session holds, which loads a tool's definition when the
+# model looks for it (code.claude.com/docs/en/mcp, "Scale with MCP tool search").
+#
+# Left out of `--tools`, Claude Code loads every MCP tool upfront (same page, "Configure tool
+# search"), and every one of OpenBot's tools is an MCP tool here. A run carries up to 128 of a Bot's
+# app tools (`MODEL_TOOL_LIMIT` in shared/model-tool-limit.ts), so a Bot holding a few apps sent all
+# their definitions with every request: measured on the API with 128 real Composio tools and a 50 KB
+# standing role, 133,798 input tokens for the first request of a conversation, and 27,932 with this
+# tool offered. It runs nothing and reaches nothing outside the session: what it finds is a tool the
+# run was already given, called through OpenBot as before.
+TOOL_SEARCH = "ToolSearch"
+
+# Claude Code's switch for that search (code.claude.com/docs/en/env-vars, `ENABLE_TOOL_SEARCH`).
+#
+# The Claude Code this harness ships (2.1.259) searches by default only when it talks to Anthropic's
+# own API. With `ANTHROPIC_BASE_URL` set, a gateway or a proxy in front of the same API, it leaves
+# the search off unless this is set, and loads every tool it holds upfront
+# (code.claude.com/docs/en/mcp, "Tool search through a gateway": on by default behind one only from
+# 2.1.304). Measured live on one task across three apps, through a proxy that passes every request
+# on to Anthropic unchanged: each request carried 108 to 118 whole tool definitions and 109K to
+# 150K input tokens, and `ToolSearch` was in none of them. Straight to Anthropic's API the same
+# task carried 39 to 61 and 24K to 106K. A deployment behind a gateway is the proxy's shape.
+# Set to `true`, the search is on wherever the model can use it. A gateway has to pass on
+# the `defer_loading` field, `tool_reference` blocks and the `anthropic-beta` header for it; one
+# that cannot is run with `ENABLE_TOOL_SEARCH=false` in this container's environment, which stands.
+ENABLE_TOOL_SEARCH = "ENABLE_TOOL_SEARCH"
+
+# What a full Bot is told `Read` is for. Its own description says it reads any file on "the local
+# filesystem", and the person calls the computer's tool "Read file": asked to read a file on its
+# computer, the Bot picked `Read`, was refused, and asked the person what to do.
+READ_TOOL_NOTE = (
+    "The Read tool opens only a tool result that was too large to show and was saved to a file, "
+    "at the path the result names. For files on your computer, use your computer's tools."
+)
+
 # What a person is told when Claude Code never started, in place of the process error.
 START_FAILED = (
     "This Bot couldn't start, so it didn't answer. Send your message again, and restart "
@@ -60,16 +285,116 @@ class ModelAuthenticationError(Exception):
     pass
 
 
-class ModelRefusedError(Exception):
-    """The model provider refused the run, in Claude Code's words for it.
+def too_long(error):
+    """Whether a refusal is the request being longer than the model's window.
 
-    Claude Code answers a refusal (out of credit, a rate limit, an unknown model, a prompt too long,
-    the API down) with an assistant message of its own, marked with `error`. Streamed as one, it read
-    as the Bot's answer: "API Error: Request rejected (429) · This request would exceed the rate
-    limit …", and the turn finished as if it had worked. It ends the run as a RUN_ERROR instead,
-    coded `OPENBOT_MODEL_REFUSED`, and the server says it in words
-    (server/src/agents/provider-refusal.ts).
+    Claude Code says "Prompt is too long", and passes the API's own "prompt is too long: … tokens
+    > … maximum" on when that is what it was told.
     """
+    return isinstance(error, ModelRefusedError) and "prompt is too long" in str(error).lower()
+
+
+def fitted_result(content):
+    """A result the model endpoint can be shown whole: at most `INLINE_RESULT_CHARS`, saying so.
+
+    Claude Code saves a longer one to a file and shows a preview and the path, and a Bot on the
+    model endpoint holds no tool that can open it.
+    """
+    if not isinstance(content, str) or len(content) <= INLINE_RESULT_CHARS:
+        return content
+    return content[:INLINE_RESULT_CHARS] + cut_note(len(content) - INLINE_RESULT_CHARS)
+
+
+class ModelRefusedError(Exception):
+    """The model provider answered the run with an error, in Claude Code's words for it.
+
+    Claude Code answers a failed request (out of credit, a rate limit, a plan's limit, an unknown
+    model, a prompt too long, the API down, a dropped connection) with an assistant message of its
+    own, marked with `error`. Streamed as one, it read as the Bot's answer: "API Error: Request
+    rejected (429) · This request would exceed the rate limit …", and the turn finished as if it had
+    worked. It ends the run as a RUN_ERROR instead, coded `OPENBOT_MODEL_REFUSED`, and the server says
+    it in words.
+
+    `category` is Claude Code's own name for what went wrong (`error_category`), sent on the
+    RUN_ERROR as `metadata.errorCategory`. Only "refusal" says the model declined to answer; the
+    others say why the request failed. The code stays the one every server reads, so a server that
+    predates the category still places the words as it did.
+    """
+
+    def __init__(self, text, category=None):
+        super().__init__(text)
+        self.category = category
+
+
+# What Claude Code calls an error on its message: `AssistantMessageError` in claude-agent-sdk
+# 0.2.152 ("authentication_failed", "billing_error", "rate_limit", "invalid_request",
+# "server_error", "unknown"), and the few more its CLI writes ("model_not_found", "account_on_hold",
+# "oauth_org_not_allowed"). A name, never words: anything else is sent as "unknown".
+CATEGORY = re.compile(r"^[a-z][a-z_]{0,39}$")
+
+
+def error_category(message):
+    """Claude Code's category for a failed message, or "refusal" when the model declined.
+
+    Claude declining to answer is the one real refusal. Claude Code marks it `invalid_request`,
+    the same as a malformed request, and tells them apart only by the message's stop reason.
+    """
+    if getattr(message, "stop_reason", None) == "refusal":
+        return "refusal"
+    error = message.error
+    return error if isinstance(error, str) and CATEGORY.match(error) else "unknown"
+
+
+class ModelUnreachableError(Exception):
+    """Nothing answered at the model's address: the connection was refused, the host doesn't
+    exist, or nothing answered in time. No provider said anything, so it is not a refusal.
+
+    FOUND ON OPENBOT DESKTOP: a base URL with nothing listening at it. Claude Code says so in its
+    own words, which went on as a refusal, and the person read that the provider "turned down the
+    request". It ends the run coded `OPENBOT_MODEL_UNREACHABLE`, and the server puts the step that
+    fits its edition in place of the second sentence.
+    """
+
+
+# Claude Code's own account of a request that never reached the API, as 2.1.259 (claude-agent-sdk
+# 0.2.152) writes it: "API Error: " and then "Connection refused — a firewall or proxy may be blocking
+# it (ConnectionRefused)", "Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+# "No internet route — …", "Unable to connect to API (…)" or "Request timed out. …". Not a dropped
+# connection ("Connection dropped"), which reached the API, and not a certificate or a proxy the
+# person has to fix ("Unable to connect to API: SSL …", "Couldn't connect through your proxy").
+UNREACHED = re.compile(
+    r"^API Error: (?:Connection refused\b|Can't reach the API server\b|No internet route\b"
+    r"|Unable to connect to API\b(?!:)|Request timed out\b)"
+)
+
+
+def model_address():
+    """Where Claude Code reaches the model, as host and port.
+
+    Nothing else of the URL: a base URL can carry a user and password, and some gateways put a key
+    in the path. Claude Code reads `ANTHROPIC_BASE_URL` from this container's environment.
+    """
+    from urllib.parse import urlsplit
+
+    base = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+    try:
+        parts = urlsplit(base)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    shown = f"[{host}]" if ":" in host else host
+    return f"{shown}:{port}" if port else shown
+
+
+def unreachable_message(address):
+    """The same sentence agent-langgraph-agui ends its run with (`unreachable_message`)."""
+    at = f" at {address}" if address else ""
+    return (
+        f"OpenBot couldn't reach the AI model{at}. "
+        "Check that it's running and the address is right."
+    )
 
 
 def refusal_text(message):
@@ -133,6 +458,8 @@ class _Turn:
     # Tool calls Claude Code reported as failed, and the result the turn streamed for each.
     failed: set[str] = field(default_factory=set)
     failed_results: dict[str, str] = field(default_factory=dict)
+    # Client calls whose result Claude Code saved to a file, and the result the browser sent.
+    saved_results: dict[str, str] = field(default_factory=dict)
     # Client calls Claude Code has actually run, and so is waiting on the browser for. See
     # `_hand_to_browser`.
     invoked: set[str] = field(default_factory=set)
@@ -140,6 +467,11 @@ class _Turn:
     settled: bool = False
     # The model the server chose when this query started, or that it was switched to since.
     model: str | None = None
+    # The newest run's input: the whole thread, with every result the browser has sent so far.
+    latest: object = None
+    # Calls on the model endpoint to a tool the step did not offer, which Claude Code answers
+    # itself. See `_not_held`.
+    not_held: set[str] = field(default_factory=set)
 
     def result(self, tool_id):
         if tool_id not in self.results:
@@ -369,6 +701,98 @@ class _OneReply:
         return StreamEvent(uuid="openbot-unstreamed", session_id="", event=event)
 
 
+def _results_kept_inline(input_data):
+    """The `ag_ui` MCP server upstream builds, with each tool's results kept in the conversation up
+    to `INLINE_RESULT_CHARS`.
+
+    Upstream builds it from this run's tools and, when the run carries state, its state tool, with
+    no annotations. The SDK reads a tool's annotations when it builds the server, so it is built
+    again rather than amended.
+    """
+    tools = []
+    for tool in input_data.tools or []:
+        try:
+            converted = convert_agui_tool_to_claude_sdk(tool)
+        except Exception as error:  # Upstream leaves out a tool it cannot convert, and so does this.
+            logger.warning("Failed to convert tool: %s", error)
+            continue
+        # Named to fit the provider's limit once Claude Code puts its prefix on (`callable_name`).
+        tools.append(replace(converted, name=callable_name(converted.name)))
+    if input_data.state is not None:
+        tools.append(create_state_management_tool())
+    return _loaded_upfront_in(
+        create_sdk_mcp_server(
+            "ag_ui",
+            "1.0.0",
+            tools=[
+                replace(tool, annotations=ToolAnnotations(maxResultSizeChars=INLINE_RESULT_CHARS))
+                for tool in tools
+            ],
+        ),
+        {callable_name(name) for name in loaded_upfront(input_data)},
+    )
+
+
+def saved_to_a_file(content):
+    """Whether a tool result is Claude Code's notice that it saved the result to a file.
+
+    Claude Code 2.1 words it two ways: `<persisted-output>` ... "Full output saved to: <path>" for a
+    result over its size threshold, and "Error: result (...) exceeds maximum allowed tokens. Output
+    has been saved to <path>" for an MCP result over `MAX_MCP_OUTPUT_TOKENS`.
+    """
+    return (
+        isinstance(content, str)
+        and "/tool-results/" in content
+        and ("<persisted-output>" in content or "Output has been saved to" in content)
+    )
+
+
+def saved_results_folder(hook_input):
+    """Where Claude Code saves this session's large tool results.
+
+    `<config>/projects/<cwd>/<session>/tool-results`, beside the session's transcript at
+    `<config>/projects/<cwd>/<session>.jsonl`; the hook is told both.
+    """
+    transcript = hook_input.get("transcript_path")
+    session = hook_input.get("session_id")
+    if not isinstance(transcript, str) or not transcript or not isinstance(session, str) or not session:
+        return None
+    return os.path.join(os.path.dirname(transcript), session, "tool-results")
+
+
+async def own_tool_results_only(input_data, tool_use_id, context):
+    """Let `Read` open a tool result Claude Code saved for this session, and nothing else.
+
+    A full Bot is given no built-in tools (see `build_options`): its files and commands are on its
+    own computer, under OpenBot's policy. Claude Code saves a tool result larger than its threshold
+    to a file and tells the model to read it, and the model had nothing that could. `Read` is the
+    tool Claude Code expects it to use, and this hook keeps it to this session's own saved results:
+    any other path, in this container or anywhere else, is refused.
+    """
+    if input_data.get("tool_name") != READ_TOOL:
+        return {}
+    folder = saved_results_folder(input_data)
+    path = (input_data.get("tool_input") or {}).get("file_path")
+    if folder and isinstance(path, str) and path:
+        folder = os.path.realpath(folder)
+        target = os.path.realpath(path)
+        if target != folder and os.path.commonpath([folder, target]) == folder:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                }
+            }
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Read only opens a tool result that was saved to a file in "
+            "this conversation. For this file, use your computer's tools instead.",
+        }
+    }
+
+
 def _with_instructions(system_prompt, instructions):
     """The server's instructions first, then whatever the adapter already put there."""
     if isinstance(system_prompt, dict):  # A preset keeps its own prompt; add to its append.
@@ -392,6 +816,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         # is the one prop it honours. Every query is built here, so a choice changed between runs
         # starts the next query on it.
         chosen = run_model(input_data.forwarded_props) if input_data else None
+        once = sends_once(input_data.forwarded_props) if input_data else False
         if self._model_only and input_data:
             # The model endpoint accepts prompts and caller-owned tools, never SDK
             # configuration or an ungoverned state-management tool.
@@ -402,6 +827,10 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         if chosen:
             # After the upstream merge, so the server's choice wins over a forwarded `model`.
             options.model, options.effort = chosen
+        options.env = {**(options.env or {}), UNKNOWN_MODEL_WINDOW: "1"}
+        if once:
+            options.env[MAX_RETRIES] = "0"
+        options.max_buffer_size = MESSAGE_BUFFER_BYTES
         if not self._model_only and input_data:
             # The model endpoint gets its instructions in context. A full Bot gets its standing
             # role only as a system message, which a user prompt cannot carry.
@@ -411,6 +840,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     options.system_prompt, instructions
                 )
         tool_names = {tool.name for tool in input_data.tools} if input_data else set()
+        # The name each tool is offered by, for one Claude Code calls by a name cut to fit.
+        by_callable = offered_names(tool_names)
         # Upstream allows each `ag_ui` tool by name, and the SDK passes the list to Claude Code as
         # one `--allowedTools` argument, so it grew with every tool a Bot holds. A Bot offered all
         # of HubSpot, Notion and Calendar is offered hundreds. The `ag_ui` server holds exactly this
@@ -422,11 +853,15 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
         ]
         if "ag_ui" in (options.mcp_servers or {}):
             options.allowed_tools.append(AG_UI_TOOLS)
+            options.mcp_servers = {
+                **options.mcp_servers,
+                "ag_ui": _results_kept_inline(input_data),
+            }
 
         async def client_result(input_data, tool_use_id, context):
             turn = self._turns.get(thread_id)
-            name = input_data.get("tool_name", "")
-            if name.removeprefix("mcp__ag_ui__") not in tool_names:
+            name = input_data.get("tool_name", "").removeprefix(AG_UI_TOOL_PREFIX)
+            if by_callable.get(name, name) not in tool_names:
                 return {}
             if turn is None or turn.cancelled:
                 raise asyncio.CancelledError("The client tool query was cancelled")
@@ -438,6 +873,8 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # The hook can arrive before the event consumer has seen TOOL_CALL_START.
             # Both paths use the SDK ID; names/arguments cannot disambiguate parallel calls.
             content = await turn.result(tool_use_id)
+            if self._model_only:
+                content = fitted_result(content)
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
@@ -469,7 +906,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 for name, server in options.mcp_servers.items()
                 if name == "ag_ui"
             }
-            offered = {f"{AG_UI_TOOL_PREFIX}{name}" for name in tool_names}
+            offered = {f"{AG_UI_TOOL_PREFIX}{callable_name(name)}" for name in tool_names}
 
             async def only_offered(input_data, tool_use_id, context):
                 if input_data.get("tool_name") in offered:
@@ -490,13 +927,37 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # and the rest) run in this container instead, ungoverned and unapproved. Left in
             # view, Claude reached for its own WebSearch, was refused, and told the person to
             # grant it. No built-ins, as on the model endpoint; OpenBot's tools still load.
-            options.tools = []  # SDK 0.2.152 maps this to --tools "".
+            #
+            # Except `Read`, held to the tool results Claude Code saves to a file for this session
+            # (`own_tool_results_only`), which is the tool Claude Code tells the model to open one
+            # with: a result over `INLINE_RESULT_CHARS`. With no `Read`, the Bot tried its
+            # computer's `Read file` on the path, which OpenBot refused for a path outside the Bot's
+            # workspace, then `grep` on its computer, a different machine, and lost the result.
+            #
+            # And `ToolSearch`, which only finds and loads the definitions of the tools this run
+            # already holds (see `TOOL_SEARCH`).
+            options.tools = [READ_TOOL, TOOL_SEARCH]
+            # On behind a gateway too, unless whoever runs this container chose otherwise. The SDK
+            # lays `options.env` over the container's own environment, so theirs is read here.
+            if not (os.environ.get(ENABLE_TOOL_SEARCH) or "").strip():
+                options.env[ENABLE_TOOL_SEARCH] = "true"
+            # After the Bot's own instructions, which come first.
+            prompt = options.system_prompt
+            options.system_prompt = (
+                f"{prompt}\n\n{READ_TOOL_NOTE}"
+                if isinstance(prompt, str) and prompt
+                else _with_instructions(prompt, READ_TOOL_NOTE)
+            )
+            options.hooks["PreToolUse"] = [
+                *options.hooks.get("PreToolUse", []),
+                HookMatcher(matcher=READ_TOOL, hooks=[own_tool_results_only]),
+            ]
         return options
 
-    async def _run_query(self, input_data):
+    async def _run_query(self, input_data, fit_results=False):
         # Never upstream `run`: it sends only the newest message to a worker that remembers the
         # rest, so a restart or an idle eviction forgets the thread. See `replay`.
-        async for event in run_replayed_query(self, input_data):
+        async for event in run_replayed_query(self, input_data, fit_results=fit_results):
             yield event
 
     async def _stream_claude_sdk(
@@ -530,8 +991,23 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     raise ModelAuthenticationError(
                         "Sign in to your model provider again."
                     )
+                if (
+                    isinstance(message, AssistantMessage)
+                    and message.error
+                    and UNREACHED.match(refusal_text(message))
+                ):
+                    # Claude Code's own words stay here, in the log: the sentence replaces them.
+                    logger.warning("The model couldn't be reached: %s", refusal_text(message))
+                    raise ModelUnreachableError(unreachable_message(model_address()))
                 if isinstance(message, AssistantMessage) and message.error:
-                    raise ModelRefusedError(refusal_text(message))
+                    category = error_category(message)
+                    if category == "refusal":
+                        logger.warning("The model declined to answer: %s", refusal_text(message))
+                    else:
+                        logger.warning(
+                            "The model request failed (%s): %s", category, refusal_text(message)
+                        )
+                    raise ModelRefusedError(refusal_text(message), category)
                 if (
                     isinstance(message, StreamEvent)
                     and message.event.get("type") == "message_start"
@@ -605,6 +1081,38 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             pending.cancel()
 
     @staticmethod
+    def _keep_saved_results(event, turn):
+        """The history at the end of a turn, with a result Claude Code saved to a file in it whole.
+
+        A result over its threshold reaches the model as a preview and a path in this container
+        (see `INLINE_RESULT_CHARS`), and that notice is what the turn streamed as the call's result
+        and kept in the history it ended with. Every later turn is a new query, in a session of its
+        own, so the Bot was left with a path to another session's file and none of the result. For
+        a call the browser answered, the browser's own result is put back: the history keeps the
+        result, and the replay fits it to its budget like any other.
+        """
+        if event.type == EventType.TOOL_CALL_RESULT and saved_to_a_file(event.content):
+            pending = turn.results.get(event.tool_call_id)
+            if pending is None or not pending.done() or pending.cancelled():
+                return event
+            turn.saved_results[event.tool_call_id] = pending.result()
+            turn.failed.discard(event.tool_call_id)
+            return event.model_copy(update={"content": pending.result()})
+        if event.type != EventType.MESSAGES_SNAPSHOT or not turn.saved_results:
+            return event
+        return event.model_copy(
+            update={
+                "messages": [
+                    message.model_copy(update={"content": turn.saved_results[message.tool_call_id]})
+                    if getattr(message, "role", None) == "tool"
+                    and getattr(message, "tool_call_id", None) in turn.saved_results
+                    else message
+                    for message in event.messages
+                ]
+            }
+        )
+
+    @staticmethod
     def _keep_failures(event, turn):
         """The history at the end of a turn, with each failed call as the turn streamed it.
 
@@ -634,24 +1142,17 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
 
     async def _pump(self, input_data, turn):
         try:
-            async for event in self._run_query(input_data):
-                if event.type == EventType.RUN_ERROR and turn.authentication_failed:
-                    event = event.model_copy(
-                        update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
-                    )
-                if (
-                    event.type == EventType.TOOL_CALL_START
-                    and event.tool_call_name in turn.tool_names
-                ):
-                    turn.offered.add(event.tool_call_id)
-                    turn.result(event.tool_call_id)
-                if (
-                    event.type == EventType.TOOL_CALL_END
-                    and event.tool_call_id in turn.offered
-                ):
-                    turn.ended.add(event.tool_call_id)
-                event = self._keep_failures(event, turn)
-                await turn.queue.put(event)
+            try:
+                await self._pump_query(input_data, turn)
+            except ModelRefusedError as error:
+                if not too_long(error) or turn.cancelled:
+                    raise
+                # Over the model's window. Once more, as a fresh query from the whole thread so
+                # far with every tool result cut to its start, this turn's included (`fit_results`
+                # in `replay`). Each cut result says how to ask for the rest. Refused again, the
+                # person is told, in the server's words for it.
+                logger.warning("The model refused the turn as too long; replaying it fitted: %s", error)
+                await self._pump_query(turn.latest or input_data, turn, fit_results=True)
         except Exception as error:
             if not_started(error):
                 # Claude Code never ran, so this sentence is all the conversation will show. The
@@ -661,13 +1162,18 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     RunErrorEvent(message=START_FAILED, code="OPENBOT_HARNESS_START_FAILED")
                 )
                 return
+            category = error.category if isinstance(error, ModelRefusedError) else None
             await turn.queue.put(
                 RunErrorEvent(
                     message=str(error),
+                    # Claude Code's own category, which the server tells the person by.
+                    metadata={"errorCategory": category} if category else None,
                     code="OPENBOT_MODEL_AUTH_REQUIRED"
                     if isinstance(error, ModelAuthenticationError)
                     else "OPENBOT_MODEL_REFUSED"
                     if isinstance(error, ModelRefusedError)
+                    else "OPENBOT_MODEL_UNREACHABLE"
+                    if isinstance(error, ModelUnreachableError)
                     else None,
                 )
             )
@@ -689,6 +1195,99 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 with suppress(asyncio.CancelledError):
                     await super().clear_session(input_data.thread_id)
             await turn.queue.put(None)
+
+    @staticmethod
+    def _named_as_offered(event, turn):
+        """An event naming a call by the name it was offered by, not the one cut to fit Claude Code.
+
+        Upstream names a call after the tool Claude Code called, `mcp__ag_ui__` taken off, which for a
+        long name is the cut one (`callable_name`). The server answers a call by the name it offered,
+        and the conversation keeps the history the turn ends with, so both are named back.
+        """
+        by_callable = offered_names(turn.tool_names)
+        if not by_callable:
+            return event
+        if event.type == EventType.TOOL_CALL_START and event.tool_call_name in by_callable:
+            return event.model_copy(
+                update={"tool_call_name": by_callable[event.tool_call_name]}
+            )
+        if event.type != EventType.MESSAGES_SNAPSHOT:
+            return event
+
+        def named(call):
+            name = call.function.name
+            if name not in by_callable:
+                return call
+            return call.model_copy(
+                update={"function": call.function.model_copy(update={"name": by_callable[name]})}
+            )
+
+        return event.model_copy(
+            update={
+                "messages": [
+                    message.model_copy(
+                        update={"tool_calls": [named(call) for call in message.tool_calls]}
+                    )
+                    if getattr(message, "role", None) == "assistant"
+                    and getattr(message, "tool_calls", None)
+                    else message
+                    for message in event.messages
+                ]
+            }
+        )
+
+    def _not_held(self, event, turn):
+        """Whether this event belongs to a call of a tool this step was not offered.
+
+        On the model endpoint the query holds exactly the step's tools (see `run`). The model can
+        still ask for one it does not hold: an app action it knows by name from the conversation, a
+        tool an earlier step was offered, or one it guessed. Claude Code answers such a call itself,
+        with "No such tool available", and the model carries on in the same query. Upstream streams
+        the call as it starts, before Claude Code has looked at it, and the server ends a run that
+        names a tool the step did not offer: FOUND IN DOGFOODING, a Bot asked to add HubSpot deals
+        to a posted Slack update called `SLACK_UPDATES_A_SLACK_MESSAGE`, which it did not hold, and
+        five minutes of work ended on an error. Nothing of such a call is passed on, so the server
+        only ever hears of calls to tools it offered, and the person reads the model's answer.
+        """
+        if not self._model_only:
+            return False
+        if event.type == EventType.TOOL_CALL_START:
+            if event.tool_call_name in turn.tool_names:
+                return False
+            turn.not_held.add(event.tool_call_id)
+            logger.warning(
+                "Claude called a tool this step did not offer; Claude Code answers it: %s",
+                event.tool_call_name,
+            )
+            return True
+        return (
+            event.type
+            in (EventType.TOOL_CALL_ARGS, EventType.TOOL_CALL_END, EventType.TOOL_CALL_RESULT)
+            and event.tool_call_id in turn.not_held
+        )
+
+    async def _pump_query(self, input_data, turn, fit_results=False):
+        async for event in self._run_query(input_data, fit_results=fit_results):
+            event = self._named_as_offered(event, turn)
+            if self._not_held(event, turn):
+                continue
+            if event.type == EventType.RUN_ERROR and turn.authentication_failed:
+                event = event.model_copy(
+                    update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
+                )
+            if (
+                event.type == EventType.TOOL_CALL_START
+                and event.tool_call_name in turn.tool_names
+            ):
+                turn.offered.add(event.tool_call_id)
+                turn.result(event.tool_call_id)
+            if (
+                event.type == EventType.TOOL_CALL_END
+                and event.tool_call_id in turn.offered
+            ):
+                turn.ended.add(event.tool_call_id)
+            event = self._keep_failures(self._keep_saved_results(event, turn), turn)
+            await turn.queue.put(event)
 
     async def run(self, input_data):
         thread_id, run_id = input_data.thread_id, input_data.run_id
@@ -727,10 +1326,20 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 and bool(input_data.messages)
                 and input_data.messages[-1].role == "user"
             )
+            # A full Bot's query is replaced the same way when it is sent a tool it does not hold:
+            # what OpenBot's own search found for it. FOUND ON WINDOWS: a Bot on this harness,
+            # registered as an ordinary endpoint, searched with `search_tools`, was told it could
+            # call SLACK_SEND_MESSAGE from its next step, and was sent it; the resumed query did not
+            # hold it, so Claude Code's ToolSearch found "No matching deferred tools" and the call
+            # was "No such tool available". The Bot posted with another tool, or not at all.
+            incoming = {tool.name for tool in input_data.tools}
             replaced = answer_only or person_spoke or (
-                self._model_only
-                and turn is not None
-                and {tool.name for tool in input_data.tools} != turn.tool_names
+                turn is not None
+                and (
+                    incoming != turn.tool_names
+                    if self._model_only
+                    else bool(incoming - turn.tool_names)
+                )
             )
             if replaced:
                 await self.interrupt(thread_id)
@@ -753,6 +1362,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                     )
                     return
                 await self._follow_model_choice(thread_id, turn, input_data)
+                turn.latest = input_data
                 for tool_id, content in incoming.items():
                     turn.result(tool_id).set_result(content)
                 # Parallel client tools may return in separate HTTP requests.
@@ -770,6 +1380,7 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
                 turn = _Turn(
                     tool_names={tool.name for tool in input_data.tools},
                     model=chosen[0] if chosen else None,
+                    latest=input_data,
                 )
                 self._turns[thread_id] = turn
                 turn.task = asyncio.create_task(self._pump(input_data, turn))

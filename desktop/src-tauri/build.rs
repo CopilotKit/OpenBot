@@ -56,7 +56,7 @@ fn main() {
                     "check_update",
                     "dismiss_update",
                     "install_update",
-                    // Narration's speech recognition, on this computer. See `src/speech.rs`.
+                    // Dictation's and narration's speech recognition, on this computer. See `src/speech.rs`.
                     "speech_available",
                     "speech_start",
                     "speech_stop",
@@ -65,8 +65,34 @@ fn main() {
                     "open_logs",
                     // A Bot's notification, opening OpenBot at a page when clicked. See `src/notice.rs`.
                     "notify",
+                    // Settings' AI model row, and its Change. See `src/ai_connection.rs`.
+                    "ai_connection",
+                    "change_ai_connection",
+                    // The AI connection changed in the app with no stop: the sign-ins that run
+                    // here, and the one engine a connection needs. See `src/ai_connection.rs`.
+                    "ai_providers",
+                    "begin_plan_sign_in",
+                    "finish_plan_sign_in",
+                    "cancel_plan_sign_in",
+                    "begin_provider_sign_in",
+                    "finish_provider_sign_in",
+                    "cancel_provider_sign_in",
+                    "prepare_ai_connection",
+                    "settle_ai_connection",
+                    // Settings' Share usage data. See `src/usage_data.rs`.
+                    "usage_data",
+                    "set_usage_data",
                     // Ctrl+Q in the window on Windows. See `src/quit-shortcut.js`.
                     "quit",
+                    // The zoom keys no menu carries. See `src/zoom-shortcut.js`.
+                    "zoom",
+                    // Where OpenBot runs, and Settings' Sign out, Change and the organisation
+                    // picked, for an app connected to an OpenBot that runs elsewhere. See
+                    // `src/desktop_connected.rs`.
+                    "connection",
+                    "sign_out",
+                    "change_connection",
+                    "set_organization",
                 ]),
             ),
     )

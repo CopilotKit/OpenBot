@@ -1,5 +1,10 @@
-import { IconDeviceDesktop, IconTerminal2 } from "@tabler/icons-react";
+import {
+  IconDeviceDesktop,
+  IconDeviceDesktopOff,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { PageEmpty } from "@/components/layout/page-parts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   followedView,
@@ -9,6 +14,7 @@ import {
   takeRequestedView,
 } from "@/lib/computers/panel-view";
 import { useComputerControl } from "@/lib/computers/use-control";
+import { useNoBotComputers } from "@/lib/deployment/queries";
 import { ActivityLog } from "./activity-log";
 import { ComputerTerminal } from "./computer-terminal";
 import { ComputerView } from "./computer-view";
@@ -27,6 +33,39 @@ import { ComputerView } from "./computer-view";
  * mounted, and stops polling on its own while it cannot be seen.
  */
 export function ComputerViewPanel({
+  agentId,
+  name,
+}: {
+  agentId: string;
+  name?: string;
+}) {
+  /*
+   * AN OPENBOT WITH NO COMPUTERS FOR BOTS SAYS SO, AND ASKS NOTHING. The server refuses every call
+   * about a computer there. The screen read those refusals as a computer on its way up, so the panel
+   * said "Starting the Bot's computer" for two and a half minutes and then "Can't show the screen
+   * right now", over a wheel that reported it could not be checked. Nothing in the live panel is
+   * drawn in that state, so nothing in it reads a status, the wheel or a screenshot.
+   *
+   * Until the deployment has said which it is, nothing is drawn: the first read of the wheel is
+   * refused at once where there are no computers, and would be on screen as a failure.
+   */
+  const noComputers = useNoBotComputers();
+  if (noComputers === undefined) return null;
+  if (noComputers)
+    return (
+      // The empty state brings its own 16px above it, which is the panel's top padding.
+      <section aria-label="Computer sidebar" className="px-4 pb-4">
+        <PageEmpty icon={IconDeviceDesktopOff} title="No computers for Bots">
+          Bots can't browse or run commands on this OpenBot. An admin can set
+          computers up.
+        </PageEmpty>
+      </section>
+    );
+  return <LiveComputerPanel agentId={agentId} name={name} />;
+}
+
+/** The panel where there are computers for Bots: this Bot's screen, its terminal and what it did. */
+function LiveComputerPanel({
   agentId,
   name,
 }: {

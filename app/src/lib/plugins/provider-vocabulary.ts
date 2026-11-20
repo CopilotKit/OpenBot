@@ -1,18 +1,29 @@
-import { type PluginsPage, pluginsProvider } from "./queries";
+import type { AppSetup } from "@/lib/api/generated/model";
 
 /**
- * The words an admin Plugins screen uses for the ACTIVE broker, and nothing of the other's (spec D11).
+ * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
+ * other's (spec D11).
  *
- * TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE TRAP. A screen that FILTERS by brokered-ness
- * needs no provider name: one provider holds rows at a time (spec D3), so {@link brokeredProvenance}
- * answers it from the row. A screen that NAMES a vendor cannot derive the name from a row that
- * happens to exist — a deployment with the key set and no app enabled yet has no row at all — so it
- * reads {@link pluginsProvider} and asks this module for the words.
+ * TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE TRAP. A screen that FILTERS by where an app
+ * came from needs no service name: an app's `source` says `directory`, whichever service that is. A
+ * screen that NAMES the service (its own directory page, the setting an admin sets) cannot derive
+ * the name from an app that happens to exist, so it reads {@link directoryProvider} off getAppSetup
+ * and asks this module for the words.
  *
  * Pure functions, so the vocabulary is pinned without a DOM. Nothing here carries a key or a
  * capability: the provider is a NAME.
  */
-export type PluginsProvider = NonNullable<PluginsPage["provider"]>;
+export type PluginsProvider = NonNullable<AppSetup["directoryProvider"]>;
+
+/**
+ * The service the directory comes from, as getAppSetup names it: `"composio"` before it has
+ * answered, or where it names none, so a label never blanks.
+ */
+export function directoryProvider(
+  setup: AppSetup | undefined,
+): PluginsProvider {
+  return setup?.directoryProvider ?? "composio";
+}
 
 /**
  * Which edition reads the sentence. The team edition's words are for an admin and for each person
@@ -34,9 +45,9 @@ function capitalised(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Whether a row came through a broker, whichever one. Filters; never names. */
-export function brokeredProvenance(provenance: string): boolean {
-  return provenance === "composio" || provenance === "arcade";
+/** Whether an app came from the directory, whichever service that is. Filters; never names. */
+export function fromDirectory(app: { source: string }): boolean {
+  return app.source === "directory";
 }
 
 /*
@@ -54,29 +65,21 @@ export type ProviderVocabulary = {
    * under Settings), so `managePaths(...).brokerDirectory(provider)` names it, from the same
    * generated route tree: a path no route file answers still stops compiling.
    */
-  /**
-   * What the "More apps" row says once the key is set.
-   *
-   * A FIELD rather than a `provider === "composio"` branch. Composio's sentence counts its
-   * directory ("a few hundred apps") and that count is Composio's, measured by nobody here; Arcade's
-   * says the same thing about reach without claiming a size this deployment has not counted.
-   */
-  directoryDescription: string;
 };
 
 const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
-  composio: {
-    directoryLabel: "Browse apps",
-    envVar: "COMPOSIO_API_KEY",
-    directoryDescription:
-      "A few hundred apps. Each person connects their own account.",
-  },
-  arcade: {
-    directoryLabel: "Browse apps",
-    envVar: "ARCADE_API_KEY",
-    directoryDescription:
-      "Apps nobody here has reviewed. Each person connects their own account.",
-  },
+  composio: { directoryLabel: "Browse apps", envVar: "COMPOSIO_API_KEY" },
+  arcade: { directoryLabel: "Browse apps", envVar: "ARCADE_API_KEY" },
+};
+
+/*
+ * What the "More apps" row says once the key is set, in each edition. NO APP COUNT, on either
+ * provider: the directory is the vendor's, nobody here counts it, and it keeps growing. Composio's
+ * sentence once said "a few hundred apps" while its directory listed over 1,600.
+ */
+const DIRECTORY_DESCRIPTION: Record<Edition, string> = {
+  team: "Apps nobody here has reviewed. Each person connects their own account.",
+  personal: "More apps you can connect.",
 };
 
 export function providerVocabulary(
@@ -92,7 +95,7 @@ export function providerVocabulary(
  * fallback once spelled a vendor on its own and printed Composio's name on an Arcade deployment.
  */
 export function directoryReadFailure(_provider: PluginsProvider): string {
-  return "Couldn't load the apps you can connect. Reload the page.";
+  return "Couldn't load the apps you can connect. Try again in a moment.";
 }
 
 /**
@@ -107,7 +110,7 @@ export function directoryDescriptions(edition: Edition = "team"): {
 } {
   return edition === "personal"
     ? {
-        page: "Add an app to give your Bots its tools. Then connect your account on its page so they can use it.",
+        page: "Add an app and connect your account so your Bots can use it.",
         search: "Search by name. OpenBot hasn't reviewed these apps.",
       }
     : {
@@ -138,16 +141,6 @@ export type MoreAppsRow = {
   linked: boolean;
 };
 
-/**
- * The "More apps" row's sentence in the personal edition, where the one person reading it is the
- * only one who connects anything. The same split as {@link ProviderVocabulary.directoryDescription}:
- * Composio's counts its directory and Arcade's claims no size.
- */
-const PERSONAL_DIRECTORY_DESCRIPTION: Record<PluginsProvider, string> = {
-  composio: "A few hundred more apps you can connect.",
-  arcade: "More apps you can connect.",
-};
-
 /** Where the personal edition's one person turns connecting apps on: Settings, Setup. */
 const PERSONAL_SET_UP = "Set it up in Settings under Setup.";
 
@@ -156,7 +149,7 @@ export function moreAppsRow(
   configured: boolean,
   edition: Edition = "team",
 ): MoreAppsRow {
-  const { directoryLabel, envVar, directoryDescription } = VOCABULARY[provider];
+  const { directoryLabel, envVar } = VOCABULARY[provider];
   if (!configured) {
     return {
       title: directoryLabel,
@@ -169,10 +162,7 @@ export function moreAppsRow(
   }
   return {
     title: directoryLabel,
-    description:
-      edition === "personal"
-        ? PERSONAL_DIRECTORY_DESCRIPTION[provider]
-        : directoryDescription,
+    description: DIRECTORY_DESCRIPTION[edition],
     linked: true,
   };
 }
@@ -303,14 +293,14 @@ function joinNames(names: readonly string[]): string {
 /**
  * Whether a directory route may answer on this deployment.
  *
- * `pending` until the page has said which provider this is: the default of `"composio"` is right for
- * a label and wrong for a gate, because acting on it would fire a Composio request against an Arcade
- * project in the moment before the answer arrives.
+ * `pending` until getAppSetup has said which service this is: the default of `"composio"` is right
+ * for a label and wrong for a gate, because acting on it would fire a request for the other
+ * service's directory page in the moment before the answer arrives.
  */
 export function directoryRouteDecision(
   routeProvider: PluginsProvider,
-  page: PluginsPage | undefined,
+  setup: AppSetup | undefined,
 ): "pending" | "render" | "redirect" {
-  if (!page) return "pending";
-  return pluginsProvider(page) === routeProvider ? "render" : "redirect";
+  if (!setup) return "pending";
+  return directoryProvider(setup) === routeProvider ? "render" : "redirect";
 }

@@ -11,6 +11,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
+import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
   authorizeActionMutationOptions,
   consentActionsFrom,
@@ -26,7 +27,7 @@ import {
  * What one account holds at one app, action by action, grouped by the permission each action needs.
  *
  * ONE ROW PER ACTION, DRAWN FROM ITS `GrantState` AND NOTHING ELSE. Authorize is offered for
- * `needs-consent` only: a `needs-operator` action is blocked by a deployment secret that no amount
+ * `needs-consent` only: a `needs-admin` action is blocked by a deployment secret that no amount
  * of consenting moves, and an `unknown` one offers a Retry, because not knowing is not the same as
  * not connected and telling somebody to authorize what they already authorized sends them round
  * twice.
@@ -46,6 +47,7 @@ export function GrantList({
   canAuthorize,
   landedAction,
   returnTo,
+  shared = false,
 }: {
   serverId: string;
   /** Every name this app goes by, so the route's synthetic toolkit-named entry is recognised. */
@@ -54,13 +56,15 @@ export function GrantList({
   canAuthorize: boolean;
   landedAction: string | null;
   returnTo: "settings" | "admin";
+  /** Whether this is an app's one shared account rather than the person's own. */
+  shared?: boolean;
 }) {
-  const grants = useQuery(grantsQueryOptions(serverId, true));
+  const grants = useQuery(grantsQueryOptions(serverId, true, shared));
   const [search, setSearch] = useState("");
   const [choosing, setChoosing] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const authorize = useMutation({
-    ...authorizeActionMutationOptions(returnTo),
+    ...authorizeActionMutationOptions(returnTo, shared),
     onError: (thrown: Error) => setNotice(thrown.message),
     /* A full page navigation: the consent screen is the vendor's own and shown in this browser. */
     onSuccess: (authorizationUrl) => {
@@ -70,6 +74,7 @@ export function GrantList({
         );
         return;
       }
+      finishOnReturn();
       window.location.href = authorizationUrl;
     },
   });
@@ -292,7 +297,7 @@ function describe(grant: GrantState, canAuthorize: boolean): string {
       return canAuthorize
         ? "Not authorized yet."
         : "Not authorized yet. An admin can authorize it.";
-    case "needs-operator":
+    case "needs-admin":
       return grant.missing.length > 0
         ? `Missing ${grant.missing.join(", ")}. An admin has to set it. Authorizing can't fix it.`
         : "A setting is missing. An admin has to set it. Authorizing can't fix it.";

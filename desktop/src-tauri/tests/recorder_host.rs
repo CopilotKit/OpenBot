@@ -497,7 +497,15 @@ fn the_test_app_address_reaches_only_a_debug_binary() {
         );
         let seen = app.join().unwrap();
         assert_eq!(seen[0].line, "GET /api/capabilities HTTP/1.1");
-        assert_eq!(seen[1].line, "POST /api/recorder/connect-codes HTTP/1.1");
+        assert_eq!(
+            seen[1].line,
+            "POST /api/v2/organizations/default/people/me/recorder-connect-codes HTTP/1.1"
+        );
+        assert!(
+            seen[1].head.to_lowercase().contains("idempotency-key: "),
+            "{}",
+            seen[1].head
+        );
         assert!(
             !seen[1].head.to_lowercase().contains("cookie:"),
             "{}",
@@ -539,11 +547,12 @@ fn a_silent_app_is_answered_for_within_the_extensions_wait() {
     let home = TempHome::new("silent");
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
+    // The app takes every connection and keeps it, unanswered, until the test is over.
+    let (over, ending) = mpsc::channel::<()>();
     let held = std::thread::spawn(move || {
         let mut streams = Vec::new();
         listener.set_nonblocking(true).unwrap();
-        let until = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < until {
+        while matches!(ending.try_recv(), Err(mpsc::TryRecvError::Empty)) {
             if let Ok((stream, _)) = listener.accept() {
                 streams.push(stream);
             }
@@ -551,6 +560,13 @@ fn a_silent_app_is_answered_for_within_the_extensions_wait() {
         }
     });
     let mut host = Host::start(home.path(), &extension_origin(), Some(&url));
+    // Up before anything is timed: a just-built program's first launch waits for the system to
+    // check it, for many seconds on a busy Mac, and the browser's wait does not include that. A
+    // message the host does not know is answered at once and touches nothing.
+    assert_eq!(
+        host.ask(json!({ "type": "hello" })),
+        json!({ "ok": false, "error": "unknown-message" })
+    );
     let asked = Instant::now();
     assert_eq!(
         host.ask(json!({ "type": "ping" })),
@@ -572,7 +588,8 @@ fn a_silent_app_is_answered_for_within_the_extensions_wait() {
         asked.elapsed()
     );
     assert!(host.close().success());
-    drop(held);
+    drop(over);
+    held.join().unwrap();
 }
 
 // The host's stderr reaches Chrome's log and the terminal of whoever started the browser: never a connect code, on

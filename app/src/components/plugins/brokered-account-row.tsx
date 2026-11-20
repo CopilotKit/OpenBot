@@ -1,7 +1,8 @@
 import { IconArrowUpRight, IconUser } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConnectionFields } from "@/components/plugins/connection-fields";
+import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,10 +16,17 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import {
+  brokeredConsentFor,
+  type ConsentHandoff,
+} from "@/lib/plugins/consent-handoff";
+import { finishOnReturn } from "@/lib/plugins/finish-on-return";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -34,14 +42,20 @@ import {
   recheckBrokeredConnectionMutationOptions,
   setDefaultBrokeredAccountMutationOptions,
 } from "@/lib/plugins/mutations";
-import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
-import { brokeredAccountsQueryOptions } from "@/lib/plugins/queries";
 import {
   type BrokeredAccountKind,
   brokeredKeyMissing,
   type Edition,
   type PluginsProvider,
 } from "@/lib/plugins/provider-vocabulary";
+import { brokeredAccountsQueryOptions } from "@/lib/plugins/queries";
+import { readableRefusal } from "@/lib/plugins/readable-refusal";
+
+/** What a failed key check says when the server's own sentence cannot be shown. */
+const KEY_CHECK_FAILED =
+  "That key didn't pass its check. Disconnect, then connect again with a new key, or press Re-check.";
+const RECHECK_FAILED =
+  "That key didn't pass its check. Press Re-check again in a few minutes.";
 
 /**
  * One person's own brokered account, on whichever screen is asking.
@@ -62,24 +76,22 @@ import {
  * What this person actually does to connect: click through a consent screen, type a secret, or
  * nothing at all.
  *
- * A coarser question than the scheme the app's authorization config was created as. The recorded
- * `authScheme` is a vendor literal — `OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH` and the rest — and
- * a row that branched on it would be re-asking the same three-way question at every branch, each
- * copy free to forget a literal the others remembered.
+ * The app's `connectsWith` (listApps) answers it: `sign-in`, `key`, `nothing`, or `unreadable` where
+ * OpenBot can't tell from what it recorded. A row branches on the three kinds below, never on the
+ * answer itself, so each branch asks the same question.
  */
 export type { BrokeredAccountKind };
 
 /**
- * Which of the three a recorded scheme is.
+ * Which of the three an app's `connectsWith` is.
  *
- * Everything that is not `NO_AUTH` and not one of the typed schemes is consent, including a scheme
- * this file has never heard of: the catalogue is the vendor's and it may name a new one tomorrow,
- * and sending somebody to a consent screen that turns out not to exist is a refusal they can read,
- * where an empty form is a box they cannot fill in.
+ * Everything that is not `nothing` and not `key` is consent, including one OpenBot couldn't read:
+ * sending somebody to a consent screen that turns out not to exist is a refusal they can read, where
+ * an empty form is a box they cannot fill in.
  */
-function kindOf(authScheme: string | null): BrokeredAccountKind {
-  if (authScheme === "NO_AUTH") return "no-auth";
-  return schemeNeedsKey(authScheme) ? "fields" : "consent";
+function kindOf(connectsWith: string | null): BrokeredAccountKind {
+  if (connectsWith === "nothing") return "no-auth";
+  return connectsWith === "key" ? "fields" : "consent";
 }
 
 /** The row's state and the things it can do, from {@link useBrokeredAccount}. */
@@ -255,6 +267,8 @@ export type BrokeredAccount = {
   rechecking: boolean;
   /** The app this row is about, for the account list beneath it. */
   serverId: string;
+  /** Whether this row is the app's one shared account, which lists no accounts of anybody's own. */
+  shared: boolean;
   /** Whether the last key handed over was taken, which closes the form it was typed into. */
   fieldsSubmitted: boolean;
   /** Leave for the app's sign-in page to add one more account beside the ones connected. */
@@ -266,6 +280,12 @@ export type BrokeredAccount = {
   disconnectAccount: (accountId: string) => void;
   /** Which account a press is in flight for, so only its buttons wait. */
   changingAccount: string | null;
+  /** A sign-in through Composio held for OpenBot's step before it, or null. */
+  handoff: ConsentHandoff | null;
+  /** Go on to the sign-in the step is holding. */
+  continueHandoff: () => void;
+  /** Drop the sign-in the step is holding, and open nothing. */
+  cancelHandoff: () => void;
 };
 
 export function useBrokeredAccount(input: {
@@ -301,17 +321,19 @@ export function useBrokeredAccount(input: {
    */
   checkable: boolean;
   /**
-   * How the app's authorization config was CREATED, as the vendor's own scheme literal.
+   * How a person connects the app, from the app itself (listApps' `connectsWith`).
    *
-   * Read off the recorded server row rather than off a connection row: the connections endpoint
-   * answers two different row shapes, so the absence of a field there says which READ a row came
-   * from and never how an app connects. Null where the app is not brokered at all.
+   * Read off the app rather than off a connection row: the connections endpoint answers two
+   * different row shapes, so the absence of a field there says which READ a row came from and never
+   * how an app connects. Null where the app is not from the directory at all.
    */
-  authScheme: string | null;
+  connectsWith: string | null;
   /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed in. */
   reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
+  /** Whether the account is the app's one shared account rather than the person's own. */
+  shared?: boolean;
   /**
    * Where this row's failures go: the screen's own banner.
    *
@@ -322,7 +344,7 @@ export function useBrokeredAccount(input: {
 }): BrokeredAccount {
   const queryClient = useQueryClient();
   const {
-    authScheme,
+    connectsWith,
     brokered,
     checkable,
     configured,
@@ -332,6 +354,7 @@ export function useBrokeredAccount(input: {
     report,
     returnTo,
     serverId,
+    shared = false,
     verified,
     verifiedAt,
   } = input;
@@ -354,7 +377,7 @@ export function useBrokeredAccount(input: {
    * that ends in the one state this row has a sentence for anyway.
    */
   const confirmation = useMutation(
-    confirmBrokeredConnectionMutationOptions(queryClient),
+    confirmBrokeredConnectionMutationOptions(queryClient, shared),
   );
   const confirmAccount = confirmation.mutate;
   /*
@@ -378,6 +401,37 @@ export function useBrokeredAccount(input: {
   }, [brokered, configured, serverId, confirmAccount]);
 
   /*
+   * WHEN OPENBOT DESKTOP'S WINDOW IS BACK IN FRONT. The window sends the sign-in to the person's
+   * browser and this page stays where it is, so the question above is never asked again here. The
+   * connect press itself left the account to be confirmed when the window has the focus again,
+   * whatever screen it is on then (`confirmOnReturn` in lib/plugins/confirm-on-return.ts), and the
+   * lists read again carry the answer to this row. So this row asks nothing more.
+   *
+   * WHERE EACH ACTION IS AUTHORIZED ON ITS OWN, THE CONSENT ENDS AT THE VERIFIER, and asking the
+   * account again would not finish it: the window opens the verifier itself instead
+   * ({@link finishOnReturn}).
+   */
+  const finishReturn = () => {
+    if (reconnectsInPlace) finishOnReturn();
+  };
+
+  /*
+   * THROUGH COMPOSIO, OPENBOT'S STEP COMES FIRST. Its own page and then the app's sign-in both name
+   * Composio, so the row holds the sign-in here and the dialog says what is coming before it goes
+   * (`ConsentHandoffDialog`). Anything else leaves at once, as it always did.
+   */
+  const [handoff, setHandoff] = useState<ConsentHandoff | null>(null);
+  const leaveFor = async (authorizationUrl: string) => {
+    const consent = await brokeredConsentFor(queryClient, serverId);
+    if (consent) {
+      setHandoff({ ...consent, url: authorizationUrl });
+      return;
+    }
+    finishReturn();
+    window.location.href = authorizationUrl;
+  };
+
+  /*
    * Find out whether the key still works, when somebody presses for it and at no other time.
    *
    * Deliberately not a second effect beside the confirm above. Composio never re-checks a key once
@@ -387,8 +441,9 @@ export function useBrokeredAccount(input: {
    * So the row says when it last checked, and the person decides when to check again.
    */
   const recheck = useMutation({
-    ...recheckBrokeredConnectionMutationOptions(queryClient),
-    onError: (thrown: Error) => report(thrown.message),
+    ...recheckBrokeredConnectionMutationOptions(queryClient, shared),
+    onError: (thrown: Error) =>
+      report(readableRefusal(thrown.message, RECHECK_FAILED)),
   });
   /*
    * The check's answer is thrown away whenever an action changes the account it was about.
@@ -408,7 +463,7 @@ export function useBrokeredAccount(input: {
   const forgetRecheck = recheck.reset;
 
   const connect = useMutation({
-    ...connectAccountMutationOptions(returnTo),
+    ...connectAccountMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
@@ -433,8 +488,8 @@ export function useBrokeredAccount(input: {
        *
        * The route this pressed serves both kinds of brokered app and answers a field list to the
        * kind whose key somebody types — so a 200 with nothing to leave for means this press went to
-       * a key app that `kindOf` above read as consent, which is what happens the day Composio names
-       * a typed scheme this app's copy of `FIELD_SCHEMES` does not carry. Assigning that nothing
+       * a key app that `kindOf` above read as consent, which is what happens when OpenBot couldn't
+       * read how the app connects (`unreadable`) and it turns out to take a key. Assigning that nothing
        * navigated: the browser resolved the string `undefined` against the current document and
        * followed it, putting the person on a page of that name on this deployment's own origin,
        * with no sentence anywhere saying why.
@@ -446,11 +501,11 @@ export function useBrokeredAccount(input: {
        */
       if (start === null) {
         report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
         return;
       }
-      window.location.href = start.authorizationUrl;
+      return leaveFor(start.authorizationUrl);
     },
   });
 
@@ -490,7 +545,7 @@ export function useBrokeredAccount(input: {
    * `onSettled` here, where it WOULD shadow the refetch.
    */
   const disconnect = useMutation({
-    ...disconnectBrokeredMutationOptions(queryClient),
+    ...disconnectBrokeredMutationOptions(queryClient, shared),
     onError: (thrown: Error) => {
       report(thrown.message);
       forgetAnswers();
@@ -507,7 +562,7 @@ export function useBrokeredAccount(input: {
    * vendor's published list, which is metadata about the app and nobody's secret.
    */
   const fieldsRequest = useMutation({
-    ...brokeredConnectionFieldsMutationOptions(),
+    ...brokeredConnectionFieldsMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
   });
 
@@ -555,9 +610,9 @@ export function useBrokeredAccount(input: {
    * guaranteed to be refused, and withholds the Re-check and Disconnect buttons the sentence names.
    */
   const submission = useMutation({
-    ...connectBrokeredWithFieldsMutationOptions(queryClient),
+    ...connectBrokeredWithFieldsMutationOptions(queryClient, returnTo, shared),
     onError: (thrown: Error) => {
-      report(thrown.message);
+      report(readableRefusal(thrown.message, KEY_CHECK_FAILED));
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -611,11 +666,11 @@ export function useBrokeredAccount(input: {
       }
       if (start === null) {
         report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Reload the page and press Connect again.",
+          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
         return;
       }
-      window.location.href = start.authorizationUrl;
+      return leaveFor(start.authorizationUrl);
     },
   });
   const makeDefault = useMutation({
@@ -720,7 +775,7 @@ export function useBrokeredAccount(input: {
      * which is equally true of an app nobody ever connected.
      */
     disconnected: disconnect.isSuccess,
-    kind: kindOf(authScheme),
+    kind: kindOf(connectsWith),
     fields: published?.fields ?? null,
     guide: published?.guide ?? null,
     requestFields: () => {
@@ -742,6 +797,7 @@ export function useBrokeredAccount(input: {
     submittingFields: submission.isPending,
     submissionError: submission.error?.message ?? null,
     serverId,
+    shared,
     fieldsSubmitted: submission.isSuccess,
     connectAnother: () => {
       report(null);
@@ -761,6 +817,14 @@ export function useBrokeredAccount(input: {
       : disconnectAccount.isPending
         ? (disconnectAccount.variables?.accountId ?? null)
         : null,
+    handoff,
+    continueHandoff: () => {
+      if (!handoff) return;
+      setHandoff(null);
+      finishReturn();
+      window.location.href = handoff.url;
+    },
+    cancelHandoff: () => setHandoff(null),
   };
 }
 
@@ -926,8 +990,15 @@ function accountSentence(input: {
 /**
  * Above the form: why this app asks for a key, what to do at the provider, and a link to its page.
  *
- * Most apps in the directory have no sign-in, and a person who pressed Connect expecting one meets
- * a form. This is what tells them that is expected and where the key comes from, before the boxes.
+ * Most apps in the directory connect here with a key, and a person who pressed Connect expecting a
+ * sign-in meets a form. This is what tells them that is expected and where the key comes from,
+ * before the boxes.
+ *
+ * THE SENTENCE IS ABOUT HOW OPENBOT CONNECTS, NEVER ABOUT THE APP. All this row knows is the scheme
+ * the broker connects the app with, and that says nothing about whether the app has a sign-in of
+ * its own. It said "{title} doesn't offer a sign-in here" and was read as a claim about the app:
+ * Fireflies, whose broker publishes only `API_KEY`, signs people in to its own MCP server with
+ * OAuth, and Pipedrive's broker row publishes `OAUTH2` beside the `API_KEY` this form is for.
  */
 function KeyGuideNote({
   guide,
@@ -939,8 +1010,8 @@ function KeyGuideNote({
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="key-guide">
       <p>
-        {title} doesn't offer a sign-in here, so it connects with a key from
-        your {title} account.
+        OpenBot connects to {title} with a key from your {title} account, not a
+        sign-in.
       </p>
       {guide ? <p className="text-muted-foreground">{guide.steps}</p> : null}
       {guide?.url ? (
@@ -955,6 +1026,23 @@ function KeyGuideNote({
         </a>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The word beside Connect on an app that is added and not signed in to yet.
+ *
+ * Said in words beside the button, so a row whose app is on never reads as done by its switch or
+ * its title alone. It is what the Bot says about the same app.
+ */
+export function NotConnected() {
+  return (
+    <span
+      className="text-muted-foreground text-xs"
+      data-testid="account-not-connected"
+    >
+      Not connected
+    </span>
   );
 }
 
@@ -975,8 +1063,14 @@ export function BrokeredAccountRow({
   notice,
   provider,
   reader = "admin",
+  startConnect = false,
   title,
 }: {
+  /**
+   * Open the key form on arrival, once, for an app that takes a key and isn't connected: Browse
+   * apps sends somebody here straight after adding one. A sign-in app is started where it was added.
+   */
+  startConnect?: boolean;
   /**
    * Which edition draws this screen (`managePaths().edition`). The personal edition's one person is
    * told to set connecting apps up themselves, never to ask an admin.
@@ -1060,14 +1154,38 @@ export function BrokeredAccountRow({
     if (account.fieldsSubmitted) setAsking(false);
   }, [account.fieldsSubmitted]);
 
+  /* The key form on arrival, when asked for: see `startConnect`. Once per visit. */
+  const started = useRef(false);
+  const { requestFields } = account;
+  useEffect(() => {
+    if (!startConnect || started.current) return;
+    if (!account.configured || account.connected || account.kind !== "fields")
+      return;
+    started.current = true;
+    setAsking(true);
+    requestFields();
+  }, [
+    startConnect,
+    account.configured,
+    account.connected,
+    account.kind,
+    requestFields,
+  ]);
+
   /*
    * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
    * or could not be read the row reads as it always did: one connection, with its own Disconnect.
    */
+  // Not read while this connection is being ended: it would ask for one that is gone.
+  const ending = useConnectionEnding(account.serverId);
   const listing = useQuery({
     ...brokeredAccountsQueryOptions(account.serverId),
     enabled:
-      account.configured && account.connected && account.kind !== "no-auth",
+      account.configured &&
+      account.connected &&
+      account.kind !== "no-auth" &&
+      !account.shared &&
+      !ending,
   });
   const accounts =
     account.connected && !listing.isPending && !listing.error && listing.data
@@ -1087,6 +1205,15 @@ export function BrokeredAccountRow({
     }
     account.connectAnother();
   };
+  /* Whether a connected account has anything to press: see the footer below. */
+  const connectedActions =
+    account.configured &&
+    account.connected &&
+    account.kind !== "no-auth" &&
+    ((account.kind === "fields" && account.checkable) ||
+      (account.reconnectsInPlace && account.kind === "consent") ||
+      canAddAnother ||
+      !several);
 
   return (
     <>
@@ -1099,11 +1226,10 @@ export function BrokeredAccountRow({
               ? "Your accounts"
               : (heading ?? "Your account")}
           </ItemTitle>
-          {/* Unclamped where the key is missing: that sentence is the only place the setting is
-              named, so it is the point rather than a hint. */}
-          <ItemDescription
-            className={account.configured ? undefined : "line-clamp-none"}
-          >
+          {/* Never clamped. It is the point rather than a hint: where the key is missing it is the
+              only place the setting is named, and once connected it says what Disconnect also
+              ends, which was cut off mid-word beside the buttons. */}
+          <ItemDescription className="line-clamp-none">
             {several
               ? `You connected ${accounts.length} ${title} accounts. Bots use your default account unless you ask for another.`
               : accountSentence({
@@ -1153,121 +1279,131 @@ export function BrokeredAccountRow({
                 />
                 {/* The same word for both kinds. The line beneath says what it rests on. */}
                 <span className="text-muted-foreground text-xs">Connected</span>
-                {/*
-                 * OFFERED ONLY ON A KEY APP, BECAUSE THAT IS THE ONLY KIND A RE-CHECK IS AN ACT ON.
-                 * A consent connection is written verified by the confirm, with no probe behind it,
-                 * and migration 0038 backfilled every consent row that came before — see
-                 * {@link BrokeredAccount.verified} — so a gate that asked only about a check would
-                 * draw Re-check on every connected Gmail a deployment already had, where pressing it
-                 * could only fail.
-                 *
-                 * AND THE SECOND HALF ASKS WHETHER THERE IS ANYTHING TO CHECK WITH, WHICH IS NOT
-                 * "HAS A CHECK PASSED". Gating on `verified` withheld the button in the one state
-                 * somebody reaches for it hardest: a key the vendor has just rejected, which they
-                 * have gone and corrected and now want tried again. An app with nothing to spend
-                 * the key on is the only state with nothing to press, because the button could only
-                 * ask for the same answer again.
-                 *
-                 * AND IT ASKS `checkable`, NOT `probe`, WHICH IS THE WHOLE OF THE DIFFERENCE. This
-                 * is a question about the app TODAY, and `probe` is the record of what the last
-                 * check spent — a fact about the past that no later listing can move. The two
-                 * agreed while the probe was derived on every read. Once it became a record they
-                 * stopped: a key accepted against an app that published nothing records null for
-                 * good, so a gate on that record withheld the button for good, even after a Refresh
-                 * gave the app something to try — and pressing this button is the only thing in the
-                 * product that could ever write an action into that record, so nothing could ever
-                 * end the state from inside it. The sentence above still reads the record, because
-                 * what to SAY is what happened; what to OFFER is what is possible now.
-                 */}
-                {account.kind === "fields" && account.checkable ? (
-                  <Button
-                    disabled={account.rechecking}
-                    onClick={account.recheck}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {account.rechecking ? "Checking…" : "Re-check"}
-                  </Button>
-                ) : null}
-                {/*
-                 * RECONNECT OVER THE ACCOUNT THAT STANDS, where the broker adds a consent to it.
-                 * This is where a Bot's card sends somebody whose call the vendor refused, and on
-                 * Arcade one press asks for everything the app needs. The arrow says it leaves
-                 * OpenBot for the vendor's consent page, as Connect's does.
-                 */}
-                {account.reconnectsInPlace && account.kind === "consent" ? (
-                  <Button
-                    disabled={account.connecting}
-                    onClick={account.connect}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Reconnect
-                    <IconArrowUpRight />
-                  </Button>
-                ) : null}
-                {/*
-                 * ONE MORE ACCOUNT BESIDE THE ONES CONNECTED, where the app can tell a person's
-                 * accounts apart. A key app opens the form; a sign-in app leaves for its page.
-                 */}
-                {canAddAnother && account.kind !== "no-auth" ? (
-                  <Button
-                    disabled={
-                      account.connectingAnother || account.requestingFields
-                    }
-                    onClick={addAnother}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Connect another account
-                    {account.kind === "consent" ? <IconArrowUpRight /> : null}
-                  </Button>
-                ) : null}
-                {/* With several accounts each has its own Disconnect, in its row below. */}
-                {several ? null : (
-                  <Button
-                    disabled={account.disconnecting}
-                    onClick={account.disconnect}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Disconnect
-                  </Button>
-                )}
               </>
             ) : (
-              /* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
-                 every app but a key app. */
+              <>
+                <NotConnected />
+                {/* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
+                 every app but a key app. */}
+                <Button
+                  disabled={account.connecting}
+                  onClick={() => {
+                    /*
+                     * A key app goes nowhere: it opens the form below and asks the app what belongs in
+                     * it. The question is asked on every open rather than once, because what an app
+                     * publishes is the vendor's and may differ from what it published last time.
+                     */
+                    if (account.kind === "fields") {
+                      setAsking(true);
+                      account.requestFields();
+                      return;
+                    }
+                    account.connect();
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Connect
+                  {/* A key app opens a form here and leaves for nowhere, so no arrow. */}
+                  {account.kind === "fields" ? null : <IconArrowUpRight />}
+                </Button>
+              </>
+            )}
+          </ItemActions>
+        )}
+        {/*
+         * WHAT CAN BE DONE TO A CONNECTED ACCOUNT, ON A LINE OF ITS OWN under the sentence. Beside
+         * it, with the status, up to three buttons squeezed the sentence to a clamp at the default
+         * desktop width, and the part about what Disconnect also ends was the part cut away.
+         */}
+        {connectedActions ? (
+          <ItemFooter className="flex-wrap justify-start">
+            {/*
+             * OFFERED ONLY ON A KEY APP, BECAUSE THAT IS THE ONLY KIND A RE-CHECK IS AN ACT ON.
+             * A consent connection is written verified by the confirm, with no probe behind it,
+             * and migration 0038 backfilled every consent row that came before — see
+             * {@link BrokeredAccount.verified} — so a gate that asked only about a check would
+             * draw Re-check on every connected Gmail a deployment already had, where pressing it
+             * could only fail.
+             *
+             * AND THE SECOND HALF ASKS WHETHER THERE IS ANYTHING TO CHECK WITH, WHICH IS NOT
+             * "HAS A CHECK PASSED". Gating on `verified` withheld the button in the one state
+             * somebody reaches for it hardest: a key the vendor has just rejected, which they
+             * have gone and corrected and now want tried again. An app with nothing to spend
+             * the key on is the only state with nothing to press, because the button could only
+             * ask for the same answer again.
+             *
+             * AND IT ASKS `checkable`, NOT `probe`, WHICH IS THE WHOLE OF THE DIFFERENCE. This
+             * is a question about the app TODAY, and `probe` is the record of what the last
+             * check spent — a fact about the past that no later listing can move. The two
+             * agreed while the probe was derived on every read. Once it became a record they
+             * stopped: a key accepted against an app that published nothing records null for
+             * good, so a gate on that record withheld the button for good, even after a Refresh
+             * gave the app something to try — and pressing this button is the only thing in the
+             * product that could ever write an action into that record, so nothing could ever
+             * end the state from inside it. The sentence above still reads the record, because
+             * what to SAY is what happened; what to OFFER is what is possible now.
+             */}
+            {account.kind === "fields" && account.checkable ? (
               <Button
-                disabled={account.connecting}
-                onClick={() => {
-                  /*
-                   * A key app goes nowhere: it opens the form below and asks the app what belongs in
-                   * it. The question is asked on every open rather than once, because what an app
-                   * publishes is the vendor's and may differ from what it published last time.
-                   */
-                  if (account.kind === "fields") {
-                    setAsking(true);
-                    account.requestFields();
-                    return;
-                  }
-                  account.connect();
-                }}
+                disabled={account.rechecking}
+                onClick={account.recheck}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                Connect
-                {/* A key app opens a form here and leaves for nowhere, so no arrow. */}
-                {account.kind === "fields" ? null : <IconArrowUpRight />}
+                {account.rechecking ? "Checking…" : "Re-check"}
+              </Button>
+            ) : null}
+            {/*
+             * RECONNECT OVER THE ACCOUNT THAT STANDS, where the broker adds a consent to it.
+             * This is where a Bot's card sends somebody whose call the vendor refused, and on
+             * Arcade one press asks for everything the app needs. The arrow says it leaves
+             * OpenBot for the vendor's consent page, as Connect's does.
+             */}
+            {account.reconnectsInPlace && account.kind === "consent" ? (
+              <Button
+                disabled={account.connecting}
+                onClick={account.connect}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Reconnect
+                <IconArrowUpRight />
+              </Button>
+            ) : null}
+            {/*
+             * ONE MORE ACCOUNT BESIDE THE ONES CONNECTED, where the app can tell a person's
+             * accounts apart. A key app opens the form; a sign-in app leaves for its page.
+             */}
+            {canAddAnother && account.kind !== "no-auth" ? (
+              <Button
+                disabled={account.connectingAnother || account.requestingFields}
+                onClick={addAnother}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Connect another account
+                {account.kind === "consent" ? <IconArrowUpRight /> : null}
+              </Button>
+            ) : null}
+            {/* With several accounts each has its own Disconnect, in its row below. */}
+            {several ? null : (
+              <Button
+                disabled={account.disconnecting}
+                onClick={account.disconnect}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Disconnect
               </Button>
             )}
-          </ItemActions>
-        )}
+          </ItemFooter>
+        ) : null}
       </Item>
 
       {/*
@@ -1287,6 +1423,12 @@ export function BrokeredAccountRow({
             />
           ))
         : null}
+
+      <ConsentHandoffDialog
+        handoff={account.handoff}
+        onCancel={account.cancelHandoff}
+        onContinue={account.continueHandoff}
+      />
 
       <Dialog onOpenChange={setAsking} open={asking}>
         <DialogContent>

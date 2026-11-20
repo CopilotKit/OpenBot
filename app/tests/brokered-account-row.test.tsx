@@ -30,10 +30,38 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import type { BrokerField } from "@/lib/plugins/mutations";
-import type { PluginServer, PluginsPage } from "@/lib/plugins/queries";
 import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connections.$key";
 import { Route as AdminAppRoute } from "@/routes/_authed/admin/plugins/$key";
-import { BROKERED_PROBE_OUTCOMES } from "../../server/src/plugins/store";
+import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
+import {
+  APP_ACCESS_REQUESTS_PATH,
+  appAccessRequestsResponse,
+} from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
+import {
+  accountsPage,
+  checkResponse,
+  confirmationResponse,
+  connectionPage,
+  connectionResponse,
+  connectionsProblem,
+  disconnectionResponse,
+  MY_CONNECTIONS_PATH,
+  myConnectionPath,
+  startResponse,
+} from "./connections-api";
+import { answerNoTeamGrants } from "./team-grants-api";
+
+/**
+ * The server's probe outcomes, in the order its `BrokeredProbe` union declares them. The server runs
+ * from the published OpenBot images, so its list is written out here as it answers today.
+ */
+const BROKERED_PROBE_OUTCOMES = [
+  "nothing",
+  "answered",
+  "complained",
+  "unreachable",
+] as const;
 
 /**
  * The brokered account row, on both screens that draw it.
@@ -167,12 +195,12 @@ function asDay(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** A minimal but complete brokered `PluginServer` — the row shape only Composio produces. */
-function brokeredServer(authScheme: string): PluginServer {
+/** A minimal but complete app from the directory, as `GET /api/plugins` listed it. */
+function brokeredServer(authScheme: string, title = "Gmail"): TodayServer {
   return {
     authScheme,
     id: APP_KEY,
-    title: "Gmail",
+    title,
     vendor: "Google",
     url: "https://example.invalid/composio",
     summary: "Mail.",
@@ -195,11 +223,11 @@ function brokeredServer(authScheme: string): PluginServer {
 function pluginsPage(
   composioConfigured: boolean,
   authScheme: string,
-): PluginsPage {
+  title?: string,
+): AppsFixture {
   return {
     catalogue: [],
-    servers: [brokeredServer(authScheme)],
-    skills: [],
+    servers: [brokeredServer(authScheme, title)],
     botsMayCallBack: true,
     redirectUri: null,
     composioConfigured,
@@ -225,6 +253,8 @@ type Deployment = {
   authScheme?: string;
   /** What the app publishes as the things a person types in, for the `API_KEY` schemes. */
   fields?: BrokerField[];
+  /** The app's name on its row. Gmail where it is left off, as every older test here meant. */
+  title?: string;
   /** Where the key comes from, as the server answers it beside the fields. Absent by default. */
   guide?: { steps: string; url: string | null };
   /** Whether a real call was ever made with this key and worked, as this deployment recorded it. */
@@ -263,7 +293,7 @@ type Deployment = {
    *
    * A NAMED PROBE BESIDE `verified: false` IS THEREFORE NOT A 200 AND THIS STUB NO LONGER MAKES ONE.
    * `recheckBrokeredConnection` writes the row and then RAISES with Composio's own sentence in it,
-   * which `POST /servers/:id/connection/recheck` passes through as a 400 — so the shape a stub
+   * which recheckConnection passes through as a 400 — so the shape a stub
    * answering 200 here pinned is one no deployment can produce, and the screen defect underneath it
    * could not be seen. See {@link REFUSED_RECHECK}.
    */
@@ -300,7 +330,7 @@ type Deployment = {
    */
   refusesFields?: { error: string; status: 400 | 409 | 502 | 503 };
   /**
-   * Whether `/api/plugins/connections` answers 500, with `/api/plugins` answering perfectly.
+   * Whether listConnections answers 500, with the apps reads answering perfectly.
    *
    * THE ONE STATE BOTH SCREENS DEFAULTED THROUGH. Every fact a brokered row draws — `recorded`,
    * `verified`, `verifiedAt`, `probe`, `checkable` — comes off that read, and both screens gated
@@ -347,6 +377,10 @@ type Server = {
    * longer publishes is a 400 on the whole connection, however tidy the screen looked.
    */
   submitted: Record<string, string>[];
+  /** How many times the vendor was asked about the account (confirmConnection). */
+  confirmsAsked: number;
+  /** What the vendor answers about the account from now on: a consent finished elsewhere. */
+  answer: (confirms: boolean) => void;
 };
 
 /**
@@ -394,6 +428,10 @@ function installDeployment(deployment: Deployment): Server {
       state.refusesFields = refusal;
     },
     submitted: [],
+    confirmsAsked: 0,
+    answer: (confirms) => {
+      state.confirms = confirms;
+    },
   };
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -414,22 +452,15 @@ function installDeployment(deployment: Deployment): Server {
         headers: { "content-type": "application/json" },
       });
 
-    if (path.startsWith("/api/plugins/connections")) {
+    if (path === MY_CONNECTIONS_PATH) {
       if (state.connectionsFail) {
-        return new Response(
-          JSON.stringify({ error: "the connections could not be read" }),
-          {
-            headers: { "content-type": "application/json" },
-            status: 500,
-          },
-        );
+        return connectionsProblem(500, "the connections could not be read");
       }
-      return json({
-        connections: state.recorded
+      return connectionPage(
+        state.recorded
           ? [
               {
                 serverId: APP_KEY,
-                scope: "",
                 connectedAt: "2026-09-10T00:00:00.000Z",
                 verified: state.verified,
                 verifiedAt: state.verifiedAt,
@@ -449,21 +480,18 @@ function installDeployment(deployment: Deployment): Server {
               },
             ]
           : [],
-        redirectUri: null,
-      });
+      );
     }
-    if (path.endsWith("/connection/confirm") && method === "POST") {
+    if (path.endsWith("/confirm") && method === "POST") {
+      server.confirmsAsked += 1;
       // What the route answers with no key at all: nothing to ask, and no answer invented.
       if (!state.composioConfigured) {
-        return new Response(
-          JSON.stringify({ error: "Composio is not set up" }),
-          {
-            headers: { "content-type": "application/json" },
-            status: 503,
-          },
-        );
+        return connectionsProblem(503, "Composio is not set up");
       }
-      return json({ connected: state.confirms });
+      // The route records what the app answered: an account the app says is connected is kept,
+      // so the connections read lists it from then on.
+      if (state.confirms) state.recorded = true;
+      return confirmationResponse(state.confirms);
     }
     /*
      * The first press on an app nobody consents to: what does it want typed in? The consent half of
@@ -485,12 +513,7 @@ function installDeployment(deployment: Deployment): Server {
          * this whole path exists to preserve, and the only thing that tells somebody their key was
          * mistyped rather than their deployment broken.
          */
-        if (state.rejects) {
-          return new Response(JSON.stringify({ error: state.rejects }), {
-            headers: { "content-type": "application/json" },
-            status: 400,
-          });
-        }
+        if (state.rejects) return connectionsProblem(400, state.rejects);
         /*
          * AND THE REFUSAL THAT LEAVES A ROW BEHIND IT, which is the same 400 over a deployment that
          * is no longer in the state the caller was in when they pressed.
@@ -509,13 +532,7 @@ function installDeployment(deployment: Deployment): Server {
           // The action that ran and that the vendor answered no to, which is the whole of what
           // separates this row on a later read from a key nobody ever tried.
           state.probe = PROBE;
-          return new Response(
-            JSON.stringify({ error: state.rejectsAndKeeps }),
-            {
-              headers: { "content-type": "application/json" },
-              status: 400,
-            },
-          );
+          return connectionsProblem(400, state.rejectsAndKeeps);
         }
         state.recorded = true;
         state.confirms = true;
@@ -534,7 +551,11 @@ function installDeployment(deployment: Deployment): Server {
          * the read behind it could never have agreed with.
          */
         state.probe = null;
-        return json({ connected: true, verified: false, probe: state.probe });
+        return startResponse({
+          connected: true,
+          verified: false,
+          probe: state.probe,
+        });
       }
       /*
        * THE FIRST PRESS FORKS ON THE RECORDED SCHEME, exactly as the route does: a typed scheme is
@@ -553,24 +574,21 @@ function installDeployment(deployment: Deployment): Server {
       // {@link Server.holdFields}.
       if (held) await held;
       if (state.refusesFields) {
-        return new Response(
-          JSON.stringify({ error: state.refusesFields.error }),
-          {
-            headers: { "content-type": "application/json" },
-            status: state.refusesFields.status,
-          },
+        return connectionsProblem(
+          state.refusesFields.status,
+          state.refusesFields.error,
         );
       }
       if (SERVER_FIELD_SCHEMES.includes(state.authScheme)) {
-        return json(
+        return startResponse(
           deployment.guide
             ? { fields: state.fields, guide: deployment.guide }
             : { fields: state.fields },
         );
       }
-      return json({ authorizationUrl: CONSENT_URL });
+      return startResponse({ authorizationUrl: CONSENT_URL });
     }
-    if (path.endsWith("/connection/recheck") && method === "POST") {
+    if (path.endsWith("/recheck") && method === "POST") {
       /*
        * A CHECK THAT SPENT SOMETHING WRITES; A CHECK THAT SPENT NOTHING WRITES NOTHING, which is
        * the fork `recheckBrokeredConnection` makes and the reason the verdict cannot be recorded on
@@ -619,14 +637,11 @@ function installDeployment(deployment: Deployment): Server {
        * ever failed.
        */
       if (!state.recheckAnswer.verified && state.recheckAnswer.probe !== null) {
-        return new Response(JSON.stringify({ error: REFUSED_RECHECK }), {
-          headers: { "content-type": "application/json" },
-          status: 400,
-        });
+        return connectionsProblem(400, REFUSED_RECHECK);
       }
-      return json(state.recheckAnswer);
+      return checkResponse(state.recheckAnswer);
     }
-    if (path.endsWith("/connection") && method === "DELETE") {
+    if (path.endsWith("/disconnect") && method === "POST") {
       server.deletes += 1;
       state.recorded = false;
       state.confirms = false;
@@ -636,12 +651,23 @@ function installDeployment(deployment: Deployment): Server {
       state.verified = false;
       state.verifiedAt = null;
       state.probe = undefined;
-      return json({ ok: true });
+      return disconnectionResponse();
     }
-    if (path.startsWith("/api/agents")) return json({ agents: [] });
-    if (path.startsWith("/api/plugins")) {
-      return json(pluginsPage(state.composioConfigured, state.authScheme));
-    }
+    const bots = answerBotsList(path, init, { visible: [] });
+    if (bots) return bots;
+    // Nobody has asked an admin for anything here.
+    if (path.startsWith(APP_ACCESS_REQUESTS_PATH))
+      return appAccessRequestsResponse([]);
+    const apps = answerAppsApi(
+      input,
+      init,
+      pluginsPage(state.composioConfigured, state.authScheme, state.title),
+    );
+    if (apps) return apps;
+    if (path.startsWith("/api/plugins")) return json({ skills: [] });
+    // The app's Teams row: no teams here, and the app granted to none.
+    const teamGrants = answerNoTeamGrants(input, init);
+    if (teamGrants) return teamGrants;
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 
@@ -709,7 +735,10 @@ afterEach(() => {
  * shell, neither of which this file is about. The index route is registered only so
  * the Back link has something to build an href from.
  */
-function renderAccountScreen(client: QueryClient) {
+function renderAccountScreen(
+  client: QueryClient,
+  at = `/connections/${APP_KEY}`,
+) {
   const rootRoute = createRootRoute({ component: Outlet });
   const authedRoute = createRoute({
     id: "/_authed",
@@ -748,7 +777,7 @@ function renderAccountScreen(client: QueryClient) {
   const router = createRouter({
     routeTree: tree,
     history: createMemoryHistory({
-      initialEntries: [`/connections/${APP_KEY}`],
+      initialEntries: [at],
     }),
   });
   return render(
@@ -972,7 +1001,7 @@ test("a key app's dialog explains the key and links to the provider's page for i
 
   const guide = await view.findByTestId("key-guide");
   expect(guide.textContent).toContain(
-    "Gmail doesn't offer a sign-in here, so it connects with a key from your Gmail account.",
+    "OpenBot connects to Gmail with a key from your Gmail account, not a sign-in.",
   );
   expect(guide.textContent).toContain("Connect server");
   const link = view.getByRole("link", { name: /Get a key from Gmail/ });
@@ -982,6 +1011,46 @@ test("a key app's dialog explains the key and links to the provider's page for i
   expect(link.getAttribute("target")).toBe("_blank");
   // The guide sits above the form, which still draws the app's own box.
   expect(await view.findByLabelText("API Key")).toBeTruthy();
+});
+
+/**
+ * THE DIALOG SAYS HOW OPENBOT CONNECTS, AND NEVER THAT THE APP HAS NO SIGN-IN.
+ *
+ * Reported from OpenBot 1.0.2: Connect on Fireflies said "Fireflies doesn't offer a sign-in here",
+ * and Fireflies does offer one, with OAuth, on its own MCP server. Composio publishes only `API_KEY`
+ * for it, so the form is right. The row knows only how OpenBot connects, so that is all the
+ * sentence may say. The field is Fireflies' own, as `server/tests/key-only-apps.test.ts` pins it
+ * from Composio's captured answer.
+ */
+const FIREFLIES_KEY: BrokerField = {
+  name: "generic_api_key",
+  label: "API key",
+  help: "Your Fireflies API key — a secret token that lets OpenBot access your meetings and transcripts. Find it at app.fireflies.ai → Integrations → Fireflies API.",
+  required: true,
+  secret: true,
+};
+
+test("a key app's dialog says OpenBot connects it with a key, not that the app has no sign-in", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [FIREFLIES_KEY],
+    recorded: false,
+    title: "Fireflies",
+  });
+
+  const view = renderAccountScreen(queryClient());
+  await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+
+  const guide = await view.findByTestId("key-guide");
+  expect(guide.textContent).toContain(
+    "OpenBot connects to Fireflies with a key from your Fireflies account, not a sign-in.",
+  );
+  expect(guide.textContent).not.toMatch(/doesn't offer a sign-in/);
+  // And the box is still Fireflies' own, so the connect itself is unchanged.
+  const input = await view.findByLabelText("API key");
+  expect(input.getAttribute("type")).toBe("password");
 });
 
 test("a key app nobody has connected says it will ask for a key, not send you off", async () => {
@@ -1051,7 +1120,7 @@ const REFUSED = "Composio rejected that key: invalid API key for perplexityai.";
  * it — on a page that has to be redrawn before that button is there to press.
  */
 const STRANDED =
-  "What you entered for gmail did not work — Composio rejected that key: invalid API key for perplexityai. — and Composio would not take the account back either, so it is recorded here as unchecked rather than left somewhere nothing could name it. Disconnect it on the Plugins page and try again.";
+  "What you entered for gmail did not work — Composio rejected that key: invalid API key for perplexityai. — and Composio would not take the account back either, so it is recorded here as unchecked rather than left somewhere nothing could name it. Disconnect it on the Apps page and try again.";
 
 test("a key the broker refuses says so inside the dialog, not only behind it", async () => {
   installDeployment({
@@ -1150,12 +1219,63 @@ test("a consent app's Connect leaves for the vendor's own page", async () => {
     await userEvent.click(await view.findByRole("button", { name: "Connect" }));
 
     /*
-     * The whole of what this press does, and the reason the case below is worth having: the row
-     * hands the browser whatever the route answered with, and there is nothing between the two.
+     * Through Composio, OpenBot's step comes first and says what the next pages will say. Nothing
+     * has left yet; Continue now (or the countdown) hands the browser the route's own answer.
      */
+    const step = await view.findByRole("dialog");
+    expect(within(step).getByText("Connecting Gmail")).toBeTruthy();
+    expect(watched.navigations).toEqual([]);
+    await userEvent.click(
+      within(step).getByRole("button", { name: "Continue now" }),
+    );
     await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
   } finally {
     watched.restore();
+  }
+});
+
+test("in OpenBot Desktop, the page asks again once the window is back in front", async () => {
+  /*
+   * The window sends the sign-in to the person's browser and this page stays where it is, so it
+   * never arrives here again to confirm on load. The browser hands the person back to the window
+   * when the sign-in is done, and the focus that brings is when the account is asked about.
+   */
+  const server = installDeployment({
+    authScheme: "OAUTH2",
+    composioConfigured: true,
+    confirms: false,
+    recorded: false,
+  });
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  const watched = watchNavigation();
+
+  try {
+    const view = renderAccountScreen(queryClient());
+    await userEvent.click(await view.findByRole("button", { name: "Connect" }));
+    await userEvent.click(
+      within(await view.findByRole("dialog")).getByRole("button", {
+        name: "Continue now",
+      }),
+    );
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+    const before = server.confirmsAsked;
+
+    server.answer(true);
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(server.confirmsAsked).toBe(before + 1));
+    expect(
+      await view.findByRole("button", { name: "Disconnect" }),
+    ).toBeTruthy();
+    // Once per sign-in: a later focus asks nothing more.
+    window.dispatchEvent(new Event("focus"));
+    expect(server.confirmsAsked).toBe(before + 1);
+  } finally {
+    watched.restore();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   }
 });
 
@@ -1233,6 +1353,9 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
   return {
     configured: true,
     reconnectsInPlace: false,
+    handoff: null,
+    continueHandoff: () => {},
+    cancelHandoff: () => {},
     connect: () => {},
     connected: false,
     connecting: false,
@@ -1270,6 +1393,7 @@ function accountState(overrides: Partial<BrokeredAccount>): BrokeredAccount {
     verified: false,
     verifiedAt: null,
     serverId: "gmail",
+    shared: false,
     fieldsSubmitted: false,
     connectAnother: () => {},
     connectingAnother: false,
@@ -1565,8 +1689,7 @@ test("a check that did not come back clean says so, without ruling on the key", 
  * rounds it did: `["nothing", "answered", "complained", "unreachable"]` written out at the assertion,
  * in this file, compared to the `outcome` fields above it — a fifth member on the server's real
  * `BrokeredProbe` passed that, which is exactly the drift the test was added to catch. It now
- * counts against `BROKERED_PROBE_OUTCOMES`, imported from `server/src/plugins/store.ts`, which that
- * module pins to the union in both directions with `satisfies` and a `Decides<…>` witness.
+ * counts against `BROKERED_PROBE_OUTCOMES` at the top of this file, the server's own list.
  *
  * `SERVER_FIELD_SCHEMES` ABOVE IS STILL A COPY AND STILL SHOULD BE, which is not the same case: it
  * earns its copy by carrying a scheme the screen has never heard of, and a disagreement is the one
@@ -2009,7 +2132,7 @@ test("a key refused with its account left standing stops offering Connect", asyn
 /**
  * A CONNECTIONS READ THAT FAILED IS SAID, NOT DEFAULTED TO "YOU HAVE NEVER CONNECTED THIS".
  *
- * CRITERION. With `/api/plugins` answering perfectly and `/api/plugins/connections` answering 500,
+ * CRITERION. With the apps reads answering perfectly and listConnections answering 500,
  * neither screen draws the brokered row, neither offers Connect, and each says the state could not
  * be read.
  *
@@ -2110,7 +2233,7 @@ test("the administrator's connector screen keeps the rest of the page when the c
   // AND THE PAGE IS STILL THERE. The switch is how a server is removed from this deployment, and
   // its absence was the whole cost of collapsing the page.
   expect(
-    view.getByRole("switch", { name: "Enable Gmail for this deployment" }),
+    view.getByRole("switch", { name: "Enable Gmail for this organization" }),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Refresh tools" })).toBeTruthy();
 });
@@ -2585,7 +2708,7 @@ function AccountProbe() {
     probe: null,
     checkable: true,
     reconnectsInPlace: false,
-    authScheme: "API_KEY",
+    connectsWith: "key",
     returnTo: "settings",
     report: () => {},
   });
@@ -2731,18 +2854,24 @@ test("a re-check that spent nothing leaves the rejection the record still names"
 });
 
 /**
- * A person's accounts at the app, as `/servers/:id/accounts` answers them, for the cases below.
- * Every other request is a 404, so nothing here can be answered by accident.
+ * A person's accounts at the app, as listConnectedAccounts answers them, and whether another can be
+ * added, as the connection itself says. Every other request is a 404, so nothing here can be answered
+ * by accident.
  */
-function answerAccounts(body: unknown) {
+function answerAccounts(body: {
+  accounts: Parameters<typeof accountsPage>[0];
+  canAddAnother: boolean;
+}) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const requested = typeof input === "string" ? input : String(input);
     const path = requested.split("?")[0] ?? requested;
-    if (path.endsWith("/accounts")) {
-      return new Response(JSON.stringify(body), {
-        headers: { "content-type": "application/json" },
+    if (path.endsWith("/accounts")) return accountsPage(body.accounts);
+    if (path === myConnectionPath(APP_KEY))
+      return connectionResponse({
+        serverId: APP_KEY,
+        verified: true,
+        canAddAccount: body.canAddAnother,
       });
-    }
     return new Response(null, { status: 404 });
   }) as typeof fetch;
 }
@@ -2823,4 +2952,46 @@ test("one account is named in the row, which keeps its Disconnect and offers ano
   expect(
     view.getByRole("button", { name: /Connect another account/ }),
   ).toBeTruthy();
+});
+
+/**
+ * ADDED IS NOT CONNECTED, ON THE APP'S PAGE TOO. A person who added an app and never signed in read
+ * a row with a Connect button and a sentence, and nothing that said plainly it wasn't connected.
+ */
+test("an added app nobody signed in to says Not connected beside Connect, on both pages", async () => {
+  installDeployment({
+    composioConfigured: true,
+    recorded: false,
+    confirms: false,
+  });
+
+  const person = renderAccountScreen(queryClient());
+  expect(await person.findByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(person.getByText("Not connected")).toBeTruthy();
+  cleanup();
+
+  const admin = renderAdminScreen(queryClient());
+  expect(await admin.findByRole("button", { name: "Connect" })).toBeTruthy();
+  expect(admin.getByText("Not connected")).toBeTruthy();
+});
+
+/**
+ * BROWSE APPS SENDS A KEY APP HERE STRAIGHT AFTER ADDING IT (`?connect=true`), and the key form is
+ * what opens: there is no sign-in page to send anybody to.
+ */
+test("arriving to connect a key app opens its key form without a second press", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    composioConfigured: true,
+    confirms: false,
+    fields: [PERPLEXITY_KEY],
+    recorded: false,
+  });
+
+  const view = renderAccountScreen(
+    queryClient(),
+    `/connections/${APP_KEY}?connect=true`,
+  );
+
+  expect(await view.findByLabelText("API Key")).toBeTruthy();
 });

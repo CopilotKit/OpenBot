@@ -9,17 +9,31 @@
 A modular, self-hostable workspace for AI coworkers.<br>
 Choose your models. Bring your agents. Own your infrastructure.
 
-[Mac / Apple silicon](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg) · [Mac / Intel](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg) · [Windows](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
+[open.bot](https://open.bot) · [Docs](docs/README.md) · [Deploy on Kubernetes](#deploy-on-kubernetes) · [Run from source](#run-from-source)
 
-[iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+[![GitHub Trending: #3 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
+[![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
+<a href="https://www.producthunt.com/products/copilotkit?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-openbot-3" target="_blank" rel="noopener noreferrer"><img alt="OpenBot - Grok Bot alternative: free, open-source, self-hostable | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1232008&amp;theme=light&amp;t=1794785577522"></a>
 
-[Kubernetes](#deploy-on-kubernetes)
+<br>
 
-[**OpenBot for Business · Get early access →**](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [**Docs**](docs/README.md)
+[![Download for Mac (Apple silicon)](https://img.shields.io/github/v/release/CopilotKit/OpenBot?style=for-the-badge&labelColor=3A3466&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExIDNoMnYxMC4ybDMuNi0zLjZMMTggMTFsLTYgNi02LTYgMS40LTEuNCAzLjYgMy42ek01IDE5aDE0djJINXoiLz48L3N2Zz4%3D&label=Download%20for%20Mac%20%28Apple%20silicon%29&color=6E6AE0)](https://downloads.copilotkit.ai/latest/OpenBot-mac-arm64.dmg)
+[![Download for Mac (Intel)](https://img.shields.io/github/v/release/CopilotKit/OpenBot?style=for-the-badge&labelColor=3A3466&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExIDNoMnYxMC4ybDMuNi0zLjZMMTggMTFsLTYgNi02LTYgMS40LTEuNCAzLjYgMy42ek01IDE5aDE0djJINXoiLz48L3N2Zz4%3D&label=Download%20for%20Mac%20%28Intel%29&color=4A7CC8)](https://downloads.copilotkit.ai/latest/OpenBot-mac-x64.dmg)
+[![Download for Windows](https://img.shields.io/github/v/release/CopilotKit/OpenBot?style=for-the-badge&labelColor=3A3466&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExIDNoMnYxMC4ybDMuNi0zLjZMMTggMTFsLTYgNi02LTYgMS40LTEuNCAzLjYgMy42ek01IDE5aDE0djJINXoiLz48L3N2Zz4%3D&label=Download%20for%20Windows&color=9A5CC6)](https://downloads.copilotkit.ai/latest/OpenBot-windows-x64-setup.exe)
 
-From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github.com/ag-ui-protocol/ag-ui).
+<sub>Notarized .dmg for Apple silicon and Intel Macs · signed installer for Windows x64 · no terminal or developer tools needed · [Release notes](https://github.com/CopilotKit/OpenBot/releases/latest)</sub>
+
+<br>
+
+[![OpenBot for Business: get early access](https://img.shields.io/badge/OpenBot_for_Business-Get_early_access_%E2%86%92-D14B9C?style=for-the-badge&labelColor=3A3466)](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=business&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
+
+<sub>From [CopilotKit](https://www.copilotkit.ai), creators of [AG-UI](https://github.com/ag-ui-protocol/ag-ui).</sub>
 
 </div>
+
+https://github.com/user-attachments/assets/c60f07da-8b6d-46eb-a573-17fc1e65a644
+
+<p align="center"><sub>Watch a Bot use its browser and tools, answer with interactive results, and wait for your approval before it sends. Take over when it needs you, and connect the agents you already run.</sub></p>
 
 ## Getting started
 
@@ -42,12 +56,6 @@ The easiest way to get started is with the fully self-contained app that runs on
 ### Web, mobile, and chat
 
 [Web](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=web&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [iOS](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=ios&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Android](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=android&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Slack](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=slack&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access) · [Teams](https://dashboard.operations.copilotkit.ai/early-access/openbot?platform=teams&ref=github&utm_source=github&utm_medium=readme&utm_campaign=openbot-early-access)
-
-## See it in action
-
-https://github.com/user-attachments/assets/535ef7ee-1631-4a69-b839-564c56cf90b4
-
-Watch a Bot use its browser and tools, review interactive results, and take over when it needs you. Teach it repeatable tasks through feedback and demonstrations.
 
 ## Your workspace. Your stack.
 
@@ -76,7 +84,7 @@ OpenBot is built on [CopilotKit](https://www.copilotkit.ai), which is [used in p
 
 ## Architecture
 
-OpenBot has three parts. On your laptop, setup runs the backend and Intelligence for you. For a team, the Helm chart deploys both on Kubernetes in your own infrastructure.
+OpenBot has three parts. On your laptop, setup runs the backend and Intelligence for you. For a team, the Helm charts deploy both on Kubernetes in your own infrastructure: `openbot-bundle` installs the two together, and `openbot` installs OpenBot beside an Intelligence that already runs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-overview-dark.svg">
@@ -86,14 +94,14 @@ OpenBot has three parts. On your laptop, setup runs the backend and Intelligence
 | Part | What it does |
 | --- | --- |
 | **OpenBot frontends** | Mac, Windows, web, iOS, Android, Slack, and Teams connect people to the same workspace. Conversations, interactive results, computer view, and approvals adapt to each surface. [Choose a frontend](#getting-started). |
-| **OpenBot backend** | Runs the workspace API and built-in Bots, connects external agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Deploys on Kubernetes with PostgreSQL and persistent storage. |
+| **OpenBot backend** | Runs the workspace API and built-in Bots, connects external agents and tools, manages Bot computers, and enforces identity, permissions, action policies, and audit. Published as signed images and Helm charts, and reached through [one API](#api). Deploys on Kubernetes with PostgreSQL and persistent storage. |
 | **CopilotKit Intelligence** | Durable conversations, memory, Automatic Learning, and enterprise governance services. Separately licensed; runs on Kubernetes alongside OpenBot. |
 
 OpenBot enforces sign-in, tool permissions, action policies, and audit at its API, alongside Intelligence's platform services. Built-in Bots run in the OpenBot server; your own agents can run alongside OpenBot or on any agent execution platform. Both use AG-UI and can share the same workspace.
 
 Computer execution is pluggable: use the default Kubernetes setup or connect a compatible external computer provider.
 
-[Architecture details](docs/architecture.md) · [Services and ports](#services-and-ports) · [Kubernetes deployment](charts/openbot/README.md)
+[Architecture details](docs/architecture.md) · [Services and ports](#services-and-ports) · [Kubernetes deployment](#deploy-on-kubernetes)
 
 ## Open source, local operation, and licensing
 
@@ -111,39 +119,43 @@ Computer execution is pluggable: use the default Kubernetes setup or connect a c
 
 ## Deploy on Kubernetes
 
-Deploy OpenBot and CopilotKit Intelligence together on **AWS EKS, Azure AKS, Google GKE, or your own Kubernetes cluster**. The chart installs Intelligence by default; no separate hosted project is required.
+Deploy OpenBot on **AWS EKS, Azure AKS, Google GKE, or your own Kubernetes cluster**. Each release publishes two Helm charts:
 
-For a first evaluation, you need a cluster with **amd64 nodes**, a **default StorageClass**, `kubectl`, Helm, a **trial or production license**, and a model key. The commands below use an OpenAI key. For Anthropic, a model router, cluster sizing, or an existing Intelligence deployment, use the [full Helm guide](charts/openbot/README.md).
+| Chart | What it installs |
+| --- | --- |
+| **`openbot-bundle`** (`openbot-bundle-0.1.0.tgz` in v1.1.0) | OpenBot and CopilotKit Intelligence together, on one PostgreSQL server. Nobody signs in to Intelligence: the chart makes OpenBot's organization, project and key in it. The quickest way to try OpenBot on a cluster, and the evaluation below. |
+| **`openbot`** (`openbot-0.3.0.tgz` in v1.1.0) | OpenBot alone, pointed at an Intelligence that already runs, managed or self-hosted: its two addresses in `config.intelligence.apiUrl` and `config.intelligence.gatewayWsUrl`, and a project key. |
 
-> **Setting up with an AI assistant?** Give it this README and [the Helm guide](charts/openbot/README.md). The guide covers cloud-specific values, storage, secrets, sign-in, networking, upgrades, and troubleshooting. Use the evaluation below only through a local port-forward; configure sign-in and TLS before sharing a deployment.
+For a first evaluation, you need a cluster with a **default StorageClass**, `kubectl`, Helm, a **trial or production license**, and a model key. The install requests about 3.15 vCPU while it runs, plus about 0.4 vCPU while its install Jobs run; on EKS that is three t3.large nodes, not two. The commands below use an OpenAI key. For Anthropic, a model router, your own database, or OpenBot against an Intelligence you already run, use the Helm guide that comes with each chart (`helm show readme` on the chart).
 
-1. **Get the source.** Skip this if you already have a checkout.
+> **Setting up with an AI assistant?** Give it this README and the Helm guide (`helm show readme` on the chart below). The guide covers cloud-specific values, storage, secrets, sign-in, networking, upgrades, and troubleshooting. Use the evaluation below only through a local port-forward; configure sign-in and TLS before sharing a deployment.
 
-   ```sh
-   git clone https://github.com/CopilotKit/OpenBot.git
-   cd OpenBot
-   ```
-
-2. **Create `openbot-secrets.yaml` locally.** Replace the placeholders with your license and model key. Keep this file out of source control.
+1. **Create `openbot-values.yaml` locally.** Replace the placeholders with your license and model key. Keep this file out of source control.
 
    ```yaml
-   secrets:
-     licenseToken: "<your CopilotKit trial or production license>"
-     modelApiKey: "<your OpenAI API key>"
+   openbot:
+     config:
+       singleUser: true
+     secrets:
+       licenseToken: "<your CopilotKit trial or production license>"
+       modelApiKey: "<your OpenAI API key>"
    ```
 
-3. **Install.**
+2. **Install** the `openbot-bundle` chart published with the release.
+
+   This evaluation runs **shared computers**: every Bot runs on one computer, and a command one Bot runs can read another person's files. That suits a proof of concept only, and `openbot.computers.sharedModeAcknowledged=true` says you know it. For people, use sandbox mode instead, which gives each person a computer of their own and is more secure: install the agent-sandbox controller in the cluster and set `openbot.computers.mode=sandbox` (the Helm guide has the command).
 
    ```sh
-   helm dependency build charts/openbot
-   helm install openbot charts/openbot \
+   helm install openbot https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-bundle-0.1.0.tgz \
      --namespace openbot --create-namespace \
-     --values charts/openbot/ci/vanilla-values.yaml \
-     --values openbot-secrets.yaml \
+     --values openbot-values.yaml \
+     --set openbot.computers.sharedModeAcknowledged=true \
      --timeout 15m
    ```
 
-4. **Open your evaluation.**
+   On arm64 nodes, add `--set intelligence.embeddings.enabled=false`. The OpenBot image runs on amd64 and arm64, but the embeddings server Intelligence runs for Memory is amd64 only. Without it, Memory recalls by keyword.
+
+3. **Open your evaluation.**
 
    ```sh
    kubectl -n openbot get pods,jobs
@@ -152,13 +164,15 @@ For a first evaluation, you need a cluster with **amd64 nodes**, a **default Sto
 
    Open <http://127.0.0.1:3001>. This configuration is single-user: anyone who can reach it is an administrator. Keep the port-forward local.
 
-The chart creates the runtime credentials, installs the databases, bootstraps Intelligence, and sets up the Learning container and scheduled jobs. Automatic Learning uses your model key too.
+The chart generates every password, key and token both products need, creates both databases, and sets up Intelligence's organization, OpenBot's project and the Learning container. OpenBot's server migrates its own database as it starts and does the scheduled work itself, so there is no migration Job and no CronJob. Automatic Learning uses your model key too.
 
-For a team deployment, follow the [Helm guide](charts/openbot/README.md) to configure authentication, TLS, your database, secrets, persistent storage, and network policies. For a single-container alternative, see [Deploy it](#deploy-it).
+For OpenBot against managed Intelligence, or an Intelligence you already run, install the `openbot` chart instead (`https://github.com/CopilotKit/OpenBot/releases/download/v1.1.0/openbot-0.3.0.tgz`) with `config.intelligence.apiUrl`, `config.intelligence.gatewayWsUrl` and `secrets.intelligenceApiKey`; its guide has the commands. A release of the 0.2 chart that still runs the Intelligence it installed is refused at upgrade to 0.3: keep it on 0.2, or install `openbot-bundle` as a new release in a namespace of its own.
+
+For a team deployment, follow the Helm guide (`helm show readme` on the chart) to configure authentication, TLS, your database, secrets, persistent storage, and network policies. For a single-container alternative, see [Deploy it](#deploy-it).
 
 ## Run from source
 
-Use the template to customize the workspace, branding, Bots, and skills. The source setup below uses managed Intelligence by default; [local Intelligence](#intelligence-on-your-own-machine) is also available.
+Use the template to customize the workspace, branding, Bots, and skills. The source setup below uses [an Intelligence on your own machine](#intelligence-on-your-own-machine) by default; managed Intelligence is the alternative.
 
 ```sh
 git clone https://github.com/CopilotKit/OpenBot.git
@@ -169,14 +183,18 @@ cd OpenBot
 
 To run the open-source template locally, you’ll need the following.
 
-- Docker, for PostgreSQL and the shipped Bots.
-- [Bun](https://bun.sh) 1.4+, for the app, the API server and the tests (some tests fail on 1.3).
-- A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
-- A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
+- Docker, for PostgreSQL, the API server and the shipped Bots. The server and
+  the Bots' computers run from the published OpenBot images, which `scripts/start.sh` pulls at the
+  tag in `backend-images.env`: `main` in a checkout of `main`, the images built from main, and the
+  release's own version in a release (`v1.0.3` in the v1.0.3 tag). Nothing else is built or needed
+  for them.
+- [Bun](https://bun.sh) 1.4+, for the app, the setup helpers and the tests (some tests fail on 1.3).
+- A CopilotKit account, for CopilotKit Intelligence. The free plan covers an Intelligence on your own machine and a managed project.
+- A model key. The example configuration uses OpenAI; Anthropic and Google work too, with `BOT_PROVIDER` set.
 
 ### Quick start
 
-The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access. On a Mac, the free Developer plan also covers [running Intelligence locally](#intelligence-on-your-own-machine) with Docker.
+The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the app as a local administrator. Configure [sign-in](#sign-in) before giving anyone else access.
 
 > **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
 > same steps as below plus the things that are easy to get wrong: which of the blank keys in
@@ -191,13 +209,42 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
    bun install
    ```
 
-2. Connect a fresh managed Intelligence project:
+2. Connect Intelligence. `.env.example` leaves its two addresses and its key empty, for one of
+   these to fill.
+
+   **On this machine**, the default (a preview for macOS with Docker Desktop; see
+   [Intelligence on your own machine](#intelligence-on-your-own-machine)):
+
+   ```sh
+   npx --yes copilotkit@latest login
+   npx --yes copilotkit@latest local setup
+   npx --yes copilotkit@latest local connect --approve-connection
+   ```
+
+   `local setup` installs Intelligence in a local cluster of its own, and `local connect` writes
+   its two addresses and its project key to `.env`. Each installation has its own ports, which is
+   why the example file has no address to ship.
+
+   **A managed project instead**, where the local Intelligence does not run or to keep
+   conversations in the managed service. Set the two addresses in `.env` first:
+
+   ```sh
+   INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai
+   INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai
+   ```
+
+   then:
 
    ```sh
    npx --yes copilotkit@latest login
    npx --yes copilotkit@latest project select
    bun scripts/setup-learning.ts
    ```
+
+   `login` opens a browser on this machine. On a machine with no browser, such as over SSH,
+   `npx --yes copilotkit@latest login --device` signs in with a code from a browser anywhere.
+   `project select` asks which project in the terminal; where there is no terminal to ask in,
+   name it: `npx --yes copilotkit@latest project select --project <slug or id> --json`.
 
    The helper provisions the selected project's runtime key, creates or reuses its
    `openbot` Learning container, then writes both settings to `.env`. It preserves
@@ -216,7 +263,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
    set that one to the same deployment yourself. Once `openbot` exists, the server assigns it
    as the default by itself unless [Admin → Automatic Learning](docs/automatic-learning.md)
    has a saved setting.
-   Managed Intelligence needs no separate licence token.
+   Managed Intelligence needs no separate license token.
 
    The same CopilotKit CLI sign-in provisions Composio automatically when you run
    `bash scripts/start.sh`. If that cannot complete, OpenBot still starts, with apps
@@ -231,9 +278,9 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
 3. Fill the remaining required values:
 
-   - `OPENAI_API_KEY`
+   - `OPENAI_API_KEY`, or for Anthropic both `ANTHROPIC_API_KEY` and `BOT_PROVIDER=anthropic`
 
-   Keep the managed Intelligence URLs from `.env.example` unless you run Intelligence yourself. The example `KEY_ENCRYPTION_KEY` is public and fine locally; generate your own with:
+   The example `KEY_ENCRYPTION_KEY` is public and fine locally; generate your own with:
 
    ```sh
    openssl rand -base64 32
@@ -247,7 +294,7 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 
 5. Open <http://localhost:3010>.
 
-`scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the routine worker, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
+`scripts/start.sh` pulls the OpenBot images at the tag in `backend-images.env`, starts Docker services, starts the API server on port 3001 from the OpenBot server image (it applies its own migrations as it starts and fires routines itself), starts the app from this checkout on port 3010, and checks that the services answer their own health routes before printing next steps. It pulls on every start, so a checkout of `main` runs the images built from main now; offline, it uses the copies already on the machine. The server's log is `docker compose logs server`.
 
 `scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own; `--keep-computers` leaves the computers running. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
 
@@ -256,13 +303,13 @@ The example configuration sets `OPENBOT_SINGLE_USER=true`, so you can try the ap
 Run the clone inside WSL 2 with Ubuntu, and run every step above from an Ubuntu terminal.
 [Windows (WSL 2)](docs/development.md#windows-wsl-2) lists what to install in Ubuntu first. Keep an
 Ubuntu terminal open while you use OpenBot, and open the app from your Windows browser at
-<http://127.0.0.1:3010>.
+<http://127.0.0.1:3010>. These steps were checked there with a managed project in step 2.
 
 ### Intelligence on your own machine
 
-To try Intelligence on one Mac instead of the managed service, follow
-[Evaluate Intelligence locally](https://docs.copilotkit.ai/intelligence/self-hosting-local). The free
-[Developer plan](https://www.copilotkit.ai/pricing) qualifies. The local licence lasts 30 days and
+The example configuration expects Intelligence on this machine, installed by the CopilotKit CLI as
+[Evaluate Intelligence locally](https://docs.copilotkit.ai/intelligence/self-hosting-local) describes. The free
+[Developer plan](https://www.copilotkit.ai/pricing) qualifies. The local license lasts 30 days and
 `npx copilotkit@latest local renew` renews it as often as you need, while your account is in good
 standing. It is a preview for macOS with Docker Desktop,
 not a production installation. Run its
@@ -287,15 +334,10 @@ One image carries the app, the API, the browser the Bots drive, and optionally P
 docker run -p 3001:3001 --env-file .env \
   -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
   ghcr.io/copilotkit/openbot:latest
-
-# Or the tree you have in front of you.
-docker build -t openbot .
-docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
 ```
 
 Everything is on 3001 here, the app included, rather than the 3010 the clone uses. `latest` is the
-most recent release and a version tag such as `:v0.0.9` pins one.
+most recent release and a version tag such as `:v1.0.1` pins one.
 
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
 [docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and how it behaves behind more than one replica.
@@ -330,39 +372,52 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 ## Main surfaces
 
-| Route                       | Purpose                                                            |
-| --------------------------- | ------------------------------------------------------------------ |
-| `/`                         | Start and browse channels.                                         |
-| `/channel/new`              | Start a conversation; two or more Bots in To: start a group.       |
-| `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
-| `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
-| `/bots`                     | Every Bot you can reach; create one, and open its page to change it. |
-| `/bots/:id`                 | One Bot: what it waits on you for, what it is doing, and how it is set up. |
-| `/bots/:id/responsibilities` | Give the Bot a lasting goal, follow its progress, and decide when it should work. |
-| `/bots/:id/reach`           | Continue a conversation with the Bot in Slack, Microsoft Teams, or by text message. |
-| `/bots/:id/memory`          | Which connected apps feed the Bot facts, and its background research. |
-| `/bots/:id/approvals`       | What the Bot may do without asking you first.                      |
-| `/connections`              | Connect your apps so your Bots can work with them.                 |
-| `/capabilities/skills`      | Create and enable personal skills.                                 |
-| `/capabilities/memory`      | What your Bots remember about you, and facts you tell them.        |
-| `/routines`                 | See the routines that are standing, and stop one.                  |
-| `/settings`                 | User preferences.                                                  |
-| `/settings/passwords`       | Logins you saved when signing a Bot in to a website.               |
-| `/settings/notifications`   | Where updates go, your devices, and recent deliveries.             |
-| `/settings/approvals`       | Whether your Bots ask before acting, and rules for every Bot.      |
-| `/admin/credentials`        | Store write-only encrypted credentials.                            |
-| `/admin/approvals`          | Team approval settings, team rules, and shared account requests.   |
-| `/admin/computers`          | View, stop, and reset Bot computers.                               |
-| `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
-| `/admin/components`         | Publish components and govern which Bots may use them.             |
-| `/admin/playground`         | Draft and publish sandboxed components in the browser.             |
-| `/admin/plugins`            | Configure MCP servers and grant their tools to Bots.               |
-| `/admin/skills`             | Write deployment skills and grant them to Bots.                    |
-| `/admin/learning`           | Assign Learning containers to Bots, or pause Automatic Learning.   |
-| `/admin/people`             | List, promote, demote, and remove people who have signed in.       |
-| `/admin/identity-providers` | Register a company SAML or OIDC provider, routed by email domain.  |
-| `/admin/enterprise`         | What members may use, how Bot computers reach the network, and what is recorded about it. |
-| `/admin/audit`              | Review permitted, refused, and failed actions.                     |
+A Bot has eight things, always listed in this order: Conversations, Routines, Memory, Skills, Apps,
+Computer, Approvals and Activity. [How OpenBot works](docs/how-openbot-works.md) explains each one.
+Each is set in at most three places: for one Bot on its page, for every Bot in the main menu
+(Routines, Memory, Skills, Connections) or Settings (the rest), and, in the team edition, for
+everyone in Admin.
+
+| | One Bot | Every Bot | Everyone (Admin) |
+| --- | --- | --- | --- |
+| Conversations | `/channel/:id`, `/bot?agent=<id>` | `/`, `/channel/new` | |
+| Routines | `/bots/:id/routines` | `/routines` | `/admin/proactive` |
+| Memory | `/bots/:id/memory` | `/memory` | |
+| Skills | `/bots/:id/skills` | `/skills` | `/admin/skills`, `/admin/learning` |
+| Apps | `/bots/:id/apps` | `/connections` | `/admin/plugins`, `/admin/components`, `/admin/playground` |
+| Computer | `/bots/:id/computer` | `/settings/computer` | `/admin/computers` |
+| Approvals | `/bots/:id/approvals` | `/settings/approvals` | `/admin/approvals`, `/admin/boundaries`, `/admin/what-if` |
+| Activity | `/bots/:id/activity` | `/settings/activity` (personal edition) | `/admin/audit` |
+
+Beside the eight:
+
+| Route | Purpose |
+| --- | --- |
+| `/bots` | Every Bot you can reach; create one, and open its page to change it. |
+| `/bots/:id` | One Bot: what it waits on you for, what it is doing, and its rows in the order above. |
+| `/bots/:id/setup` | The Bot's name, instructions and who it hands work to. |
+| `/bots/:id/reach`, `/bots/:id/sharing` | Team edition: reach the Bot in Slack, Microsoft Teams or by text, and share it. |
+| `/settings` | Your account and preferences. |
+| `/settings/notifications` | Where updates go, your devices, and recent deliveries. |
+| `/settings/vault` | Your saved logins and, in the personal edition, your keys. No Bot sees what is in it. |
+| `/settings/setup` | What OpenBot has and still needs. |
+| `/admin/credentials` | Admin → Vault: write-only encrypted credentials for the deployment. |
+| `/admin/people`, `/admin/permissions`, `/admin/identity-providers`, `/admin/providers` | Admin → Team: who can sign in, what they may do, and which models Bots use. |
+
+Old addresses redirect to the pages above:
+
+| Old address | Opens |
+| --- | --- |
+| `/capabilities`, `/capabilities/skills`, `/settings/skills`, `/settings/learning` | `/skills` |
+| `/settings/skills/new`, `/settings/skills/:slug` (personal edition) | `/skills/new`, `/skills/:slug` |
+| `/capabilities/memory`, `/settings/memory` | `/memory`, which opens `/bots` in the personal edition |
+| `/responsibilities` | `/routines` |
+| `/bots/:id/responsibilities` | `/bots/:id/routines` |
+| `/bots/:id/access` | `/bots/:id/apps` |
+| `/settings/passwords`, `/settings/credentials` | `/settings/vault` |
+| `/settings/credentials/new` | `/settings/vault/new` in the personal edition, `/settings/vault` in the team edition |
+| `/settings/this-computer` | `/settings/computer#this-computer` |
+| `/settings/browsers` | `/settings/computer#browsers` |
 
 ## Features
 
@@ -375,7 +430,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
-- **Governed MCP**: Google Drive, Notion and the [public-web research providers](docs/web-research.md) Parallel, Exa and Firecrawl ship in the catalogue, and Composio brokers a few hundred more apps behind one account, each reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
+- **Governed MCP**: Google Drive, Notion and the [public-web research providers](docs/web-research.md) Parallel, Exa and Firecrawl ship in the catalogue, and Composio brokers a few hundred more apps behind one account (Arcade can be the broker instead), each reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer. A Bot granted the shipped `skill-creator` skill can write one with you in the conversation, and saves it only when you press the button on the card.
 - **Sign in with what your company already has**: Google, Microsoft or Okta from the environment, or a company's own SAML or OpenID Connect provider registered while the deployment runs and routed by email domain. Any one turns sign-in on; several may be configured at once.
 - **Decide who gets in**: `/admin/people` lists everybody who has signed in, promotes and demotes them, and removes access, which ends the session they are using and stops the next sign-in. Every change is on the audit trail.
@@ -383,7 +438,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 - **Credentials encrypted at rest**: stored through `/admin/credentials`, never returned by an API, and redacted from audit events.
 - **Loopback by default**: computers bind to `127.0.0.1` and require a per-container token, so nothing reaches a logged-in browser by knowing its port. The supervisor binds there too, because it holds the Docker socket and its token is a shared secret rather than a network boundary.
 - **Durable threads and memory**: conversations survive restarts through CopilotKit Intelligence, and each deployment stamps the threads it owns.
-- **Routines**: ask a Bot to do something on a schedule and it does, running as you, in the channel you asked in. A 15-minute floor and a cap of 20 enabled routines keep a sentence from scheduling more than a person meant, and ten failures in a row switch a routine off rather than burn model spend forever. Needs a worker process, which `scripts/start.sh` starts locally; see [docs/routines.md](docs/routines.md).
+- **Routines**: ask a Bot to do something on a schedule and it does, running as you, in the channel you asked in. A 15-minute floor and a cap of 20 enabled routines keep a sentence from scheduling more than a person meant, and ten failures in a row switch a routine off rather than burn model spend forever. The server fires them itself, so there is nothing else to run; see [docs/routines.md](docs/routines.md).
 
 ## Bring your own agent
 
@@ -391,12 +446,12 @@ Any AG-UI endpoint can be a Bot.
 
 From `/bots`, create a Bot with:
 
-- name, title, and role description;
+- name and instructions, which become its role description;
 - private or public visibility;
-- optional AG-UI endpoint;
+- optional AG-UI endpoint, with the framework the agent is built on when it is one New Bot lists;
 - optional write-only authorization header.
 
-The server validates agent endpoints with the same target checks used for browser navigation, at registration and again on every redirect the endpoint answers with. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL` when it is configured, and are refused when it is not.
+The server validates agent endpoints with the same target checks used for browser navigation, at registration and again on every redirect the endpoint answers with. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL` when it is configured, and otherwise run in the OpenBot server on their role description.
 
 A private address is refused unless it is listed in `AGENT_ENDPOINT_ALLOWED_HOSTS`:
 
@@ -408,10 +463,11 @@ A host on its own covers any port on that host; a host with a port pins that por
 
 The list covers agent endpoints only. Browsing is unaffected, the addresses holding a deployment's own cloud credentials are refused whatever is listed, and listing an address permits registering an agent there rather than granting that agent anything.
 
-Tenant package agents are declared in the package's own `agents.yaml`, in the directory `TENANT_PACKAGE_DIR` names (`examples/fintech` by default), or each in a file of its own under that package's `agents/` directory, as either:
+Tenant package agents are declared in the package's own `agents.yaml`, in the directory `TENANT_PACKAGE_DIR` names (`examples/fintech` by default), or each in a file of its own under that package's `agents/` directory, as one of:
 
-- `built-in`, with a system prompt; or
-- `remote-ag-ui`, with an endpoint.
+- `built-in`, with a system prompt;
+- `remote-ag-ui`, with an endpoint; or
+- `remote-mastra`, with a Mastra server's address.
 
 See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/coworkers.md).
 
@@ -423,12 +479,16 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 - `KEY_ENCRYPTION_KEY`
 - `INTELLIGENCE_API_URL`
 - `INTELLIGENCE_GATEWAY_WS_URL`
-- `INTELLIGENCE_API_KEY`
+- `CPK_INTELLIGENCE_API_KEY` (or the older `INTELLIGENCE_API_KEY`)
 
-`COPILOTKIT_LICENSE_TOKEN` is optional. A self-hosted Intelligence with its own
-licence can still set it and it is forwarded to the runtime; managed Intelligence
-does not issue one and startup no longer asks for it. A self-hosted Intelligence
-also needs the licence on its own deployment, or it refuses memory; OpenBot logs
+`COPILOTKIT_LICENSE_TOKEN` is optional. With none, the server starts on the
+Intelligence project key, once the Intelligence at `INTELLIGENCE_API_URL` accepts
+it; managed Intelligence issues no license. With one set, it must be a valid
+CopilotKit license: one that is invalid or expired stops startup with a sentence
+naming the variable, and the key is not tried instead. It is also forwarded to the
+runtime. The server also checks at start that Intelligence has every operation it
+calls, and names the oldest Intelligence version that does when one is missing. A self-hosted Intelligence
+also needs the license on its own deployment, or it refuses memory; OpenBot logs
 `intelligence-entitlement-not-ready` at boot when that is missing.
 
 Settings worth knowing:
@@ -462,11 +522,10 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `app`                    | 3010                       | React/Vite UI.                                                                                   |
 | `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
-| `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
-| `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
+| `agent-langgraph-agui`   | 4201 host / 4206 container | The managed Bot: the LangGraph harness the team edition's Risk Analyst runs on.                  |
+| `agent-harness`          | 4202 to 4214, per framework | The agent framework picked in OpenBot Desktop setup, behind the `harness` Compose profile.       |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per person, and one per Isolated Bot.                           |
-| `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |
-| PostgreSQL with pgvector | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
+| PostgreSQL               | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |
 
 The server gateway is the product/API path for Bot browser and file tool calls.
@@ -475,6 +534,19 @@ It resolves the target, evaluates policy, writes an audit row, and then calls
 endpoints; keep them private and do not use them to bypass the gateway.
 
 More detail: [docs/architecture.md](docs/architecture.md).
+
+## API
+
+Every OpenBot client uses one API, and its spec is in this repository under [`api/`](api/README.md):
+
+- **REST**, in OpenAPI 3.1: [`api/openapi.yaml`](api/openapi.yaml), bundled from one file per area in `api/openapi/`. Every resource is under `/api/v2/organizations/{organizationId}/`, where `organizationId` is an organization's id or its slug. `default` is the first organization, the one that holds everything from before organizations, so its Bots are at `/api/v2/organizations/default/bots`. An OpenBot holds more than one when `OPENBOT_MULTIPLE_ORGANIZATIONS=true`, and a caller who isn't a member of the organization an address names gets the same not found as one that doesn't exist.
+- **Live channels**, on WebSockets, in AsyncAPI 3.1: [`api/asyncapi.yaml`](api/asyncapi.yaml). A Bot's run as it streams, what changed in your conversations, a Bot's screen and its terminal.
+
+The conventions are the same everywhere. An error is a problem detail (`application/problem+json`, RFC 9457). A list pages with `cursor` and `limit`. Every write takes an `Idempotency-Key` header, and repeating a request with the same key within 24 hours does it once. The web app signs in with its session cookie; anything else sends `Authorization: Bearer` with an API key, which acts as the person who made it, or with an access token from OAuth 2.1 with PKCE. Both work on `/api/v2` only.
+
+A client is given one address, OpenBot's. An Intelligence that runs beside OpenBot is reached there too: on a laptop OpenBot's server carries the Intelligence gateway's socket on its own port, and on a cluster the Ingress or HTTPRoute sends that socket's path straight to Intelligence and everything else to OpenBot. Run from a source checkout, the app keeps the gateway's own port unless `OPENBOT_PUBLIC_URL` is set. [Configuration](docs/configuration.md#required-api-server-variables) has the settings.
+
+The web app's client is generated from the spec (`bun run api:generate`, into `app/src/lib/api/generated`), and CI fails a pull request whose spec breaks an existing client. Every client is on the API now. The earlier `/api/...` addresses are retired, except those that stay outside it for a named reason, such as sign-in, the CopilotKit runtime, machine callbacks, webhooks and health checks, which [`api/client-boundary.allow.ts`](api/client-boundary.allow.ts) lists in `STAYS`. A script should call only `/api/v2`.
 
 ## Sign in
 
@@ -536,25 +608,20 @@ provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
 - **Put TLS in front of any deployment.** A page served over plain `http://` on anything but
   localhost is not a secure context, and sign-in cookies want `Secure`.
 
-### Organization sign-in for desktop installations
+### Organization sign-in through another OpenBot
 
-For an employee desktop, provision an OpenBot authority using the Google, Microsoft or Okta
-settings above (your Kubernetes OpenBot can serve this role). Set **Organization OpenBot URL**
-in the desktop connection screen, or `OPENBOT_ORGANIZATION_AUTH_URL=https://openbot.company.example`
-in its public configuration. Use an HTTPS origin; HTTP is accepted only on loopback for local tests.
-Provider client secrets stay on that authority. Template and white-label deployments can supply
-the same setting without changing their Intelligence endpoint.
+A team deployment can leave sign-in to another OpenBot, the authority, configured with the Google,
+Microsoft or Okta settings above (your Kubernetes OpenBot can serve this role). Set
+`OPENBOT_ORGANIZATION_AUTH_URL=https://openbot.company.example` to the authority's origin. Use an
+HTTPS origin; HTTP is accepted only on loopback for local tests. Provider client secrets stay on
+that authority. The authority verifies the person and their current role; organization mode never
+substitutes `dev@openbot.local`, and it decides sign-in ahead of `OPENBOT_SINGLE_USER`.
 
 This optional URL is separate from `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
-`INTELLIGENCE_API_KEY`. Local, managed and customer-hosted Intelligence all retain their project
-credential. A Google ID token is not an Intelligence project key. Leave the organization URL empty
-for a standalone desktop.
+`CPK_INTELLIGENCE_API_KEY`. Each deployment keeps its own Intelligence project credential.
 
-Desktop sign-in uses the system browser and Better Auth's single-use PKCE exchange. The authority
-verifies the employee and current role; organization mode never substitutes `dev@openbot.local`.
-Employees do not need project-key administration privileges. Installation happens once: reopening
-or refreshing an expired organization, Intelligence or model connection preserves the installed
-runtime and data and opens the relevant connection screen.
+OpenBot Desktop does not offer organization sign-in. It installs the personal edition, which
+refuses `OPENBOT_ORGANIZATION_AUTH_URL`, and removes that setting from its `.env` on every Start.
 
 ## Keeping it to your machine
 
@@ -573,14 +640,13 @@ bun run test
 bun run build
 ```
 
-After changing the Drizzle schema:
+After changing the API spec under `api/openapi/`, bundle it and regenerate the app's client, and commit both ([api/README.md](api/README.md)):
 
 ```sh
-bun run --filter server db:generate
-bun run --filter server db:migrate
+bun run api:generate
 ```
 
-Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to take it down. Use `bun run dev` only when you want the app and server without the Docker Bots and computers.
+Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to take it down. Use `bun run dev` only when you want the app on its own, against a server that is already running. The database schema and its migrations come with the server image, which applies them as it starts.
 
 ## Project status
 
@@ -589,22 +655,21 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Latest OpenBot release](https://img.shields.io/github/v/release/CopilotKit/OpenBot?label=release&color=blue)](https://github.com/CopilotKit/OpenBot/releases/latest)
 
-[![GitHub Trending: #5 Repository Of The Day](https://trendshift.io/api/badge/repositories/175080)](https://trendshift.io/repositories/175080)
-[![Trendshift: #3 Repository Of The Day](https://trendshift.io/api/badge/trendshift/repositories/175080/daily)](https://trendshift.io/repositories/175080)
-
 ## Documentation
 
 - [open.bot](https://open.bot)
+- [docs/how-openbot-works.md](docs/how-openbot-works.md): a Bot's eight things, and where you set each one
 - [docs/README.md](docs/README.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/personal-edition.md](docs/personal-edition.md): OpenBot for one person, with no sign-in and no Admin
 - [docs/development.md](docs/development.md)
+- [api/README.md](api/README.md): the API's spec, and how to change it
 - [docs/coworkers.md](docs/coworkers.md)
 - [docs/routines.md](docs/routines.md)
 - [docs/automatic-learning.md](docs/automatic-learning.md)
 - [docs/deployment.md](docs/deployment.md)
-- [charts/openbot/README.md](charts/openbot/README.md): the Helm chart
+- The Helm charts, `openbot` and `openbot-bundle`, published with each release: `helm show readme` on either is its Helm guide
 - [docs/releasing.md](docs/releasing.md)
 - [docs/web-research.md](docs/web-research.md): public-web search and extraction through Parallel, Exa or Firecrawl
 

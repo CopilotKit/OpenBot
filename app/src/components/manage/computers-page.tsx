@@ -3,10 +3,12 @@ import {
   IconAlertTriangle,
   IconBolt,
   IconDeviceDesktop,
+  IconDeviceDesktopOff,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { SharedComputersNotice } from "@/components/admin/shared-computers-notice";
 import {
   ClearBrowserDialog,
   useClearBrowserData,
@@ -36,7 +38,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
 import {
   type HostAccessPendingOperation,
@@ -51,7 +56,10 @@ import {
   type ComputerProfile,
   computerFleetQueryOptions,
 } from "@/lib/computers/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  deploymentCapabilitiesQueryOptions,
+  useNoBotComputers,
+} from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
@@ -68,6 +76,29 @@ function isOwnBrowser(computer: ComputerProfile): boolean {
 }
 
 /**
+ * What a confirmation is about, kept while its dialog closes.
+ *
+ * The dialog fades out after Cancel or Reset it, and its words are drawn on every frame of that.
+ * Cleared on close, the row went with it, and the title fell back to its words for no row: "Reset the
+ * computer?" flashed up as the dialog left after "Reset Fernhill Guide's browser?" was answered. So
+ * closing only closes, and what the dialog names is replaced the next time it asks.
+ */
+function useConfirmation() {
+  const [asking, setAsking] = useState<{
+    about: ComputerProfile;
+    open: boolean;
+  } | null>(null);
+  return {
+    /** The row asked about, still named while the dialog closes. */
+    about: asking?.about ?? null,
+    open: asking?.open === true,
+    ask: (about: ComputerProfile) => setAsking({ about, open: true }),
+    close: () =>
+      setAsking((current) => (current ? { ...current, open: false } : null)),
+  };
+}
+
+/**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
  * controls for these). The personal edition's Settings renders this page with none.
  *
@@ -76,17 +107,31 @@ function isOwnBrowser(computer: ComputerProfile): boolean {
  * traffic leaves. Each Bot's browser stays, with Stop and Reset, because this is the one place the
  * person can sign a Bot out of everything.
  */
-export function ComputersPage({ children }: { children?: ReactNode } = {}) {
+export function ComputersPage({
+  children,
+  agentId,
+  embedded = false,
+}: {
+  children?: ReactNode;
+  /**
+   * One Bot's part, for its own Computer page: its folders on this computer and its own computer or
+   * browser, with no page frame (the Bot's page draws one). Absent, the whole page.
+   */
+  agentId?: string;
+  /** The sections only, inside a page that draws its own frame (Settings → Computer). */
+  embedded?: boolean;
+} = {}) {
   const paths = useManagePaths();
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   /** The row currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
   /** Reset deletes the browser profiles, so it requires confirmation. */
-  const [confirming, setConfirming] = useState<ComputerProfile | null>(null);
+  const reset = useConfirmation();
+  const confirming = reset.about;
   /** Updating restarts a running computer mid-task, so it is confirmed too. */
-  const [confirmingUpdate, setConfirmingUpdate] =
-    useState<ComputerProfile | null>(null);
+  const update = useConfirmation();
+  const confirmingUpdate = update.about;
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
   /*
@@ -96,9 +141,24 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
   const clearOwnBrowser = useMutation(clearBrowserMutationOptions(queryClient));
   const clearing = useClearBrowserData(clearOwnBrowser);
 
-  const fleet = useQuery(computerFleetQueryOptions());
+  // Every computer is an admin's to list. On one Bot's page a person who isn't an admin has only folders.
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
+  /*
+   * An OpenBot with no computers for Bots has no list to read: the server refuses it, and "Couldn't
+   * load the computers. Reload the page." sent a person to retry what can never work. So the list
+   * waits until the deployment has said whether there are computers, and is not asked for where
+   * there are none.
+   */
+  const noComputers = useNoBotComputers();
+  const fleet = useQuery({
+    ...computerFleetQueryOptions(),
+    enabled: (agentId === undefined || admin) && noComputers === false,
+  });
   const hostAccess = useQuery(hostAccessQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const setState = useMutation(setComputerStateMutationOptions(queryClient));
   const requestGrant = useMutation(
     requestHostFolderGrantMutationOptions(queryClient),
@@ -110,14 +170,17 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
     stopHostAccessMutationOptions(queryClient),
   );
 
-  const computers = fleet.data?.computers ?? null;
+  const computers =
+    fleet.data?.computers.filter(
+      (computer) => agentId === undefined || computer.botId === agentId,
+    ) ?? null;
   const isolation = fleet.data?.isolation ?? null;
   /*
    * A list that could not be read. A refused stop, reset or update is said beside the buttons
    * instead, because the top of this page is a long scroll away from them.
    */
   const problem = fleet.error
-    ? "Couldn't load the computers. Reload the page."
+    ? "Couldn't load the computers. Try again in a moment."
     : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message
@@ -134,8 +197,8 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
     action: "stop" | "reset" | "update",
   ) => {
     setBusy(rowId(computer));
-    setConfirming(null);
-    setConfirmingUpdate(null);
+    reset.close();
+    update.close();
     setState.mutate(
       {
         action,
@@ -201,15 +264,8 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
       : `${since}. It opens when you record with Teach a Bot.`;
   };
 
-  return (
-    <PageShell
-      description={
-        personal
-          ? "Your Bots share one computer. Each Bot keeps its own browser profile there, which keeps it signed in. A command one Bot runs can still read another Bot's files."
-          : "Each person's computer, and each isolated Bot's. Every Bot keeps its own browser profile on it, which keeps that Bot signed in. Resetting a computer signs every Bot on it out of everything."
-      }
-      title={personal ? "Computer" : "Computers"}
-    >
+  const body = (
+    <>
       {problem ? (
         <p
           className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
@@ -219,16 +275,9 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         </p>
       ) : null}
 
-      {personal ? null : isolation === "shared" ? (
-        <p className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          <span className="font-medium">
-            Every person's Bots run on one computer.
-          </span>{" "}
-          Each person keeps their own browser profile and folder for each Bot,
-          so logins aren't shared. A command one Bot runs can still read
-          another's files. Set <code>COMPUTER_SUPERVISOR_URL</code> to give each
-          person a computer of their own.
-        </p>
+      {personal || agentId ? null : isolation === "shared" ? (
+        // The server's own word on whether this is a shared install (one person's isn't).
+        <SharedComputersNotice className="mt-4" />
       ) : isolation === "per-person" ? (
         <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
           Each person has their own computer, and every Bot they use runs on it,
@@ -239,128 +288,153 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         </p>
       ) : null}
 
-      <HostFoldersSection
-        connected={hostAccess.data?.connected ?? false}
-        desktop={hostAccess.data?.desktop !== false}
-        grants={hostAccess.data?.grants ?? []}
-        botIds={(agents.data ?? []).map((agent) => agent.id)}
-        loading={hostAccess.isPending || agents.isPending}
-        nameFor={nameFor}
-        onGrant={(botId) => requestGrant.mutate({ botId })}
-        onRevoke={(grantId) => revokeGrant.mutate({ grantId })}
-        onStop={() => stopHostAccess.mutate()}
-        pending={hostAccess.data?.pending ?? []}
-        personal={personal}
-        problem={hostProblem}
-        requestingBotId={
-          requestGrant.isPending
-            ? (requestGrant.variables?.botId ?? null)
-            : null
-        }
-        revokingGrantId={
-          revokeGrant.isPending
-            ? (revokeGrant.variables?.grantId ?? null)
-            : null
-        }
-        stopping={stopHostAccess.isPending}
-      />
+      {/* On one Bot's page, folders only where they exist: inside OpenBot Desktop. */}
+      {agentId && hostAccess.data?.desktop === false ? null : (
+        <HostFoldersSection
+          connected={hostAccess.data?.connected ?? false}
+          desktop={hostAccess.data?.desktop !== false}
+          grants={hostAccess.data?.grants ?? []}
+          botIds={
+            agentId ? [agentId] : (agents.data ?? []).map((agent) => agent.id)
+          }
+          loading={hostAccess.isPending || agents.isPending}
+          nameFor={nameFor}
+          onGrant={(botId) => requestGrant.mutate({ botId })}
+          onRevoke={(grantId) => revokeGrant.mutate({ grantId })}
+          onStop={() => stopHostAccess.mutate()}
+          pending={hostAccess.data?.pending ?? []}
+          personal={personal}
+          problem={hostProblem}
+          requestingBotId={
+            requestGrant.isPending
+              ? (requestGrant.variables?.botId ?? null)
+              : null
+          }
+          revokingGrantId={
+            revokeGrant.isPending
+              ? (revokeGrant.variables?.grantId ?? null)
+              : null
+          }
+          stopping={stopHostAccess.isPending}
+        />
+      )}
 
-      <PageSection
-        title={
-          personal ? "Your Bots' browsers" : "Computers in this deployment"
-        }
-      >
-        {setState.error ? (
-          <p
-            className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-            role="alert"
-          >
-            {setState.error.message}
-          </p>
-        ) : null}
-        {computers === null && problem ? (
-          <PageEmpty icon={IconAlertTriangle} title="Couldn't load the list" />
-        ) : computers === null ? null : computers.length === 0 ? (
-          <PageEmpty
-            icon={IconDeviceDesktop}
-            title={personal ? "No browsers yet" : "No computers yet"}
-          >
-            {personal
-              ? "One starts the first time a Bot opens a page."
-              : "One shows up the first time a Bot opens a page."}
-          </PageEmpty>
-        ) : (
-          <PageRows>
-            {computers.map((computer, index) => (
-              <StaggerItem index={index} key={rowId(computer)}>
-                <Item size="sm">
-                  <ItemContent>
-                    <ItemTitle title={computer.computer}>
-                      {titleOf(computer)}
-                    </ItemTitle>
-                    <ItemDescription>
-                      {personal ? null : `${scopeOf(computer)} · `}
-                      {stateOf(computer)}
-                      {personal
-                        ? null
-                        : ` · ${
-                            computer.egress === undefined
-                              ? "Egress not reported"
-                              : computer.egress === null
-                                ? "Leaves directly"
-                                : `Leaves through ${computer.egress}`
-                          }`}
-                      {computer.updateAvailable ? " · Update available" : ""}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    {computer.updateAvailable ? (
+      {agentId && !admin ? null : (
+        <PageSection
+          title={
+            agentId
+              ? personal
+                ? "Its browser"
+                : "Its computer"
+              : personal
+                ? "Your Bots' browsers"
+                : "Computers in this organization"
+          }
+        >
+          {setState.error ? (
+            <p
+              className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+              role="alert"
+            >
+              {setState.error.message}
+            </p>
+          ) : null}
+          {noComputers ? (
+            <PageEmpty
+              icon={IconDeviceDesktopOff}
+              title="No computers for Bots"
+            >
+              Bots can't browse or run commands on this OpenBot. Set up
+              computers for Bots, and they show up here.
+            </PageEmpty>
+          ) : computers === null && problem ? (
+            <PageEmpty
+              icon={IconAlertTriangle}
+              title="Couldn't load the list"
+            />
+          ) : computers === null ? null : computers.length === 0 ? (
+            <PageEmpty
+              icon={IconDeviceDesktop}
+              title={personal ? "No browsers yet" : "No computers yet"}
+            >
+              {personal
+                ? "One starts the first time a Bot opens a page."
+                : "One shows up the first time a Bot opens a page."}
+            </PageEmpty>
+          ) : (
+            <PageRows>
+              {computers.map((computer, index) => (
+                <StaggerItem index={index} key={rowId(computer)}>
+                  <Item size="sm">
+                    <ItemContent>
+                      <ItemTitle title={computer.computer}>
+                        {titleOf(computer)}
+                      </ItemTitle>
+                      <ItemDescription>
+                        {personal ? null : `${scopeOf(computer)} · `}
+                        {stateOf(computer)}
+                        {personal
+                          ? null
+                          : ` · ${
+                              computer.egress === undefined
+                                ? "Egress not reported"
+                                : computer.egress === null
+                                  ? "Leaves directly"
+                                  : `Leaves through ${computer.egress}`
+                            }`}
+                        {computer.updateAvailable ? " · Update available" : ""}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      {computer.updateAvailable ? (
+                        <Button
+                          disabled={busy === rowId(computer)}
+                          onClick={() => update.ask(computer)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Update computer
+                        </Button>
+                      ) : null}
                       <Button
-                        disabled={busy === rowId(computer)}
-                        onClick={() => setConfirmingUpdate(computer)}
+                        disabled={busy === rowId(computer) || !computer.running}
+                        onClick={() => void run(computer, "stop")}
                         size="sm"
                         variant="outline"
                       >
-                        Update computer
+                        {busy === rowId(computer) ? "Working…" : "Stop browser"}
                       </Button>
-                    ) : null}
-                    <Button
-                      disabled={busy === rowId(computer) || !computer.running}
-                      onClick={() => void run(computer, "stop")}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {busy === rowId(computer) ? "Working…" : "Stop browser"}
-                    </Button>
-                    {personal && isOwnBrowser(computer) ? (
-                      <Button
-                        disabled={
-                          busy === rowId(computer) || clearOwnBrowser.isPending
-                        }
-                        onClick={clearing.ask}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Clear browser data
-                      </Button>
-                    ) : (
-                      <Button
-                        disabled={busy === rowId(computer)}
-                        onClick={() => setConfirming(computer)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Reset
-                      </Button>
-                    )}
-                  </ItemActions>
-                </Item>
-                {index !== computers.length - 1 && <Separator />}
-              </StaggerItem>
-            ))}
-          </PageRows>
-        )}
-      </PageSection>
+                      {personal && isOwnBrowser(computer) ? (
+                        <Button
+                          disabled={
+                            busy === rowId(computer) ||
+                            clearOwnBrowser.isPending
+                          }
+                          onClick={clearing.ask}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Clear browser data
+                        </Button>
+                      ) : (
+                        <Button
+                          disabled={busy === rowId(computer)}
+                          onClick={() => reset.ask(computer)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Reset
+                        </Button>
+                      )}
+                    </ItemActions>
+                  </Item>
+                  {index !== computers.length - 1 && <Separator />}
+                </StaggerItem>
+              ))}
+            </PageRows>
+          )}
+        </PageSection>
+      )}
 
       {/*
        * A DIALOG RATHER THAN AN INLINE CONFIRM. Resetting signs a Bot out of everything it has ever
@@ -370,9 +444,9 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
        */}
       <Dialog
         onOpenChange={(open) => {
-          if (!open) setConfirming(null);
+          if (!open) reset.close();
         }}
-        open={confirming !== null}
+        open={reset.open}
       >
         <DialogContent>
           <DialogHeader>
@@ -393,22 +467,20 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              onClick={() => setConfirming(null)}
-              size="sm"
-              variant="ghost"
-            >
+            <Button onClick={reset.close} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
-              disabled={confirming !== null && busy === rowId(confirming)}
+              disabled={
+                reset.open && confirming !== null && busy === rowId(confirming)
+              }
               onClick={() => {
                 if (confirming) void run(confirming, "reset");
               }}
               size="sm"
               variant="destructive"
             >
-              {confirming !== null && busy === rowId(confirming)
+              {reset.open && confirming !== null && busy === rowId(confirming)
                 ? "Resetting…"
                 : "Reset it"}
             </Button>
@@ -424,9 +496,9 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
 
       <Dialog
         onOpenChange={(open) => {
-          if (!open) setConfirmingUpdate(null);
+          if (!open) update.close();
         }}
-        open={confirmingUpdate !== null}
+        open={update.open}
       >
         <DialogContent>
           <DialogHeader>
@@ -440,23 +512,23 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              onClick={() => setConfirmingUpdate(null)}
-              size="sm"
-              variant="ghost"
-            >
+            <Button onClick={update.close} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
               disabled={
-                confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+                update.open &&
+                confirmingUpdate !== null &&
+                busy === rowId(confirmingUpdate)
               }
               onClick={() => {
                 if (confirmingUpdate) void run(confirmingUpdate, "update");
               }}
               size="sm"
             >
-              {confirmingUpdate !== null && busy === rowId(confirmingUpdate)
+              {update.open &&
+              confirmingUpdate !== null &&
+              busy === rowId(confirmingUpdate)
                 ? "Updating…"
                 : "Update it"}
             </Button>
@@ -464,7 +536,8 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         </DialogContent>
       </Dialog>
 
-      {personal ? (
+      {/* What Stop, Reset and Update do, which is about computers: not said where there are none. */}
+      {(agentId && !admin) || noComputers ? null : personal ? (
         <p className="mt-4 text-muted-foreground text-sm">
           <strong>Stop browser</strong> closes a browser and keeps its sign-ins.
           It starts again the next time it's needed. <strong>Reset</strong>{" "}
@@ -496,6 +569,19 @@ export function ComputersPage({ children }: { children?: ReactNode } = {}) {
         </p>
       )}
       {children}
+    </>
+  );
+  if (agentId || embedded) return body;
+  return (
+    <PageShell
+      description={
+        personal
+          ? "Your Bots share one computer. Each Bot keeps its own browser profile there, which keeps it signed in. A command one Bot runs can still read another Bot's files."
+          : "Each person's computer, and each isolated Bot's. Every Bot keeps its own browser profile on it, which keeps that Bot signed in. Resetting a computer signs every Bot on it out of everything."
+      }
+      title={personal ? "Computer" : "Computers"}
+    >
+      {body}
     </PageShell>
   );
 }

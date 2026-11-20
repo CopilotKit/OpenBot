@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, jest, test } from "bun:test";
 import {
   askDesktopForHandoff,
   desktopAvailable,
+  desktopEntry,
 } from "../src/background/native-host";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
@@ -84,6 +85,35 @@ test("desktopAvailable is true only for available: true", async () => {
   }
 });
 
+const ENTRY =
+  "http://127.0.0.1:7478/api/install/enter?token=install-token-abc&to=%2Fsettings%2Fbrowsers";
+
+test("the Recorder asks OpenBot Desktop for the entry address of the path it opens", async () => {
+  fake.native.reply = () => ({ ok: true, url: ENTRY });
+  expect(await desktopEntry("/settings/browsers")).toBe(ENTRY);
+  expect(fake.native.sent).toEqual([
+    { type: "entry", path: "/settings/browsers" },
+  ]);
+});
+
+test("a refused entry, a reply of another shape, or no host at all is no entry address", async () => {
+  for (const reply of [
+    { ok: false, error: "bad-path" },
+    { ok: false, error: "not-running" },
+    { ok: false, error: "unknown-message" },
+    { ok: true },
+    { ok: true, url: 5 },
+    { url: ENTRY },
+  ]) {
+    fake.native.reply = () => reply;
+    expect(await desktopEntry("/settings/browsers")).toBeNull();
+  }
+  fake.native.reply = null;
+  expect(await desktopEntry("/settings/browsers")).toBeNull();
+  fake.native.reply = () => new Promise(() => {});
+  expect(await desktopEntry("/settings/browsers", 20)).toBeNull();
+});
+
 /** A host reply that lands after `ms` on the fake clock. */
 function answerAfter(ms: number, reply: object) {
   return () =>
@@ -120,6 +150,23 @@ test("a handoff waits out the host's 7 s deadline, and gives up at 8 s", async (
     const tooSlow = askDesktopForHandoff();
     jest.advanceTimersByTime(8_000);
     expect(await tooSlow).toEqual({ error: "no-answer" });
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("an entry waits out the host's 7 s deadline, and gives up at 8 s", async () => {
+  jest.useFakeTimers();
+  try {
+    fake.native.reply = answerAfter(7_000, { ok: true, url: ENTRY });
+    const slow = desktopEntry("/settings/browsers");
+    jest.advanceTimersByTime(7_000);
+    expect(await slow).toBe(ENTRY);
+
+    fake.native.reply = answerAfter(8_001, { ok: true, url: ENTRY });
+    const tooSlow = desktopEntry("/settings/browsers");
+    jest.advanceTimersByTime(8_000);
+    expect(await tooSlow).toBeNull();
   } finally {
     jest.useRealTimers();
   }

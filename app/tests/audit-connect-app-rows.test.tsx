@@ -186,6 +186,8 @@ test("Admin reads the refusal's own sentence, without the marker", async () => {
   expect(drawn(view.container)[0]?.decision).toEqual([
     "Not connected",
     "You have not connected your Gmail account. Connect it and ask again.",
+    // Admin asks the controls about the row: see what-if/why-button.tsx.
+    "Why?",
   ]);
   const decision =
     view.container.querySelector("tbody [data-column=decision]")?.textContent ??

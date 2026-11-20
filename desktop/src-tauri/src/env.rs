@@ -45,7 +45,6 @@ pub struct Ports {
     pub server: u16,
     pub postgres: u16,
     pub computer: u16,
-    pub bot: u16,
     pub langgraph: u16,
     pub supervisor: u16,
     pub harness: Option<u16>,
@@ -58,7 +57,6 @@ impl Default for Ports {
             server: 3001,
             postgres: 5432,
             computer: 4100,
-            bot: 4200,
             langgraph: 4201,
             supervisor: 4500,
             harness: None,
@@ -67,12 +65,11 @@ impl Default for Ports {
 }
 
 /// The `.env` keys a deployment's host ports are kept under.
-const PORT_KEYS: [&str; 8] = [
+const PORT_KEYS: [&str; 7] = [
     "APP_PORT",
     "SERVER_PORT",
     "POSTGRES_PORT",
     "COMPUTER_PORT",
-    "BOT_PORT",
     "LANGGRAPH_PORT",
     "SUPERVISOR_PORT",
     "PICKED_HARNESS_HOST_PORT",
@@ -151,7 +148,6 @@ impl Ports {
             ("SERVER_PORT", &mut ports.server),
             ("POSTGRES_PORT", &mut ports.postgres),
             ("COMPUTER_PORT", &mut ports.computer),
-            ("BOT_PORT", &mut ports.bot),
             ("LANGGRAPH_PORT", &mut ports.langgraph),
             ("SUPERVISOR_PORT", &mut ports.supervisor),
         ] {
@@ -166,13 +162,34 @@ impl Ports {
         Ok(ports)
     }
 
+    /**
+    [`Ports::read`], for a Start whose Bot listens on `harness` inside its container.
+
+    The Bot's host port is recorded beside the container port it was published for
+    (`PICKED_HARNESS_PORT`). Where the two are the same, the host port was only that Bot's own
+    port, and a Bot that listens somewhere else gets its own port instead. Without this, an update
+    that moved the default Bot from the Python LangGraph image (4206) to the TypeScript one (4215)
+    kept publishing 4206 on the host, and nothing answered on 4215 there. A recorded host port that
+    differs from its container port (one a Start moved off a port somebody else held, or one set
+    by hand in `.env`) is kept, whichever Bot runs.
+    */
+    pub fn read_for_harness(root: &Path, harness: Option<u16>) -> std::io::Result<Self> {
+        let mut ports = Self::read(root)?;
+        let recorded = read_already_set(&root.join(".env"), &["PICKED_HARNESS_PORT"])?
+            .get("PICKED_HARNESS_PORT")
+            .and_then(|value| value.parse::<u16>().ok());
+        if recorded.is_some() && ports.harness == recorded && harness != recorded {
+            ports.harness = None;
+        }
+        Ok(ports)
+    }
+
     pub fn settings(&self) -> BTreeMap<String, String> {
         let mut settings: BTreeMap<_, _> = [
             ("APP_PORT", self.app),
             ("SERVER_PORT", self.server),
             ("POSTGRES_PORT", self.postgres),
             ("COMPUTER_PORT", self.computer),
-            ("BOT_PORT", self.bot),
             ("LANGGRAPH_PORT", self.langgraph),
             ("SUPERVISOR_PORT", self.supervisor),
         ]
@@ -195,6 +212,16 @@ impl Ports {
         ours: &std::collections::HashSet<u16>,
         harness: Option<u16>,
     ) -> std::io::Result<Self> {
+        self.reserve(ours, harness).map(|(ports, _held)| ports)
+    }
+
+    /// [`Ports::available`], with the listeners that proved each port free still bound. Dropping
+    /// them gives the ports back, which is what `available` does before Compose publishes them.
+    fn reserve(
+        self,
+        ours: &std::collections::HashSet<u16>,
+        harness: Option<u16>,
+    ) -> std::io::Result<(Self, Vec<std::net::TcpListener>)> {
         let mut held = Vec::new();
         let mut chosen = std::collections::HashSet::new();
         let mut choose = |preferred| -> std::io::Result<u16> {
@@ -226,18 +253,18 @@ impl Ports {
                 std::io::Error::other("could not allocate distinct local ports")
             }))
         };
-        Ok(Self {
+        let ports = Self {
             app: choose(self.app)?,
             server: choose(self.server)?,
             postgres: choose(self.postgres)?,
             computer: choose(self.computer)?,
-            bot: choose(self.bot)?,
             langgraph: choose(self.langgraph)?,
             supervisor: choose(self.supervisor)?,
             harness: harness
                 .map(|default| choose(self.harness.unwrap_or(default)))
                 .transpose()?,
-        })
+        };
+        Ok((ports, held))
     }
 }
 
@@ -419,7 +446,6 @@ mod port_tests {
                 server: port,
                 postgres: port,
                 computer: port,
-                bot: port,
                 langgraph: port,
                 supervisor: port,
                 harness: None,
@@ -442,22 +468,37 @@ mod port_tests {
             server: port,
             postgres: port,
             computer: port,
-            bot: port,
             langgraph: port,
             supervisor: port,
             harness: Some(port),
         };
-        let chosen = preferred.available(&HashSet::new(), Some(port)).unwrap();
+        let (chosen, held) = preferred.reserve(&HashSet::new(), Some(port)).unwrap();
         let values: HashSet<u16> = chosen
             .settings()
             .values()
             .map(|value| value.parse().unwrap())
             .collect();
-        assert_eq!(values.len(), 8);
+        assert_eq!(values.len(), 7);
         assert!(!values.contains(&port));
+        // Checked on the binds that chose them, still open. Given back and bound again here, a
+        // port can still be taken: a process another test is starting holds a copy of every open
+        // socket until it execs.
+        let bound: HashSet<std::net::SocketAddr> = held
+            .iter()
+            .map(|listener| listener.local_addr().unwrap())
+            .collect();
+        let ipv6 = TcpListener::bind("[::1]:0").is_ok();
         for value in values {
-            assert!(bind_loopbacks(value).is_ok(), "port {value} is unavailable");
+            assert!(
+                bound.contains(&(std::net::Ipv4Addr::LOCALHOST, value).into()),
+                "port {value} is not bound on 127.0.0.1"
+            );
+            assert!(
+                !ipv6 || bound.contains(&(std::net::Ipv6Addr::LOCALHOST, value).into()),
+                "port {value} is not bound on [::1]"
+            );
         }
+        drop(held);
         assert!(
             TcpStream::connect(foreign.local_addr().unwrap()).is_ok(),
             "foreign listener must remain untouched"
@@ -479,7 +520,15 @@ mod port_tests {
 
     #[test]
     fn saved_ports_survive_reopen_and_only_a_new_conflict_moves() {
+        // Ports given back and then bound again are the scenario, so it runs where no other test
+        // can be starting a process that holds them for a moment. The lock is taken first, so this
+        // process's own port tests wait while the child chooses the same default ports.
         let _ports = crate::test_support::hold_ports();
+        if crate::test_support::isolated_process(
+            "env::port_tests::saved_ports_survive_reopen_and_only_a_new_conflict_moves",
+        ) {
+            return;
+        }
         let root = crate::test_support::temp_root("saved-local-ports");
         std::fs::create_dir_all(&root).unwrap();
         let chosen = Ports::default()
@@ -534,6 +583,7 @@ mod port_tests {
     #[test]
     fn the_app_and_api_ports_our_server_container_publishes_are_kept() {
         // The one `server` container publishes both, so both are held while it runs.
+        let _ports = crate::test_support::hold_ports();
         let app = TcpListener::bind("127.0.0.1:0").unwrap();
         let server = TcpListener::bind("127.0.0.1:0").unwrap();
         let preferred = Ports {
@@ -554,8 +604,7 @@ mod port_tests {
     }
 
     /// What the engine's port forwarder does after a quit: holds the port a moment, then lets go.
-    fn held_for(port: u16, ms: u64) -> std::thread::JoinHandle<()> {
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).unwrap();
+    fn held_for(listener: TcpListener, ms: u64) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(ms));
             drop(listener);
@@ -567,16 +616,14 @@ mod port_tests {
         // 2026-11-08: OpenBot quit and opened again at once moved its app from 3010 to 49381,
         // because the last run's port was still held when Start chose.
         let _ports = crate::test_support::hold_ports();
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        // One listener from choosing the port to letting it go: never given back in between.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
         let preferred = Ports {
             app: port,
             ..Ports::default()
         };
-        let letting_go = held_for(port, 800);
+        let letting_go = held_for(listener, 800);
         let chosen = preferred
             .for_start(
                 &HashSet::from([port]),
@@ -679,6 +726,17 @@ fn secret() -> String {
     BASE64.encode(bytes)
 }
 
+/// A new value for `key`. The install's token travels in an address and a cookie, so it is 32
+/// random bytes in the URL-safe alphabet with no padding, which both carry as they are.
+fn minted(key: &str) -> String {
+    if key == crate::install_token::NAME {
+        let mut bytes = [0u8; 32];
+        rand::rng().fill_bytes(&mut bytes);
+        return base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    }
+    secret()
+}
+
 /// The settings the shell owns, in the order a person reading the file would want them.
 ///
 /// Addresses use `127.0.0.1` rather than `localhost` deliberately. Compose publishes on both
@@ -735,6 +793,9 @@ pub fn compose(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
+            // Where the ChatGPT plan's model calls go; see `crate::plan::CHATGPT_PLAN_URL`.
+            // Emptied on any other answer, which is also what stops that service being started.
+            "CHATGPT_PLAN_HARNESS_URL",
             "OPENBOT_MODEL_OAUTH_FILE",
             "BOT_PROVIDER",
             /*
@@ -803,7 +864,19 @@ pub fn compose(
          */
         ModelCredential::ChatGptPlan { store } => {
             if !store.trim().is_empty() {
+                // The Bot sends a plan's model calls to the ChatGPT plan's own engine, at the
+                // address every Start writes (`crate::ai_connection::gateway_settings`).
                 env.insert("CHATGPT_AUTH_FILE".into(), CHATGPT_STORE_INSIDE.into());
+                /*
+                 * The Bot is the TypeScript LangGraph image, which sends a plan's model calls to
+                 * the Python image that holds the Codex transport, and so do the server's own
+                 * Bots. Both read this address; the token is the deployment's MANAGED_AGENT_TOKEN,
+                 * which every one of them already has.
+                 */
+                env.insert(
+                    "CHATGPT_PLAN_HARNESS_URL".into(),
+                    crate::plan::CHATGPT_PLAN_URL.into(),
+                );
             }
         }
         ModelCredential::ProviderOAuth {
@@ -827,7 +900,6 @@ pub fn compose(
             );
             env.insert("BOT_PROVIDER".into(), "openai".into());
             env.insert("BOT_MODEL".into(), model.clone());
-            env.insert("AGENT_BOT_MODEL".into(), model.clone());
         }
         ModelCredential::Compatible {
             base_url,
@@ -858,18 +930,6 @@ pub fn compose(
                 insert_if_given(&mut env, "OPENAI_CONTAINER_BASE_URL", container_base_url);
             }
             insert_if_given(&mut env, "BOT_MODEL", name);
-            /*
-             * The bundled Bot's own model variable, set to the same name.
-             *
-             * It has one because it hand-writes `/v1/chat/completions`, where `gpt-5.6-*` rejects
-             * function tools, so `docker-compose.yml` pins it to `gpt-5.5` rather than letting the
-             * framework Bot's choice take its tools away. That reasoning is about OpenAI's own
-             * models and does not survive a custom endpoint: `gpt-5.5` is not in the catalogue of
-             * an Ollama or a vLLM, so the pin asked somebody's own server for a model it has never
-             * heard of. The person named exactly one model on that screen and meant it for
-             * whichever Bot answers.
-             */
-            insert_if_given(&mut env, "AGENT_BOT_MODEL", name);
         }
     }
 
@@ -889,9 +949,9 @@ pub fn compose(
     // reports that it cannot answer without ever naming the space.
     //
     // And at `127.0.0.1` where they say `localhost`, as the local Intelligence CLI reports its
-    // stack. The server and the person's browser both dial these (`docker-compose.yml` hands the
-    // gateway to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`), the stack publishes on
-    // `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway at no other name.
+    // stack. The stack publishes on `127.0.0.1` alone, and whatever on this machine reads these
+    // from `.env` dials them there. The person's browser and the Recorder dial neither: they are
+    // given OpenBot's own address for the gateway (below).
     env.insert(
         "INTELLIGENCE_API_URL".into(),
         numeric_loopback(&intelligence.api_url),
@@ -904,10 +964,14 @@ pub fn compose(
      * The same two addresses as the server's container reaches them.
      *
      * Local Intelligence answers on this machine's loopback, which inside a container is the
-     * container. `host.docker.internal` is the machine. Only the server is moved: the browser opens
-     * the gateway too, from the address in `/info`, and the browser is on the host, so
-     * `docker-compose.yml` hands it the address above unchanged. Empty for an Intelligence somewhere
-     * else, which the container reaches at the address it was given.
+     * container. `host.docker.internal` is the machine. Empty for an Intelligence somewhere else,
+     * which the container reaches at the address it was given.
+     *
+     * A gateway address here is also what turns the server's own carrying of the gateway socket on
+     * (`INTELLIGENCE_GATEWAY_PROXY` in `docker-compose.yml`): the browser opens that socket too,
+     * and with Intelligence on this machine it is given OpenBot's address for it, the app's own
+     * port, and never the gateway's. An Intelligence somewhere else has a host of its own, which
+     * the browser reaches itself.
      */
     env.insert(
         "INTELLIGENCE_CONTAINER_API_URL".into(),
@@ -933,6 +997,19 @@ pub fn compose(
     for key in ["CPK_INTELLIGENCE_API_KEY", "INTELLIGENCE_API_KEY"] {
         env.insert(key.into(), intelligence.api_key.trim().to_string());
     }
+    /*
+     * No Learning container named: the server assigns this Intelligence's own (auto-assign, in
+     * server/src/learning/auto-assign.ts), after checking it is there.
+     *
+     * Written empty rather than left out, so it is ours and `write` takes out a line somebody else
+     * left. A CLI set up against hosted Intelligence writes `"openbot"` into this same file; against
+     * the local Intelligence Start points at, that container does not exist, every new thread was
+     * refused ("Failed to initialize thread"), and naming one also turned auto-assign off.
+     */
+    env.insert(
+        "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID".into(),
+        String::new(),
+    );
 
     /*
      * MINTED ONCE PER DEPLOYMENT, NOT ONCE PER START.
@@ -957,7 +1034,7 @@ pub fn compose(
             // present, is published, and must still be replaced. It also holds
             // `KEY_ENCRYPTION_KEY` to the 32 bytes it has to decode to.
             .filter(|value| usable(key, value))
-            .unwrap_or_else(secret);
+            .unwrap_or_else(|| minted(key));
         env.insert(key.into(), value);
     }
 
@@ -1014,12 +1091,133 @@ pub fn compose(
      * The picked harness, if there is one.
      *
      * Addressed on loopback rather than by a compose service name, because the server is a host
-     * process here and not a container: it reaches `agent-bot` and `agent-langgraph` the same way,
-     * over the port those services publish.
+     * process here and not a container: it reaches a Bot's container the same way, over the port
+     * that service publishes.
      *
      * One address and one kind. The package's single row drops itself while the address is blank,
      * so a deployment that picked nothing registers nothing.
      */
+    env.extend(harness_settings(harness, ports));
+
+    /*
+     * One computer, and every Bot on it is this person's.
+     *
+     * The personal edition refuses a supervisor (`personalEditionRequirements` in
+     * server/src/config.ts), so both addresses are written empty: the host's, and the one
+     * `docker-compose.yml` gives the server's container, which defaults to the supervisor only while
+     * it is unset. Empty rather than left out, because `write` keeps a line it does not own and an
+     * earlier Start wrote the supervisor's address here.
+     *
+     * The computer is started as the person's (`COMPUTER_PERSON_ID`, as `scripts/start.sh` does for
+     * the personal edition), which is what lets them record in a Bot's browser.
+     *
+     * The person's own browser runs there too, shown in the OpenBot window as hosted OpenBot shows
+     * it, so no `OPENBOT_BROWSER_URL` is written: that would send the server to a browser on this
+     * machine's desktop, a separate Chrome window, which Desktop no longer runs. Start takes out
+     * the one an earlier Desktop wrote ([`REMOVED_WHEN_UNSET`]).
+     */
+    env.insert("COMPUTER_SUPERVISOR_URL".into(), String::new());
+    env.insert("COMPUTER_SUPERVISOR_CONTAINER_URL".into(), String::new());
+    env.insert("COMPUTER_PERSON_ID".into(), "personal".into());
+    env.insert(
+        "COMPUTER_LOOPBACK_RELAYS".into(),
+        loopback_relays(ports, &intelligence.gateway_ws_url),
+    );
+
+    // For an installation whose Compose file is a release's up to 1.0.3, which runs the routines
+    // sweep as a `worker` service: that worker refuses to start without this, by design. It is a
+    // fact about where the process runs, and it would rather stop than guess. Later releases' server
+    // does the sweep itself and reads neither this nor the worker's secret.
+    env.insert(
+        "SERVER_INTERNAL_URL".into(),
+        format!("http://127.0.0.1:{}", ports.server),
+    );
+
+    env.extend(ports.settings());
+    // The server is a container on the Bots' network now, so they reach it by name and on its own
+    // port, whichever host port this start published it on.
+    env.insert(
+        "OPENBOT_TOOL_URL".into(),
+        "http://server:3001/api/agent-tools/call".into(),
+    );
+    /*
+     * THE MODEL GATEWAY, which is how the AI connection changes with no restart. Every engine sends
+     * its model calls to the server's gateway with `MODEL_GATEWAY_TOKEN` (minted below) and the
+     * gateway adds the connection's live key per request, so no engine holds a provider key and a
+     * key changed in the app reaches every Bot on its next request. By name, on the Bots' network,
+     * as `OPENBOT_TOOL_URL` above. See `crate::ai_connection` for the rest.
+     */
+    env.extend(crate::ai_connection::gateway_settings());
+    if let Some(connection) = crate::ai_connection::connection_setting(&model.credential) {
+        env.insert(crate::ai_connection::CONNECTION_ENV.into(), connection);
+    }
+    // A plan's own engine serves a Bot picked for that plan, so the server is pointed there.
+    if let Some(plan) = crate::ai_connection::Plan::serving(&model.credential, harness) {
+        env.extend(plan.picked_harness_settings(harness));
+    }
+
+    // The whole deployment is on this machine, so the server must be allowed to talk to it.
+    //
+    // The private-address floor stops a hosted deployment reaching into its own network, which is
+    // right there and wrong here: the computer, the person's browser on it and the Bots are all on
+    // loopback by design. Without this the server refuses to call its own computer and the failure
+    // arrives as an Unauthorized wrapped in a 500, which names neither the address nor the rule.
+    env.insert("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS".into(), "true".into());
+
+    // The personal edition: one person on their own machine, which is who this app installs OpenBot
+    // for. Unset, the server runs the team edition, with its admin screens, its fintech Bots and a
+    // computer per Bot. See docs/personal-edition.md.
+    env.insert("OPENBOT_EDITION".into(), "personal".into());
+
+    // Which package the deployment runs. Without it the server falls back rather than using the one
+    // that came with the deployment, and the Bots somebody was given are not the Bots they get.
+    env.insert("TENANT_PACKAGE_DIR".into(), "../examples/personal".into());
+
+    // The one person, named. `OPENBOT_SINGLE_USER` says there is nobody else; this says who that
+    // somebody is, so the routes that ask what an actor may do have an actor to answer about.
+    env.insert("INITIAL_ADMIN_EMAILS".into(), "dev@openbot.local".into());
+
+    // One machine, one person, no sign-in.
+    //
+    // The server refuses to start with no identity provider rather than serve a deployment where
+    // every visitor is an administrator, which is the right refusal on a server and the wrong
+    // question on a laptop: there is nobody else here. Saying so explicitly is how that refusal is
+    // answered, and it is the same switch `ci.yml` uses for the same reason.
+    env.insert("OPENBOT_SINGLE_USER".into(), "true".into());
+
+    // Pull the published images rather than build them. A desktop install has no toolchain and no
+    // reason to compile Chromium.
+    env.insert("IMAGE_PULL_POLICY".into(), "missing".into());
+
+    // Which images, by digest, from the release's own manifest. Compose's defaults are local build
+    // names, so leaving these unset does not fall back to something workable: it asks a registry
+    // for `openbot-supervisor:latest`, which nobody publishes, and the denial that comes back
+    // reads as a login problem.
+    for (variable, reference) in images {
+        env.insert(variable.clone(), reference.clone());
+    }
+
+    // Only rootless Podman on Linux needs this; see engine.rs.
+    if let Some(socket) = &engine.engine_socket {
+        env.insert("ENGINE_SOCKET".into(), socket.clone());
+        // And only there is `host-gateway` not this machine's loopback, which is where a local
+        // Intelligence listens. See `engine::ROOTLESS_HOST_LOOPBACK`.
+        env.insert(
+            HOST_GATEWAY_ENV.into(),
+            crate::engine::ROOTLESS_HOST_LOOPBACK.into(),
+        );
+    }
+
+    env
+}
+
+/// The picked harness's settings, as `compose` writes them at Start and the AI connection's
+/// settle rewrites them when a new connection moves the Bot to another engine.
+pub fn harness_settings(
+    harness: Option<&PickedHarness>,
+    ports: &Ports,
+) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
     // KIND describes the wire protocol, not who runs the endpoint. Always replace this
     // nonsecret provenance, including when nothing is picked: `write` preserves omitted keys.
     env.insert(
@@ -1094,100 +1292,6 @@ pub fn compose(
             }
         }
     }
-
-    /*
-     * One computer, and every Bot on it is this person's.
-     *
-     * The personal edition refuses a supervisor (`personalEditionRequirements` in
-     * server/src/config.ts), so both addresses are written empty: the host's, and the one
-     * `docker-compose.yml` gives the server's container, which defaults to the supervisor only while
-     * it is unset. Empty rather than left out, because `write` keeps a line it does not own and an
-     * earlier Start wrote the supervisor's address here.
-     *
-     * The computer is started as the person's (`COMPUTER_PERSON_ID`, as `scripts/start.sh` does for
-     * the personal edition), which is what lets them record in a Bot's browser.
-     *
-     * The person's own browser runs there too, shown in the OpenBot window as hosted OpenBot shows
-     * it, so no `OPENBOT_BROWSER_URL` is written: that would send the server to a browser on this
-     * machine's desktop, a separate Chrome window, which Desktop no longer runs. Start takes out
-     * the one an earlier Desktop wrote ([`REMOVED_WHEN_UNSET`]).
-     */
-    env.insert("COMPUTER_SUPERVISOR_URL".into(), String::new());
-    env.insert("COMPUTER_SUPERVISOR_CONTAINER_URL".into(), String::new());
-    env.insert("COMPUTER_PERSON_ID".into(), "personal".into());
-    env.insert(
-        "COMPUTER_LOOPBACK_RELAYS".into(),
-        loopback_relays(ports, &intelligence.gateway_ws_url),
-    );
-
-    // The worker refuses to start without this, by design: it is a fact about where this process
-    // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
-    // from a developer's machine does not carry it either.
-    env.insert(
-        "SERVER_INTERNAL_URL".into(),
-        format!("http://127.0.0.1:{}", ports.server),
-    );
-
-    env.extend(ports.settings());
-    // The server is a container on the Bots' network now, so they reach it by name and on its own
-    // port, whichever host port this start published it on.
-    env.insert(
-        "OPENBOT_TOOL_URL".into(),
-        "http://server:3001/api/agent-tools/call".into(),
-    );
-
-    // The whole deployment is on this machine, so the server must be allowed to talk to it.
-    //
-    // The private-address floor stops a hosted deployment reaching into its own network, which is
-    // right there and wrong here: the computer, the person's browser on it and the Bots are all on
-    // loopback by design. Without this the server refuses to call its own computer and the failure
-    // arrives as an Unauthorized wrapped in a 500, which names neither the address nor the rule.
-    env.insert("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS".into(), "true".into());
-
-    // The personal edition: one person on their own machine, which is who this app installs OpenBot
-    // for. Unset, the server runs the team edition, with its admin screens, its fintech Bots and a
-    // computer per Bot. See docs/personal-edition.md.
-    env.insert("OPENBOT_EDITION".into(), "personal".into());
-
-    // Which package the deployment runs. Without it the server falls back rather than using the one
-    // that came with the deployment, and the Bots somebody was given are not the Bots they get.
-    env.insert("TENANT_PACKAGE_DIR".into(), "../examples/personal".into());
-
-    // The one person, named. `OPENBOT_SINGLE_USER` says there is nobody else; this says who that
-    // somebody is, so the routes that ask what an actor may do have an actor to answer about.
-    env.insert("INITIAL_ADMIN_EMAILS".into(), "dev@openbot.local".into());
-
-    // One machine, one person, no sign-in.
-    //
-    // The server refuses to start with no identity provider rather than serve a deployment where
-    // every visitor is an administrator, which is the right refusal on a server and the wrong
-    // question on a laptop: there is nobody else here. Saying so explicitly is how that refusal is
-    // answered, and it is the same switch `ci.yml` uses for the same reason.
-    env.insert("OPENBOT_SINGLE_USER".into(), "true".into());
-
-    // Pull the published images rather than build them. A desktop install has no toolchain and no
-    // reason to compile Chromium.
-    env.insert("IMAGE_PULL_POLICY".into(), "missing".into());
-
-    // Which images, by digest, from the release's own manifest. Compose's defaults are local build
-    // names, so leaving these unset does not fall back to something workable: it asks a registry
-    // for `openbot-supervisor:latest`, which nobody publishes, and the denial that comes back
-    // reads as a login problem.
-    for (variable, reference) in images {
-        env.insert(variable.clone(), reference.clone());
-    }
-
-    // Only rootless Podman on Linux needs this; see engine.rs.
-    if let Some(socket) = &engine.engine_socket {
-        env.insert("ENGINE_SOCKET".into(), socket.clone());
-        // And only there is `host-gateway` not this machine's loopback, which is where a local
-        // Intelligence listens. See `engine::ROOTLESS_HOST_LOOPBACK`.
-        env.insert(
-            HOST_GATEWAY_ENV.into(),
-            crate::engine::ROOTLESS_HOST_LOOPBACK.into(),
-        );
-    }
-
     env
 }
 
@@ -1322,7 +1426,7 @@ pub const NO_KEY_NEEDED: &str = "no-key-needed";
 const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
 
 /// The secrets this deployment mints for itself, once.
-pub const MINTED: [&str; 7] = [
+pub const MINTED: [&str; 9] = [
     "AGENT_TOOL_TOKEN",
     "COMPUTER_TOKEN",
     "KEY_ENCRYPTION_KEY",
@@ -1330,6 +1434,11 @@ pub const MINTED: [&str; 7] = [
     // the person's plan. See `learning_model`.
     crate::learning_model::TOKEN,
     "MANAGED_AGENT_TOKEN",
+    // What every engine proves itself to the server's model gateway with. See `ai_connection`.
+    crate::ai_connection::GATEWAY_TOKEN,
+    // The install's own token, which the personal edition only admits requests carrying. Kept, not
+    // minted again, so a window that already has its cookie stays let in. See `install_token`.
+    crate::install_token::NAME,
     "SUPERVISOR_TOKEN",
     "WORKER_SHARED_SECRET",
 ];
@@ -1339,10 +1448,18 @@ pub const MINTED: [&str; 7] = [
 /// earlier run wrote outlives the answer that implied it: `BOT_MODEL` once asked OpenAI for a model
 /// an earlier endpoint had named, and `OPENBOT_BROWSER_URL` would send the person to a browser that
 /// no longer runs.
-pub const REMOVED_WHEN_UNSET: [&str; 9] = [
+pub const REMOVED_WHEN_UNSET: [&str; 12] = [
     "BOT_PROVIDER",
     "BOT_MODEL",
     "AGENT_BOT_MODEL",
+    // What earlier Desktops wrote for the two Bots that shipped in their own containers, agent-bot
+    // and agent-langgraph: a host port and an image for the first, an image for the second. Neither
+    // Bot exists now, and nothing reads these. `LANGGRAPH_IMAGE` is written again, pinned to the
+    // ChatGPT plan's model service, whenever the release publishes that image
+    // (`crate::deployment::OPTIONAL_IMAGE_VARIABLES`), and taken out when it does not.
+    "BOT_PORT",
+    "BOT_IMAGE",
+    "LANGGRAPH_IMAGE",
     // What earlier Desktops wrote for the host-side Chrome they ran beside the server: its port, its
     // address (the host's and the server container's), and why there was none. Desktop runs no such
     // browser now, and a server still pointed at one shows the person a separate window, or a port
@@ -1572,6 +1689,8 @@ pub fn write(
             continue;
         }
         let key = line.split('=').next().unwrap_or("").trim();
+        // `export NAME=value` sets NAME for Compose and the server alike, so it is NAME's line.
+        let key = key.strip_prefix("export ").map_or(key, str::trim);
         let ours = owned.contains_key(key) || purge.contains_key(key);
         if key.is_empty() || line.trim_start().starts_with('#') || !ours {
             out.push_str(line);
@@ -1860,6 +1979,40 @@ HTTPS_PROXY=http://proxy:8080
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A hosted CLI setup left `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="openbot"` in the folder
+    /// Desktop now runs from. Kept, it named a container the local Intelligence does not have, every
+    /// message failed with "Failed to initialize thread", and auto-assign was off. After a Start the
+    /// only value in the file is Desktop's empty one, which the server reads as "assign one".
+    #[test]
+    fn a_learning_container_an_earlier_setup_named_gives_way_to_auto_assign() {
+        let dir = temp_root("env-stale-learning-container");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=\"openbot\"\nexport CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=openbot\nCUSTOM=keep-me\n",
+        )
+        .unwrap();
+        let (settings, secrets) = crate::vault::split(compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        ));
+        write(&path, &settings, &secrets).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let named: Vec<&str> = saved
+            .lines()
+            .filter(|line| line.contains("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"))
+            .collect();
+        assert_eq!(named, ["CPK_INTELLIGENCE_LEARNING_CONTAINER_ID="]);
+        assert!(saved.contains("CUSTOM=keep-me"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn a_value_with_nothing_around_it_is_untouched() {
         let env = compose(
@@ -1940,6 +2093,54 @@ HTTPS_PROXY=http://proxy:8080
         for key in MINTED {
             assert_eq!(first.get(key), second.get(key), "{key} was minted again");
         }
+    }
+
+    /**
+    The install's token, which the personal edition only admits requests carrying: minted by the
+    first Start, and kept by every Start after it, a restart, an upgrade, and a put-back to an older
+    app and forward again alike, because each reads it back from the credential store (`MINTED`).
+    Never written to `.env`, and minted in a shape a URL and a cookie carry as it is.
+    */
+    #[test]
+    fn the_install_token_is_minted_once_kept_and_never_written_to_the_file() {
+        let name = crate::install_token::NAME;
+        assert!(MINTED.contains(&name), "Start reads only MINTED back");
+        let first = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let minted = first.get(name).cloned().expect("the first Start mints it");
+        assert!(minted.len() >= 43, "32 random bytes: {}", minted.len());
+        assert!(
+            minted
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "a URL and a cookie carry it as it is"
+        );
+
+        // What the credential store is given, and what the next Start reads back from it.
+        let (settings, secrets) = crate::vault::split(first);
+        assert!(!settings.contains_key(name), "never in .env");
+        assert_eq!(secrets.get(name), Some(&minted));
+        let kept: BTreeMap<String, String> = secrets
+            .into_iter()
+            .filter(|(key, _)| MINTED.contains(&key.as_str()))
+            .collect();
+        let again = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &kept,
+        );
+        assert_eq!(again.get(name), Some(&minted), "minted again");
     }
 
     /// A blank one is not a value to keep. An empty line is what clearing looks like, not a secret.
@@ -2205,6 +2406,51 @@ HTTPS_PROXY=http://proxy:8080
         write(&path, &settings, &purge).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("OPENBOT_ORGANIZATION_AUTH_URL"), "{text}");
+        assert!(text.contains("MY_OWN=kept"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// An installation updated from a release that shipped agent-bot and agent-langgraph still has
+    /// their settings in `.env`: a port and an image for the first, an image for the second. A Start
+    /// takes them out, keeps the ports it still chooses and leaves a person's own lines alone.
+    #[test]
+    fn a_start_takes_out_the_settings_of_the_two_retired_bots() {
+        let dir = temp_root("env-retired-bots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = env_at(&dir);
+        std::fs::write(
+            &path,
+            "BOT_PORT=4200\n\
+             LANGGRAPH_PORT=4201\n\
+             BOT_IMAGE=ghcr.io/copilotkit/openbot-agent-bot@sha256:00\n\
+             LANGGRAPH_IMAGE=ghcr.io/copilotkit/openbot-agent-langgraph@sha256:00\n\
+             MY_OWN=kept\n",
+        )
+        .unwrap();
+        let ports = Ports::read(&dir).unwrap();
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &ports,
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let purge: BTreeMap<String, String> = REMOVED_WHEN_UNSET
+            .iter()
+            .filter(|key| !settings.contains_key(**key))
+            .map(|key| (key.to_string(), String::new()))
+            .collect();
+        write(&path, &settings, &purge).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        for gone in ["BOT_PORT=", "BOT_IMAGE=", "LANGGRAPH_IMAGE="] {
+            assert!(
+                !text.lines().any(|line| line.starts_with(gone)),
+                "{gone} survived: {text}"
+            );
+        }
+        assert!(text.contains("LANGGRAPH_PORT=4201"), "{text}");
         assert!(text.contains("MY_OWN=kept"), "{text}");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -2829,10 +3075,11 @@ HTTPS_PROXY=http://proxy:8080
         );
     }
 
-    /// The local Intelligence CLI reports its stack at `localhost`, and `docker-compose.yml` hands
-    /// the gateway address to the browser as `INTELLIGENCE_BROWSER_GATEWAY_WS_URL`. The stack
-    /// publishes on `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at
-    /// `127.0.0.1` or `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved.
+    /// The local Intelligence CLI reports its stack at `localhost`. The stack publishes on
+    /// `127.0.0.1` alone, and the Recorder opens a plain `ws://` gateway only at `127.0.0.1` or
+    /// `[::1]`, so `ws://localhost:51798` in the file left every recording unsaved when the
+    /// browser was handed that address. It is handed OpenBot's own now, and nothing written here
+    /// dials the name either.
     #[test]
     fn a_local_intelligence_is_written_at_127_0_0_1_and_nothing_written_dials_localhost() {
         let env = compose(
@@ -2923,6 +3170,88 @@ mod model_tests {
             engine_socket: None,
             detail: String::new(),
         }
+    }
+
+    /**
+    Every Start points the engines at the model gateway with a token of the deployment's own, tells
+    the server which connection the setup window chose and never its key, and on a Claude plan
+    sends the server to the plan's own engine for the Claude Agent SDK Bot the plan picked.
+    */
+    #[test]
+    fn a_start_names_the_gateway_and_the_connection_and_a_plan_serves_its_own_bot() {
+        let claude_sdk = PickedHarness::Installed {
+            image: "ghcr.io/copilotkit/openbot-agent-claude-sdk@sha256:abc".into(),
+            port: 4212,
+            name: "Claude Agent SDK".into(),
+            mastra: false,
+            run_path: String::new(),
+            remote_agent_id: String::new(),
+        };
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::ClaudePlan {
+                    token: "sentinel-plan-token".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            Some(&claude_sdk),
+            &BTreeMap::new(),
+        );
+        assert!(usable(
+            crate::ai_connection::GATEWAY_TOKEN,
+            &env[crate::ai_connection::GATEWAY_TOKEN]
+        ));
+        assert_eq!(
+            env["MODEL_GATEWAY_OPENAI_URL"],
+            "http://server:3001/api/model-provider/v1"
+        );
+        assert_eq!(
+            env[crate::ai_connection::CONNECTION_ENV],
+            r#"{"login":"plan","provider":"anthropic"}"#
+        );
+        assert_eq!(
+            env["PICKED_HARNESS_CONTAINER_URL"],
+            "http://agent-claude-plan:4212"
+        );
+        assert_eq!(
+            env["CLAUDE_PLAN_HARNESS_URL"],
+            "http://agent-claude-plan:4212"
+        );
+        assert_eq!(
+            env["CHATGPT_PLAN_HARNESS_URL"],
+            "http://agent-chatgpt-plan:4206"
+        );
+
+        // The same Bot on an Anthropic key runs in its own container, on the gateway.
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Anthropic {
+                    api_key: "sentinel-key".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            Some(&claude_sdk),
+            &BTreeMap::from([(
+                crate::ai_connection::GATEWAY_TOKEN.to_string(),
+                "kept-gateway-token-from-the-last-start".to_string(),
+            )]),
+        );
+        assert_eq!(
+            env["PICKED_HARNESS_CONTAINER_URL"],
+            "http://agent-harness:4212"
+        );
+        // Minted once per installation, as the other tokens are.
+        assert_eq!(
+            env[crate::ai_connection::GATEWAY_TOKEN],
+            "kept-gateway-token-from-the-last-start"
+        );
+        assert!(!env[crate::ai_connection::CONNECTION_ENV].contains("sentinel"));
     }
 
     #[test]
@@ -3355,18 +3684,9 @@ mod model_tests {
             compatible.get("BOT_MODEL"),
             Some(&"local-model".to_string())
         );
-        /*
-         * And the bundled Bot's own variable, which is the one that was missed.
-         *
-         * `docker-compose.yml` reads `AGENT_BOT_MODEL` for `agent-bot` rather than `BOT_MODEL`, so
-         * that a model chosen for the framework Bot cannot take its tools away. On a custom
-         * endpoint that pin asked somebody's own server for `gpt-5.5`, which an Ollama or a vLLM
-         * has never heard of.
-         */
-        assert_eq!(
-            compatible.get("AGENT_BOT_MODEL"),
-            Some(&"local-model".to_string())
-        );
+        // AGENT_BOT_MODEL was the retired agent-bot's own model setting: nothing reads it now, so
+        // nothing writes it, and an earlier .env's line is taken out (REMOVED_WHEN_UNSET).
+        assert!(!compatible.contains_key("AGENT_BOT_MODEL"));
 
         let with_a_key = compose(
             &intelligence(),

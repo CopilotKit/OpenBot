@@ -215,10 +215,12 @@ def plan(monkeypatch, tmp_path):
     return CodexBackend(PLAN_LISTING).install(monkeypatch)
 
 
-def run_body(*, model=None, tools=(), content="Say hello."):
+def run_body(*, model=None, tools=(), content="Say hello.", send_once=None):
     props = {"openbotRun": "synthetic-run-assertion"}
     if model is not None:
         props["openbotModel"] = model
+    if send_once is not None:
+        props["openbotSendOnce"] = send_once
     return {
         "threadId": str(uuid4()),
         "runId": str(uuid4()),
@@ -586,13 +588,14 @@ async def test_openai_takes_a_responses_model_on_the_responses_api_with_its_effo
 async def test_openai_takes_a_chat_completions_model_with_reasoning_effort(monkeypatch, effort):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-synthetic")
     monkeypatch.setenv("BOT_PROVIDER", "openai")
-    choice = {"model": "gpt-5.5", **({"reasoningEffort": effort} if effort else {})}
+    # gpt-5.2 takes function tools and an effort on Chat Completions (OpenAI, 2026-11-17).
+    choice = {"model": "gpt-5.2", **({"reasoningEffort": effort} if effort else {})}
     with openai_capture(monkeypatch) as captured:
         finished(await run(run_body(model=choice)))
 
     [request] = captured
     assert request["url"] == "https://api.openai.com/v1/chat/completions"
-    assert request["body"]["model"] == "gpt-5.5"
+    assert request["body"]["model"] == "gpt-5.2"
     assert request["body"].get("reasoning_effort") == effort
     assert "reasoning" not in request["body"]
 
@@ -611,6 +614,45 @@ async def test_a_compatible_endpoint_gets_reasoning_effort_on_chat_completions(m
     assert "messages" in body, "Chat Completions, which every compatible endpoint serves"
     assert body["model"] == "gemini-3.1-pro"
     assert body.get("reasoning_effort") == effort
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["low", None])
+@pytest.mark.parametrize("model", ["gpt-5.6-terra", "gpt-5.5"])
+async def test_a_responses_model_behind_a_base_url_is_called_on_the_responses_api(
+    monkeypatch, effort, model
+):
+    # FOUND IN THE LIVE CHECK, whose model requests go through a recorder at OPENAI_BASE_URL. Told
+    # to run on gpt-5.6-terra, the harness sent it to Chat Completions because an address was set,
+    # and OpenAI refused every run that offered a tool: "Function tools with reasoning_effort are
+    # not supported for gpt-5.6-terra in /v1/chat/completions." The person read "Your model
+    # provider is having problems right now." gpt-5.5 with an effort is refused the same way.
+    choice = {"model": model, **({"reasoningEffort": effort} if effort else {})}
+    with fake_provider() as (base, bodies):
+        monkeypatch.setenv("OPENAI_API_KEY", "synthetic-proxied-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", f"{base}/v1")
+        monkeypatch.setenv("BOT_PROVIDER", "openai")
+        finished(await run(run_body(model=choice, tools=["lookup"])))
+
+    [body] = bodies
+    assert "input" in body and "messages" not in body, "the Responses API, not Chat Completions"
+    assert body["model"] == model
+    assert [tool["name"] for tool in body["tools"]] == ["lookup"]
+    assert body.get("reasoning") == ({"effort": effort} if effort else None)
+    assert "reasoning_effort" not in body
+
+
+@pytest.mark.asyncio
+async def test_an_operator_who_chose_chat_completions_keeps_it_behind_a_base_url(monkeypatch):
+    with fake_provider() as (base, bodies):
+        monkeypatch.setenv("OPENAI_API_KEY", "synthetic-proxied-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", f"{base}/v1")
+        monkeypatch.setenv("BOT_PROVIDER", "openai")
+        monkeypatch.setenv("COPILOTKIT_OPENAI_API", "chat")
+        finished(await run(run_body(model={"model": "gpt-5.6-terra"})))
+
+    [body] = bodies
+    assert "messages" in body
 
 
 @pytest.mark.asyncio
@@ -681,6 +723,69 @@ async def test_google_gets_its_thinking_level(monkeypatch, effort):
         assert thinking in ({"thinkingLevel": "LOW"}, {"thinking_level": "LOW"})
 
 
+# A run the server retries itself is asked once. Any other run keeps the client's own retries.
+
+
+@contextmanager
+def rate_limited(monkeypatch, client=httpx2.AsyncClient):
+    """A provider that answers every call with a rate limit, counting the calls it was sent."""
+    calls = []
+
+    async def send(_client, request, **kwargs):
+        calls.append(str(request.url))
+        return client_response(request)
+
+    def client_response(request):
+        return httpx2.Response(
+            429,
+            json={
+                "error": {
+                    "message": "Rate limit reached for requests per min.",
+                    "type": "rate_limit_error",
+                    "code": "rate_limit_exceeded",
+                }
+            },
+            # So the client's own retries, where it makes them, do not wait.
+            headers={"retry-after-ms": "1", "retry-after": "0"},
+            request=request,
+        )
+
+    monkeypatch.setattr(client, "send", send)
+    yield calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "key", "model"),
+    [
+        ("openai", "OPENAI_API_KEY", "gpt-5.5"),
+        ("openai", "OPENAI_API_KEY", "gpt-6.1-terra"),
+        ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5"),
+    ],
+)
+async def test_a_run_the_server_retries_itself_asks_the_model_once(monkeypatch, provider, key, model):
+    monkeypatch.setenv(key, "sk-synthetic")
+    monkeypatch.setenv("BOT_PROVIDER", provider)
+    with rate_limited(monkeypatch) as calls:
+        events = await run(run_body(model={"model": model}, send_once=True))
+
+    assert len(calls) == 1
+    assert [e["type"] for e in events if e["type"].startswith("RUN_")] == ["RUN_STARTED", "RUN_ERROR"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send_once", [None, False, "true"])
+async def test_any_other_run_keeps_the_model_clients_own_retries(monkeypatch, send_once):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-synthetic")
+    monkeypatch.setenv("BOT_PROVIDER", "openai")
+    with rate_limited(monkeypatch) as calls:
+        events = await run(run_body(model={"model": "gpt-5.5"}, send_once=send_once))
+
+    # The first call and the client's two retries.
+    assert len(calls) == 3
+    assert [e["type"] for e in events if e["type"].startswith("RUN_")] == ["RUN_STARTED", "RUN_ERROR"]
+
+
 @pytest.mark.asyncio
 async def test_without_a_server_choice_the_deployment_model_answers(monkeypatch):
     with fake_provider() as (base, bodies):
@@ -701,7 +806,7 @@ async def test_without_a_server_choice_the_deployment_model_answers(monkeypatch)
         ("gpt-5.6-terra", True),
         ("gpt-6", True),
         ("gpt-6.1-terra", True),
-        ("gpt-5.5", False),
+        ("gpt-5.5", True),
         (" gpt-5.6-terra", True),
         ("\tgpt-6 ", True),
         ("claude-sonnet-4-5", False),
@@ -714,12 +819,23 @@ async def test_without_a_server_choice_the_deployment_model_answers(monkeypatch)
         ("gpt-5.5-pro", True),
         ("o3-pro", True),
         ("gpt-5.3-codex", True),
+        ("gpt-5.5-2026-04-23", True),
+        ("gpt-5.4", True),
+        ("gpt-5.4-2026-03-05", True),
+        ("gpt-5.4-mini", True),
+        ("gpt-5.4-mini-2026-03-17", True),
+        ("gpt-5.4-nano", True),
         ("gpt-5", False),
-        ("gpt-5.4-mini", False),
-        ("gpt-5.5-2026-04-23", False),
+        ("gpt-5-mini", False),
+        ("gpt-5-nano", False),
+        ("gpt-5.1", False),
+        ("gpt-5.1-2025-11-13", False),
+        ("gpt-5.2", False),
+        ("gpt-5.2-2025-12-11", False),
         ("o3", False),
         ("openai/gpt-5.6-terra", True),
-        ("openai/gpt-5.5", False),
+        ("openai/gpt-5.5", True),
+        ("openai/gpt-5.2", False),
         ("openai/gpt-oss-20b", False),
         ("qwen/qwen3-8b", False),
     ],

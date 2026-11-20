@@ -8,8 +8,9 @@ import {
   IconPlus,
   IconWebhook,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
+import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,9 +57,9 @@ import {
   type TriggerConfig,
   type TriggerKind,
   type TriggerRecord,
-  triggersQueryOptions,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
+import { useGoalTriggers } from "./use-goal-reads";
 
 export const KIND_LABEL: Record<TriggerKind, string> = {
   webhook: "Webhook",
@@ -132,7 +133,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 /** A value somebody copies into another product: a URL, an address, a key. */
 function Copyable({ children }: { children: string }) {
   return (
-    <code className="break-all rounded bg-background px-2 py-1 text-xs">
+    <code className="break-all rounded bg-muted px-2 py-1 text-xs">
       {children}
     </code>
   );
@@ -140,8 +141,10 @@ function Copyable({ children }: { children: string }) {
 
 function describeFilter(config: TriggerConfig) {
   if (config.kind === "slack") {
-    const where = config.channels.length
-      ? `in ${config.channels.join(", ")}`
+    const channels = config.channels ?? [];
+    const reactions = config.reactions ?? [];
+    const where = channels.length
+      ? `in ${channels.join(", ")}`
       : "in every channel the Bot is in";
     const what =
       config.mode === "mention"
@@ -149,42 +152,48 @@ function describeFilter(config: TriggerConfig) {
         : config.mode === "message"
           ? "on any message"
           : config.mode === "phrase"
-            ? `on messages containing ${config.phrases.map((phrase) => `"${phrase}"`).join(" or ")}`
-            : `on reactions${config.reactions.length ? ` :${config.reactions.join(": :")}:` : ""}`;
+            ? `on messages containing ${(config.phrases ?? []).map((phrase) => `"${phrase}"`).join(" or ")}`
+            : `on reactions${reactions.length ? ` :${reactions.join(": :")}:` : ""}`;
     return `${what} ${where} (workspace ${config.teamId})`;
   }
+  const eventTypes = config.filter?.eventTypes ?? [];
+  const field = config.filter?.field;
   const parts = [
-    config.filter.eventTypes.length
-      ? `events ${config.filter.eventTypes.join(", ")}`
-      : "every event",
+    eventTypes.length ? `events ${eventTypes.join(", ")}` : "every event",
   ];
-  if (config.filter.field)
-    parts.push(
-      `where ${config.filter.field.path} = ${config.filter.field.equals}`,
-    );
+  if (field) parts.push(`where ${field.path} = ${field.equals}`);
   if (config.kind === "github" && config.repository)
     parts.push(`from ${config.repository}`);
-  if (config.kind === "email" && config.allowedSenders.length)
+  if (config.kind === "email" && config.allowedSenders?.length)
     parts.push(`from ${config.allowedSenders.join(", ")} (authenticated)`);
   return parts.join(" ");
 }
 
 /**
- * What starts a responsibility from outside: one muted row per trigger inside the responsibility's
- * dialog, and a stacked dialog to add one. A fresh key is held here, keyed by trigger, so it survives
+ * What starts a responsibility from outside: one row per trigger on the goal's page, and a dialog to
+ * add one. A fresh key is held here, keyed by trigger, so it survives
  * the list refetching after the write that produced it.
  */
+/**
+ * Why a goal's triggers won't start it, while it is paused or completed. Nothing for a state a newer
+ * server sends that this app doesn't know.
+ */
+export function triggersNote(status: string): string | null {
+  return status === "paused" || status === "completed"
+    ? `This goal is ${status}. Its triggers won't start it.`
+    : null;
+}
+
 export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
-  const triggers = useQuery(triggersQueryOptions(goal.id));
+  const triggers = useGoalTriggers(goal.id);
   const [adding, setAdding] = useState(false);
   const [freshSecret, setFreshSecret] = useState<{
     id: string;
     secret: string;
   } | null>(null);
   return (
-    <section className="grid gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-medium text-sm">Triggers</h3>
+    <PageSection
+      action={
         <Button
           size="sm"
           variant="outline"
@@ -194,24 +203,27 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
           <IconPlus />
           Add trigger
         </Button>
-      </div>
-      {goal.status !== "active" && (
-        <p className="text-muted-foreground text-xs">
-          This goal is {goal.status}. Its triggers won't start it.
+      }
+      title="Triggers"
+    >
+      {triggersNote(goal.status) && (
+        <p className="mt-1 text-muted-foreground text-sm">
+          {triggersNote(goal.status)}
         </p>
       )}
       {triggers.error && (
-        <p role="alert" className="text-destructive text-sm">
+        <p role="alert" className="mt-4 text-destructive text-sm">
           {triggers.error.message}
         </p>
       )}
       {triggers.data?.length === 0 && (
-        <p className="text-muted-foreground text-xs">
-          No triggers. It runs when you press Run now, or on the events above.
+        <p className="mt-4 text-muted-foreground text-sm">
+          No triggers. It runs when you press Run now, or on its schedules and
+          events.
         </p>
       )}
       {triggers.data?.length ? (
-        <div className="overflow-hidden rounded-lg">
+        <PageRows>
           {triggers.data.map((trigger, index) => (
             <Fragment key={trigger.id}>
               {index > 0 ? <Separator /> : null}
@@ -226,12 +238,12 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
               />
             </Fragment>
           ))}
-        </div>
+        </PageRows>
       ) : null}
       {adding ? (
         <NewTriggerDialog
           goalId={goal.id}
-          botId={goal.agentId}
+          botId={goal.botId}
           onClose={() => setAdding(false)}
           onCreated={(created) => {
             setAdding(false);
@@ -243,7 +255,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
           }}
         />
       ) : null}
-    </section>
+    </PageSection>
   );
 }
 
@@ -288,7 +300,7 @@ function TriggerRow({
   const generated = trigger.kind === "webhook" || trigger.kind === "github";
   const Icon = KIND_ICON[trigger.kind];
   return (
-    <Item size="sm" variant="muted">
+    <Item size="sm">
       <ItemMedia variant="icon">
         <Icon />
       </ItemMedia>
@@ -380,9 +392,7 @@ function TriggerRow({
                 size="sm"
                 variant="outline"
                 disabled={reveal.isPending}
-                onClick={() =>
-                  reveal.mutate(trigger.id, { onSuccess: setSecret })
-                }
+                onClick={() => reveal.mutate(trigger, { onSuccess: setSecret })}
               >
                 Show key
               </Button>
@@ -525,9 +535,7 @@ function NewTriggerDialog({
   };
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
-      {/* The heavier backdrop, forced: this stacks over the responsibility's dialog, and Base UI
-          would otherwise render a nested dialog with no backdrop at all. */}
-      <DialogContent overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>Add trigger</DialogTitle>
           <DialogDescription>

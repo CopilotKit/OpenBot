@@ -9,7 +9,9 @@
 //! - this installation was set up on Docker, so it answered for OpenBot before.
 //!
 //! Anything else gets Podman (see `install::install_engine_with`). OpenBot never installs Docker
-//! Desktop itself. Linux is not handled here: Docker there is the distribution's Docker Engine.
+//! Desktop on a machine without it; one too old to run OpenBot is updated in place
+//! (`docker_desktop_update`). Linux is not handled here: Docker there is the distribution's Docker
+//! Engine.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -141,6 +143,12 @@ fn vm_disks() -> Vec<PathBuf> {
 /// Whether Docker answers now.
 pub fn answers() -> bool {
     engine::Address::new(Engine::Docker, None).responds()
+}
+
+/// `answers`, giving up after `limit`, for a check that must not wait on a Docker that hangs:
+/// `None` when it ran out of time.
+pub fn answers_within(limit: Duration) -> Option<bool> {
+    engine::Address::new(Engine::Docker, None).responds_within(limit)
 }
 
 /// What `start_with` needs from the machine, so its decisions can be tested without one.

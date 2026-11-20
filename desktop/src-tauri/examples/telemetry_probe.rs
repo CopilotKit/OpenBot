@@ -1,6 +1,6 @@
 //! Exercise the production emitter against an explicit local receiver, without starting OpenBot.
 use openbot_desktop_lib::telemetry::{
-    Architecture, Config, Context, CredentialPath, Distribution, Engine, EventData, NumericVersion,
+    AppVersion, Architecture, Config, Context, CredentialPath, Distribution, Engine, EventData,
     Platform, Provider, RuntimeEnv, Step, Telemetry,
 };
 
@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args[1],
         Context {
             distribution: Distribution::Desktop,
-            app_version: NumericVersion::parse("0.0.9")?,
+            app_version: AppVersion::parse("0.0.9")?,
             platform: if cfg!(target_os = "windows") {
                 Platform::Windows
             } else if cfg!(target_os = "macos") {

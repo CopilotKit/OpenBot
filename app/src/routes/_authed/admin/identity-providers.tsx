@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { SignInSection } from "@/components/admin/controls/sign-in-section";
+import { TeamPage } from "@/components/edition/for-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -40,7 +41,7 @@ import { identityProviderListQueryOptions } from "@/lib/identity-providers/queri
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/identity-providers")({
-  component: IdentityProvidersPage,
+  component: IdentityProvidersPageInEveryEdition,
 });
 
 const EMPTY = {
@@ -69,6 +70,27 @@ function IdentityProvidersPage() {
   // A removal failure belongs on the page: there is no dialog to put it in. A registration failure
   // is shown inside the dialog instead, where the person who caused it is looking.
   const failure = remove.error;
+
+  /*
+   * Not this organization's: an admin of an organization that does not run OpenBot reads why, and
+   * is offered nothing to press. Sign-in is to OpenBot as a whole, so its providers, requiring SSO
+   * and directory provisioning are kept by the admins who run it (lib/identity-providers/queries.ts).
+   */
+  if (providers.data?.managedHere === false)
+    return (
+      <PageShell
+        description="People sign in to OpenBot as a whole, before they pick an organization."
+        title="Identity providers"
+      >
+        <PageEmpty icon={IconBuildingBank} title="Set up for all of OpenBot">
+          Identity providers and SSO apply to everyone who signs in here, not to
+          one organization. Ask whoever runs OpenBot to add or change one.
+        </PageEmpty>
+      </PageShell>
+    );
+  const registered = providers.data?.managedHere
+    ? providers.data.providers
+    : [];
 
   function submit(submission: React.FormEvent) {
     submission.preventDefault();
@@ -102,9 +124,12 @@ function IdentityProvidersPage() {
   return (
     <PageShell
       action={
-        <Button onClick={() => setOpen(true)} size="lg">
-          Add a provider
-        </Button>
+        // Offered once the server has said the providers are this organization's to change.
+        providers.data?.managedHere ? (
+          <Button onClick={() => setOpen(true)} size="lg">
+            Add a provider
+          </Button>
+        ) : undefined
       }
       description="Configure your company’s SAML or OpenID Connect provider. Email domains determine which provider people use to sign in."
       title="Identity providers"
@@ -120,9 +145,9 @@ function IdentityProvidersPage() {
         ) : null}
         {providers.isPending ? null : providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load identity providers. Reload the page.
+            Couldn't load identity providers. Try again in a moment.
           </p>
-        ) : providers.data?.length === 0 ? (
+        ) : registered.length === 0 ? (
           <PageEmpty
             action={
               <Button onClick={() => setOpen(true)} size="sm" variant="outline">
@@ -136,7 +161,7 @@ function IdentityProvidersPage() {
           </PageEmpty>
         ) : (
           <PageRows>
-            {providers.data?.map((provider, index) => (
+            {registered.map((provider, index) => (
               <StaggerItem index={index} key={provider.providerId}>
                 <Item size="sm">
                   <ItemMedia variant="icon">
@@ -161,13 +186,14 @@ function IdentityProvidersPage() {
                     </Button>
                   </ItemActions>
                 </Item>
-                {index !== (providers.data?.length ?? 0) - 1 && <Separator />}
+                {index !== registered.length - 1 && <Separator />}
               </StaggerItem>
             ))}
           </PageRows>
         )}
       </PageSection>
-      <SignInSection />
+      {/* Requiring SSO is the deployment's too: drawn once the server has answered for the providers. */}
+      {providers.isPending ? null : <SignInSection />}
 
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent>
@@ -333,5 +359,18 @@ function IdentityProvidersPage() {
         </DialogContent>
       </Dialog>
     </PageShell>
+  );
+}
+
+/** The personal edition shows this page's title, and that it applies to a team. */
+function IdentityProvidersPageInEveryEdition() {
+  return (
+    <TeamPage
+      description="Configure your company’s SAML or OpenID Connect provider. Email domains determine which provider people use to sign in."
+      more="Here, nobody signs in."
+      title="Identity providers"
+    >
+      <IdentityProvidersPage />
+    </TeamPage>
   );
 }

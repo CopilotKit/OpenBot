@@ -33,15 +33,16 @@ export function removeRecipient(
   return current.filter((recipient) => recipient.id !== id);
 }
 
-/** Whether this draft can start a conversation. */
+/** Whether this draft can start a conversation: somebody to send to, and words or files to send. */
 export function canSend(
   recipients: readonly Recipient[],
   text: string,
+  attachmentCount = 0,
 ): boolean {
   return (
     recipients.length >= 1 &&
     recipients.length <= MAX_RECIPIENTS &&
-    text.trim().length > 0
+    (text.trim().length > 0 || attachmentCount > 0)
   );
 }
 

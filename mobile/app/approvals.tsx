@@ -8,7 +8,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { type ApprovalInbox, api } from "../src/api";
+import { loadApprovalInbox, ME, ORGANIZATION_ID } from "../src/api";
+import {
+  decideApproval,
+  respondToQuestion,
+} from "../src/api/generated/approvals/approvals";
 import { authClient } from "../src/auth";
 import { useLoad } from "../src/use-load";
 export default function ApprovalsScreen() {
@@ -17,7 +21,7 @@ export default function ApprovalsScreen() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const load = useCallback(() => api<ApprovalInbox>("/api/approvals"), []);
+  const load = useCallback(() => loadApprovalInbox(), []);
   const inbox = useLoad(load, Boolean(session));
   if (!session && !isPending) return <Redirect href="/" />;
   async function decide(
@@ -27,10 +31,7 @@ export default function ApprovalsScreen() {
     setBusy(id);
     setError("");
     try {
-      await api(`/api/approvals/${encodeURIComponent(id)}/decision`, {
-        method: "POST",
-        body: { decision },
-      });
+      await decideApproval(ORGANIZATION_ID, ME, id, { decision });
       await inbox.refresh();
     } catch (failure) {
       setError(
@@ -46,9 +47,8 @@ export default function ApprovalsScreen() {
     setBusy(id);
     setError("");
     try {
-      await api(`/api/approvals/questions/${encodeURIComponent(id)}/respond`, {
-        method: "POST",
-        body: { response: answers[id] ?? "" },
+      await respondToQuestion(ORGANIZATION_ID, ME, id, {
+        response: answers[id] ?? "",
       });
       await inbox.refresh();
     } catch (failure) {
@@ -95,16 +95,12 @@ export default function ApprovalsScreen() {
             }}
           >
             <Text style={{ fontWeight: "600" }}>
-              {request.botId ?? request.action?.botId} asks to use{" "}
-              {request.toolRef ?? request.action?.toolRef}
+              {request.action.botId} asks to use {request.action.toolRef}
             </Text>
             <Text>
-              {request.effect ?? request.action?.effect} ·{" "}
-              {request.scope ?? request.action?.scope}
+              {request.action.effect} · {request.action.scope}
             </Text>
-            <Text>
-              {JSON.stringify(request.preview ?? request.action?.args, null, 2)}
-            </Text>
+            <Text>{JSON.stringify(request.action.args, null, 2)}</Text>
             <Button
               disabled={Boolean(busy)}
               title="Allow once"
@@ -113,7 +109,7 @@ export default function ApprovalsScreen() {
               }}
             />
             {/* Not for a check-in task's approval: tasks ask before every change, rules or not. */}
-            {request.action?.policy?.source === "task" ? null : (
+            {request.action.policy?.source === "task" ? null : (
               <Button
                 disabled={Boolean(busy)}
                 title="Always allow this scope"

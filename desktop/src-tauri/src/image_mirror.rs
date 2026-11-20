@@ -147,7 +147,7 @@ fn docker_hub(image: &str) -> Option<String> {
 /// An engine will not tag with a digest, so a digest-only reference is tagged `sha256-<hex>` after
 /// its digest: unique to the image, and never a tag anyone publishes. A reference with a tag keeps
 /// its tag.
-fn local_name(image: &str) -> String {
+pub(crate) fn local_name(image: &str) -> String {
     let (name, digest) = match image.split_once('@') {
         Some((name, digest)) => (name, Some(digest)),
         None => (image, None),

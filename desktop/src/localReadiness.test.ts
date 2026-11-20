@@ -12,6 +12,7 @@ import {
   engineTooSmallSaid,
   localReadiness,
   type ReadinessInput,
+  resourcesShortSaid,
 } from "./localReadiness";
 
 const reasons: LocalReason[] = [
@@ -33,6 +34,7 @@ const reasons: LocalReason[] = [
   "dashboard-unavailable",
   "browser-open-failed",
   "resources-short",
+  "stack-lost",
   "unrecognized",
 ];
 
@@ -64,6 +66,27 @@ function hasText(said: string, slug: string): boolean {
   return said.toLowerCase().includes(slug);
 }
 
+/**
+ * Box I: OpenBot's machine was made again and the backend went with the old one, so every status
+ * failed and the row said "Setup stopped partway through with an error. Retry." for good. A lost
+ * backend says what happened and what to do, honestly, and offers Start fresh instead of Retry.
+ */
+test("a lost backend says the saved data is gone and offers Start fresh", () => {
+  const row = localReadiness({
+    ...base,
+    intelligence: report({
+      outcome: "failed",
+      reason: "stack-lost",
+      stack: null,
+    }),
+  }).intelligence;
+  expect(row).toEqual({
+    state: "blocked",
+    said: "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    action: "start-fresh",
+  });
+});
+
 test("every reason gives a plain, non-empty sentence without its own name or Intelligence's", () => {
   for (const reason of reasons) {
     const rows = localReadiness({
@@ -92,8 +115,8 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(19);
-  expect(localFailures.length).toBe(18);
+  expect(new Set(reasons).size).toBe(20);
+  expect(localFailures.length).toBe(19);
 });
 
 test("Docker reasons block the runtime when the probe has no answer", () => {
@@ -104,7 +127,7 @@ test("Docker reasons block the runtime when the probe has no answer", () => {
   });
   expect(rows.runtime).toEqual({
     state: "blocked",
-    said: "The container engine is not running.",
+    said: "OpenBot can't reach the software it runs on.",
     action: "retry",
   });
   expect(rows.intelligence.state).toBe("blocked");
@@ -114,7 +137,7 @@ test("Docker reasons block the runtime when the probe has no answer", () => {
     intelligence: report({ outcome: "blocked", reason: "unsupported-engine" }),
   });
   expect(engine.runtime.said).toBe(
-    "This container engine setup is not supported.",
+    "OpenBot can't run on this computer as it's set up.",
   );
   expect(engine.runtime.action).toBeUndefined();
 });
@@ -133,7 +156,7 @@ test("runtime probe maps directly", () => {
   );
   expect(localReadiness({ ...base, runtime: "not-running" }).runtime).toEqual({
     state: "blocked",
-    said: "The container engine is not running.",
+    said: "The software OpenBot runs on isn't running.",
     action: "retry",
   });
   expect(localReadiness({ ...base, runtime: "unknown" }).runtime.state).toBe(
@@ -148,14 +171,14 @@ test("specific wording and actions", () => {
     said(report({ outcome: "blocked", reason: "port-unavailable" })),
   ).toEqual({
     state: "blocked",
-    said: "A port the back end needs is in use.",
+    said: "Another app is using a network port OpenBot needs. Quit that app, then Retry.",
     action: "retry",
   });
   expect(
     said(report({ outcome: "blocked", reason: "authentication-required" })),
   ).toEqual({
     state: "blocked",
-    said: "Sign in to CopilotKit.",
+    said: "Sign in to OpenBot.",
     action: "sign-in",
   });
   expect(said("cancelled").action).toBe("retry");
@@ -164,20 +187,20 @@ test("specific wording and actions", () => {
   );
   expect(
     said(report({ outcome: "blocked", reason: "local-command-busy" })).said,
-  ).toBe("The back end is still running another command.");
+  ).toBe("OpenBot is still busy with another step. Wait a moment, then Retry.");
   expect(said("timeout")).toEqual({
     state: "blocked",
-    said: "The back end took too long to start, so OpenBot stopped waiting. What it already downloaded is kept, so trying again picks up from there.",
+    said: "OpenBot took too long to set up, so it stopped waiting. What it already downloaded is kept, so Retry picks up from there.",
     action: "restart-intelligence",
   });
   expect(said("unexpected-exit").said).toBe(
-    "The back end's software quit without saying why. OpenBot's log has the details.",
+    "Part of OpenBot stopped without saying why. Retry. If it stops again, copy the logs below.",
   );
   // A setup the CLI itself failed says so, not only that the back end could not start.
   expect(
     said(report({ outcome: "failed", reason: "local-command-failed" })).said,
   ).toBe(
-    "The back end stopped with an error partway through. OpenBot's log has the details.",
+    "Setup stopped partway through with an error. Retry. If it stops again, copy the logs below.",
   );
   // The CLI's resource check: which resource is short and where to raise it, on each engine.
   const short = (shortfall: Partial<Shortfall>) =>
@@ -196,40 +219,40 @@ test("specific wording and actions", () => {
     );
   expect(short({ disk: true })).toEqual({
     state: "blocked",
-    said: "Docker is out of disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    said: "Docker Desktop doesn't have enough free disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
     action: "retry",
   });
   expect(short({ cpu: true }).said).toBe(
-    "Docker doesn't have enough CPUs. OpenBot needs 4 free CPUs. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop doesn't have enough CPUs. OpenBot needs 4 CPUs. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ memory: true }).said).toBe(
-    "Docker doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ cpu: true, memory: true, disk: true }).said).toBe(
-    "Docker doesn't have enough CPUs, memory and disk space. OpenBot needs 4 free CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop doesn't have enough CPUs, memory and free disk space. OpenBot needs 4 CPUs, 4 GB of free memory and 40 GB free. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(short({ podman: true, disk: true }).said).toBe(
-    "Podman is out of disk space. OpenBot needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
   // With the CLI's own numbers, as `local_eval.rs` reads them from its error.
   expect(
     short({ disk: true, cpus: "9.8", memoryGb: "18.9", diskGb: "0" }).said,
   ).toBe(
-    "Docker has 0 GB of free disk. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 0 GB of free disk space. OpenBot needs 40 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(
-    short({ cpu: true, cpus: "3.7", memoryGb: "5.2", diskGb: "51" }).said,
+    short({ cpu: true, cpus: "2", memoryGb: "5.2", diskGb: "51" }).said,
   ).toBe(
-    "Docker has 3.7 free CPUs. OpenBot needs 4. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop has 2 CPUs. OpenBot needs 4. Raise the CPU limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(short({ memory: true, memoryGb: "2.9" }).said).toBe(
-    "Docker has 2.9 GB of free memory. OpenBot needs 4 GB. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop has 2.9 GB of free memory. OpenBot needs 4 GB. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(
-    short({ cpu: true, disk: true, cpus: "3.5", memoryGb: "6", diskGb: "12" })
+    short({ cpu: true, disk: true, cpus: "2", memoryGb: "6", diskGb: "12" })
       .said,
   ).toBe(
-    "Docker has 3.5 free CPUs and 12 GB of free disk. OpenBot needs 4 free CPUs and 40 GB of free disk. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "Docker Desktop has 2 CPUs and 12 GB of free disk space. OpenBot needs 4 CPUs and 40 GB of free disk space. Raise the limits in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   // OpenBot's own check after a start that failed (`local_eval::checked_call`), as it reports
   // each case. A nearly full disk is said as k3s's, beside the 40 GB only when it is below it.
@@ -244,18 +267,32 @@ test("specific wording and actions", () => {
       drive: "C:",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 40 GB. Free up space on drive C:, then Retry.",
   );
+  // C: is what ran short, as `local_eval.rs` reports it after a start that failed on Windows.
   expect(
-    short({ podman: true, disk: true, diskGb: "30", wsl: true, drive: "C:" })
+    short({
+      podman: true,
+      disk: true,
+      diskGb: "30",
+      wsl: true,
+      drive: "C:",
+      freeOnDrive: true,
+    }).said,
+  ).toBe(
+    "This computer has 30 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Retry.",
+  );
+  // OpenBot's machine's own disk is what ran short, and C: has room: never said as C:'s.
+  expect(
+    short({ podman: true, disk: true, diskGb: "10", wsl: true, drive: "C:" })
       .said,
   ).toBe(
-    "Podman has 30 GB of free disk. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "OpenBot has 10 GB of free disk space. It needs 40 GB. Free up space on drive C:, then Retry.",
   );
   // On Windows, never `podman machine set --disk-size`: Podman refuses it for WSL machines, even
   // when WSL did not say which drive holds the disk.
   expect(short({ podman: true, disk: true, wsl: true }).said).toBe(
-    "Podman is out of disk space. OpenBot needs 40 GB free. Free space on the drive that holds OpenBot's engine, then Retry.",
+    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Free up space on the drive OpenBot is installed on, then Retry.",
   );
   expect(
     short({
@@ -265,7 +302,7 @@ test("specific wording and actions", () => {
       diskSizeGb: "1827.9",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Docker has 160 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+    "OpenBot is nearly out of disk space. Docker Desktop has 160 GB free of 1827.9 GB. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
   );
   expect(
     short({
@@ -276,14 +313,14 @@ test("specific wording and actions", () => {
       diskSizeGb: "60",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 8 GB free of 60 GB. OpenBot needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
+    "OpenBot is nearly out of disk space. It has 8 GB free of 60 GB. It needs 40 GB. Stop your Podman machine, run podman machine set --disk-size 160, start it again, then Retry.",
   );
   // Space was freed and k3s still says the disk is low: wait, rather than free more.
   expect(
     short({ podman: true, recovering: true, wsl: true, drive: "C:" }),
   ).toEqual({
     state: "blocked",
-    said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    said: "OpenBot is recovering from low disk space. Wait a few minutes, then Retry.",
     action: "retry",
   });
   // A back end that runs but does not answer, with OpenBot's check of its disk, and without.
@@ -307,7 +344,7 @@ test("specific wording and actions", () => {
     );
   expect(degraded({ recovering: true, wsl: true, drive: "C:" })).toEqual({
     state: "blocked",
-    said: "The back end is recovering from low disk space. Wait a few minutes, then Retry.",
+    said: "OpenBot is recovering from low disk space. Wait a few minutes, then Retry.",
     action: "restart-intelligence",
   });
   expect(
@@ -320,10 +357,44 @@ test("specific wording and actions", () => {
       drive: "C:",
     }).said,
   ).toBe(
-    "The back end's disk is nearly full. Podman has 30.5 GB free of 1006.8 GB. OpenBot needs 40 GB. Free space on the drive that holds OpenBot's engine (C:), then Retry.",
+    "OpenBot is nearly out of disk space. It has 30.5 GB free of 1006.8 GB. It needs 40 GB. Free up space on drive C:, then Retry.",
   );
-  expect(degraded().said).toBe("The back end is running but not healthy.");
-  // The account step's check before a first setup, on Windows.
+  expect(degraded().said).toBe(
+    "OpenBot is running but not working properly. Retry to start it again.",
+  );
+  // The account step's check before a first setup, on Windows, as Windows F's check answered it
+  // (`local-eval-terms-windows-f-short-of-disk.json`): what is free, then what is needed. With 13
+  // GB free it was told "OpenBot is out of disk space" and no figure.
+  expect(
+    engineTooSmallSaid({
+      podman: true,
+      cpu: false,
+      memory: false,
+      disk: true,
+      wsl: true,
+      drive: "C:",
+      diskGb: "13.2",
+      freeOnDrive: true,
+    }),
+  ).toBe(
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+  );
+  // Windows G on Docker Desktop: its disk is a sparse virtual disk on C:, and C: ran short. Said
+  // as C:'s, never as Docker's disk limit, which had 938.3 GB free.
+  expect(
+    engineTooSmallSaid({
+      podman: false,
+      cpu: false,
+      memory: false,
+      disk: true,
+      drive: "C:",
+      diskGb: "13.9",
+      freeOnDrive: true,
+    }),
+  ).toBe(
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+  );
+  // A disk that is short is never said as out of space, measured or not.
   expect(
     engineTooSmallSaid({
       podman: true,
@@ -334,19 +405,19 @@ test("specific wording and actions", () => {
       drive: "C:",
     }),
   ).toBe(
-    "Podman is out of disk space. OpenBot needs 40 GB free. Free space on the drive that holds OpenBot's engine (C:), then Try again.",
+    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Free up space on drive C:, then Try again.",
   );
   // A report that does not say which is still about resources, never "partway through".
   expect(
     said(report({ outcome: "failed", reason: "resources-short" })).said,
   ).toBe(
-    "Docker doesn't have enough CPUs, memory or disk space for the back end. Raise them in Docker Desktop > Settings > Resources, then Retry.",
+    "Docker Desktop doesn't give OpenBot enough CPUs, memory or disk space. Raise them in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(said("unavailable").action).toBeUndefined();
   expect(said("unverified").action).toBe("repair");
   expect(said("invalid-json")).toEqual({
     state: "blocked",
-    said: "OpenBot did not understand its back end's reply.",
+    said: "OpenBot got an answer it couldn't read. Retry. If it happens again, copy the logs below.",
   });
 });
 
@@ -365,7 +436,7 @@ test("a v1 report is unknown, never ready", () => {
   const row = localReadiness(base).intelligence;
   expect(row).toEqual({
     state: "unknown",
-    said: "The back end started. Its licence and readiness are not reported yet.",
+    said: "OpenBot started, and hasn't said yet whether it's ready.",
   });
   expect(
     localReadiness({ ...base, intelligence: null }).intelligence.state,
@@ -517,7 +588,7 @@ test("types: the failure and reason inputs are the upstream ones", () => {
   const failure: LocalFailure = "spawn";
   expect(
     localReadiness({ ...base, intelligence: failure }).intelligence.said,
-  ).toBe("OpenBot could not run the back end's software.");
+  ).toBe("OpenBot couldn't run part of its own software. Retry.");
 });
 
 test("each readiness state of a valid licence has its own row", () => {
@@ -528,25 +599,25 @@ test("each readiness state of a valid licence has its own row", () => {
     }).intelligence;
   expect(row("ready")).toEqual({
     state: "ready",
-    said: "The back end is ready.",
+    said: "OpenBot is ready.",
   });
   expect(row("starting")).toEqual({
     state: "unknown",
-    said: "The back end is starting.",
+    said: "OpenBot is starting.",
   });
   expect(row("stopped")).toEqual({
     state: "blocked",
-    said: "The back end is stopped.",
+    said: "OpenBot's services are stopped.",
     action: "start-intelligence",
   });
   expect(row("degraded")).toEqual({
     state: "blocked",
-    said: "The back end is running but not healthy.",
+    said: "OpenBot is running but not working properly. Retry to start it again.",
     action: "restart-intelligence",
   });
   expect(row("unknown")).toEqual({
     state: "unknown",
-    said: "The back end started. Its licence and readiness are not reported yet.",
+    said: "OpenBot started, and hasn't said yet whether it's ready.",
   });
 });
 
@@ -562,7 +633,7 @@ test("a licence that is not valid blocks a ready Intelligence", () => {
   });
   expect(row("missing")).toEqual({
     state: "blocked",
-    said: "The back end has no evaluation licence.",
+    said: "OpenBot has no evaluation licence on this computer.",
   });
   expect(row("invalid")).toEqual({
     state: "blocked",
@@ -589,10 +660,179 @@ test("a licence expiring in four days is ready with a warning", () => {
     }).intelligence;
   expect(expiring("2026-10-25T18:00:00.000Z")).toEqual({
     state: "ready",
-    said: "The back end is ready. Its evaluation licence expires within 5 days.",
+    said: "OpenBot is ready. Its evaluation licence expires within 5 days.",
   });
   expect(expiring("2026-10-27T18:00:00.000Z")).toEqual({
     state: "ready",
-    said: "The back end is ready.",
+    said: "OpenBot is ready.",
   });
+});
+
+/*
+ * Every way the back end's setup, start or update can stop, as a person reads it. A tester could
+ * not tell what "The back end's disk is nearly full. Podman has 30.5 GB free…" wanted of them. The
+ * rule: what happened, then what to do, in plain words. The CLI's words, the engine and the back
+ * end are for the log and the logs a person copies from the same card. A product is named only
+ * where the person has to act in it: Docker Desktop's settings, or a Podman command they run.
+ */
+const TECHNICAL = [
+  /Podman/i,
+  /\bWSL\b/,
+  /Windows Subsystem for Linux/i,
+  /\bengines?\b/i,
+  /back ?end/i,
+  /\bk3[sd]\b/i,
+  /\bHelm\b/,
+  /kubectl/i,
+  /\bCLI\b/,
+  /\bCompose\b/,
+  /\bcontainers?\b/i,
+  /\brootful\b/i,
+  /\bcluster\b/i,
+  /Intelligence/,
+];
+
+/** The instructions a person follows inside Podman: the one place its name stays. */
+const ACTS_IN_PODMAN =
+  /Stop your Podman machine|run podman machine set(?: --[a-z-]+(?: \d+)?)+|raise them with podman machine set|your Podman machine/g;
+
+function plain(said: string): string[] {
+  const left = said.replace(ACTS_IN_PODMAN, "");
+  return TECHNICAL.filter((word) => word.test(left)).map(
+    (word) => `${left.match(word)?.[0]} in: ${said}`,
+  );
+}
+
+test("every way setup, start or update can stop is said in plain words, with what to do", () => {
+  const said: string[] = [];
+  const row = (intelligence: ReadinessInput["intelligence"]) =>
+    said.push(localReadiness({ ...base, intelligence }).intelligence.said);
+  for (const reason of reasons)
+    row(report({ outcome: "blocked", reason, stack: null }));
+  for (const failure of localFailures) row(failure);
+  for (const licence of [
+    "expired",
+    "missing",
+    "invalid",
+    "organization-mismatch",
+  ])
+    row(future("ready", licence));
+  for (const readiness of [
+    "ready",
+    "starting",
+    "stopped",
+    "degraded",
+    "unknown",
+  ])
+    row(future(readiness, "valid"));
+  row(null);
+  // Short of something, on Docker Desktop, on OpenBot's own Podman machine, and in WSL.
+  const resources = [
+    { cpu: true },
+    { memory: true },
+    { disk: true },
+    { cpu: true, memory: true, disk: true },
+    {},
+  ];
+  for (const engine of [
+    { podman: false },
+    { podman: true },
+    { podman: true, wsl: true, drive: "C:" },
+  ])
+    for (const short of resources)
+      for (const extra of [
+        {},
+        { cpus: "3.7", memoryGb: "2.9", diskGb: "12" },
+        { nearlyFull: true, diskGb: "30.5", diskSizeGb: "1006.8" },
+        { recovering: true },
+      ]) {
+        const shortfall = {
+          cpu: false,
+          memory: false,
+          disk: false,
+          ...engine,
+          ...short,
+          ...extra,
+        };
+        said.push(resourcesShortSaid(shortfall), engineTooSmallSaid(shortfall));
+      }
+  const rows = localReadiness({
+    runtime: "not-running",
+    intelligence: report({ reason: "unsupported-engine", outcome: "blocked" }),
+    openBot: "not-connected",
+    provider: "invalid",
+  });
+  said.push(rows.runtime.said, rows.openBot.said);
+  said.push(
+    localReadiness({ ...base, runtime: "unknown", intelligence: null }).runtime
+      .said,
+  );
+
+  expect(said.flatMap(plain)).toEqual([]);
+  // Each stop that the person can do something about says what: a Retry, a setting, a command.
+  for (const sentence of said) expect(sentence).toMatch(/^[A-Z][^—]*[.]$/);
+});
+
+/*
+ * A Mac updating to 1.1.0 with 7.5 GB free of 926 GB: Docker's disk showed room, the update filled
+ * the Mac, and the card showed only containerd's input/output errors. The update is checked first
+ * now (`local_eval::update_room`), and short of room it says what the Mac has and what the update
+ * needs, and what to do.
+ */
+test("an update with no room says what is free and what the update needs", () => {
+  const mac: Shortfall = {
+    podman: false,
+    cpu: false,
+    memory: false,
+    disk: true,
+    diskGb: "7.5",
+    freeOnDrive: true,
+    mac: true,
+    updating: true,
+    neededGb: "13",
+  };
+  expect(resourcesShortSaid(mac)).toBe(
+    "This Mac has 7.5 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+  );
+  // Windows G's C:, under Docker Desktop's disk.
+  expect(
+    resourcesShortSaid({
+      ...mac,
+      mac: false,
+      drive: "C:",
+      diskGb: "11.8",
+    }),
+  ).toBe(
+    "This computer has 11.8 GB of free space on drive C:, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+  );
+  // Docker Desktop's own disk limit is what is short: raised or freed there.
+  expect(
+    resourcesShortSaid({
+      ...mac,
+      mac: false,
+      freeOnDrive: false,
+      diskGb: "12",
+      neededGb: "16",
+    }),
+  ).toBe(
+    "Docker Desktop has 12 GB of free disk space, and OpenBot needs about 16 GB to update. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Retry.",
+  );
+  // Memory short as well: said after the disk.
+  expect(resourcesShortSaid({ ...mac, memory: true })).toBe(
+    "This Mac has 7.5 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry. Docker Desktop doesn't have enough memory. OpenBot needs 4 GB of free memory. Raise the memory limit in Docker Desktop > Settings > Resources, then Retry.",
+  );
+  // A first setup on that Mac: its own disk, said as the Mac's, with the setup's 40 GB.
+  expect(
+    engineTooSmallSaid({
+      podman: false,
+      cpu: false,
+      memory: false,
+      disk: true,
+      diskGb: "7.5",
+      freeOnDrive: true,
+      mac: true,
+    }),
+  ).toBe(
+    "This Mac has 7.5 GB of free space, and OpenBot needs 40 GB. Free up some space, then Try again.",
+  );
 });

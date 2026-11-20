@@ -10,6 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { BusinessLink } from "@/components/edition/business-link";
+import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { deploymentKeys } from "@/lib/deployment/queries";
 
 /**
@@ -17,7 +18,13 @@ import { deploymentKeys } from "@/lib/deployment/queries";
  * the session, so it is back the next time the app starts.
  */
 
-beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
+// The dialog's booking calendar keeps its address but never fetches it: no test reaches Calendly.
+beforeAll(() =>
+  GlobalRegistrator.register({
+    url: "http://localhost/",
+    settings: { navigation: { disableChildFrameNavigation: true } },
+  }),
+);
 beforeEach(() => sessionStorage.clear());
 afterEach(cleanup);
 afterAll(async () => {
@@ -39,15 +46,28 @@ function draw(edition: "personal" | "team") {
   return render(
     <QueryClientProvider client={client}>
       <BusinessLink />
+      <TeamFeaturesDialog />
     </QueryClientProvider>,
   );
 }
 
-test("the personal edition links to OpenBot for Business in a new tab", () => {
+/*
+ * It opened the website in a new tab, away from the app and its calendar. It opens the OpenBot for
+ * Business dialog, with the booking calendar in it, and leaves nothing to follow out of the app.
+ */
+test("the personal edition's Meet OpenBot for Business opens the dialog in the app, not the website", async () => {
   const view = draw("personal");
-  const link = view.getByRole("link", { name: "Meet OpenBot for Business" });
-  expect(link.getAttribute("href")).toBe("https://open.bot/business");
-  expect(link.getAttribute("target")).toBe("_blank");
+  expect(view.queryByRole("link", { name: /OpenBot for Business/ })).toBeNull();
+  expect(view.queryByRole("dialog")).toBeNull();
+
+  fireEvent.click(
+    view.getByRole("button", { name: "Meet OpenBot for Business" }),
+  );
+
+  const dialog = await view.findByRole("dialog", {
+    name: "OpenBot for Business",
+  });
+  expect(dialog.querySelector('iframe[title="Booking calendar"]')).toBeTruthy();
 });
 
 test("the team edition shows nothing", () => {

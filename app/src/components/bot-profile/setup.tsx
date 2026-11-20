@@ -1,5 +1,7 @@
+import { OPENBOT_HARNESS_NAME } from "@openbot/shared/harnesses";
 import {
   IconChevronRight,
+  IconCpu,
   IconDeviceDesktop,
   IconEye,
   IconId,
@@ -10,7 +12,7 @@ import {
   IconTextCaption,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import type { ZodType } from "zod";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
@@ -20,6 +22,7 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -45,6 +48,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   type AgentFormValues,
+  agentEndpointSchema,
   agentFormSchema,
   profileUpdateInput,
 } from "@/lib/agents/form";
@@ -58,10 +62,8 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { updateAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  type AgentProfile,
-  agentCapabilitiesQueryOptions,
-} from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/agents/queries";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
@@ -109,13 +111,27 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const update = useMutation(updateAgentMutationOptions(queryClient));
-  const [editing, setEditing] = useState<TextField | null>(null);
+  const [editing, setEditing] = useState<TextField | "endpoint" | null>(null);
   const save = (patch: Partial<AgentFormValues>) =>
     update.mutateAsync({
       agentId: agent.id,
       input: profileUpdateInput(agent, patch),
     });
   const open = TEXT_FIELDS.find((entry) => entry.field === editing);
+  /*
+   * The subtitle as a person reads it everywhere else (lib/agents/subtitle.ts). Saved back unchanged,
+   * it stays as stored: the Bot is told the stored subtitle, and a save of the shown wording would
+   * change that.
+   */
+  const shown = (field: TextField) =>
+    field === "title" ? shownSubtitle(agent.title) : agent[field];
+  const saveText = (field: TextField, value: string) =>
+    save({
+      [field]:
+        field === "title" && value === shownSubtitle(agent.title)
+          ? agent.title
+          : value,
+    });
   const fields = TEXT_FIELDS.filter(
     ({ field }) =>
       field !== "instructions" || typeof agent.instructions === "string",
@@ -141,7 +157,7 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{label}</ItemTitle>
-                  <ItemDescription>{agent[field]}</ItemDescription>
+                  <ItemDescription>{shown(field)}</ItemDescription>
                 </ItemContent>
                 {agent.canManage ? (
                   <ItemActions>
@@ -192,15 +208,33 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
           ) : null}
         </PageRows>
       </PageSection>
-      <ConnectionSection agent={agent} />
+      <ConnectionSection
+        agent={agent}
+        onEditEndpoint={() => setEditing("endpoint")}
+      />
       {open ? (
         <EditTextDialog
           label={open.label}
           multiline={open.multiline ?? false}
           onClose={() => setEditing(null)}
-          onSave={(value) => save({ [open.field]: value })}
+          onSave={(value) => saveText(open.field, value)}
           schema={TEXT_SCHEMAS[open.field]}
-          value={agent[open.field] ?? ""}
+          value={shown(open.field) ?? ""}
+        />
+      ) : null}
+      {editing === "endpoint" ? (
+        <EditTextDialog
+          address
+          description="This Bot’s replies come from the agent at this address."
+          label="Agent URL"
+          multiline={false}
+          onClose={() => setEditing(null)}
+          // The same address saved back changes nothing, so it is not sent to be checked again.
+          onSave={async (endpoint) => {
+            if (endpoint !== agent.endpoint) await save({ endpoint });
+          }}
+          schema={agentEndpointSchema}
+          value={agent.endpoint ?? ""}
         />
       ) : null}
     </>
@@ -296,11 +330,11 @@ function IsolatedRow({
   agent: AgentProfile;
   onSave: (isolated: boolean) => Promise<unknown>;
 }) {
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const available = capabilities?.isolationAvailable ?? false;
+  const available = capabilities?.isolatedBots ?? false;
   const allowed = mine?.capabilities.isolatedComputers !== false;
   const isPublic = agent.visibility === "public";
   // A Bot that comes with OpenBot belongs to nobody, and the switch is a person's.
@@ -379,18 +413,27 @@ function sharedSummary(isPublic: boolean): string {
  * One text field in a dialog, validated against the same limits the server enforces. Enter saves a
  * single-line field — but not the Enter that confirms a composed character, which would save the
  * value before the person finished typing it.
+ *
+ * What is wrong shows under the field, whether this check or the server's refusal found it, and
+ * the field is marked invalid and described by it only while it is shown, so a screen reader reads
+ * it with the field and not before anything went wrong. `address` is a web address: the URL
+ * keyboard, monospace like the row it edits, and nothing corrected as it is typed.
  */
 function EditTextDialog({
   label,
+  description,
   value,
   multiline,
+  address = false,
   schema,
   onSave,
   onClose,
 }: {
   label: string;
+  description?: string;
   value: string;
   multiline: boolean;
+  address?: boolean;
   schema: ZodType<string>;
   onSave: (value: string) => Promise<unknown>;
   onClose: () => void;
@@ -398,10 +441,18 @@ function EditTextDialog({
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
+  const [field, setField] = useState<
+    HTMLInputElement | HTMLTextAreaElement | null
+  >(null);
+  const refuse = (message: string) => {
+    setError(message);
+    field?.focus();
+  };
   const submit = async () => {
     const parsed = schema.safeParse(draft);
     if (!parsed.success) {
-      setError(
+      refuse(
         parsed.error.issues[0]?.message ?? "Check this field and try again.",
       );
       return;
@@ -411,7 +462,7 @@ function EditTextDialog({
       await onSave(parsed.data);
       onClose();
     } catch (failure) {
-      setError(
+      refuse(
         failure instanceof Error
           ? failure.message
           : "Couldn't save. Try again.",
@@ -420,20 +471,32 @@ function EditTextDialog({
       setSaving(false);
     }
   };
+  const invalid = error
+    ? { "aria-invalid": true, "aria-describedby": errorId }
+    : {};
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
+          {description ? (
+            <DialogDescription>{description}</DialogDescription>
+          ) : null}
         </DialogHeader>
-        <DialogBody className="mt-4 grid gap-2">
+        {/*
+         * The body scrolls, so it clips what is drawn outside it: 4px of padding above and below keep
+         * the field's focus and error rings whole, and the margins are 4px less to keep the gaps.
+         */}
+        <DialogBody className="mt-3 grid gap-2 py-1">
           {multiline ? (
             <Textarea
               aria-label={label}
               autoFocus
               onChange={(event) => setDraft(event.target.value)}
+              ref={setField}
               rows={5}
               value={draft}
+              {...invalid}
             />
           ) : (
             <Input
@@ -446,16 +509,29 @@ function EditTextDialog({
                   void submit();
                 }
               }}
+              ref={setField}
               value={draft}
+              {...invalid}
+              {...(address
+                ? {
+                    autoCapitalize: "off",
+                    autoComplete: "off",
+                    autoCorrect: "off",
+                    className: "font-mono",
+                    inputMode: "url" as const,
+                    spellCheck: false,
+                    type: "url",
+                  }
+                : {})}
             />
           )}
           {error ? (
-            <p className="text-destructive text-sm" role="alert">
+            <p className="text-destructive text-sm" id={errorId} role="alert">
               {error}
             </p>
           ) : null}
         </DialogBody>
-        <DialogFooter className="mt-4">
+        <DialogFooter className="mt-3">
           <Button
             disabled={saving}
             onClick={onClose}
@@ -475,14 +551,37 @@ function EditTextDialog({
 
 /**
  * Where it runs. A built-in Bot runs on the deployment's own Bot, whose process already holds the
- * deployment's tool credential, so there is nothing to show but that sentence.
+ * deployment's tool credential, so there is nothing to connect. When it runs on an engine other
+ * than OpenBot's own agent (a Bot made from New Bot runs on LangGraph (TypeScript)), the Bot API
+ * names it as the Bot's framework, and a row under Built in says so.
+ *
+ * A Bot that runs at an address of its own can be moved to another by whoever manages it: the row
+ * opens a dialog, like the Identity rows above it.
  */
-function ConnectionSection({ agent }: { agent: AgentProfile }) {
+function ConnectionSection({
+  agent,
+  onEditEndpoint,
+}: {
+  agent: AgentProfile;
+  onEditEndpoint: () => void;
+}) {
   const builtIn = !agent.endpoint || agent.builtIn;
+  const editable = agent.canManage && !builtIn;
+  const engine =
+    builtIn && agent.framework && agent.framework !== OPENBOT_HARNESS_NAME
+      ? agent.framework
+      : undefined;
   return (
     <PageSection title="Connection">
       <PageRows>
-        <Item size="sm">
+        <Item
+          render={
+            editable ? (
+              <button onClick={onEditEndpoint} type="button" />
+            ) : undefined
+          }
+          size="sm"
+        >
           <ItemMedia variant="icon">
             <IconPlugConnected />
           </ItemMedia>
@@ -498,7 +597,26 @@ function ConnectionSection({ agent }: { agent: AgentProfile }) {
                 : agent.endpoint}
             </ItemDescription>
           </ItemContent>
+          {editable ? (
+            <ItemActions>
+              <IconChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          ) : null}
         </Item>
+        {engine ? (
+          <>
+            <Separator />
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconCpu />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Runs on</ItemTitle>
+                <ItemDescription>{engine}</ItemDescription>
+              </ItemContent>
+            </Item>
+          </>
+        ) : null}
       </PageRows>
       {!builtIn && agent.canManage ? (
         <CallbackTokenPanel

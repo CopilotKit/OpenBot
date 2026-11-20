@@ -2,18 +2,26 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
-import { useWaitingByBot } from "@/components/approvals/waiting";
+import {
+  useHeldAnswers,
+  useWaitingByBot,
+} from "@/components/approvals/waiting";
+import { useWaitingOnYou } from "@/components/bot-profile/attention";
 import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
+import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
+import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
 import { useNeedsYou } from "./needs-you";
+import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
 
 /** How many of one Bot's finds show before the rest open in place. */
 const FINDS_SHOWN = 3;
@@ -33,40 +41,85 @@ const FINDS_SHOWN = 3;
 export function NeedsYouBoard({ agentId }: { agentId?: string }) {
   const agents = useQuery(agentListQueryOptions());
   const settings = useQuery(proactiveSettingsQueryOptions());
-  const waiting = useWaitingByBot(agentId);
   const list = useNeedsYou(agentId);
+  // A question or an action waiting in a task's own conversation is that task waiting: one row.
+  const waiting = useWaitingByBot(
+    agentId,
+    heldByTaskOf([...list.tasks, ...list.done]),
+  );
 
+  const stalledHandoffs = useStalledHandoffs(agentId);
+  // A task waiting on something in its thread is answered on its own row.
+  const heldAnswer = useHeldAnswers();
+
+  /*
+   * ONE COUNT, THE BADGE'S. How many things wait on the person is the number the Bots badge shows
+   * (`waitingOnYou`, the server's rule), read from the same answer, for every Bot or for this one:
+   * the board counted its own rows and said "18 waiting" beside a badge of 16. The two it had over
+   * were tasks under a Bot no longer shared with the person, which the server leaves out, as it
+   * leaves out every Bot they can't reach: there is nothing left there for them to read, answer or
+   * try again, only to mark done. Those rows are still listed, and are not counted.
+   */
+  const waitingOn = useWaitingOnYou();
+  const waitingCount = waitingOn(agentId);
   const blocked = new Map(waiting.byBot);
   for (const listed of list.tasks) {
     const group = blocked.get(listed.task.agentId) ?? { rows: [], times: [] };
     group.rows.push(
-      <TaskBoardRow key={`task-${listed.task.id}`} listed={listed} />,
+      <TaskBoardRow
+        held={
+          listed.status === "needs_input" ? heldAnswer(listed.task) : undefined
+        }
+        key={`task-${listed.task.id}`}
+        listed={listed}
+      />,
     );
-    group.times.push(listed.task.updatedAt);
+    // Only what waits on the person says how long it has waited.
+    if (countsAsWaiting(listed)) group.times.push(listed.task.updatedAt);
     blocked.set(listed.task.agentId, group);
+  }
+  // A hand-off that ran out of tries waits on the person too, and the badge counts it.
+  for (const stalled of stalledHandoffs) {
+    const group = blocked.get(stalled.botId) ?? { rows: [], times: [] };
+    group.rows.push(
+      <StalledHandoffBoardRow
+        key={`handoff-${stalled.item.id}`}
+        stalled={stalled}
+      />,
+    );
+    group.times.push(stalled.item.at);
+    blocked.set(stalled.botId, group);
   }
   const found = new Map<string, typeof list.items>();
   for (const item of list.items)
-    found.set(item.agentId, [...(found.get(item.agentId) ?? []), item]);
+    found.set(item.botId, [...(found.get(item.botId) ?? []), item]);
 
-  if (blocked.size === 0 && found.size === 0) {
-    const error = waiting.error ?? list.error;
-    return error ? (
-      <PageSection title="Needs you">
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
-        </p>
-      </PageSection>
-    ) : null;
-  }
+  /*
+   * Each read that failed, said on its own whatever else loaded. A failed read is never "nothing
+   * waiting": the rows that did load stay, and the notice says which part may be missing.
+   */
+  const failures = [
+    {
+      key: "approvals",
+      what: "questions and approvals",
+      failure: waiting.failure,
+    },
+    { key: "tasks", what: "tasks", failure: list.failures.tasks },
+    {
+      key: "check-ins",
+      what: "check-in findings",
+      failure: list.failures.checkIns,
+    },
+  ].flatMap(({ failure, ...source }) =>
+    failure ? [{ ...source, failure }] : [],
+  );
+
+  if (blocked.size === 0 && found.size === 0 && failures.length === 0)
+    return null;
 
   const bot = (id: string) => agents.data?.find((agent) => agent.id === id);
   const settingOf = (id: string | null | undefined) =>
     id ? settings.data?.find((setting) => setting.id === id) : undefined;
-  const waitingCount = [...blocked.values()].reduce(
-    (total, group) => total + group.rows.length,
-    0,
-  );
   const foundCount = list.items.length;
 
   return (
@@ -84,18 +137,29 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
       title="Needs you"
     >
       <div className="flex flex-col gap-5">
+        {failures.length ? (
+          <div className="flex flex-col gap-2">
+            {failures.map(({ key, what, failure }) => (
+              <ReadFailureNotice failure={failure} key={key} what={what} />
+            ))}
+          </div>
+        ) : null}
         {blocked.size ? (
-          <Half title="Waiting on you">
+          <Half title={waitingCount ? "Waiting on you" : "Your tasks"}>
             {[...blocked].map(([botId, group]) => (
               <BotGroup
                 bot={bot(botId)}
                 botId={botId}
                 key={botId}
-                note={`waiting since ${relativeTime(
-                  group.times.reduce((first, at) =>
-                    Date.parse(at) < Date.parse(first) ? at : first,
-                  ),
-                )}`}
+                note={
+                  group.times.length && waitingOn(botId)
+                    ? `waiting since ${relativeTime(
+                        group.times.reduce((first, at) =>
+                          Date.parse(at) < Date.parse(first) ? at : first,
+                        ),
+                      )}`
+                    : "nothing waiting on you"
+                }
               >
                 {group.rows}
               </BotGroup>
@@ -108,7 +172,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
               const watched = [
                 ...new Set(
                   items
-                    .map((item) => settingOf(item.settingId)?.subject)
+                    .map((item) => settingOf(item.checkInId)?.subject)
                     .filter((subject): subject is string => Boolean(subject)),
                 ),
               ];
@@ -131,6 +195,33 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
         ) : null}
       </div>
     </PageSection>
+  );
+}
+
+/** One source that didn't load: what may be missing, and Retry for that read alone. */
+function ReadFailureNotice({
+  what,
+  failure,
+}: {
+  what: string;
+  failure: ReadFailure;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5"
+      data-needs-you-failure={what}
+      role="alert"
+    >
+      <p className="text-sm">Couldn't load {what}. Some may be missing here.</p>
+      <Button
+        disabled={failure.retrying}
+        onClick={failure.retry}
+        size="sm"
+        variant="outline"
+      >
+        {failure.retrying ? "Retrying…" : "Retry"}
+      </Button>
+    </div>
   );
 }
 
@@ -205,7 +296,7 @@ function FoundGroup({
       botName={bot?.name ?? "Your Bot"}
       inGroup
       key={item.id}
-      setting={settingOf(item.settingId)}
+      setting={settingOf(item.checkInId)}
       suggestion={item}
     />
   ));

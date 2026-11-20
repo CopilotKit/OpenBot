@@ -10,6 +10,9 @@ import { isSharedWithYou } from "@/lib/agents/queries";
 
 function agent(overrides: Partial<AgentProfile>): AgentProfile {
   return {
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
     id: "agent_1",
     name: "Renewal Desk",
     title: "Accounts Receivable",

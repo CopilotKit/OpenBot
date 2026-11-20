@@ -97,13 +97,15 @@ test("disabled and unresolved deployments do not send the catalog", () => {
   });
 });
 
-test("the catalog is the standard one, less the omitted components and without the gallery", () => {
+test("the catalog is the standard one, less the omitted components, plus Breakdown and without the gallery", () => {
   expect(OPENBOT_UI.id).toBe("openbot/ui@1");
   const expected = Object.keys(standardUI.manifestComponents).filter(
     (name) =>
       !(OMITTED_STANDARD_COMPONENTS as readonly string[]).includes(name),
   );
-  expect([...OPENBOT_UI.components.keys()].sort()).toEqual(expected.sort());
+  expect([...OPENBOT_UI.components.keys()].sort()).toEqual(
+    [...expected, "Breakdown"].sort(),
+  );
   expect(expected).toHaveLength(65);
   // The A2UI 1.0 basic components, under their A2UI names.
   for (const name of [

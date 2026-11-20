@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { DEFAULT_SKIN, SKIN_IDS, type SkinId } from "./types";
+import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
 
 /*
  * The skin is saved on the person's account (`skin` in their preferences), so it follows them to
@@ -16,8 +16,9 @@ export const SKIN_STORAGE_KEY = "openbot-skin";
 
 export { DEFAULT_SKIN };
 
+/** A skin saved under the id it was renamed from is read as its new id. */
 export function parseStoredSkin(value: string | null | undefined): SkinId {
-  return SKIN_IDS.find((id) => id === value) ?? DEFAULT_SKIN;
+  return currentSkinId(value) ?? DEFAULT_SKIN;
 }
 
 type SkinEffects = {

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-  accessSummary,
   countLabel,
   memorySummary,
   reachSummary,
@@ -18,18 +17,14 @@ test("counts read as words", () => {
   );
 });
 
-test("access names skills and apps, or says there is nothing", () => {
-  expect(accessSummary(0, 0)).toBe("Nothing granted");
-  expect(accessSummary(2, 0)).toBe("2 skills");
-  expect(accessSummary(0, 1)).toBe("1 app");
-  expect(accessSummary(1, 3)).toBe("1 skill, 3 apps");
-});
-
 test("sharing names the audience", () => {
   expect(sharingSummary(undefined, "private")).toBe("Not shared");
-  expect(sharingSummary({ audience: "team" }, "private")).toBe("Whole team");
+  // The wire's `team` is everybody: a person reads "organization", never "team", for it.
+  expect(sharingSummary({ audience: "team" }, "private")).toBe(
+    "Everyone in the organization",
+  );
   expect(sharingSummary({ audience: "people" }, "private")).toBe(
-    "Specific people and groups",
+    "Specific people and teams",
   );
 });
 
@@ -89,9 +84,8 @@ test("reach names the places a Bot continues the conversation", () => {
   expect(reachSummary(["teams"])).toBe("Microsoft Teams");
 });
 
-test("memory names the sources and whether check-ins are on", () => {
-  expect(memorySummary(0, false)).toBe("Nothing connected");
-  expect(memorySummary(2, false)).toBe("2 sources");
-  expect(memorySummary(0, true)).toBe("Check-ins on");
-  expect(memorySummary(1, true)).toBe("1 source, check-ins on");
+test("memory names the sources, and leaves check-ins to Routines", () => {
+  expect(memorySummary(0)).toBe("Nothing connected");
+  expect(memorySummary(1)).toBe("1 source");
+  expect(memorySummary(2)).toBe("2 sources");
 });

@@ -14,6 +14,7 @@ import {
   InlineApproval,
 } from "@/components/approvals/inline-approval";
 import { DetailPanel } from "@/components/layout/detail-panel";
+import { approvalInboxResponse, approvalWriteResponse } from "./approvals-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -71,7 +72,7 @@ afterAll(async () => {
   GlobalRegistrator.unregister();
 });
 
-/** A pending request as `GET /api/approvals` returns it. */
+/** A pending request as the inbox the screens read holds it. */
 const request = (id: string, toolCallId: string, threadId: string) => ({
   id,
   status: "pending",
@@ -88,7 +89,7 @@ const request = (id: string, toolCallId: string, threadId: string) => ({
     policy: {
       behaviour: "ask",
       source: "safety",
-      reason: "Deleting something always asks you first.",
+      reason: "Deleting something asks you first.",
     },
   },
 });
@@ -103,10 +104,10 @@ function serving() {
         url,
         body: typeof init.body === "string" ? JSON.parse(init.body) : null,
       });
-      return Response.json({ ok: true });
+      return approvalWriteResponse(input, init) ?? Response.json({ ok: true });
     }
-    if (url === "/api/approvals")
-      return Response.json({
+    {
+      const approvals = approvalInboxResponse(url, {
         enabled: true,
         rules: [],
         teamRules: [],
@@ -116,6 +117,8 @@ function serving() {
           request("elsewhere-request", "elsewhere-call", "thread-elsewhere"),
         ],
       });
+      if (approvals) return approvals;
+    }
     return Response.json({ error: "not served" }, { status: 404 });
   }) as unknown as typeof fetch;
 }
@@ -160,13 +163,18 @@ test("on a narrow window the Computer sheet shows the approval it covers, and an
     name: "Waiting for your approval",
   });
   expect(
-    within(card).getByText("Deleting something always asks you first."),
+    within(card).getByText("Deleting something asks you first."),
   ).toBeTruthy();
   expect(
     within(card)
       .getAllByRole("radio")
       .map((radio) => radio.getAttribute("aria-label")),
-  ).toEqual(["Allow once", "Deny"]);
+  ).toEqual([
+    "Allow once",
+    "Allow for this conversation",
+    "Always allow here",
+    "Deny",
+  ]);
   // Only this conversation's: an approval waiting in another one is not drawn here.
   expect(
     within(sheet).getAllByRole("region", { name: "Waiting for your approval" }),
@@ -177,7 +185,7 @@ test("on a narrow window the Computer sheet shows the approval it covers, and an
   fireEvent.click(within(card).getByRole("button", { name: "Allow once" }));
   await waitFor(() =>
     expect(decisions).toContainEqual({
-      url: "/api/approvals/delete-request/decision",
+      url: "/api/v2/organizations/default/people/me/approvals/delete-request/decide",
       body: { decision: "allow_once" },
     }),
   );

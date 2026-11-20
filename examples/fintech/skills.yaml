@@ -223,6 +223,13 @@ skills:
       and never addressed to the person talking to it. Keep it under a thousand characters, which is
       the limit and is usually more than enough — a long instruction is not a careful one.
 
+      Write each rule as a plain sentence with its reason, and never in capitals for emphasis: a
+      model applies an emphatic rule further than it was meant. Leave out how to work in general,
+      because OpenBot already tells every Bot to use what it has, take the step in the same reply,
+      retry a failed call once and deliver with the gaps named. Never tell it to stop at the first
+      error, to ask whenever something is unclear, or to ask the person to sign in and wait: each of
+      those makes a coworker stall where it should finish.
+
       Call list_bot_skills and offer only the skills that fit the job. Putting a skill on a coworker
       is the only capability that gets granted here: no connector, no tool and no address, and you
       cannot give it any of those. Say so rather than implying the coworker will arrive able to

@@ -127,7 +127,7 @@ test("the dialog says a recording in progress stops and what it has not sent is 
   fireEvent.click(await findByRole("button", { name: "Disconnect" }));
   expect(
     getByText(
-      "The recording in progress stops, and what it has not sent to OpenBot's back end yet is discarded.",
+      "The recording in progress stops, and what it has not sent to OpenBot's backend yet is discarded.",
     ),
   ).toBeTruthy();
 });
@@ -144,7 +144,7 @@ test("the dialog names the stopped recordings still sending apart from the kept 
   fireEvent.click(await findByRole("button", { name: "Disconnect" }));
   expect(
     getByText(
-      "2 recordings still sending to OpenBot's back end stop, and what they have not sent yet is discarded.",
+      "2 recordings still sending to OpenBot's backend stop, and what they have not sent yet is discarded.",
     ),
   ).toBeTruthy();
   expect(
@@ -162,7 +162,7 @@ test("the dialog says one recording still sending stops", async () => {
   fireEvent.click(await findByRole("button", { name: "Disconnect" }));
   expect(
     getByText(
-      "1 recording still sending to OpenBot's back end stops, and what it has not sent yet is discarded.",
+      "1 recording still sending to OpenBot's backend stops, and what it has not sent yet is discarded.",
     ),
   ).toBeTruthy();
 });

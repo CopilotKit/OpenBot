@@ -36,7 +36,9 @@ import {
   agentListQueryOptions,
   agentQueryOptions,
 } from "@/lib/agents/queries";
+import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
+import { useAttachmentLimits } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
@@ -48,8 +50,12 @@ import { newId } from "../../../../lib/new-id";
  * more are a group, answering in the order they were picked. The first Bot stays in the URL so
  * profile links and reloads preserve the pending recipient without creating an empty channel.
  */
-/** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
+/** What the API's `getBot` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
+
+/** Said when a draft holding files is sent to two or more Bots. */
+const GROUP_TAKES_NO_FILES =
+  "A conversation with more than one Bot can't take files yet. Remove them to send.";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
   /*
@@ -165,7 +171,7 @@ function NewConversation({ composition }: { composition: string }) {
   const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
   const loadError =
     rosterError && profiles === undefined
-      ? "Couldn't load your Bots. Reload the page."
+      ? "Couldn't load your Bots. Try again in a moment."
       : urlAgentDetailFailed
         ? /*
            * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
@@ -174,7 +180,7 @@ function NewConversation({ composition }: { composition: string }) {
            */
           detailFailure?.message === AGENT_NOT_FOUND
           ? "This Bot isn't available to you. It may be unpublished or not shared with you."
-          : "Couldn't load that Bot. Reload the page."
+          : "Couldn't load that Bot. Try again in a moment."
         : null;
   /** Bots picked in the To: field, in the order they will answer; the URL's Bot until one is picked. */
   const [picked, setPicked] = useState<AgentProfile[] | null>(null);
@@ -189,8 +195,11 @@ function NewConversation({ composition }: { composition: string }) {
    * A model can be picked before the first message when the conversation is with one Bot that runs
    * on OpenBot's own model. The pick is saved with the conversation, before the message runs.
    */
-  const pickable =
-    !group && selected.length === 1 && selected[0]?.runsOnOpenBotModel === true;
+  const takesModel = useBotTakesModelChoice(
+    !group && selected.length === 1 ? selected[0] : undefined,
+  );
+  // Not a Bot that hands work to agents: its model is set on its Agents page.
+  const pickable = !group && selected.length === 1 && takesModel;
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
     enabled: pickable,
@@ -200,11 +209,22 @@ function NewConversation({ composition }: { composition: string }) {
   const skillCommands = useSkillCommands(
     group ? "" : (recipients[0]?.id ?? ""),
   );
+  const attachmentLimits = useAttachmentLimits();
 
   const submit = async (draft: ComposerDraft) => {
     const recipient = recipients[0];
-    if (!recipient || !canSend(recipients, draft.text)) return;
+    if (
+      !recipient ||
+      !canSend(recipients, draft.text, draft.attachments.length)
+    )
+      return;
     if (group) {
+      // A group's messages carry words only, in this first message as in every later one. Files
+      // held before a second Bot was added are refused out loud and stay on the strip.
+      if (draft.attachments.length > 0) {
+        setError(GROUP_TAKES_NO_FILES);
+        throw new Error(GROUP_TAKES_NO_FILES);
+      }
       setError(null);
       try {
         // An `@` addresses one Bot, as it does in every later message of the group.
@@ -232,7 +252,13 @@ function NewConversation({ composition }: { composition: string }) {
       // home screen, and the trail has to say so for both.
       // A `/` skill stays at the start of the words, where the server finds it, as it does for
       // every later message.
-      await startChosen(recipient.id, draft.text, draftModel.requested);
+      await startChosen(
+        recipient.id,
+        draft.text,
+        draftModel.requested,
+        undefined,
+        draft.attachments,
+      );
     } catch (caught) {
       // Preserve the unsent draft when channel creation fails.
       setSent(null);
@@ -384,6 +410,12 @@ function NewConversation({ composition }: { composition: string }) {
         autoFocus={recipients.length > 0}
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
+        /*
+         * Files are held until the first message creates the conversation, then sent with it. Not
+         * for a group: its messages carry words only, so its composer offers no `+`.
+         */
+        holdsFilesUntilSent={!group}
+        attachmentLimits={attachmentLimits}
         modelPicker={
           <ModelPicker
             catalogue={pickable ? models.data : undefined}
@@ -412,7 +444,7 @@ function NewConversation({ composition }: { composition: string }) {
         starterSuggestions={
           !group && !sent ? (
             <StarterSuggestions
-              agentId={recipients[0]?.id}
+              bot={selected[0]}
               disabled={pending || Boolean(loadError) || waitingForUrlAgent}
               onSelect={(text) =>
                 submit({

@@ -120,16 +120,19 @@ export function PageSection({
   children,
   className,
   description,
+  id,
   title,
 }: {
   action?: React.ReactNode;
   children?: React.ReactNode;
   className?: string;
   description?: React.ReactNode;
+  /** For an address that opens the page at this section, as its hash. */
+  id?: string;
   title?: string;
 }) {
   return (
-    <section className={cn("mt-12", className)}>
+    <section className={cn("mt-12", className)} id={id}>
       {title ? (
         <div className="flex min-h-8 flex-row items-center justify-between gap-4">
           {/*

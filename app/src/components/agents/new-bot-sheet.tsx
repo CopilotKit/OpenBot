@@ -1,11 +1,12 @@
 import {
+  DEFAULT_BOT_ENGINE,
   OPENBOT_HARNESS_NAME,
+  reachedThroughMastra,
   summaryFor,
   WEB_HARNESSES,
 } from "@openbot/shared/harnesses";
 import {
   IconCheck,
-  IconChevronDown,
   IconInfoCircle,
   IconLock,
   IconUsers,
@@ -17,10 +18,12 @@ import {
 } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { RoutinesAppHint } from "@/components/routines/routines-app-hint";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -57,23 +60,19 @@ import {
   isolatedExplained,
 } from "@/lib/agents/isolation";
 import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import {
-  agentCapabilitiesQueryOptions,
-  testAgentConnection,
-} from "@/lib/agents/queries";
+import { testAgentConnection } from "@/lib/agents/queries";
+import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
   type GiveableApp,
   giveableAppsQueryOptions,
 } from "@/lib/app-access/queries";
+import { appsQueryOptions } from "@/lib/apps/queries";
 import { isComposing } from "@/lib/composing";
+import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
-import {
-  type PluginsPage,
-  pluginKeys,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { type PluginServer, pluginKeys } from "@/lib/plugins/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -118,20 +117,36 @@ export function NewBotSheet({
  * Advancing from the endpoint also tests it, so there is no separate Test action to forget.
  */
 const STEPS = ["about", "runtime", "endpoint"] as const;
-/**
- * The web list as it comes: the frameworks people look for first, and "An agent you already run"
- * last, so the rows that show above the footer on the first screen are frameworks they know.
- */
-const CONNECTION_OPTIONS = WEB_HARNESSES;
+const CONNECTION_OPTIONS = [
+  ...WEB_HARNESSES.filter((harness) => harness.id === "byo-url"),
+  ...WEB_HARNESSES.filter((harness) => harness.id !== "byo-url"),
+];
 type Step = (typeof STEPS)[number];
 
 /**
  * Where the Bot runs: on this deployment, or behind a framework somebody hosts.
  *
- * The framework is kept for its connection instructions and default role description. Every framework is reached the same way and stored the same way — an AG-UI address —
- * so the server never hears which was picked.
+ * The framework is kept for its connection instructions and default role description, and sent with
+ * the create. Every framework but Mastra is reached the same way, at an AG-UI address. A Mastra
+ * server is reached through Mastra's own API, which the server picks from the framework sent.
  */
-type Runtime = { kind: "builtin" } | { kind: "managed"; harness: string };
+export type Runtime =
+  | { kind: "builtin" }
+  | { kind: "managed"; harness: string };
+
+/**
+ * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
+ * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
+ * fails if the two drift apart.
+ */
+export function declaredFramework(
+  id: string,
+): CreateBotRequestHarness | undefined {
+  const known: readonly string[] = Object.values(CreateBotRequestHarness);
+  return id !== "" && known.includes(id)
+    ? (id as CreateBotRequestHarness)
+    : undefined;
+}
 
 /** Framework name used in default custom-agent instructions. */
 function frameworkName(runtime: Runtime): string {
@@ -181,31 +196,26 @@ function defaultInstructions(name: string, runtime: Runtime): string {
  * `min-h-0` and no overflow of its own shrinks and paints over the footer instead.
  */
 function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+  const personal = capabilities?.edition === "personal";
   const createAgent = useMutation(createAgentMutationOptions(queryClient));
   /*
    * Assumed available while the answer loads, so the common deployment never sees the option flash
    * from disabled to enabled; the server refuses the create either way.
    */
-  const { data: capabilities } = useQuery(agentCapabilitiesQueryOptions());
-  const builtInAvailable = capabilities?.builtInAvailable ?? true;
+  const builtInAvailable = capabilities?.builtInBots ?? true;
   /*
    * A computer of its own: whether this deployment can make one, and whether an administrator lets
    * this person ask. Unavailable until the deployment says otherwise, since promising a computer
    * that cannot be made is the worse mistake; allowed unless the switch says no, since the server
    * refuses a create without it either way.
    */
-  const isolationAvailable = capabilities?.isolationAvailable ?? false;
+  const isolationAvailable = capabilities?.isolatedBots ?? false;
   const { data: mine } = useQuery(myCapabilitiesQueryOptions());
   const isolationAllowed = mine?.capabilities.isolatedComputers !== false;
   /** Shared with the person's own computer unless they tick it. */
   const [isolated, setIsolated] = useState(false);
   const [step, setStep] = useState<Step>("about");
-  /** Where the address step was reached from, so Back returns there: the first screen or the list. */
-  const [pickedFrom, setPickedFrom] = useState<Step>("runtime");
-  /** Set by Back from the address step to the first screen, which then opens on its custom agents. */
-  const [backToCustom, setBackToCustom] = useState(false);
   const [direction, setDirection] = useState(1);
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState<string>();
@@ -238,7 +248,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
    * list Connections shows as on, and not only the ones this person could give.
    */
   const turnedOn = useQuery({
-    ...pluginsPageQueryOptions(),
+    ...appsQueryOptions(),
     enabled: personal,
   });
   const [leftOut, setLeftOut] = useState<Set<string>>(() => new Set());
@@ -268,13 +278,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     return () => window.clearTimeout(timer);
   }, [createdId, reduceMotion]);
 
-  // Back from the address lands where the framework was picked, below the simple form.
-  useEffect(() => {
-    if (step !== "about" || !backToCustom) return;
-    setBackToCustom(false);
-    showCustom(reduceMotion);
-  }, [step, backToCustom, reduceMotion]);
-
   const named = name.trim() !== "";
   const endpointIssue =
     endpoint.trim() === ""
@@ -300,6 +303,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const create = async (chosen: Runtime) => {
     const managed = chosen.kind === "managed";
+    /*
+     * A Bot somebody runs names its framework; one that runs here names the engine new Bots run
+     * on (`DEFAULT_BOT_ENGINE`). The server decides each run's engine from there.
+     */
+    const framework = declaredFramework(
+      managed ? chosen.harness : DEFAULT_BOT_ENGINE,
+    );
     const agent = await createAgent.mutateAsync({
       ...agentInputFrom({
         name: name.trim(),
@@ -314,11 +324,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         isolated:
           !personal && isolated && isolationAvailable && isolationAllowed,
       }),
-      // The framework picked from the list, so the Bot is told what runs it. None for an agent
-      // somebody already runs, since nobody said what is behind its address.
-      ...(managed && chosen.harness !== "byo-url"
-        ? { harness: chosen.harness }
-        : {}),
+      // The framework picked from the list, so the Bot is told what runs it, or the engine a Bot
+      // that runs here is made on. None for an agent somebody already runs, since nobody said what
+      // is behind its address.
+      ...(framework ? { harness: framework } : {}),
     });
     /*
      * The ticked apps, given once the Bot exists. A refusal is not a failed create: the Bot is made,
@@ -343,11 +352,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return custom ? go("runtime") : create({ kind: "builtin" });
   };
 
-  /**
-   * From the first screen to a custom agent: the whole list, or one framework picked from the custom
-   * agents below the form. The name is checked first, since the next screens never show it.
-   */
-  const connectCustom = (chosen?: Runtime) => {
+  /** Into the custom-agent steps, once the Bot has a name. */
+  const toCustom = () => {
     const parsed = agentFormSchema.shape.name.safeParse(name);
     if (!parsed.success) {
       setNameError(parsed.error.issues[0]?.message);
@@ -355,23 +361,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setNameError(undefined);
-    if (!chosen) return go("runtime");
-    setRuntime(chosen);
-    setPickedFrom("about");
-    go("endpoint");
+    go("runtime");
   };
 
-  /**
-   * Back returns to the previous screen without resetting any answers: to the first screen's custom
-   * agents when the framework was picked there, and to the list when it was picked from that.
-   */
-  const back = () => {
-    if (step === "endpoint" && pickedFrom === "about") {
-      setBackToCustom(true);
-      return go("about");
-    }
-    go(step === "endpoint" ? "runtime" : "about");
-  };
+  /** Back returns to the previous screen without resetting any answers. */
+  const previous = (): Step => (step === "endpoint" ? "runtime" : "about");
 
   /** Verify the endpoint before creating a custom Bot. */
   const connect = async () => {
@@ -384,6 +378,25 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setUnreachable(undefined);
+    /*
+     * A Mastra server has no AG-UI route, so the AG-UI test could only fail against it. The create
+     * names the framework and the server proves the address against Mastra's own API before it saves
+     * anything. What it refused with is shown under the address, as a failed test is.
+     */
+    if (runtime?.kind === "managed" && reachedThroughMastra(runtime.harness)) {
+      try {
+        await create(runtime);
+      } catch (error) {
+        createAgent.reset();
+        setUnreachable(
+          error instanceof Error && error.message
+            ? error.message
+            : MASTRA_UNREACHABLE,
+        );
+        focusAddress();
+      }
+      return;
+    }
     setChecking(true);
     const verdict = await testAgentConnection(endpoint.trim(), key).finally(
       () => setChecking(false),
@@ -438,7 +451,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         submit();
       }}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pt-6 pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-6 pt-8 pb-6">
         <MotionConfig reducedMotion="user">
           {/* Shares its layout id with the orb on the created view, so it travels there. */}
           <div className="flex items-center gap-3">
@@ -451,23 +464,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             <SheetTitle className="text-2xl font-semibold tracking-tight">
               New Bot
             </SheetTitle>
-            {/* On a phone the custom agents can't show above the footer, so this says they are there. */}
-            {step === "about" && builtInAvailable && (
-              <Button
-                className="ml-auto h-auto px-0 text-muted-foreground text-xs sm:hidden"
-                onClick={() => showCustom(reduceMotion)}
-                type="button"
-                variant="link"
-              >
-                Custom agent
-                <IconChevronDown className="size-3.5" />
-              </Button>
-            )}
           </div>
 
           <motion.div
             animate={{ opacity: 1, x: 0 }}
-            className="mt-5"
+            className="mt-6"
             initial={{ opacity: 0, x: 24 * direction }}
             key={step}
             transition={{ duration: 0.2, ease: "easeOut" }}
@@ -504,12 +505,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   onVisibility={setVisibility}
                   visibility={visibility}
                 />
-                {builtInAvailable ? (
-                  <CustomAgents
-                    disabled={busy}
-                    onChoose={(chosen) => connectCustom(chosen)}
-                  />
-                ) : (
+                {!builtInAvailable && (
                   <p className="mt-3 text-sm text-muted-foreground">
                     An admin must enable built-in hosting before you can run a
                     Bot here.
@@ -520,7 +516,6 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
               <RuntimeStep
                 onChoose={(chosen) => {
                   setRuntime(chosen);
-                  setPickedFrom("runtime");
                   go("endpoint");
                 }}
               />
@@ -544,6 +539,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           </motion.div>
         </MotionConfig>
 
+        {step === "about" && builtInAvailable ? (
+          <div className="mt-auto pt-10">
+            <CustomAgentCta disabled={busy} onConnect={toCustom} />
+          </div>
+        ) : null}
+
         {createAgent.error ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
             {createAgent.error.message}
@@ -562,7 +563,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           <Button
             className="px-4"
             disabled={busy}
-            onClick={back}
+            onClick={() => go(previous())}
             size="lg"
             type="button"
             variant="ghost"
@@ -592,6 +593,10 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     </form>
   );
 }
+
+/** Said when a Mastra create failed without a sentence of the server's own. */
+export const MASTRA_UNREACHABLE =
+  "Couldn't reach a Mastra server at that address.";
 
 /** How long the created view holds before handing over to the new Bot's page. */
 const CREATED_BEAT_MS = 1600;
@@ -654,14 +659,25 @@ function CreatedView({ name }: { name: string }) {
 
 type Visibility = AgentFormValues["visibility"];
 
-/** The two ways a Bot can be seen: a word and an icon each, which say enough between them. */
+/** The two ways a Bot can be seen, in the words the old wizard used for them. */
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility;
   title: string;
+  description: string;
   icon: typeof IconLock;
 }> = [
-  { value: "private", title: "Private", icon: IconLock },
-  { value: "public", title: "Public", icon: IconUsers },
+  {
+    value: "private",
+    title: "Private",
+    description: "Only you can see it and talk to it.",
+    icon: IconLock,
+  },
+  {
+    value: "public",
+    title: "Public",
+    description: "Everyone in your company can find and use it.",
+    icon: IconUsers,
+  },
 ];
 
 /**
@@ -694,18 +710,16 @@ function AboutStep({
   onInstructions: (value: string) => void;
   onVisibility: (value: Visibility) => void;
   apps: GiveableApp[];
-  turnedOn: UseQueryResult<PluginsPage>;
+  turnedOn: UseQueryResult<PluginServer[]>;
   leftOut: Set<string>;
   onApp: (app: string, used: boolean) => void;
   isolation: IsolationChoice;
   personal: boolean;
 }) {
   return (
-    <FieldGroup className="gap-5">
+    <FieldGroup>
       <Field>
-        <FieldLabel className={SECTION_LABEL} htmlFor="new-bot-name">
-          Name
-        </FieldLabel>
+        <FieldLabel htmlFor="new-bot-name">Name</FieldLabel>
         <Input
           autoComplete="off"
           autoFocus
@@ -728,11 +742,9 @@ function AboutStep({
         )}
       </Field>
       <Field>
-        <FieldLabel className={SECTION_LABEL} htmlFor="new-bot-instructions">
+        <FieldLabel htmlFor="new-bot-instructions">
           Instructions
-          <span className="font-normal normal-case tracking-normal">
-            Optional
-          </span>
+          <span className="font-normal text-muted-foreground">Optional</span>
         </FieldLabel>
         <Textarea
           autoComplete="off"
@@ -749,9 +761,7 @@ function AboutStep({
       ) : (
         <>
           <FieldSet>
-            <FieldLegend className={SECTION_LABEL} variant="label">
-              Who can see it
-            </FieldLegend>
+            <FieldLegend variant="label">Who can see it</FieldLegend>
             <div className="grid gap-2 sm:grid-cols-2">
               {VISIBILITY_OPTIONS.map((option) => {
                 const Icon = option.icon;
@@ -764,7 +774,14 @@ function AboutStep({
                     type="button"
                   >
                     <Icon className="size-5 shrink-0 text-muted-foreground" />
-                    <span className="font-medium text-sm">{option.title}</span>
+                    <span className="min-w-0">
+                      <span className="block font-medium text-sm">
+                        {option.title}
+                      </span>
+                      <span className="block text-pretty text-muted-foreground text-xs">
+                        {option.description}
+                      </span>
+                    </span>
                   </button>
                 );
               })}
@@ -776,32 +793,40 @@ function AboutStep({
       {personal ? (
         <EveryAppList turnedOn={turnedOn} />
       ) : apps.length > 0 ? (
-        <FieldSet className="gap-2">
-          <FieldLegend className={SECTION_LABEL} variant="label">
-            Apps it can use
-          </FieldLegend>
+        <FieldSet>
+          <FieldLegend variant="label">Apps it can use</FieldLegend>
           <FieldDescription>
             It always uses the account of whoever is asking.
           </FieldDescription>
-          <div className="grid gap-x-4 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {apps.map((app) => (
-              <label
-                className="flex items-center gap-3 py-1 text-sm"
-                htmlFor={`new-bot-app-${app.key}`}
+              // The tile holds the label, and beside Routines an example and a link the box's name
+              // must not take in, so they sit outside the label.
+              <div
+                className={cn(
+                  "flex items-center gap-3 rounded-lg bg-muted/50 pr-3 text-sm",
+                  app.key === ALWAYS_ON_APP && "sm:col-span-2",
+                )}
                 key={app.key}
               >
-                <Checkbox
-                  checked={!leftOut.has(app.key)}
-                  id={`new-bot-app-${app.key}`}
-                  onCheckedChange={(checked) =>
-                    onApp(app.key, checked === true)
-                  }
-                />
-                <PluginLogo logo={app.logo} />
-                <span className="min-w-0 truncate font-medium">
-                  {app.displayName}
-                </span>
-              </label>
+                <label
+                  className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-3"
+                  htmlFor={`new-bot-app-${app.key}`}
+                >
+                  <Checkbox
+                    checked={!leftOut.has(app.key)}
+                    id={`new-bot-app-${app.key}`}
+                    onCheckedChange={(checked) =>
+                      onApp(app.key, checked === true)
+                    }
+                  />
+                  <PluginLogo logo={app.logo} />
+                  <span className="min-w-0 truncate font-medium">
+                    {app.displayName}
+                  </span>
+                </label>
+                {app.key === ALWAYS_ON_APP ? <RoutinesAppHint /> : null}
+              </div>
             ))}
           </div>
         </FieldSet>
@@ -816,14 +841,16 @@ function AboutStep({
  * (`EVERY_BOT_REFUSAL` in server/src/plugins/personal-defaults.ts). A box to untick would promise a
  * choice the server doesn't offer.
  */
-function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
+function EveryAppList({
+  turnedOn,
+}: {
+  turnedOn: UseQueryResult<PluginServer[]>;
+}) {
   if (turnedOn.isPending) return null;
-  const servers = turnedOn.data?.servers ?? [];
+  const servers = turnedOn.data ?? [];
   return (
-    <FieldSet className="gap-2">
-      <FieldLegend className={SECTION_LABEL} variant="label">
-        Apps it can use
-      </FieldLegend>
+    <FieldSet>
+      <FieldLegend variant="label">Apps it can use</FieldLegend>
       <FieldDescription>
         Every Bot can use every app you turn on in Connections.
       </FieldDescription>
@@ -832,19 +859,20 @@ function EveryAppList({ turnedOn }: { turnedOn: UseQueryResult<PluginsPage> }) {
           Couldn't load your apps.
         </p>
       ) : servers.length > 0 ? (
-        <ul
-          aria-label="Apps it can use"
-          className="grid gap-x-4 sm:grid-cols-2"
-        >
+        <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
           {servers.map((server) => (
             <li
-              className="flex items-center gap-3 py-1 text-sm"
+              className={cn(
+                "flex items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm",
+                server.id === ALWAYS_ON_APP && "sm:col-span-2",
+              )}
               key={server.id}
             >
               <PluginLogo logo={server.logo} />
               <span className="min-w-0 truncate font-medium">
                 {server.title}
               </span>
+              {server.id === ALWAYS_ON_APP ? <RoutinesAppHint /> : null}
             </li>
           ))}
         </ul>
@@ -870,9 +898,9 @@ type IsolationChoice = {
  * needs nothing and costs nothing more; Isolated is the exception somebody opts into. What it means
  * is in the tooltip beside it, and for a public Bot that includes who else ends up on that computer.
  *
- * NEVER HIDDEN. Where it cannot be ticked it is drawn disabled with the reason below it, so
- * somebody who heard about Isolated Bots finds out here why they cannot have one rather than
- * wondering where it went.
+ * NEVER HIDDEN. Where it cannot be ticked it is drawn disabled with the reason in place of its
+ * summary, so somebody who heard about Isolated Bots finds out here why they cannot have one rather
+ * than wondering where it went.
  *
  * A label for the word only, not the whole tile, so the tooltip's button beside it does not tick the
  * box when pressed.
@@ -891,12 +919,10 @@ function IsolatedOption({
       : null;
   return (
     <FieldSet>
-      <FieldLegend className={SECTION_LABEL} variant="label">
-        Its computer
-      </FieldLegend>
-      <div className="flex items-start gap-3">
+      <FieldLegend variant="label">Its computer</FieldLegend>
+      <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
         <Checkbox
-          aria-describedby={reason ? "new-bot-isolated-reason" : undefined}
+          aria-describedby="new-bot-isolated-summary"
           checked={checked && reason === null}
           className="mt-0.5"
           disabled={reason !== null}
@@ -933,14 +959,12 @@ function IsolatedOption({
               </TooltipContent>
             </Tooltip>
           </div>
-          {reason && (
-            <p
-              className="text-pretty text-muted-foreground text-xs"
-              id="new-bot-isolated-reason"
-            >
-              {reason}
-            </p>
-          )}
+          <p
+            className="text-pretty text-muted-foreground text-xs"
+            id="new-bot-isolated-summary"
+          >
+            {reason ?? "A computer of its own, instead of sharing yours."}
+          </p>
         </div>
       </div>
     </FieldSet>
@@ -948,18 +972,11 @@ function IsolatedOption({
 }
 
 /**
- * The first screen's section names: small, uppercase and grey, so the fields lead and the sections
- * are told apart by space.
- */
-const SECTION_LABEL =
-  "text-[0.7rem] text-muted-foreground uppercase tracking-wider data-[variant=label]:text-[0.7rem]";
-
-/**
  * Filled rather than outlined, so the list reads as a set of things to pick and not as a stack of
  * cards. The border is there but transparent until chosen, so choosing one never shifts the rows.
  */
-const OPTION_CLASSES =
-  "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 px-3 py-2.5 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+export const OPTION_CLASSES =
+  "flex w-full items-center gap-3 rounded-lg border border-transparent bg-muted/50 p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 /**
  * Choose a custom framework and advance immediately to its connection settings.
@@ -967,103 +984,41 @@ const OPTION_CLASSES =
  * new question rather than the control on the previous screen. The sheet body scrolls;
  * an inner scroller would give this list a second scrollbar.
  */
-function RuntimeStep({ onChoose }: { onChoose: (runtime: Runtime) => void }) {
+export function RuntimeStep({
+  onChoose,
+}: {
+  onChoose: (runtime: Runtime) => void;
+}) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
 
   return (
-    <div className="flex flex-col">
-      <h2 className={cn("mb-3", RUNTIME_HEADING)} ref={heading} tabIndex={-1}>
-        Connect a custom agent
-      </h2>
-      <FrameworkRows onChoose={onChoose} />
-    </div>
-  );
-}
-
-/** RuntimeStep's heading, which the first screen's custom agents share. */
-const RUNTIME_HEADING =
-  "break-words font-semibold text-lg tracking-tight outline-none";
-
-/**
- * A framework row: no fill until hovered, so the list reads as a list and not as a stack of tiles.
- * Pressing one acts at once, so there is no chosen state to draw.
- */
-const FRAMEWORK_ROW_CLASSES =
-  "-mx-3 flex items-center gap-3 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
-
-/** Every framework the sheet offers, one line each, name then summary; pressing one picks it. */
-function FrameworkRows({
-  disabled,
-  onChoose,
-}: {
-  disabled?: boolean;
-  onChoose: (runtime: Runtime) => void;
-}) {
-  return CONNECTION_OPTIONS.map((harness) => (
-    <button
-      className={FRAMEWORK_ROW_CLASSES}
-      disabled={disabled}
-      key={harness.id}
-      onClick={() => onChoose({ kind: "managed", harness: harness.id })}
-      type="button"
-    >
-      <HarnessMark id={harness.mark} name={harness.name} />
-      <span className="min-w-0 truncate text-sm">
-        <span className="font-medium">{harness.name}</span>
-        <span className="ml-2 text-muted-foreground">
-          {summaryFor(harness)}
-        </span>
-      </span>
-    </button>
-  ));
-}
-
-const CUSTOM_ID = "new-bot-custom";
-const CUSTOM_HEADING_ID = "new-bot-custom-heading";
-
-/**
- * Brings the first screen's custom agents to the top of the sheet body and puts focus on their
- * heading, without the browser scrolling a second time for the focus.
- */
-function showCustom(reduceMotion: boolean | null) {
-  document.getElementById(CUSTOM_ID)?.scrollIntoView({
-    block: "start",
-    behavior: reduceMotion ? "auto" : "smooth",
-  });
-  document.getElementById(CUSTOM_HEADING_ID)?.focus({ preventScroll: true });
-}
-
-/**
- * The first screen's second way to make a Bot, below the simple form: RuntimeStep's rows under a
- * section name like the form's own, without taking focus from Name. A wider gap than the form's own
- * sets it apart. In an 800px-tall window (OpenBot Desktop's common height on a Mac) the four
- * frameworks named first show above the footer before anything is scrolled, which is why the form
- * above is spaced as tightly as it is; new-bot-sheet-fit.test.tsx measures it in Chromium. Each row
- * acts on its own press, so Create Bot stays the form's.
- */
-function CustomAgents({
-  disabled,
-  onChoose,
-}: {
-  disabled: boolean;
-  onChoose: (runtime: Runtime) => void;
-}) {
-  return (
-    <section
-      aria-labelledby={CUSTOM_HEADING_ID}
-      className="mt-8 flex scroll-mt-6 flex-col"
-      id={CUSTOM_ID}
-    >
+    <div className="flex flex-col gap-2">
       <h2
-        className={cn("mb-1.5 font-medium outline-none", SECTION_LABEL)}
-        id={CUSTOM_HEADING_ID}
+        className="mb-2 break-words font-semibold text-lg tracking-tight outline-none"
+        ref={heading}
         tabIndex={-1}
       >
         Connect a custom agent
       </h2>
-      <FrameworkRows disabled={disabled} onChoose={onChoose} />
-    </section>
+
+      {CONNECTION_OPTIONS.map((harness) => (
+        <button
+          className={OPTION_CLASSES}
+          key={harness.id}
+          onClick={() => onChoose({ kind: "managed", harness: harness.id })}
+          type="button"
+        >
+          <HarnessMark id={harness.mark} name={harness.name} />
+          <span className="min-w-0">
+            <span className="block font-medium text-sm">{harness.name}</span>
+            <span className="block text-pretty text-muted-foreground text-xs">
+              {summaryFor(harness)}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1071,8 +1026,8 @@ function CustomAgents({
  * The address of an agent somebody else runs, and the key it sits behind if it has one.
  *
  * The framework picked on the step before is named at the top so the person can see what they are
- * connecting, but nothing below differs by framework: every one of them is an AG-UI address and is
- * stored the same way.
+ * connecting. Nothing below differs by framework but Mastra's: every other one is an AG-UI address,
+ * and a Mastra one is the address of the Mastra server itself, so its example and its hint say so.
  *
  * The address takes focus on arrival rather than the heading, as the name does on the first step: it
  * is the one thing this step asks for, and its label says what it is.
@@ -1082,7 +1037,7 @@ function CustomAgents({
  * from there, which is the one thing the browser cannot tell. Why it could not be reached arrives as
  * this field's error.
  */
-function EndpointStep({
+export function EndpointStep({
   harness,
   endpoint,
   secret,
@@ -1098,6 +1053,7 @@ function EndpointStep({
   onKey: (value: string) => void;
 }) {
   const chosen = WEB_HARNESSES.find((entry) => entry.id === harness);
+  const mastra = reachedThroughMastra(harness);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1123,7 +1079,11 @@ function EndpointStep({
             id="new-bot-endpoint"
             inputMode="url"
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://your-agent.example.com/ag-ui"
+            placeholder={
+              mastra
+                ? "https://your-mastra-server.example.com"
+                : "https://your-agent.example.com/ag-ui"
+            }
             value={endpoint}
           />
           {endpointError ? (
@@ -1131,6 +1091,11 @@ function EndpointStep({
               className="text-pretty"
               errors={[{ message: endpointError }]}
             />
+          ) : mastra ? (
+            <FieldDescription>
+              Give the address of your Mastra server. It needs to run one agent,
+              and OpenBot's server has to be able to reach it.
+            </FieldDescription>
           ) : (
             <FieldDescription>
               Any agent that speaks AG-UI works. OpenBot connects to it, so it

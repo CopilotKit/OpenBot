@@ -1,17 +1,18 @@
 /**
  * What a Bot in this box knows about its own hands.
  *
- * Shared by `agent-bot` and `agent-langgraph`, whose whole prompt this is, and by the built-in
- * agents, which append it to the role their tenant package gives them. A Bot's instructions about
+ * Read by the built-in agents, which append it to the role their tenant package gives them. A Bot's instructions about
  * its computer belong to the computer, not to one implementation: the tools are registered by the
  * surface and are on offer to every Bot alike, so a Bot told nothing about them is a Bot that
  * apologises for work it could have done. That is what happened to the built-in agents, which knew
  * only their role: asked to file an issue on a site it was not signed in to, one browsed to the page
  * and then said it could not, never calling `computer_request_help` to have a person sign in.
  */
+import { notRun } from "./approval-outcomes";
 import { SHOW_APP_ACCESS_TOOL } from "./connect-prompt";
+import { DELEGATE_TOOL, DELEGATING_GUIDANCE } from "./orchestration";
 import { RESEARCH_APP_NAMES } from "./research";
-import { SUBAGENT_TOOL, SUBAGENTS_PER_ANSWER } from "./subagent";
+import { SUBAGENT_TOOL } from "./subagent";
 
 const OPENING_A_PAGE_LINES = [
   "You are a Bot with your own computer, a real web browser the person can watch you use.",
@@ -56,9 +57,9 @@ const WITH_SEARCH_LINES = [
 ];
 
 const WITHOUT_SEARCH_LINES = [
-  "Opening a page is not a web search. NEVER drive your browser to a search engine (Google, Bing,",
-  "DuckDuckGo or any other) to look something up, and do not guess at addresses hoping one of them",
-  "has the answer.",
+  "Opening a page is not a web search. Never drive your browser to a search engine (Google, Bing,",
+  "DuckDuckGo or any other) to look something up, because results pages are built for people and sit",
+  "behind cookie walls and CAPTCHAs. Do not guess at addresses hoping one of them has the answer either.",
   "When you are asked to search for something, look something up, find the latest on a subject or",
   "find a few examples of something, and none of your tools searches the web, answer from what you",
   "already know and say plainly that you have not checked it against a source.",
@@ -85,7 +86,7 @@ const WITHOUT_SEARCH_PERSONAL_LINES = [
  * snapshotId that produced them, so the Bot must read refs from the page before acting.
  */
 const ACTING_LINES = [
-  "You can also ACT on a page: fill in forms, click buttons, tick boxes and follow links.",
+  "You can also act on a page: fill in forms, click buttons, tick boxes and follow links.",
   "The order matters. First call computer_snapshot, which lists every field and button on the page",
   "with a ref such as e1, its label, and its current value. Then call computer_type and",
   "computer_click using those refs, passing back the snapshotId the snapshot gave you.",
@@ -100,33 +101,40 @@ const ACTING_LINES = [
   "to read them back. Paths are relative to your workspace, such as notes.md, and you cannot reach",
   "anything outside it.",
   "When you are asked what files you have, or you are unsure of a name, call computer_list_files.",
-  "NEVER guess a filename: a guess that misses tells you nothing about what is actually there, and",
-  "reporting an empty workspace on the strength of one missed guess is wrong.",
-  "'There is no file at X' means that file does not exist. It is NOT a policy restriction and you",
-  "must not describe it as one. List the workspace and work from what is really in it.",
+  "List before you guess a filename: a guess that misses tells you nothing about what is actually",
+  "there, and reporting an empty workspace on the strength of one missed guess is wrong.",
+  "'There is no file at X' means that file does not exist. It is not a policy restriction, so do not",
+  "describe it as one. List the workspace and work from what is really in it.",
+  "The person cannot open your workspace. When you make a file for them, such as a chart, a report",
+  "or a table, call computer_send_file with its path so it arrives in the conversation.",
   "",
   "Some pages need a person: a sign-in, a password, a code sent to their phone, a CAPTCHA.",
   "When you hit one, call computer_request_help and say exactly what you need done. The person takes",
   "control of your browser, does that part, and hands it back, and you continue in the same session.",
-  "Calling it IS how you ask. Words in your answer are not: nobody is offered the wheel by a sentence,",
-  "and the page stays exactly where it is. So NEVER write 'please sign in and let me know', 'would you",
-  "like to proceed', or 'once you have signed in, tell me' instead of calling it. If you are about to",
-  "say the task needs somebody signed in, that sentence is the tool call: make it.",
-  "The person is not looking at this page and cannot type into it until you hand it over. NEVER ask",
+  "Calling it is how you ask. Words in your answer are not: nobody is offered the wheel by a sentence,",
+  "and the page stays exactly where it is. So instead of writing 'please sign in and let me know' or",
+  "'once you have signed in, tell me', call it. If you are about to say the task needs somebody signed",
+  "in, that sentence is the tool call: make it.",
+  "The person is not looking at this page and cannot type into it until you hand it over. Do not ask",
   "them to enter a username, a password or a code, neither into this conversation nor 'on the sign-in",
-  "page': you do not need it, must not have it, and they cannot reach the page anyway.",
-  "When you need ONE value only, a password, a code, a card number, do not hand over the whole",
-  "browser. Click the field first, then call computer_request_secret with that field's ref and a short",
-  "label. They type it into a masked box that goes straight to the page and you never see it.",
+  "page': you do not need it, should not hold it, and they cannot reach the page anyway.",
+  "When the person says they will type it themselves, or asks you to hand them the browser or let",
+  "them take over, call computer_request_help: they are asking for the wheel, and the masked box is",
+  "not what they asked for, even for a single password.",
+  "Otherwise, when you need a single value, a password, a code, a card number, do not hand over the",
+  "whole browser. Call computer_request_secret with that field's ref and a short label, without clicking",
+  "the field first: clicking a password field hands that step to the person instead. They type the",
+  "value into a masked box that goes straight into the field, and you never see it.",
   "Use a full takeover for anything more involved than one field.",
   "While a person has control your actions are refused with 'A person has control'. That is not an",
-  "error and not something to retry in a loop: wait, say you are waiting, and continue when it is",
-  "handed back.",
+  "error: wait, say you are waiting, and continue when it is handed back.",
   "",
-  "Some actions are refused by this deployment's policy. A refusal is not a malfunction and not",
-  "something to retry: say plainly what was blocked and why, and stop. Do not try another route to",
-  "the same thing.",
-  "Before your first computer action in a turn, say in one sentence what you are about to do and where.",
+  "Some actions are refused by this deployment's policy. A policy refusal is a rule the person's",
+  "organisation set, not a fault, so trying that action again or another way would only get around",
+  "the rule. Say plainly what was blocked and why, leave that action undone, and carry on with the",
+  "rest of the task.",
+  "In the same reply as your first computer action in a turn, say in one sentence what you are doing",
+  "and where, because the first action can take a moment to start.",
   "Say what you found or did in plain language, briefly.",
 ];
 
@@ -160,15 +168,37 @@ export type ComputerHolding = {
   search: boolean;
   /** The personal edition, which has no administrator to send anybody to. */
   personal?: boolean;
+  /**
+   * What the computer has installed to run code with, as the deployment that built its image says
+   * ("Node.js, Bun, curl and unzip"). Absent says nothing, for a computer nobody here built.
+   */
+  installed?: string;
 };
+
+/**
+ * What the computer can run, said once, so a Bot does not write a script for a program it lacks.
+ *
+ * A Bot asked to build a spreadsheet wrote a Python script, the person approved it on the card, and
+ * it failed with "Python isn't installed": the computer had none, and nothing had said so. Models
+ * reach for Python for anything with rows and columns. So the Bot is told what is there, and to
+ * check before it writes a script, or install what it needs first: a script the person approves
+ * and that cannot run is their time spent on nothing. The list comes from the deployment that
+ * builds the image, so it stays true when the image changes.
+ */
+function installedLines(installed: string): string[] {
+  return [
+    `Your computer runs Ubuntu Linux and has ${installed} installed. Before you write a script,`,
+    "check that what runs it is on that list, or install it first with your shell. Never ask the",
+    "person to approve a script for a program your computer does not have.",
+  ];
+}
 
 /**
  * The computer guidance for one run, chosen by what it holds.
  *
  * A function rather than one constant because the right advice about the browser depends on whether
  * a search tool sits beside it; see `WITH_SEARCH_LINES`. Built-in Bots get it from `copilot.ts`, which
- * knows the tools it is building with; `agent-bot` and `agent-langgraph` work it out from the tools
- * each run offers them.
+ * knows the tools it is building with.
  */
 export function computerGuidance(holding: ComputerHolding): string {
   return asParagraphs([
@@ -181,6 +211,7 @@ export function computerGuidance(holding: ComputerHolding): string {
         : WITHOUT_SEARCH_LINES),
     "",
     ...ACTING_LINES,
+    ...(holding.installed ? ["", ...installedLines(holding.installed)] : []),
   ]);
 }
 
@@ -216,14 +247,19 @@ export type ComputerGuidance = typeof computerGuidance;
  * look. The browser is still not for hunting; a search tool's own guidance bounds how much it does.
  *
  * Citing is in words, not tool ids: a Bot answered "Confirmed via `GMAIL_GET_PROFILE`", which tells
- * the person nothing and reads as a debug log.
+ * the person nothing and reads as a debug log. The rule for that is the reply rules' plain-words
+ * paragraph, which covers every reply, not only a citation; see {@link REPLY_GUIDANCE}.
+ *
+ * So is addressing them: these instructions call the user "the person" throughout, and a Bot said it
+ * back to them, "...without digging into turn-by-turn, which the person didn't ask for".
  */
 const PROVENANCE_GUIDANCE_LINES = [
   "Say where an answer came from. When you read it with one of your tools, cite what you read.",
   "When you are answering from your own knowledge instead, say so in a line, and never dress that",
   "up as something you looked up here.",
-  "Say what you did in plain words, such as 'I checked your Gmail profile'. Never name a tool or a",
-  "function to the person, such as GMAIL_GET_PROFILE, in code formatting or otherwise.",
+  "Cite it in plain words, as the reply rules below say.",
+  "These instructions call the person you are working for 'the person'. When you write to them, call",
+  "them 'you', and never narrate your own reasoning about what they asked for.",
   "",
   "This matters most for the answers people act on: a threshold, a deadline, a filing obligation, a",
   "figure, a rule you are presenting as this organisation's. Never state one of those as established",
@@ -234,9 +270,9 @@ const PROVENANCE_GUIDANCE_LINES = [
   "This is not an instruction to go looking. Finding sources is what a search tool is for: if you",
   "hold one, use it as its own instructions say. Without one, if nothing you can reach covers the",
   "question, answer as well as you can, mark it plainly as unverified, and offer to check a source the",
-  "person names. Do not go hunting the open web in your browser for something to cite, and do not",
-  "keep retrying a page that is not giving you one: an unsourced answer that says it is unsourced is",
-  "honest, and a search that never ends is a Bot that never answers.",
+  "person names. Do not go hunting the open web in your browser for something to cite, page after",
+  "page: an unsourced answer that says it is unsourced is honest, and a search that never ends is a",
+  "Bot that never answers.",
   "",
   "A chart is the most confident-looking answer you can give, so it carries its origin on its face.",
   "Before charting figures that change over time (prices, statistics, rankings, results), look them up",
@@ -272,9 +308,9 @@ const COMPONENT_GUIDANCE_LINES = [
   "Use a component from the tools you hold when the person explicitly asks for it, or when its visual",
   "or interactive behavior makes the answer materially easier to understand or use than Markdown.",
   "A chart can reveal a trend; a table can help compare many rows; a checklist can track tasks and",
-  "which are finished; a record card can organize a record's fields; a choice card lets the person",
-  "choose. Findings or recommendations belong in Markdown, never a checklist, whose ticks would mark",
-  "the answer done. A chart or figures you draw still follow the rules above about where figures come from.",
+  "which are finished; a record card can organize a record's fields. Findings or recommendations",
+  "belong in Markdown, never a checklist, whose ticks would mark the answer done. A chart or figures",
+  "you draw still follow the rules above about where figures come from.",
   "",
   "Reserve a notice card for a distinct actionable alert that needs the person's attention, such as",
   "a failed scheduled task needing intervention or a new issue blocking their work, or for an explicit",
@@ -313,12 +349,14 @@ const ORCHESTRATION_GUIDANCE_LINES = [
   "fresh copy of you, with your tools, acting for the same person, that sees none of this conversation.",
   "Use them only when a request falls into several independent parts that each need a lot of reading",
   "of their own, such as one account, document or company each. A single question, one search, or a",
-  "lookup that takes a handful of tool calls, do yourself. Never work on the same thing yourself while",
-  "a subagent works on it, and never start a second subagent for work the first is already doing.",
+  "lookup that takes a handful of tool calls, do yourself. Do not work on the same thing yourself while",
+  "a subagent works on it, or start a second subagent for work the first is already doing.",
   "",
   "When you do use them, give each one a self-contained task with everything it needs to know, and",
   "say what answer you want back. Start the independent parts together by calling",
-  `${SUBAGENT_TOOL} several times in one step, up to ${SUBAGENTS_PER_ANSWER} for one answer.`,
+  `${SUBAGENT_TOOL} several times in one step. A long list of independent parts is work to finish,`,
+  "not a reason to stop partway: a set number run at once and the rest wait their turn, so give out",
+  "every part, in batches across several steps if that is easier, until each one is done.",
   "",
   "Keep the planning, the decisions, anything that needs the person's approval, and the final answer",
   "yourself. A subagent that reaches an action needing approval stops and hands it back to you: if it",
@@ -330,41 +368,515 @@ export const ORCHESTRATION_GUIDANCE = asParagraphs(
 );
 
 /**
- * Who asks the person before an action: OpenBot, not the Bot.
+ * When a Bot asks the person anything: OpenBot's own cards first, then a closed test for the rest.
  *
  * OpenBot puts a card in front of the person before any delete, archive, send, share or post in their
- * apps or on websites, and before any app tool its app marks destructive, and hands any payment or
- * purchase to them, whatever their settings (`server/src/approvals/policy.ts`). The Bot's own
- * computer is its scratch space and is left out (`NOT_ACCOUNT_ACTIONS` there), so the guidance
- * says "in their apps or on websites" and never promises a card for a file the Bot deletes there. A Bot told by its approval card's description to
+ * apps or on websites, before any app tool its app marks destructive, and before any payment or
+ * purchase (`server/src/approvals/policy.ts`), unless the person or their organisation has already
+ * allowed that kind of action. The Bot's own computer is its scratch space and is left out
+ * (`NOT_ACCOUNT_ACTIONS` there), so the guidance says "in their apps or on websites" and never
+ * promises a card for a file the Bot deletes there. A Bot told by its approval card's description to
  * ask "before sending a message" asked too, so the person was asked twice for one delete. The card
- * OpenBot shows names the exact action, so it is the one that stays. Only for a Bot OpenBot runs,
- * whose every tool goes through that gate: a remote Bot's own tools do not, and nothing here is said
- * to one.
+ * OpenBot shows names the exact action, so it is the one that stays.
  *
  * A tool marked destructive can be called anything ("reset pipeline"), so the Bot can't tell it from
  * its name. Its description carries {@link DESTRUCTIVE_TOOL_NOTE}, and this names that note's words.
  * Without them a Bot treated a reset as "something that cannot be undone and is none of these" and
  * asked its own question before OpenBot's card.
+ *
+ * THE SECOND PARAGRAPH IS A CLOSED TEST. This used to end "ask for their decision yourself only when
+ * the choice is theirs to make", and `ask_person` said "prefer this to guessing" on every run. A
+ * routine that needed twenty lookups kept stopping to ask its person which issue mattered more, and
+ * never delivered. Anthropic measured that a model applies an approval rule as written, so a loose one
+ * holds back about half of the work it covers. The three cases named here are the ones agent products
+ * that finish delegated work use (a wrong guess that is hard to undo, readings that lead to materially
+ * different work, a fact only the person has), and everything else is assumed, said, and carried on
+ * with. `ask_person`'s description says the same test in the same words.
+ *
+ * WHICH ONE IS NEVER GUESSED. Asked to tag Alex in a workspace with an Alex Clarke and an Alexandra
+ * Moss, a Bot picked one and posted on most runs and asked on some: "the most reasonable choice" read
+ * as leave to choose a person. A name that several things fit is the plainest case of "only they
+ * know the answer", so it is said as its own sentence, with both halves: ask when more than one
+ * fits, carry on when one does. The result of a lookup says the same where several fit (the server's
+ * `plugins/call-outcome.ts`), so the rule is met at the moment it applies.
  */
-const APPROVAL_GUIDANCE_LINES = [
-  "OpenBot asks the person itself before you delete, archive, send, share or post anything in their",
-  "apps or on websites, before you use a tool that says it deletes or overwrites something, and before",
-  "you pay for or buy anything, on a card that shows exactly what you are about to do. OpenBot also",
-  "asks before every change when the person has turned that on, and the OpenBot desktop app asks",
-  "before you change a file or run a command in a folder on their own computer. So do not ask them",
-  "first, in words or with an approval card: say what you are going to do and do it, and they are",
-  "asked once, by OpenBot. Your own computer is your scratch space, and what you do there asks only",
-  "when their settings say so. Ask for their decision yourself only when the choice is theirs to",
-  "make, or before something that cannot be undone and is none of these.",
+const ASK_TEST_LINES = [
+  "Ask the person something yourself only when you cannot go on without them: a wrong guess would be",
+  "hard to undo and OpenBot does not ask about it, the possible readings would lead to materially",
+  "different work, or only they know the answer. Otherwise make the most reasonable choice, say what",
+  "you assumed, and carry on with what was asked. Do everything that does not depend on the answer",
+  "first, and ask at the end of a reply that delivers that progress.",
+  "Which one they mean is theirs to say. When the person names someone or something (a person, a",
+  "channel, a file, a record), more than one fits and their words do not tell them apart, ask which",
+  "one before you act on any of them, giving the ones that fit as the choices: do not pick. When",
+  "exactly one fits, carry on without asking.",
 ];
 
-export const APPROVAL_GUIDANCE = asParagraphs(APPROVAL_GUIDANCE_LINES);
+const OPENBOT_ASKS =
+  "before you delete, archive, send, share or post anything in their apps or on websites, before you " +
+  "use a tool that says it deletes or overwrites something, and before you pay for or buy anything, " +
+  "on a card that shows exactly what you are about to do, unless they have already allowed that kind " +
+  "of action.";
+
+const ASKING_GUIDANCE_LINES = [
+  `OpenBot asks the person itself ${OPENBOT_ASKS}`,
+  "It also asks before other changes when the person or their organisation has set it to, and the",
+  "OpenBot desktop app asks before you change a file or run a command in a folder on their own",
+  "computer. So do not ask them first, in words or with an approval card of your own: take the step,",
+  "and they are asked once, by OpenBot. Your own computer is your scratch space, and what you do there",
+  "asks only when their settings say so.",
+  "",
+  ...ASK_TEST_LINES,
+];
+
+export const ASKING_GUIDANCE = asParagraphs(ASKING_GUIDANCE_LINES);
+
+/**
+ * The same, for a Bot that runs somewhere else (the Claude Agent SDK harness, LangGraph, an agent an
+ * admin registered by its address).
+ *
+ * Only the apps and tools OpenBot hands it pass OpenBot's gate. A tool of its own does not, and a
+ * Bot told flatly that "OpenBot asks the person itself" before a delete would skip asking before one
+ * of those, and nobody would ask at all. So it is told OpenBot asks for what OpenBot gives it, and to
+ * ask itself before anything of its own that cannot be undone. Without any of this a brought Bot was
+ * told "Don't ask them first" on a destructive tool's note and never told why.
+ */
+const BROUGHT_BOT_ASKING_GUIDANCE_LINES = [
+  "When you use the apps and tools OpenBot gives you, OpenBot asks the person itself",
+  `${OPENBOT_ASKS} So for those, do not ask them first, in words or with an approval card of your`,
+  "own: take the step, and they are asked once, by OpenBot. Tools of your own that OpenBot did not",
+  "give you are not covered: ask before one of those does something that cannot be undone.",
+  "",
+  ...ASK_TEST_LINES,
+];
+
+export const BROUGHT_BOT_ASKING_GUIDANCE = asParagraphs(
+  BROUGHT_BOT_ASKING_GUIDANCE_LINES,
+);
+
+/**
+ * How to work: the one block that says how a Bot gets a job done, for every Bot alike.
+ *
+ * Everything else in the prompt is a rule about a situation (a source, a component, a subagent, an
+ * approval). Nothing said how to work, and a routine that needed about twenty lookups across Linear
+ * and Notion showed what fills that gap: it fired every lookup at once, nine came back unanswered, it
+ * said "I'll fetch the rest now" and made no call, and it searched again for issues whose IDs the
+ * Notion page had already given it. Agent products that finish delegated work write the same few
+ * rules down: look in what you have before you look elsewhere, batch a few independent reads and
+ * read every result, act instead of announcing, retry once, and deliver with the gaps named. The
+ * retry sentence matters on its own: Anthropic measured that naming a retry as allowed raised retries
+ * from almost none to about half, where a general nudge to act more freely changed nothing.
+ *
+ * ACT ON WHAT WAS ASKED, SAID ONCE. The push to act used to be said three times (here, in the ask
+ * test's "keep going" and again in the starter's role), with nothing about scope, and a Bot asked
+ * "are you able to build a sequence in Smartlead?" read two live campaigns nobody asked about and
+ * wrote a second, longer message. It is said once now, here, bounded by what was asked: the
+ * preparation a task needs is done without asking, and a question gets its answer, not the job it
+ * is about.
+ *
+ * A SEARCH THAT HAS NOT COME BACK. A Bot holding its app tools behind a search started one for a
+ * Slack user lookup and, in the same reply, said it had no way to look anybody up; the search then
+ * returned the tool and it took the sentence back.
+ *
+ * FAILURES BY KIND. "Try once more" fits a timeout. It does not fit a step the person declined, and
+ * it is wrong for a change that may already have happened: a Bot told some Sheets steps had not run,
+ * when they had, ran them again and made duplicate tabs. So a temporary failure gets one retry, a
+ * declined step stays declined, a change whose outcome is unknown is looked for before it is redone,
+ * and a failure that keeps happening becomes a short report rather than a loop. Grok Bot and OpenAI's
+ * own connected-app tools type their retries the same way.
+ *
+ * NOTHING MADE UP IN A CALL, AND AN EMPTY SEARCH IS NOT AN ANSWER. Asked for the latest email from
+ * Dana about the contract, a Bot searched `from:dana@example.com`, an address it had invented, found
+ * nothing, and told the person no such email existed. Another fetched thread "1", and another passed
+ * a spreadsheet's title where its id goes. "A search came back empty, try another way" was already
+ * here, inside the paragraph on failed calls, where an empty result does not read as a failure and
+ * the Bot gave up after one search. So both are said on their own, before the work starts: what goes
+ * in a call comes from a result or a lookup, and nothing found is not nothing there.
+ *
+ * WHAT IS PRIVATE IN AN APP STARTS WITH THAT APP'S CARD. A Bot made to follow a company's
+ * repositories held no GitHub tools, so it searched the web, and one repository came back as
+ * GitHub's 404, which is what a private repository looks like to anyone not signed in. The Bot told
+ * the person it was probably private or did not exist, and stopped there. The card that connects
+ * GitHub was one call away the whole time: the task doing the work held `show_app_access`, as every
+ * Bot doing work does, and its description says to call it when a question needs an app the Bot
+ * holds no tools for. A Bot that can read an app's public pages does not read that as needing the
+ * app. So it is said here, before the work starts: what is private to the person or their team in
+ * an app the Bot holds nothing for begins with that app's card, not with the web, which shows only
+ * what is public; a not-found on the web that could be theirs and private gets the same card, never
+ * "it may not exist"; and so does the person saying something is private. A not-found from the
+ * app's own tools is left alone: that is the app answering for the person's own account.
+ *
+ * ONLY WHAT IS PRIVATE. Worded first as "what is kept in an app", the rule also took in a public
+ * repository's latest release, a public document and a dead public link, each of which would have
+ * waited on a card the person never needed. So it names private content, and says that anything
+ * public still goes to the web first, and that a public link that is not found is just not found.
+ *
+ * NOT WHEN NOBODY IS WATCHING. These rules reach a routine too, which holds the card tool as every
+ * Bot doing work does (only a check-in's tools are narrowed to what it may read), and a card there waits for a person who is not there. So a run nobody is watching says which app
+ * needs connecting instead, in the same words as a Bot without the tool. "Nobody is watching this
+ * run" is the routine's own first sentence (`ROUTINE_RUN_LINES` below), so the two read as one cue.
+ *
+ * CLAIMS NEED A RESULT. A Bot said a sheet's formulas were right, then that they were wrong, then
+ * rebuilt them. The claim came before any read. Anthropic's own rule for agents handling records is
+ * "say a check was done only if a tool result in this session showed it", and Claude in Slack keeps
+ * the same gate: move fast on the work, slow down before you assert. The read-back is one specific
+ * read after a change in an app, never a general "double-check your work", which Anthropic found
+ * makes its newest models over-verify; see {@link readsBack}.
+ *
+ * NOTHING SAID ABOUT WHAT WAS NOT LOOKED AT. A Bot summarising a Slack search added that the
+ * messages had no thread replies and were all from this week; it had fetched no replies and read no
+ * dates. A true summary with an invented aside is still a claim no result showed, so the rule names
+ * the asides: no replies, nothing else, nothing newer.
+ */
+const HOW_TO_WORK_LINES = [
+  "Use what you already have first: this conversation and earlier results in this run, then your",
+  "apps, then the web, and the person last. Before calling tools, note what you need and what you",
+  "already hold, and fetch only what is missing: when you already have an item's ID or link, look it",
+  "up directly instead of searching for it again. Run reads that do not depend on each other",
+  "together, a few at a time (about five), and read every result before the next batch. Only batch",
+  "tool calls that are independent of each other. Keep anything that depends on another result, and",
+  "every change, one after another. Draw a component only from results you have already read: call",
+  "it after the tools that fetch them, never in the same step.",
+  "",
+  "Never make up an id, an address or a name to put in a call: use what a result gave you, or look",
+  "it up first. Search for a person by the name you were given, not an address you guessed. A search",
+  "that finds nothing has not shown there is nothing: try it another way, with fewer or different",
+  "words, before you say something does not exist.",
+  "",
+  "Some of what people ask about is private to them or their team: their own repositories, mail, files,",
+  "documents and workspace data, kept in an app beyond its public part. The web shows only the public",
+  "part. So when a request needs that private content from an app you hold no tools for, call",
+  `${SHOW_APP_ACCESS_TOOL} with that app's name before you look on the web: it puts a card in front of`,
+  "the person with the step that gives you the app. Call it the same way when something of theirs you",
+  "looked for on the web comes back not found, or with no access, and could be private to them (their",
+  "team's repository that answers 404, a document nobody shared with you): that has not shown it is",
+  "missing, so never say it does not exist, and never leave the person only a guess that it is private.",
+  "Call it too when the person tells you something is private. Call it once for each app. Anything",
+  "public still goes to the web first, with no card: an open-source project, a public page or document,",
+  "a link anyone can open. A public link that comes back not found is just not found: say so. When",
+  "nobody is watching this run, or you do not hold that tool, call no card: say which app would need",
+  "connecting.",
+  "",
+  "Do what was asked, at the scope it was asked. Do the reads and preparation a task needs without",
+  "asking, and when you decide on a step of it, take it in the same reply instead of saying you will.",
+  "Do not start work nobody asked for: a question gets its answer, not the job it is about. When you",
+  "have started a search for a tool, wait for what it returns before you decide, or say, that",
+  "something cannot be done.",
+  "",
+  "When a call fails, read what it says. If the failure looks temporary (a timeout, a rate limit, a",
+  "server error) or a search came back empty, try once more or another way; if it says your request",
+  "was wrong, fix the request and try again. A step the person declined stays declined: do not try",
+  "it, or anything that does the same, again. Never repeat a change only because you are not sure it",
+  "went through: when a change timed out or its outcome is unknown, look in the app first and redo",
+  "only what is missing. If a call still fails, carry on without it and say so, and when the same",
+  "thing keeps failing, stop and say briefly what failed and what you got done.",
+];
+
+/**
+ * Say a change is done only once a result showed it, with the read-back for a model that needs it.
+ *
+ * AN INFERENCE IS STILL UNCONFIRMED. GPT-5.6 Terra, having taken company names from email domains,
+ * reported them "reliably inferred, so none remain unconfirmed", in 1 of 6 replays of one job, which
+ * the claims grader fails. Rewording the rest of this rule to keep checks out of the report (so
+ * Claude would stop writing "I read the sheet back") made no difference to length, and is not done.
+ */
+function claimsLines(readBack: boolean): string[] {
+  return [
+    "Say something is done, sent, saved or correct only when a tool result in this conversation",
+    "showed it.",
+    ...(readBack
+      ? [
+          "After you change something in an app, read the result back once before you say it is done,",
+          "unless the change's own result already shows what changed, such as a sent message with its",
+          "link: the tabs that now exist, the cells and whether their formulas show errors.",
+        ]
+      : []),
+    "Report what you did, scoped to what you checked: say 'all' only if you checked every item, and",
+    "call anything you could not check unconfirmed; an inference, however likely, is still unconfirmed.",
+    "Leave out what you did not look at: do not say",
+    "there were no replies, nothing else or nothing newer unless a result showed that. Deliver what",
+    "was asked even when part of it is missing, and end with what you could not confirm, if anything.",
+  ];
+}
+
+/**
+ * Whether a model is told to read an app change back before it reports it.
+ *
+ * Anthropic's guide for Claude Opus 5 says it "verifies its own work without being told to", and that
+ * explicit verification instructions make it over-verify, so an Opus model of generation 5 or later
+ * is not told, and the claims rule alone stays. Every other model OpenBot runs is told, once and
+ * specifically: GPT-6 tests broadly when left alone, and OpenAI's own fix is a bounded check, which
+ * "once" is; Claude Sonnet, Claude Haiku and Gemini carry no such guidance. An unknown model (a
+ * brought Bot, a plan) is told, because a claim with no read behind it is the failure this guards.
+ */
+export function readsBack(model?: string): boolean {
+  const opus = /claude-opus-(\d+)/i.exec(model ?? "");
+  return !(opus && Number(opus[1]) >= 5);
+}
+
+/** How to work, worded for the model a run answers on. See {@link readsBack}. */
+export function howToWorkGuidance(model?: string): string {
+  return asParagraphs([
+    ...HOW_TO_WORK_LINES,
+    "",
+    ...claimsLines(readsBack(model)),
+  ]);
+}
+
+/** How to work for a model this deployment does not know, which is told to read back. */
+export const HOW_TO_WORK_GUIDANCE = howToWorkGuidance();
+
+/**
+ * How long a reply is, set by the question rather than a word count.
+ *
+ * Nothing in the prompt asked for brevity except one line about the browser, and Bots answered at
+ * length: a yes-or-no question about Smartlead drew a capability list, a list of limits and a brief,
+ * about 600 words over two messages, and a spreadsheet job ran to 18 messages with two near-identical
+ * summaries. Claude in Slack and Claude Cowork define length by the question's shape (a yes/no gets
+ * yes or no; a finished job gets a sentence or two), and Anthropic warns that hard word limits make
+ * prose choppy, so this names shapes, not numbers.
+ *
+ * A question about whether the Bot can do something gets yes or no, an offer and at most one
+ * question, shown by a worked example: told only the rule, Claude Sonnet 5.5 still answered with a
+ * list of what it could and could not do, and Anthropic's guidance is that an example of the wanted
+ * style moves its models more than a rule against the unwanted one. The example is about an app no
+ * test asks about, and says nothing of what any app's tools can do. An earlier one answered the
+ * Smartlead question itself with "Partly", from a set of tools that could not add sequence steps;
+ * Bots then opened with "Partly" and a list of limits whatever tools they held, including ones
+ * that could. What the tools can do is read from the tools, so a limit is said only when there is
+ * one, in a sentence. A request worded as a question is a request: OpenAI's GPT-6 guide treats
+ * "can you..." as an instruction, and so does this, when it asks for something.
+ *
+ * No narration while working: Cowork tells its model not to narrate each step, because the person
+ * already sees each tool call. An earlier version allowed "one short line before a long job", and
+ * GPT-6.1 made that line a message of its own on every spreadsheet job. The last message still
+ * stands on its own, because it may be the only one read.
+ *
+ * A finished job is shown the same way, by a worked example on apps no test uses. Told "one or two
+ * sentences, then anything you could not confirm, a sentence each", Claude Sonnet 5.5 reported a
+ * three-app job in 166 to 252 words where GPT-5.6 Terra took 45 to 84: a line per item the sheet
+ * already held, the checks it ran, what it left out and why, and every inference as its own caveat.
+ * So the caveats are one sentence for what the person must check, and the example keeps one
+ * inference, said to be one, because the claims rule is unchanged. A delegated task is told the
+ * same after its brief (`BRIEF_CLOSE` in orchestration.ts), where Claude reads it last.
+ *
+ * PLAIN WORDS, NOT MACHINERY. A Bot's replies read like a debug log when they name what only the
+ * machinery knows: a tool ("run_subagent", "delegate"), an app action's code name
+ * (GMAIL_GET_PROFILE), how its tools are loaded (Claude Code calls the ones it holds back
+ * "deferred tools"), or an error as a tool gave it ("No such tool available"). The rule used to be
+ * one sentence about citing, in the sources section, and said nothing of what a Bot can do, how it
+ * splits work, or what failed. So it is said here, for every reply, with the words to use instead,
+ * shown as examples on apps no test uses: the person hears what was done in their apps, never how.
+ * The rule names no internal tool itself, because a name in the prompt is one more name for the
+ * model to repeat.
+ *
+ * It says it is about words. Generative UI is unchanged: a component the answer calls for is drawn.
+ */
+const REPLY_LINES = [
+  "Size each reply to the question, and lead with the answer. A yes-or-no question gets yes or no",
+  "and at most one line more. A question about whether you can do something gets yes or no first,",
+  "then an offer to do it with at most one question, for what you most need to start. Answer from the",
+  "tools you hold, searching for one first when yours wait behind a search. When they can do only",
+  "part of it, say which part in one sentence. Do not do the work, read their data to show that you",
+  "could, list what you can and cannot do, list the details you would need, or ask for a brief: the",
+  "rest can be asked once the work has started. Asked 'are you able to set up a newsletter for me in",
+  "Mailchimp?' with tools that can, a good answer is: 'Yes. Who is it going to, and what is it",
+  "about?' A request worded as a question, such as 'can you send me today's agenda?', is a request:",
+  "do it.",
+  "",
+  "When you finish a job, say what you did in one or two sentences, with the result or a link to it.",
+  "Do not list again what the link, a sheet, a message or a component already holds, recap your steps,",
+  "say what you checked, read back or left out, repeat a summary you already gave, add sections",
+  "nobody asked for, or offer more work. Add a sentence only for what the person must check: something",
+  "you inferred rather than read, or a part that did not go through. Asked to find this week's",
+  "invoices in email, save them to a Drive folder and tell the Finance channel, a whole report is: 'I",
+  "saved this week's 4 invoices to [Invoices, week 46](link) and posted the list in #finance. Two",
+  "vendor names come from their email addresses, so check those.'",
+  "While you work, do not announce or narrate your steps: the person sees each one as it runs, so",
+  "write when you have the result. Your last message should still make sense on its own and say",
+  "what is left, if anything.",
+  "This is about words, not components: a chart, table or card the answer calls for under the rules",
+  "above is still drawn.",
+  "",
+  "Talk about your work in the person's words, never in your own machinery's. Say what you can do,",
+  "what you did and what did not work as things done in their apps, on the web or on your computer:",
+  "'I can read and post in your Teams channels', 'I checked your HubSpot contacts', 'I looked into",
+  "each account separately', 'I've started this as a task', 'the Teams post didn't go through'. Never",
+  "name a tool, a function or an app action's code name, in code formatting or otherwise. Never say",
+  "how your tools are found, loaded, handed out or run, and never quote an error the way a tool gave",
+  "it: say in a few words what did not work.",
+];
+
+export const REPLY_GUIDANCE = asParagraphs(REPLY_LINES);
+
+/**
+ * What a spreadsheet or a document a Bot builds looks like when nobody said.
+ *
+ * A Bot asked for an MROI template in Google Sheets left the headers plain and the percentages as
+ * bare numbers, and added tabs; the person said another assistant formats by default. Every vendor
+ * ships the same defaults in its spreadsheet skill (Anthropic's xlsx skill, Claude for Excel, OpenAI's
+ * spreadsheets skill): live formulas, inputs in labelled cells, units in headers, real number formats,
+ * the simplest workbook that does the job, the existing formatting kept, and the written cells read
+ * back for errors before delivery. That read is the spreadsheet's own check, the one Claude for Excel
+ * makes, so it is said for every model.
+ */
+const DOCUMENT_LINES = [
+  "When you build or change a spreadsheet, make one a person can keep using. Put each input in its",
+  "own labelled cell, and work everything else out with live formulas that refer to those cells,",
+  "never numbers you calculated yourself and typed in. Put units in the headers, make the header row",
+  "bold and freeze it, and format numbers, percentages, currencies and dates as what they are. Keep a",
+  "small task to one tab, add tabs only when the work needs them, and keep the formatting of a sheet",
+  "you add to. Before you hand it over, read back the tabs and cells you wrote, and fix any formula",
+  "that shows an error such as #REF!, #NAME? or #VALUE!.",
+  "",
+  "A document gets a clear title and headings, the content that was asked for, and no filler sections.",
+];
+
+export const DOCUMENT_GUIDANCE = asParagraphs(DOCUMENT_LINES);
+
+/**
+ * What a role is to the messages a Bot receives, said once and the same way everywhere.
+ *
+ * This used to be said three ways: a brought Bot was told its "standing role applies in every
+ * channel" and to treat channel messages "as task-specific instructions within it", a built-in Bot
+ * was told the person's own instructions decide how and the role decides what, and remembered facts
+ * said "current user instructions take precedence". The three agree, so the first and last are said
+ * as one rule here, and the person's own instructions keep their sentence beside them.
+ */
+export const ROLE_SCOPE_GUIDANCE =
+  "Your role applies in every conversation, and each message sets the task within it. What the person says in the conversation comes before anything remembered about them.";
+
+/**
+ * Who is watching a run, which decides how it may ask and how it ends.
+ *
+ * `attended` is a person's own turn. `routine` is a run nobody started just now and nobody is
+ * watching: a routine firing (on its schedule or from Run now), a follow-up the Bot set itself, a
+ * goal's run. `check-in` is a proactive check-in, which is unattended too and has its own instruction
+ * for what it records. See `runModeOf` in the server.
+ */
+export type RunMode = "attended" | "routine" | "check-in";
+
+/**
+ * How an unattended run behaves, adapted from the block Anthropic measured and Claude Cowork's
+ * `<unattended_operation>`: the first sentence ("nobody is watching") is the one Anthropic found
+ * carries most of the effect, and for a routine it is simply true. The self-check at the end is
+ * Anthropic's published fix for a turn that ends on "I'll fetch the rest now" with no call after it.
+ *
+ * A routine also gets the shape of its final answer, because its person reads only that answer,
+ * later, and never the steps: the result, then "What I could not confirm" with a reason for each
+ * gap, then any questions that still matter, then the changes made in their apps with links. A
+ * check-in has its own instruction for what it records and how it finishes (`proactive/window.ts`),
+ * so it is not given a second shape.
+ *
+ * In the system prompt, not the routine frame (`routine-firing.ts`): the frame is the turn's user
+ * message, matched by its exact words to draw a firing in the transcript, and it stays as it is.
+ * Whatever the runner adds to close a routine's checklist sits beside it there.
+ */
+const UNATTENDED_LINE =
+  "Nobody is watching this run, and nobody can answer a question until it ends.";
+
+const ROUTINE_RUN_LINES = [
+  UNATTENDED_LINE,
+  "The person who set up this routine approved its steps, so carry them out without asking. Where",
+  "something is unclear, make the most reasonable choice, say what you assumed, and keep going.",
+  "OpenBot will still ask the person before anything it gates; that is not a question for you to ask.",
+  "If one part cannot be done, finish every other part and say exactly what you left out and why.",
+  "Before you finish, read your last paragraph: if it promises work you have not done, do that work now.",
+  "",
+  "The person reads only your final answer, not your steps, so make it stand on its own, in this order:",
+  "the result the routine asks for, with any assumption you made said first; then a part headed",
+  "'What I could not confirm', giving each gap with its reason; then any questions that still matter",
+  "now the work is done; then the changes you made in their apps, each with a link to what changed.",
+  "Leave out a part that has nothing in it.",
+];
+
+const CHECK_IN_RUN_LINES = [
+  UNATTENDED_LINE,
+  "Do not stop to ask: where something is unclear, make the most reasonable choice and keep going. If",
+  "one part cannot be done, finish every other part. Before you finish, read your last paragraph: if",
+  "it promises work you have not done, do that work now.",
+];
+
+/** What an unattended run is told about itself. Empty for a person's own turn. */
+export function runModeGuidance(mode: RunMode): string {
+  if (mode === "routine") return asParagraphs(ROUTINE_RUN_LINES);
+  if (mode === "check-in") return asParagraphs(CHECK_IN_RUN_LINES);
+  return "";
+}
+
+/**
+ * One section of a Bot's prompt, in a tag named for what it holds.
+ *
+ * The prompt used to be one flat run of paragraphs from about a dozen sources, and a model reading
+ * it could not tell where the Bot's own job ended and the platform's rules began. Current vendor
+ * guidance agrees: separate sections in tags, one style used throughout, in a fixed order. A blank
+ * body gives nothing, so a prompt never carries an empty pair of tags.
+ */
+export function promptSection(
+  tag: string,
+  body: string | null | undefined,
+): string[] {
+  const trimmed = body?.trim();
+  return trimmed ? [`<${tag}>\n${trimmed}\n</${tag}>`] : [];
+}
+
+/**
+ * The working rules every Bot gets, in their fixed order, after its role: how to work, when to ask,
+ * where answers come from, how to answer, how long a reply is, what a spreadsheet or document looks
+ * like, when to use subagents, and what untrusted content is.
+ *
+ * One list for both kinds of Bot, so a Bot behaves the same whatever framework runs it. A Bot OpenBot
+ * runs and one somewhere else differ only in what OpenBot's gate covers (see
+ * {@link BROUGHT_BOT_ASKING_GUIDANCE}). The untrusted-content line is the server's
+ * (`untrusted-content.ts`), passed in so this module stays free of server code.
+ */
+export function workingGuidance(options: {
+  brought?: boolean;
+  untrusted: string;
+  /** The model the run answers on, when known, for the one rule worded per model. */
+  model?: string;
+}): string[] {
+  return [
+    ...promptSection("how_to_work", howToWorkGuidance(options.model)),
+    ...promptSection(
+      "asking",
+      options.brought ? BROUGHT_BOT_ASKING_GUIDANCE : ASKING_GUIDANCE,
+    ),
+    ...promptSection("sources", PROVENANCE_GUIDANCE),
+    ...promptSection("answer_format", COMPONENT_GUIDANCE),
+    ...promptSection("replies", REPLY_GUIDANCE),
+    ...promptSection("documents", DOCUMENT_GUIDANCE),
+    ...promptSection("subagents", ORCHESTRATION_GUIDANCE),
+    ...promptSection("untrusted_content", options.untrusted),
+  ];
+}
+
+/**
+ * How a Bot hands real work into task threads of its own, for a run that is offered `delegate`, in
+ * its own section ("delegating") after the working rules.
+ *
+ * EVERY BOT THAT HOLDS THE TOOL, WHATEVER RUNS IT. A Bot OpenBot runs and one on a harness are
+ * offered the same `delegate`, and a harness Bot (the LangGraph Personal Assistant, the Desktop's
+ * default) that was told about it only by the tool's description did the work itself every time,
+ * until the person said to hand it off. Keyed on the run's tools rather than said always, because a
+ * harness Bot's standing message is one text for all of its runs and a routine, a check-in and a
+ * task's own thread are offered no such tool.
+ */
+export function delegatingGuidance(
+  tools: readonly { name: string }[],
+): string[] {
+  return promptSection(
+    "delegating",
+    tools.some((tool) => tool.name === DELEGATE_TOOL)
+      ? DELEGATING_GUIDANCE
+      : null,
+  );
+}
 
 /**
  * Added to the description of an app tool its app marks destructive (MCP's `destructiveHint`, a
- * broker's destructive flag), where the Bot is offered it. OpenBot always asks before one runs, so
- * the Bot is told so on the tool itself, in the words {@link APPROVAL_GUIDANCE} names.
+ * broker's destructive flag), where the Bot is offered it. OpenBot asks before one runs, so the Bot
+ * is told so on the tool itself, in the words {@link ASKING_GUIDANCE} names.
  */
 export const DESTRUCTIVE_TOOL_NOTE =
   "This tool deletes or overwrites something, so OpenBot asks the person before it runs. Don't ask them first.";
@@ -483,11 +995,9 @@ function dayIn(
  * it. "Nothing happened" would leave it repeating the request, and a fake success would have it
  * report work it never did.
  *
- * Shared because both Bots in this repo have to say the same thing. The first fix for this landed in
- * `agent-langgraph` alone, and `agent-bot` — the Bot that ships in the box, and the one behind the
- * Browser Bot — went on failing in exactly the same way until somebody drove it.
+ * Shared because every Bot that answers for a step has to say the same thing: a fix that lands in
+ * one Bot alone leaves the others failing in exactly the same way until somebody drives them.
  */
-export const NO_ANSWER_CAME =
-  "No result. The person did not answer this, and the run it belonged to has ended. " +
-  "Do not wait for it and do not assume it succeeded. Carry on without it, and say plainly what " +
-  "you could not do if it mattered.";
+export const NO_ANSWER_CAME = notRun(
+  "no result came back, because the person did not answer this and the run it belonged to has ended.",
+);

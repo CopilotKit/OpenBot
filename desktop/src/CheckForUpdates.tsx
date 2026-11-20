@@ -1,18 +1,29 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import { DOESNT_UPDATE_ITSELF } from "../../shared/desktop-updates";
+import {
+  DOESNT_UPDATE_ITSELF,
+  type UpdateReadiness,
+  updateOffered,
+} from "../../shared/desktop-updates";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { type AppUpdate, describe } from "./UpdateOffer";
 
 /** What the shell found when asked, as `app_update::Asked` names it. */
 export type Checked =
-  | { found: "available"; version: string; current: string }
+  | {
+      found: "available";
+      version: string;
+      current: string;
+      ready?: UpdateReadiness | null;
+    }
   | { found: "upToDate"; current: string }
   | { found: "installing"; version: string; current: string }
   | { found: "notOffered"; current: string };
 
 /** How often to ask the shell how an install is going, as the offer at the top does. */
 const PROGRESS_EVERY_MS = 500;
+/** How often to ask how ready a newer version found is, as the offer at the top does. */
+const READY_EVERY_MS = 5_000;
 
 /**
  * Whether this build updates itself, as the shell's offer says: `null` while asking, `"unknown"` if
@@ -39,6 +50,7 @@ export function CheckForUpdates() {
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<AppUpdate["installing"]>(null);
   const [installFailure, setInstallFailure] = useState<string | null>(null);
+  const [ready, setReady] = useState<UpdateReadiness | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -76,6 +88,26 @@ export function CheckForUpdates() {
       clearInterval(timer);
     };
   }, [installing]);
+
+  // A newer version found goes on getting ready after the check: asked again until it is.
+  const found = checked?.found === "available";
+  useEffect(() => {
+    if (!found || ready?.state === "ready") return;
+    let current = true;
+    const ask = async () => {
+      try {
+        const offer = await invoke<AppUpdate>("app_update_offer");
+        if (current && offer.ready) setReady(offer.ready);
+      } catch {
+        // How ready it is is a courtesy. The check already said it is there.
+      }
+    };
+    const timer = setInterval(() => void ask(), READY_EVERY_MS);
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [found, ready?.state]);
 
   async function check() {
     setChecking(true);
@@ -134,8 +166,8 @@ export function CheckForUpdates() {
       {checked?.found === "available" && (
         <>
           <p role="status">
-            OpenBot {checked.version} is available. You are running{" "}
-            {checked.current}.
+            {updateOffered(checked.version, ready ?? checked.ready)} You are
+            running {checked.current}.
           </p>
           <button
             type="button"

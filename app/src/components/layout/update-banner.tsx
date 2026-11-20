@@ -1,3 +1,4 @@
+import { updateOffered } from "@openbot/shared/desktop-updates";
 import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,8 @@ import { queryClient } from "@/query-client";
 
 /**
  * A slim bar saying a newer OpenBot Desktop is out, with Update and restart, until this person
- * closes it.
+ * closes it. It says how ready the new version is: downloading in the background while this one
+ * keeps running, then ready to install in a few minutes. Update and restart works at any point.
  *
  * Only inside OpenBot Desktop. The desktop app reads its update feed and this asks the app, so a
  * browser on a self-hosted OpenBot draws nothing and asks nothing. Closing it lasts until a newer
@@ -32,40 +34,49 @@ export function UpdateBanner() {
   const progress = offer.data?.installing ?? null;
   const busy = install.isPending || progress !== null;
 
+  const said = updateOffered(version, offer.data?.ready);
+
   return (
     <aside
       aria-label="OpenBot update"
-      className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
+      className="flex shrink-0 flex-col border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
     >
-      <p className="text-foreground">OpenBot {version} is available.</p>
-      {busy ? (
-        <p className="text-muted-foreground" role="status">
-          {describe(progress)}
+      {/* One line, as tall as its buttons, in every state, so the page under it never moves as
+          the new version downloads and gets ready. A sentence too long for a narrow window is cut
+          short, with the whole of it on hover. */}
+      <div className="flex h-7 min-w-0 items-center gap-x-2">
+        <p className="min-w-0 truncate text-foreground" title={said}>
+          {said}
         </p>
-      ) : (
-        <span className="flex items-center gap-2">
-          <Button
-            // Foreground, not the link variant's primary, which is a mid grey on the dark bar.
-            className="px-0 text-foreground underline"
-            onClick={() => install.mutate()}
-            size="sm"
-            variant="link"
-          >
-            Update and restart
-          </Button>
-          <Button
-            aria-label="Dismiss"
-            disabled={dismiss.isPending}
-            onClick={() => dismiss.mutate(version)}
-            size="icon-xs"
-            variant="ghost"
-          >
-            <IconX />
-          </Button>
-        </span>
-      )}
+        {busy ? (
+          <p className="shrink-0 text-muted-foreground" role="status">
+            {describe(progress)}
+          </p>
+        ) : (
+          <span className="flex shrink-0 items-center gap-2">
+            <Button
+              // Foreground, not the link variant's primary, which is a mid grey on the dark bar.
+              className="px-0 text-foreground underline"
+              onClick={() => install.mutate()}
+              size="sm"
+              variant="link"
+            >
+              Update and restart
+            </Button>
+            <Button
+              aria-label="Dismiss"
+              disabled={dismiss.isPending}
+              onClick={() => dismiss.mutate(version)}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <IconX />
+            </Button>
+          </span>
+        )}
+      </div>
       {install.error && !busy ? (
-        <p className="basis-full text-destructive" role="alert">
+        <p className="text-destructive" role="alert">
           Couldn't install the update: {reason(install.error)}
         </p>
       ) : null}

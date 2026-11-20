@@ -89,3 +89,25 @@ test("nothing a person reads tells them what the Bot should do next", () => {
     expect(read).not.toMatch(/\byou asked\b/);
   }
 });
+
+test("every step that did not run says what happened, then the same two ways on", async () => {
+  // These used to point three ways: "do not assume it succeeded", "run it again if it is still
+  // needed" and "carry on without it", and a Bot told only the first did nothing with the gap.
+  const { NO_ANSWER_CAME } = await import("./bot-prompt");
+  const notRun = [
+    NO_ANSWER_CAME,
+    outcomes.NOT_RUN_WHILE_WAITING,
+    WITHDRAWN_APPROVALS_OFF,
+    WITHDRAWN_RULE_ALLOWS,
+  ];
+  for (const sentence of notRun) {
+    expect(sentence?.startsWith("Not run: ")).toBe(true);
+    expect(
+      sentence?.endsWith(
+        " Run it again if you still need it, or say in your answer that you could not get it.",
+      ),
+    ).toBe(true);
+    // A person reads only what happened, never the Bot's next step.
+    expect(outcomeForPerson(sentence ?? "")).not.toContain("Run it again");
+  }
+});

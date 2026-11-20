@@ -1,9 +1,7 @@
-import {
-  type BrowserApiState,
-  browserApiPaths,
-} from "@openbot/shared/openbot-browser";
+import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { getPersonBrowser } from "@/lib/api/generated/browsers/browsers";
+import { organizationId } from "@/lib/api/request";
 
 export const browserKeys = {
   all: ["browser"] as const,
@@ -48,13 +46,10 @@ function sidebarInterval(state: BrowserApiState | undefined): number | false {
 export function browserStateQueryOptions(options?: { poll?: boolean }) {
   return queryOptions({
     queryKey: browserKeys.state,
-    // The whole body is the state, so no envelope key: without one, client() returns the Response.
-    queryFn: async (): Promise<BrowserApiState> =>
-      (
-        await client(browserApiPaths.state, {
-          fallback: "Couldn't load your browser.",
-        })
-      ).json(),
+    queryFn: (): Promise<BrowserApiState> =>
+      getPersonBrowser(organizationId(), "me", {
+        fallback: "Couldn't load your browser.",
+      }),
     refetchInterval: options?.poll
       ? BROWSER_POLL_MS
       : (query) => sidebarInterval(query.state.data),

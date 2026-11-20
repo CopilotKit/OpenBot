@@ -156,7 +156,7 @@ export function MemoryList({
             <Fragment key={memory.id}>
               {index > 0 ? <Separator /> : null}
               <MemoryRow
-                botName={botName(memory.formedByAgentId)}
+                botName={botName(memory.formedByBotId)}
                 memory={memory}
               />
             </Fragment>
@@ -194,7 +194,7 @@ function MemoryRow({
   // forgotten here but not paused or reviewed.
   const heldByIntelligence = memory.formedBy === "intelligence";
   const status = heldByIntelligence
-    ? "Kept in the back end"
+    ? "Kept in the backend"
     : !memory.enabled
       ? "Turned off"
       : memory.formedBy === "bot"
@@ -324,7 +324,7 @@ function EditMemoryDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit memory</DialogTitle>
-          <DialogDescription>{memory.provenance}</DialogDescription>
+          <DialogDescription>Change what your Bots remember.</DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
           <Field>

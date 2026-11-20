@@ -22,7 +22,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { UpdateBanner } from "@/components/layout/update-banner";
-import type { DesktopAppUpdate } from "@/lib/desktop/queries";
+import { type DesktopAppUpdate, desktopKeys } from "@/lib/desktop/queries";
 import { queryClient } from "@/query-client";
 
 type Call = { command: string; args: unknown };
@@ -118,6 +118,31 @@ test("inside Desktop, a newer version is offered with Update and restart and a w
   expect(calls.map((call) => call.command)).toEqual([
     "plugin:openbot-desktop|update_offer",
   ]);
+  expect(fetches).toEqual([]);
+});
+
+test("while the new version downloads in the background it says how far, then that it is ready", async () => {
+  inDesktop();
+  offer = {
+    version: "0.3.2",
+    current: "0.3.1",
+    installing: null,
+    ready: { state: "preparing", done: 450, total: 1000 },
+  };
+  const view = show();
+  const bar = await view.findByRole("complementary", banner);
+  expect(bar.textContent).toContain(
+    "OpenBot 0.3.2 is downloading in the background (45%).",
+  );
+  // It never holds the update back: Update and restart is there all along.
+  expect(view.getByRole("button", { name: "Update and restart" })).toBeTruthy();
+  offer = { ...offer, ready: { state: "ready" } };
+  await queryClient.invalidateQueries({ queryKey: desktopKeys.appUpdate });
+  await waitFor(() =>
+    expect(bar.textContent).toContain(
+      "OpenBot 0.3.2 is ready to install. It takes a few minutes.",
+    ),
+  );
   expect(fetches).toEqual([]);
 });
 
@@ -223,22 +248,12 @@ test("a self-hosted OpenBot, in a browser with no Desktop around it, draws nothi
 
 /**
  * Nothing a Helm or Compose deployment runs knows the Desktop update feed: only OpenBot Desktop's
- * own shell reads it. A server, worker or page that named it would be a self-hosted OpenBot
- * reaching downloads.copilotkit.ai, which is never wanted.
+ * own shell reads it. A page or Compose file that named it would be a self-hosted OpenBot reaching
+ * downloads.copilotkit.ai, which is never wanted.
  */
 test("no code a self-hosted deployment runs names the Desktop update feed", () => {
   const root = join(import.meta.dir, "..", "..");
-  const shipped = [
-    "app/src",
-    "server/src",
-    "worker",
-    "shared",
-    "supervisor",
-    "charts",
-    "docker",
-    "docker-compose.yml",
-    "Dockerfile",
-  ];
+  const shipped = ["app/src", "shared", "docker-compose.yml"];
   const named: string[] = [];
   const visit = (path: string) => {
     const stat = statSync(path);

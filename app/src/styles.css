@@ -5,10 +5,6 @@
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "./theme.css";
-/* OpenBot's own frame: the orb's colours behind a frosted sidebar. Remove for the solid frame theme.css draws. */
-@import "./frame.css";
-/* OpenBot's own typeface, the one open.bot is set in. Remove for theme.css's Inter. */
-@import "./typeface.css";
 @import "./skins/skins.css";
 
 /*
@@ -19,19 +15,46 @@
 @source "../node_modules/streamdown/dist/*.js";
 /* Its code plugin, which Streamdown's docs say to scan the same way. */
 @source "../node_modules/@streamdown/code/dist/*.js";
+/* And its maths plugin, likewise. */
+@source "../node_modules/@streamdown/math/dist/*.js";
+
+/*
+ * Maths a Bot writes, drawn by KaTeX (lib/math-plugin.ts). KaTeX's own fonts set the formula, as
+ * maths is set everywhere, and it takes the colour of the words around it, so it follows the theme
+ * with them. KaTeX draws a formula at 1.21 times the text round it; at the chat's size that stood a
+ * line taller than the prose beside it, so it is drawn at 1.1, which keeps a fraction readable
+ * without loosening the line.
+ *
+ * A formula set apart is centred on a block of its own, as KaTeX sets it, and scrolls sideways from
+ * its start when it is wider than the column, on a phone or in a card, and never the page. The scroll leaves a little room above
+ * and below so a fraction's top and a subscript's foot are not clipped by it.
+ */
+.katex {
+  font-size: 1.1em;
+}
+
+.katex-display {
+  margin-block: 0.75rem;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+  scrollbar-width: thin;
+}
 
 /*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
  * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
- * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle;
- * here the header makes room for the buttons above its own row. With the sidebar collapsed the
- * buttons are over the main column instead, so that moves down. The main column is the shell's own
- * `<main>`; the primitive's `SidebarInset`, which an earlier rule aimed at, is used by no shell.
- * Outside the desktop nothing changes.
+ * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle.
+ * It draws the buttons 20px in, on the middle of the header's row (`TRAFFIC_LIGHTS` in the
+ * desktop's main.rs), so here the row starts to their right: OpenBot's name and + share
+ * one line with them. With the sidebar collapsed the buttons are over the main column instead, so
+ * that moves down below them. The main column is the shell's own `<main>`; the primitive's
+ * `SidebarInset`, which an earlier rule aimed at, is used by no shell. Outside the desktop nothing
+ * changes.
  */
 :root[data-desktop-titlebar="overlay"] [data-slot="sidebar-header"] {
-  height: auto;
-  padding-top: 36px;
+  padding-left: 80px;
 }
 
 :root[data-desktop-titlebar="overlay"]
@@ -39,7 +62,7 @@
     > [data-slot="sidebar"][data-state="collapsed"]
   )
   > main {
-  padding-top: 28px;
+  padding-top: 40px;
 }
 
 /* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */
@@ -51,49 +74,27 @@
 /*
  * A tool line that is still running.
  *
- * A light band sweeps left to right across the words. `background-clip: text` with a transparent
- * colour is what confines the gradient to the glyphs, and the band is built from the line's own
- * colour so it reads the same in either theme. Only `background-position` animates, which the
- * compositor handles without laying the text out again on every frame.
+ * The words breathe: they ease down to a little over half strength and back once every 2.4 seconds,
+ * a pace that reads as calm progress. A light band used to sweep across them every 1.6 seconds,
+ * crossing the words in under half a second and then holding still, so on screen the text seemed to
+ * blink on and off. The words are drawn in the line's own colour throughout and never fade further
+ * than 0.6, so a running step can be read at any moment of the cycle. Only `opacity` animates, which
+ * the compositor handles without painting the text again on every frame.
  */
 .tool-line-running {
-  background-image: linear-gradient(
-    100deg,
-    currentColor 40%,
-    color-mix(in oklab, currentColor 25%, transparent) 50%,
-    currentColor 60%
-  );
-  background-size: 250% 100%;
-  background-position: 100% 0;
-  background-clip: text;
-  -webkit-background-clip: text;
-  /*
-   * THE GLYPH FILL, NOT `color`. This was `color: transparent`, which blanked the gradient too —
-   * `currentColor` resolves against this element's own `color` — so nothing was ever drawn. The
-   * transparent fill only works while the gradient is painted behind it, so the reduced-motion
-   * branch below, which drops the gradient, has to put the fill back as well.
-   */
-  -webkit-text-fill-color: transparent;
-  animation: tool-line-sweep 1.6s linear infinite;
+  animation: tool-line-pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes tool-line-sweep {
-  to {
-    background-position: -150% 0;
+@keyframes tool-line-pulse {
+  50% {
+    opacity: 0.6;
   }
 }
 
-/*
- * Reduced motion keeps the words and drops the sweep. Without the gradient a transparent fill draws
- * nothing, and on a computer with animations off every running step showed only its caret. The
- * fill goes back to the line's own colour, the tone the sweep is drawn in, rather than the darker
- * colour of whatever holds the line.
- */
+/* Reduced motion keeps the words at full strength and still. */
 @media (prefers-reduced-motion: reduce) {
   .tool-line-running {
     animation: none;
-    background-image: none;
-    -webkit-text-fill-color: currentColor;
   }
 }
 
@@ -202,18 +203,57 @@
 }
 
 /*
+ * An interface a Bot draws inside a Card has one frame, not two. CopilotKit draws a frame of its own
+ * around every interface in a chat (a border and 12px of padding), and the catalog's Card draws a
+ * border as well, so a Card on top, the shape most interfaces take, came out as a box inside a box.
+ * When the top component is a Card that draws a box, the frame gives up its border and padding and
+ * the Card, drawn in the app's tokens, is the one card in the conversation. Anything else on top,
+ * including a Card drawn as a borderless section or a transparent one, keeps the frame as its box.
+ *
+ * `data-a2ui-card="top"` is the catalog's mark for a Card that is not inside another one. A
+ * component given an accessible name it does not apply itself sits in a `display: contents` span.
+ */
+[data-generative-ui-chat-surface]:has(
+  > .a2ui-surface
+    > [data-a2ui-card="top"]:not(
+      [data-a2ui-card-variant="section"],
+      [data-a2ui-card-variant="transparent"]
+    ),
+  > .a2ui-surface
+    > [data-a2ui-accessibility]
+    > [data-a2ui-card="top"]:not(
+      [data-a2ui-card-variant="section"],
+      [data-a2ui-card-variant="transparent"]
+    )
+) {
+  border-width: 0;
+  padding: 0;
+}
+
+/*
  * Markdown and code in an interface a Bot generates are drawn by a reply's renderer (see
  * lib/copilot/a2ui-markdown.tsx), inside a surface that also carries CopilotKit's own stylesheet.
  * That stylesheet is in no layer, so its heading sizes, and the `color: inherit` it gives every
  * button inside a Card, outrank Tailwind's utilities however specific those are: headings came out
  * smaller than in a reply and the copy buttons lost their muted colour. `revert-layer` hands exactly
  * those properties back to the layered rules, which are the ones a reply is drawn with.
+ *
+ * The amount boxes of a Breakdown (lib/copilot/a2ui-breakdown.tsx) are the app's own inputs and
+ * take back their type size the same way.
  */
 .a2ui-surface
-  .openbot-markdown
+  :is(.openbot-markdown, .openbot-breakdown)
   :is(h1, h2, h3, h4, h5, h6, button, input, select, textarea) {
   font: revert-layer;
   color: revert-layer;
+}
+
+/*
+ * The frame CopilotKit draws around an interface in the conversation has a fixed light grey border,
+ * which in the dark theme was a bright ring around the card. It takes the app's border colour.
+ */
+[data-generative-ui-chat-surface] {
+  border-color: var(--border);
 }
 
 /*
@@ -247,7 +287,13 @@
 /*
  * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
  * so swapping or turning off the empty-state pattern does the same here. It fades out from the
- * center instead of a corner.
+ * center instead of a corner, and is gone by the edge of its own box (`closest-side`), so the box's
+ * square never shows. The intro leaves it room to reach that edge (`HALO_ROOM` in
+ * conversation-intro.tsx).
+ *
+ * The dark theme's light pattern on a near-black ground stood out about 1.6 times as strongly as the
+ * light theme's, and read as a block of pixels around the orb rather than a halo; it is drawn at 0.6
+ * of the token's strength there so the two themes match. A skin's 0 is still 0.
  */
 .orb-pattern {
   position: absolute;
@@ -258,28 +304,78 @@
   opacity: var(--empty-pattern-opacity);
   mask-image:
     var(--empty-pattern),
-    radial-gradient(circle, #000 30%, rgb(0 0 0 / 0.35) 55%, transparent 72%);
+    radial-gradient(
+      circle closest-side,
+      #000 42%,
+      rgb(0 0 0 / 0.35) 78%,
+      transparent 100%
+    );
   mask-repeat: repeat, no-repeat;
   mask-size:
     auto,
     100% 100%;
   mask-composite: intersect;
 }
+.dark .orb-pattern {
+  opacity: calc(var(--empty-pattern-opacity) * 0.6);
+}
 
 /*
- * A Bot's live orb, toned for the app's surfaces. AgentOrb's own contrast boost and full-strength
- * halftone wash light colors out to white; these keep each Bot's palette true. Only `BotOrb`
- * carries `.bot-orb-live`, so the orb anywhere else is unchanged.
+ * A Bot's sphere, the one drawing of a Bot at every size, so it reads as the same Bot wherever it
+ * is: its palette's lightest stop (c4) lit through c2 to c3 at the rim, with one sweep of c1 across
+ * it. `BotOrb` draws it still at avatar sizes, with CSS alone, and live when larger or busy, where
+ * the sweep turns. Before, the live orb drew AgentOrb's own mesh instead, in which c3, a violet in
+ * most palettes, lay across the top: the Personal Assistant was green in the sidebar and blue, teal
+ * and pink at the top of its page and its conversation (bot-orb-one-color.test.tsx).
  */
+.bot-orb-still {
+  background:
+    radial-gradient(circle at 30% 24%, hsl(0 0% 100% / 0.28), transparent 34%),
+    conic-gradient(
+      from 200deg at 70% 30%,
+      var(--c1),
+      transparent 30% 65%,
+      var(--c1)
+    ),
+    radial-gradient(
+      circle at 38% 34%,
+      var(--c4) 0%,
+      var(--c2) 42%,
+      var(--c3) 100%
+    );
+}
+/*
+ * The live orb's disc: the same sphere as its ground, on the light page's `--background` in both
+ * themes, so it reads the same on either page (the mesh is clear in places, and on the dark page its
+ * own `--background` made a dark hole in the bottom of the sphere, with the halo's pattern showing
+ * through). Written here rather than as a token, since theme.css holds only shadcn's tokens. The
+ * sheen and the rim are AgentOrb's own, and its halftone is kept faint, since at full strength it
+ * washes light colors out to white.
+ */
+.bot-orb-live .agent-orb {
+  --background: oklch(0.983 0.003 286.4);
+  background-color: var(--background);
+  background-image: radial-gradient(
+    circle at 38% 34%,
+    var(--c4) 0%,
+    var(--c2) 42%,
+    var(--c3) 100%
+  );
+}
+/* The sweep, turning as AgentOrb turns its mesh, faster while the Bot works. */
 .bot-orb-live .agent-orb::before {
-  filter: blur(var(--blur-amount)) contrast(1.15) saturate(1.3);
+  background: conic-gradient(
+    from calc(200deg + var(--angle)) at 70% 30%,
+    var(--c1),
+    transparent 30% 65%,
+    var(--c1)
+  );
+  box-shadow: none;
+  filter: blur(var(--blur-amount));
 }
 .bot-orb-live .agent-orb::after {
   opacity: 0.25;
   backdrop-filter: blur(calc(var(--blur-amount) * 1.5)) contrast(1.25);
-}
-.dark .bot-orb-live .agent-orb::before {
-  filter: blur(var(--blur-amount)) contrast(1) saturate(0.95) brightness(1.18);
 }
 
 /*

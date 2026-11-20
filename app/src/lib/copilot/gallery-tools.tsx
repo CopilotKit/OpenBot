@@ -1,5 +1,9 @@
 import { useCopilotKit, useFrontendTool } from "@copilotkit/react-core/v2";
 import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
+import {
+  answeredTooEarly,
+  drawnTooEarlyAnswer,
+} from "@openbot/shared/tool-steps";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
@@ -49,6 +53,7 @@ import {
   grantsFrom,
 } from "@/lib/copilot/grant-store";
 import { settledArgs } from "@/lib/copilot/settled-args";
+import { drawnTooEarlyIn } from "@/lib/copilot/tool-steps";
 import { browserCallFailed } from "@/lib/plugins/tool-result";
 
 /**
@@ -148,6 +153,9 @@ function GrantedTool({
       args: Record<string, unknown>,
       context: ToolCallContext = {},
     ) => {
+      // Asked for in the same step as another kind of call: not drawn. See `shared/tool-steps.ts`.
+      if (drawnTooEarlyIn(context?.agent?.messages, context?.toolCall?.id))
+        return drawnTooEarlyAnswer(spec.name);
       /*
        * Asked about the Bot that drew it, which is not always the one on screen: a turn carries on
        * after its person leaves the conversation. See `botOfCall`.
@@ -203,6 +211,8 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
     const refusal = props.toolCallId
       ? snapshot.refusals.get(props.toolCallId)
       : undefined;
+    // Asked for too early, so never drawn, not even as a refusal. See `shared/tool-steps.ts`.
+    if (answeredTooEarly(props.result)) return null;
     if (refusal) {
       return <RefusedCard reason={refusal} title={spec.title} />;
     }
@@ -350,6 +360,14 @@ export function useDecisionTool(
   const handler = useCallback(
     async (_args: unknown, context: ToolCallContext = {}) =>
       new Promise<unknown>((resolve, reject) => {
+        /*
+         * Asked for in the same step as another kind of call: the person is not asked, and the Bot
+         * asks again from the results. See `shared/tool-steps.ts`.
+         */
+        if (drawnTooEarlyIn(context.agent?.messages, context.toolCall?.id)) {
+          resolve(drawnTooEarlyAnswer(spec.name));
+          return;
+        }
         const signal = context.signal;
         if (signal?.aborted) {
           reject(new Error("Human-in-the-loop interaction aborted"));
@@ -367,7 +385,7 @@ export function useDecisionTool(
           stop: () => signal?.removeEventListener("abort", onAbort),
         });
       }),
-    [],
+    [spec.name],
   );
 
   // Created once, for the same reason as `makeGalleryRender`.
@@ -411,6 +429,8 @@ export function makeDecisionRender(
       [toolCallId],
     );
     const answer = props.status === "executing" ? answerThisCall : undefined;
+    // Asked for too early, so the person was never asked. See `shared/tool-steps.ts`.
+    if (answeredTooEarly(props.result)) return null;
     /*
      * Failed on arguments it can't be drawn from: an empty question with its buttons off, for good.
      * Only then. A decision stopped while it waited also ends in a failed result, and its card,

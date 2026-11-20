@@ -8,12 +8,12 @@ import {
 } from "bun:test";
 import type { Message, RunAgentInput } from "@ag-ui/core";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
+import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   DECLINED_BY_PERSON,
   HANDLED_BY_PERSON,
 } from "@openbot/shared/approval-outcomes";
-import { CopilotKitProvider } from "@copilotkit/react-core/v2";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -32,6 +32,20 @@ import { ComputerTools } from "@/lib/copilot/computer-tools";
 import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 import { GalleryTools } from "@/lib/copilot/gallery-tools";
 import { queryClient } from "@/query-client";
+import {
+  approvalInboxResponse,
+  approvalWriteResponse,
+  COMPUTER_STEPS_PATH,
+  computerStepResponse,
+} from "./approvals-api";
+import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
+import {
+  ANNOUNCE_COMPONENTS_PATH,
+  announcedResponse,
+  botComponentsPath,
+  botComponentsResponse,
+} from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -296,19 +310,21 @@ beforeAll(() => {
       }
       if (url.pathname.match(/\/threads\/[^/]+\/messages$/))
         return NativeResponse.json({ messages: stored });
-      // The gate: `POST /api/approvals/computer/:botId` in server/src/approvals/routes.ts.
-      if (url.pathname === `/api/approvals/computer/${bot}`) {
-        const body = (await request.json()) as GatedStep;
+      // The gate: the API's computer step, which carries the conversation with the call in it.
+      if (url.pathname === COMPUTER_STEPS_PATH) {
+        const { conversation: body } = (await request.json()) as {
+          conversation: GatedStep;
+        };
         const step = {
           toolCallId: body.toolCallId,
           toolName: body.toolName,
           args: body.args,
         };
         gated.push(step);
-        return gate(step);
+        return computerStepResponse(gate(step));
       }
-      if (url.pathname === "/api/approvals")
-        return NativeResponse.json({
+      {
+        const approvals = approvalInboxResponse(url.pathname, {
           enabled: true,
           requests: inbox.map((request) => ({
             ...request,
@@ -318,18 +334,37 @@ beforeAll(() => {
           teamRules: [],
           questions: [],
         });
+        if (approvals) return approvals;
+      }
       const decided = url.pathname.match(
-        /^\/api\/approvals\/([^/]+)\/decision$/,
+        /^\/api\/v2\/organizations\/default\/people\/me\/approvals\/([^/]+)\/decide$/,
       );
       if (decided?.[1]) {
         onDecision(decodeURIComponent(decided[1]));
-        return NativeResponse.json({ ok: true });
+        // The approval, as decided, which is what the API answers a decision with.
+        return (
+          approvalWriteResponse(url.pathname, {
+            method: "POST",
+            body: await request.text(),
+          }) ?? NativeResponse.json({})
+        );
       }
       // Whether this conversation asks before every step: the person's own conversation, so it does not.
-      if (/^\/api\/approvals\/threads\/[^/]+$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/people\/me\/approval-modes\/[^/]+$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ asksEveryStep: false });
-      if (url.pathname.startsWith(`/api/computers/${bot}/`)) {
-        const route = url.pathname.replace(`/api/computers/${bot}`, "");
+      if (
+        url.pathname.startsWith(
+          `/api/v2/organizations/default/computers/${bot}`,
+        )
+      ) {
+        const route = url.pathname.replace(
+          `/api/v2/organizations/default/computers/${bot}`,
+          "",
+        );
         direct.push(route);
         // A read goes straight to the computer, which answers as `agent-computer` does.
         if (route === "/files/read")
@@ -339,27 +374,39 @@ beforeAll(() => {
             truncated: false,
             bytes: 9,
           });
-        if (route === "/status")
+        if (route === "")
           return NativeResponse.json({ botId: bot, state: "ready" });
+        // Opening a page, as `agent-computer` answers it: where it landed, its title and its text.
+        if (route === "/navigate")
+          return NativeResponse.json({
+            url: "https://github.com/CopilotKit/OpenBot/releases",
+            title: "Releases · CopilotKit/OpenBot · GitHub",
+            text: "OpenBot 1.0.1",
+            truncated: false,
+          });
         return NativeResponse.json({ error: "Not found" }, { status: 404 });
       }
-      if (url.pathname === "/api/agents")
-        return NativeResponse.json({ agents: [] });
-      if (url.pathname === `/api/plugins/for/${bot}`)
-        return NativeResponse.json({ skills: [], tools: [] });
-      if (url.pathname === "/api/voice/sessions")
+      const bots = answerBotsList(url, init, { visible: [] });
+      if (bots) return bots;
+      if (url.pathname === botGrantsPath(bot)) return botGrantsResponse();
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/voice-sessions$/.test(
+          url.pathname,
+        )
+      )
         return NativeResponse.json({ sessions: [], nextCursor: null });
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/(activity|signal-busy)$/.test(
+          url.pathname,
+        )
+      )
         return new NativeResponse(null, { status: 204 });
       // The Bot holds the approval card, as `server/src/components/routes.ts` answers for a granted one.
-      if (url.pathname === "/api/components/catalogue")
-        return NativeResponse.json({ added: [] });
-      if (url.pathname === `/api/components/for-agent/${bot}`)
-        return NativeResponse.json({
-          components: [
-            { name: "askApproval", description: APPROVAL.description },
-          ],
-        });
+      if (url.pathname === ANNOUNCE_COMPONENTS_PATH) return announcedResponse();
+      if (url.pathname === botComponentsPath(bot))
+        return botComponentsResponse([
+          { name: "askApproval", description: APPROVAL.description },
+        ]);
       // Grants, capabilities, profiles: none of them decides anything here, and the app reads none as a refusal.
       return NativeResponse.json({ error: "Not found" }, { status: 404 });
     },
@@ -499,7 +546,7 @@ test("a command the gate runs at once shows in Activity with what it printed and
   const view = render(app());
   expect(
     await activityOf(view).findByText(
-      "Nothing yet. Commands the Bot runs and files it reads appear here.",
+      "Nothing yet. Pages the Bot opens, commands it runs and files it reads appear here.",
     ),
   ).toBeTruthy();
 
@@ -598,7 +645,7 @@ test("a command that waits for approval shows once the person allows it and its 
   );
   expect(
     activityOf(view).getByText(
-      "Nothing yet. Commands the Bot runs and files it reads appear here.",
+      "Nothing yet. Pages the Bot opens, commands it runs and files it reads appear here.",
     ),
   ).toBeTruthy();
 
@@ -926,6 +973,135 @@ test("reopening a conversation shows what was already done, once each, without c
   await new Promise((resolve) => setTimeout(resolve, 300));
   expect(entries(again)).toHaveLength(2);
   expect(runs).toHaveLength(0);
+});
+
+test("a Bot that only browses lists each page it opened and each click and field in Activity, never what it typed", async () => {
+  // Found on a clean install: a Bot browsed for a release while the screen changed page after page,
+  // and the pane beside it said "Nothing yet" for the whole run.
+  turns = [
+    {
+      call: {
+        id: "call-open",
+        name: "computer_navigate",
+        args: { url: "https://github.com/CopilotKit/OpenBot/releases" },
+      },
+    },
+    {
+      call: {
+        id: "call-type",
+        name: "computer_type",
+        args: {
+          ref: "e12",
+          snapshotId: 3,
+          text: "hunter2-secret",
+          submit: true,
+        },
+      },
+    },
+    {
+      call: {
+        id: "call-click",
+        name: "computer_click",
+        args: { ref: "e7", snapshotId: 3 },
+      },
+    },
+    { reply: "The latest release is 1.0.1." },
+  ];
+  // The gate's answers, as the gateway attaches the element's label (`withElement` in gateway.ts).
+  gate = (step) =>
+    NativeResponse.json({
+      result:
+        step.toolName === "computer_type"
+          ? {
+              ok: true,
+              action: "type",
+              ref: "e12",
+              url: "https://github.com/CopilotKit/OpenBot/releases",
+              element: { role: "searchbox", name: "Find a release" },
+            }
+          : {
+              ok: true,
+              action: "click",
+              ref: "e7",
+              url: "https://github.com/CopilotKit/OpenBot/releases",
+              element: { role: "link", name: "OpenBot 1.0.1" },
+            },
+    });
+  const view = render(app());
+  await ask(view, "What is the latest OpenBot release?");
+  expect(
+    await view.findByText(
+      "The latest release is 1.0.1.",
+      {},
+      { timeout: 5000 },
+    ),
+  ).toBeTruthy();
+
+  await waitFor(() => expect(entries(view)).toHaveLength(3), { timeout: 3000 });
+  expect(activityOf(view).queryByText(/Nothing yet/)).toBeNull();
+  const [click, typed, opened] = entries(view);
+  expect(opened).toContain("Opened page");
+  expect(opened).toContain("https://github.com/CopilotKit/OpenBot/releases");
+  expect(opened).toContain("Releases · CopilotKit/OpenBot · GitHub");
+  expect(typed).toContain("Filled in field");
+  expect(typed).toContain("Find a release");
+  expect(typed).not.toContain("hunter2-secret");
+  expect(click).toContain("Clicked on page");
+  expect(click).toContain("OpenBot 1.0.1");
+  // Watched happen on this page, so each says when.
+  expect(
+    view.getByRole("region", { name: "Activity" }).querySelectorAll("time"),
+  ).toHaveLength(3);
+});
+
+test("reopening a conversation that only browsed lists what the Bot read and where, not Nothing yet", async () => {
+  stored = [
+    { id: "user-1", role: "user", content: "Find the latest release" },
+    calling("call-open", "computer_navigate", {
+      url: "https://github.com/CopilotKit/OpenBot/releases",
+    }),
+    answering("call-open", {
+      ok: true,
+      url: "https://github.com/CopilotKit/OpenBot/releases",
+      title: "Releases · CopilotKit/OpenBot · GitHub",
+      text: "OpenBot 1.0.1",
+    }),
+    calling("call-look", "computer_snapshot", {}),
+    answering("call-look", {
+      ok: true,
+      url: "https://github.com/CopilotKit/OpenBot/releases",
+      elements: [],
+    }),
+    // Turned away until the Bot looks again after a handback: an instruction to it, not a step.
+    calling("call-stale", "computer_click", { ref: "e7", snapshotId: 2 }),
+    answering("call-stale", {
+      ok: false,
+      snapshotRequired: true,
+      reason: "Take a fresh snapshot first.",
+    }),
+    calling("call-blocked", "computer_navigate", {
+      url: "http://169.254.169.254/",
+    }),
+    answering("call-blocked", {
+      ok: false,
+      refused: true,
+      reason: "This address is not allowed.",
+    }),
+    { id: "reply-1", role: "assistant", content: "It is 1.0.1." },
+  ];
+  const view = render(app());
+  expect(
+    await view.findByText("It is 1.0.1.", {}, { timeout: 5000 }),
+  ).toBeTruthy();
+  await waitFor(() => expect(entries(view)).toHaveLength(3), { timeout: 3000 });
+  expect(activityOf(view).queryByText(/Nothing yet/)).toBeNull();
+  const [blocked, looked, opened] = entries(view);
+  expect(opened).toContain("Opened page");
+  expect(opened).toContain("Releases · CopilotKit/OpenBot · GitHub");
+  expect(looked).toContain("Inspected page");
+  expect(blocked).toContain("http://169.254.169.254/");
+  expect(blocked).toContain("This address is not allowed.");
+  expect(entries(view).join("\n")).not.toContain("fresh snapshot");
 });
 
 /** What the Bot asked with before deleting a file, as it asked on the stack it was found on. */

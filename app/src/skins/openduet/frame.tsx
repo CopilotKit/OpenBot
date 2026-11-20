@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
+import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
@@ -52,8 +53,11 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
   const [main, setMain] = useState<HTMLElement | null>(null);
 
   return (
+    // The frame's own background, beside a column narrower than the window, moves the window in
+    // OpenBot Desktop on macOS, so the title bar's strip reaches both edges (`data-desktop-drag`).
     <div
       className="flex h-svh flex-col overflow-hidden bg-openduet-surface text-openduet-ink"
+      data-desktop-drag=""
       data-openduet-frame=""
     >
       {/*
@@ -64,6 +68,7 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
       <div hidden>
         <BotsNavBadge />
       </div>
+      <ConnectionBanner />
       <UpdateBanner />
       <SelfHostBanner />
       <div

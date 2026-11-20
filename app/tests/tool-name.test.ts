@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { approvalWords, readToolName } from "@openbot/shared/tool-name";
+import {
+  answersTheModel,
+  approvalWords,
+  readToolName,
+} from "@openbot/shared/tool-name";
 
 /**
  * What the person watching is told a Bot just did.
@@ -8,6 +12,14 @@ import { approvalWords, readToolName } from "@openbot/shared/tool-name";
  * that exists to keep two vendors' `search` apart. A reader should never see either.
  */
 describe("naming a tool call", () => {
+  test("a Claude Agent SDK Bot looking for a tool says so, as any Bot's tool search does", () => {
+    for (const name of ["search_tools", "ToolSearch"]) {
+      expect(readToolName(name)).toEqual({ label: "Looked for a tool" });
+      expect(readToolName(name, true)).toEqual({ label: "Looking for a tool" });
+      expect(answersTheModel(name)).toBe(true);
+    }
+  });
+
   test("a research call says what it did and not which provider did it", () => {
     for (const name of [
       "mcp__exa__web_search_exa",
@@ -235,5 +247,40 @@ describe("naming what an approval asks to do", () => {
     expect(
       approvalWords({ toolRef: "host/run_command", scope: "grant-1" }),
     ).toEqual({ action: "run a command", place: "grant-1" });
+  });
+
+  test("a share reads as who it goes to, and a hand-off as the Bot it asks", () => {
+    expect(
+      approvalWords({
+        toolRef: "openbot/share_private_information",
+        scope: "handoff:usr_dana",
+        args: { audience: "Pipeline Bot", recipients: 1 },
+      }),
+    ).toEqual({
+      action: "share private information with",
+      place: "Pipeline Bot",
+    });
+    // A share named by its address alone says who in words, never the address.
+    expect(
+      approvalWords({
+        toolRef: "openbot/share_private_information",
+        scope: "group:g1:members:9f2c",
+        args: { audience: "group:g1:members:9f2c" },
+      }),
+    ).toEqual({
+      action: "share private information with",
+      place: "other people",
+    });
+    expect(
+      approvalWords({ toolRef: "bot/message_bot", scope: "Pipeline Bot" }),
+    ).toEqual({ action: "ask", place: "Pipeline Bot" });
+    // One card for a hand-off that also shares: it names the Bot the work is handed to.
+    expect(
+      approvalWords({
+        toolRef: "openbot/share_private_information",
+        scope: "handoff:usr_dana",
+        args: { audience: "Pipeline Bot", handOff: "Pipeline Bot" },
+      }),
+    ).toEqual({ action: "hand this to", place: "Pipeline Bot" });
   });
 });

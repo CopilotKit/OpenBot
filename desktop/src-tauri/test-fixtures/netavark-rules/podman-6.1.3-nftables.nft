@@ -1,0 +1,156 @@
+table inet netavark { # handle 1
+	chain INPUT { # handle 1
+		type filter hook input priority filter; policy accept;
+		ip saddr 10.89.0.0/24 meta l4proto { tcp, udp } th dport 53 accept # handle 25
+		ip saddr 10.89.1.0/24 meta l4proto { tcp, udp } th dport 53 accept # handle 35
+		ip saddr 10.89.5.0/24 meta l4proto { tcp, udp } th dport 53 accept # handle 63
+		ip saddr 10.88.0.0/16 meta l4proto { tcp, udp } th dport 53 accept # handle 78
+	}
+
+	chain FORWARD { # handle 2
+		type filter hook forward priority filter; policy accept;
+		ct state invalid drop # handle 15
+		ct mark & 0x00001000 == 0x00001000 accept # handle 16
+		jump NETAVARK-ISOLATION-1 # handle 17
+		ip daddr 10.89.0.0/24 ct state established,related accept # handle 26
+		ip saddr 10.89.0.0/24 accept # handle 27
+		ip daddr 10.89.1.0/24 ct state established,related accept # handle 36
+		ip saddr 10.89.1.0/24 accept # handle 37
+		ip daddr 10.89.5.0/24 ct state established,related accept # handle 64
+		ip saddr 10.89.5.0/24 accept # handle 65
+		ip daddr 10.88.0.0/16 ct state established,related accept # handle 79
+		ip saddr 10.88.0.0/16 accept # handle 80
+	}
+
+	chain POSTROUTING { # handle 3
+		type nat hook postrouting priority srcnat; policy accept;
+		meta mark & 0x00002000 == 0x00002000 masquerade # handle 11
+		ip saddr 10.89.0.0/24 jump nv_69db1544_10_89_0_0_nm24 # handle 28
+		ip saddr 10.89.1.0/24 jump nv_e7a4ec37_10_89_1_0_nm24 # handle 38
+		ip saddr 10.89.5.0/24 jump nv_bcdfbc0a_10_89_5_0_nm24 # handle 66
+		ip saddr 10.88.0.0/16 jump nv_2f259bab_10_88_0_0_nm16 # handle 81
+	}
+
+	chain PREROUTING { # handle 4
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local jump NETAVARK-HOSTPORT-DNAT # handle 13
+	}
+
+	chain OUTPUT { # handle 5
+		type nat hook output priority dstnat; policy accept;
+		fib daddr type local jump NETAVARK-HOSTPORT-DNAT # handle 14
+	}
+
+	chain NETAVARK-HOSTPORT-DNAT { # handle 6
+		ip daddr 127.0.0.1 tcp dport 3001 jump nv_69db1544_10_89_0_0_nm24_dnat # handle 40
+		ip daddr 127.0.0.1 tcp dport 3010 jump nv_69db1544_10_89_0_0_nm24_dnat # handle 44
+		ip daddr 127.0.0.1 tcp dport 3001 jump nv_e7a4ec37_10_89_1_0_nm24_dnat # handle 49
+		ip daddr 127.0.0.1 tcp dport 3010 jump nv_e7a4ec37_10_89_1_0_nm24_dnat # handle 53
+		ip daddr 127.0.0.1 tcp dport 8081 jump nv_bcdfbc0a_10_89_5_0_nm24_dnat # handle 68
+		ip daddr 127.0.0.1 tcp dport 8082 jump nv_2f259bab_10_88_0_0_nm16_dnat # handle 83
+		ip daddr 127.0.0.1 tcp dport 3001 jump nv_69db1544_10_89_0_0_nm24_dnat # handle 87
+		ip daddr 127.0.0.1 tcp dport 3010 jump nv_69db1544_10_89_0_0_nm24_dnat # handle 91
+		ip daddr 127.0.0.1 tcp dport 3001 jump nv_e7a4ec37_10_89_1_0_nm24_dnat # handle 95
+		ip daddr 127.0.0.1 tcp dport 3010 jump nv_e7a4ec37_10_89_1_0_nm24_dnat # handle 99
+	}
+
+	chain NETAVARK-HOSTPORT-SETMARK { # handle 7
+		meta mark set meta mark | 0x00002000 # handle 12
+	}
+
+	chain NETAVARK-ISOLATION-1 { # handle 8
+		iifname "podman1" oifname != "podman1" jump NETAVARK-ISOLATION-3 # handle 18
+		iifname "podman2" oifname != "podman2" jump NETAVARK-ISOLATION-3 # handle 29
+		iifname "person1" oifname != "person1" jump NETAVARK-ISOLATION-3 # handle 57
+		iifname "podman0" oifname != "podman0" jump NETAVARK-ISOLATION-3 # handle 72
+	}
+
+	chain NETAVARK-ISOLATION-2 { # handle 9
+		oifname "podman1" drop # handle 19
+		oifname "podman2" drop # handle 30
+		oifname "person1" drop # handle 58
+		oifname "podman0" drop # handle 73
+	}
+
+	chain NETAVARK-ISOLATION-3 { # handle 10
+		jump NETAVARK-ISOLATION-2 # handle 20
+	}
+
+	chain nv_69db1544_10_89_0_0_nm24 { # handle 21
+		ip daddr 10.89.0.0/24 accept # handle 22
+		ip daddr != 224.0.0.0/4 masquerade # handle 23
+	}
+
+	chain nv_e7a4ec37_10_89_1_0_nm24 { # handle 31
+		ip daddr 10.89.1.0/24 accept # handle 32
+		ip daddr != 224.0.0.0/4 masquerade # handle 33
+	}
+
+	chain nv_69db1544_10_89_0_0_nm24_dnat { # handle 39
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 41
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 42
+		ip daddr 127.0.0.1 tcp dport 3001 ct mark set meta mark | 0x00001000 dnat ip to 10.89.0.3:80 # handle 43
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 45
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 46
+		ip daddr 127.0.0.1 tcp dport 3010 ct mark set meta mark | 0x00001000 dnat ip to 10.89.0.3:80 # handle 47
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 88
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 89
+		ip daddr 127.0.0.1 tcp dport 3001 ct mark set meta mark | 0x00001000 dnat ip to 10.89.0.2:80 # handle 90
+		ip saddr 10.89.0.0/24 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 92
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 93
+		ip daddr 127.0.0.1 tcp dport 3010 ct mark set meta mark | 0x00001000 dnat ip to 10.89.0.2:80 # handle 94
+	}
+
+	chain nv_e7a4ec37_10_89_1_0_nm24_dnat { # handle 48
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 50
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 51
+		ip daddr 127.0.0.1 tcp dport 3001 ct mark set meta mark | 0x00001000 dnat ip to 10.89.1.3:80 # handle 52
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 54
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 55
+		ip daddr 127.0.0.1 tcp dport 3010 ct mark set meta mark | 0x00001000 dnat ip to 10.89.1.3:80 # handle 56
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 96
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3001 jump NETAVARK-HOSTPORT-SETMARK # handle 97
+		ip daddr 127.0.0.1 tcp dport 3001 ct mark set meta mark | 0x00001000 dnat ip to 10.89.1.2:80 # handle 98
+		ip saddr 10.89.1.0/24 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 100
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3010 jump NETAVARK-HOSTPORT-SETMARK # handle 101
+		ip daddr 127.0.0.1 tcp dport 3010 ct mark set meta mark | 0x00001000 dnat ip to 10.89.1.2:80 # handle 102
+	}
+
+	chain nv_bcdfbc0a_10_89_5_0_nm24 { # handle 59
+		ip daddr 10.89.5.0/24 accept # handle 60
+		ip daddr != 224.0.0.0/4 masquerade # handle 61
+	}
+
+	chain nv_bcdfbc0a_10_89_5_0_nm24_dnat { # handle 67
+		ip saddr 10.89.5.0/24 ip daddr 127.0.0.1 tcp dport 8081 jump NETAVARK-HOSTPORT-SETMARK # handle 69
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 8081 jump NETAVARK-HOSTPORT-SETMARK # handle 70
+		ip daddr 127.0.0.1 tcp dport 8081 ct mark set meta mark | 0x00001000 dnat ip to 10.89.5.2:80 # handle 71
+	}
+
+	chain nv_2f259bab_10_88_0_0_nm16 { # handle 74
+		ip daddr 10.88.0.0/16 accept # handle 75
+		ip daddr != 224.0.0.0/4 masquerade # handle 76
+	}
+
+	chain nv_2f259bab_10_88_0_0_nm16_dnat { # handle 82
+		ip saddr 10.88.0.0/16 ip daddr 127.0.0.1 tcp dport 8082 jump NETAVARK-HOSTPORT-SETMARK # handle 84
+		ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 8082 jump NETAVARK-HOSTPORT-SETMARK # handle 85
+		ip daddr 127.0.0.1 tcp dport 8082 ct mark set meta mark | 0x00001000 dnat ip to 10.88.0.2:80 # handle 86
+	}
+}
+table ip nat { # handle 2
+	chain DOCKER { # handle 1
+		iifname "docker0" counter packets 0 bytes 0 return # handle 6
+		iifname != "docker0" tcp dport 8080 counter packets 0 bytes 0 dnat to 172.17.0.2:80 # handle 7
+	}
+
+	chain PREROUTING { # handle 2
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local counter packets 0 bytes 0 jump DOCKER # handle 3
+	}
+
+	chain OUTPUT { # handle 4
+		type nat hook output priority dstnat; policy accept;
+		ip daddr != 127.0.0.0/8 fib daddr type local counter packets 0 bytes 0 jump DOCKER # handle 5
+	}
+}

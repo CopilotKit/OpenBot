@@ -57,7 +57,8 @@ type CalendlyMessage = {
 };
 
 /**
- * The OpenBot for Business calendar, inline, where somebody books a call without leaving the app.
+ * The OpenBot for Business calendar, inline, where somebody books a call without leaving the app:
+ * onboarding's Book a demo step and the OpenBot for Business dialog.
  *
  * A REAL CONTROL, SO A CARD, NOT THE ILLUSTRATION'S PANEL. It has the illustrations' rounded
  * corners and border, but the cards' fill: the muted fill is what says "this is only a picture" on
@@ -66,7 +67,7 @@ type CalendlyMessage = {
  * ITS OWN MESSAGES SAY IT LOADED. A frame's `load` fires for an error page too, so the calendar
  * counts as there only once Calendly, from its own origin and this frame, says so. Until then a
  * spinner stands in its place. Offline, an `error` from the frame, or no word from it in
- * {@link BOOKING_CALENDAR_TIMEOUT_MS}, and `onFailed` hands the step back to the plain button. A
+ * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to the plain button. A
  * booking made in it calls `onBooked`. Its height follows what it reports, so it never scrolls
  * inside the step.
  *
@@ -123,12 +124,34 @@ export function BookingCalendar({
     const element = frame.current;
     const onError = () => handlers.current.onFailed();
     element?.addEventListener("error", onError);
-    const timer = setTimeout(() => {
-      if (!heard) handlers.current.onFailed();
-    }, BOOKING_CALENDAR_TIMEOUT_MS);
+    /*
+     * The wait starts once the calendar is on screen. A browser holds back a frame scrolled out of
+     * view, and Calendly says nothing until it is drawn: in the OpenBot for Business dialog on a
+     * phone the calendar sits below the list, and somebody still reading the list was told it
+     * couldn't load.
+     */
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const startWaiting = () => {
+      timer ??= setTimeout(() => {
+        if (!heard) handlers.current.onFailed();
+      }, BOOKING_CALENDAR_TIMEOUT_MS);
+    };
+    let seen: IntersectionObserver | undefined;
+    if (element && typeof IntersectionObserver === "function") {
+      seen = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          startWaiting();
+          seen?.disconnect();
+        }
+      });
+      seen.observe(element);
+    } else {
+      startWaiting();
+    }
     return () => {
       window.removeEventListener("message", onMessage);
       element?.removeEventListener("error", onError);
+      seen?.disconnect();
       clearTimeout(timer);
     };
   }, []);
@@ -150,7 +173,12 @@ export function BookingCalendar({
           // Everything a booking needs, and nothing that lets the frame move this window.
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
           src={src}
-          style={{ height }}
+          /*
+           * Light, whatever the app's theme. Calendly's page declares no colour scheme, and a frame
+           * whose scheme differs from its element's is painted on an opaque white canvas: in the
+           * dark theme its last two pixels, below its content, showed as a white line.
+           */
+          style={{ colorScheme: "light", height }}
           title="Booking calendar"
         />
         {ready ? null : (

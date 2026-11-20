@@ -5,6 +5,7 @@ import {
 } from "@tabler/icons-react";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { BrandName } from "@/components/edition/brand-name";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Popover,
@@ -106,10 +107,10 @@ export function OnboardingFrame({
       {/*
        * In OpenBot Desktop on macOS the window's buttons sit over the page's top-left corner, where
        * the one-column layout puts Back (a 1000px window is one column). The desktop marks the page
-       * (`data-desktop-titlebar`, macOS only), and the header then starts below the buttons' 28px
-       * strip, as the app's sidebar does (styles.css). Two columns start 40px down already.
+       * (`data-desktop-titlebar`, macOS only), and draws them about 21–37px down, so the header then
+       * starts 48px down, below them, in one column and in two.
        */}
-      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] max-lg:in-data-[desktop-titlebar=overlay]:pt-7 lg:static lg:bg-transparent lg:px-10 lg:pt-10">
+      <header className="sticky top-0 z-10 col-start-1 row-start-1 bg-background lg:col-start-1 pt-[env(safe-area-inset-top)] max-lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:in-data-[desktop-titlebar=overlay]:pt-12 lg:static lg:bg-transparent lg:px-10 lg:pt-10">
         {/*
          * The phone's chrome. Back is not drawn on the first step, rather than drawn disabled: there
          * is nowhere behind it, and a control that does nothing is one more thing a screen reader
@@ -132,7 +133,7 @@ export function OnboardingFrame({
         <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
           <div className="text-sm flex items-center gap-2 font-semibold">
             <AgentOrb size="24px" />
-            {appConfig.brand.productName}
+            <BrandName>{appConfig.brand.productName}</BrandName>
           </div>
           {titles.length > 1 ? (
             <StepMenu
@@ -325,7 +326,9 @@ function StepMenu({
                       at + 1
                     )}
                   </span>
-                  <span className="min-w-0 truncate">{title}</span>
+                  <span className="min-w-0 truncate">
+                    <BrandName>{title}</BrandName>
+                  </span>
                   {done ? (
                     <span className="sr-only">, done</span>
                   ) : !current && !pickable ? (
@@ -433,7 +436,7 @@ export function StepIntro({
   return (
     <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left">
       <h1 className="text-3xl font-semibold tracking-tight text-pretty [overflow-wrap:anywhere] focus:outline-none">
-        {title}
+        {typeof title === "string" ? <BrandName>{title}</BrandName> : title}
       </h1>
       {children ? (
         <div className="text-base mt-3 flex max-w-md flex-col gap-2 text-pretty text-muted-foreground">

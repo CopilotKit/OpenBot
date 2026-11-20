@@ -66,15 +66,15 @@ const parked = () =>
   Response.json(
     {
       code: "INTELLIGENCE_RUNTIME_REQUIRED",
-      message: "OpenBot's back end is not configured.",
+      message: "OpenBot's backend is not configured.",
     },
     { status: 503 },
   );
 
 function route(request: Request): Response | null {
   const path = new URL(request.url).pathname;
-  if (path.startsWith("/api/recorder/")) {
-    if (path !== "/api/recorder/activity")
+  if (path.startsWith("/api/v2/organizations/default/recorder")) {
+    if (path !== "/api/v2/organizations/default/recorder/activity")
       recorderRequests.push(`${request.method} ${path}`);
     return Response.json({ error: "Not found." }, { status: 404 });
   }

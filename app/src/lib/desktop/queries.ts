@@ -1,3 +1,4 @@
+import type { UpdateReadiness } from "@openbot/shared/desktop-updates";
 import { queryOptions } from "@tanstack/react-query";
 import { desktopShell } from "./shell";
 
@@ -68,6 +69,11 @@ export type DesktopAppUpdate = {
    * updater. Absent from a desktop app older than the field, which still answers a check.
    */
   updatesItself?: boolean;
+  /**
+   * How ready the newer version is to install: downloading in the background, or all here. Null
+   * before the app starts on it, and absent from a desktop app older than the field.
+   */
+  ready?: UpdateReadiness | null;
 };
 
 /**
@@ -75,14 +81,69 @@ export type DesktopAppUpdate = {
  * A newer version is named even if this person closed the banner on it, because they asked.
  */
 export type DesktopAppUpdateCheck =
-  | { found: "available"; version: string; current: string }
+  | {
+      found: "available";
+      version: string;
+      current: string;
+      ready?: UpdateReadiness | null;
+    }
   | { found: "upToDate"; current: string }
   | { found: "installing"; version: string; current: string }
   /** This build never updates itself: an internal or candidate build. */
   | { found: "notOffered"; current: string };
 
+/**
+ * Which AI provider and sign-in OpenBot starts with, as the desktop app last saved it. Never a key
+ * or a token: the setup window holds those, and changing the connection happens there.
+ */
+export type DesktopAiConnection = {
+  /** The connection chosen in setup; null before one was. */
+  kind:
+    | "open-ai-api-key"
+    | "anthropic-api-key"
+    | "claude-plan"
+    | "chat-gpt-plan"
+    | "compatible-endpoint"
+    | "google-oauth"
+    | "xai-oauth"
+    | null;
+  /** The model named in setup. Only an address or a provider sign-in names one. */
+  model: string | null;
+  /** A custom address's host, and nothing else of the address. */
+  endpointHost: string | null;
+};
+
+/**
+ * Settings' Share usage data, as the desktop app keeps it. Off is the same opt-out as
+ * `COPILOTKIT_TELEMETRY_DISABLED`; when that variable (or `DO_NOT_TRACK`) is set where the app was
+ * launched, sharing is off and Settings cannot turn it on.
+ */
+export type DesktopUsageData = {
+  shared: boolean;
+  offByEnvironment: boolean;
+};
+
+/**
+ * Where the OpenBot this window shows runs: on this computer, which the desktop app started itself,
+ * or somewhere else, at an address the person typed and signed in to. Never the sign-in itself: the
+ * desktop app keeps that and the page never holds it.
+ */
+export type DesktopConnection =
+  /** `canConnect`: the desktop app is one that can connect to an OpenBot elsewhere. */
+  | { mode: "local"; address: null; canConnect: boolean }
+  | { mode: "connected"; address: string };
+
+const ON_THIS_COMPUTER: DesktopConnection = {
+  mode: "local",
+  address: null,
+  canConnect: false,
+};
+
 export const desktopKeys = {
   all: ["desktop"] as const,
+  connection: ["desktop", "connection"] as const,
+  aiConnection: ["desktop", "ai-connection"] as const,
+  usageData: ["desktop", "usage-data"] as const,
   status: (memory: boolean) => ["desktop", "status", { memory }] as const,
   intelligence: ["desktop", "intelligence"] as const,
   appUpdate: ["desktop", "app-update"] as const,
@@ -98,6 +159,34 @@ export async function invokeDesktop<T>(
   const shell = desktopShell();
   if (!shell) throw new Error("This page needs the OpenBot desktop app.");
   return (await shell.invoke(`${PLUGIN}|${command}`, args)) as T;
+}
+
+/**
+ * Whether this window shows an OpenBot on this computer or one it is connected to. In a browser,
+ * and in a desktop app from before it could connect (which refuses the question the same way every
+ * time), the answer is this computer. It does not change while the page shows: changing it sends
+ * the window back to setup.
+ */
+export function desktopConnectionQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.connection,
+    queryFn: async (): Promise<DesktopConnection> => {
+      if (desktopShell() === null) return ON_THIS_COMPUTER;
+      try {
+        const answer = await invokeDesktop<{
+          mode?: string;
+          address?: string | null;
+        }>("connection");
+        return answer?.mode === "connected" && answer.address
+          ? { mode: "connected", address: answer.address }
+          : { mode: "local", address: null, canConnect: true };
+      } catch {
+        return ON_THIS_COMPUTER;
+      }
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
 }
 
 /**
@@ -145,7 +234,39 @@ export function desktopAppUpdateQueryOptions() {
     queryFn: (): Promise<DesktopAppUpdate> => invokeDesktop("update_offer"),
     enabled: desktopShell() !== null,
     retry: false,
-    refetchInterval: (query) => (query.state.data?.installing ? 500 : 60_000),
+    // Every five seconds while it downloads in the background, so its share moves on screen.
+    refetchInterval: (query) =>
+      query.state.data?.installing
+        ? 500
+        : query.state.data?.ready?.state === "preparing"
+          ? 5_000
+          : 60_000,
+  });
+}
+
+/**
+ * Settings' AI model row. Asked only inside the Desktop window. An older desktop app has no such
+ * command and refuses it every time, so a refusal is not retried: there is just no row.
+ */
+export function desktopAiConnectionQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.aiConnection,
+    queryFn: (): Promise<DesktopAiConnection> => invokeDesktop("ai_connection"),
+    enabled: desktopShell() !== null,
+    retry: false,
+  });
+}
+
+/**
+ * Settings' Share usage data row. Asked only inside the Desktop window; an older desktop app has
+ * no such command and refuses it every time, so a refusal is not retried and there is no row.
+ */
+export function desktopUsageDataQueryOptions() {
+  return queryOptions({
+    queryKey: desktopKeys.usageData,
+    queryFn: (): Promise<DesktopUsageData> => invokeDesktop("usage_data"),
+    enabled: desktopShell() !== null,
+    retry: false,
   });
 }
 
@@ -185,8 +306,8 @@ export function diagnostics(
     `  processes: ${parts(status.processes)}`,
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
-      ? `Back end: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
-      : "Back end: not on this computer",
+      ? `Backend: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
+      : "Backend: not on this computer",
     ...(status.intelligenceStack
       ? [`  containers: ${parts(status.intelligenceContainers)}`]
       : []),

@@ -12,6 +12,11 @@
  * `gh release view <tag> --json assets` lists them, one per line, as its `--jq` would. Each upload
  * also keeps the file itself, and `gh release download <tag> --pattern <name> --dir <dir>` gives it
  * back, failing as gh does when no asset has that name.
+ *
+ * Every release in the repository, each with its asset names, lives in a third:
+ * `gh api --paginate repos/<repo>/releases?per_page=100` serves it in the REST API's shape and
+ * applies `--jq`, and `gh release delete-asset <tag> <name>` removes one, failing when that release
+ * has no such asset.
  */
 import {
   chmodSync,
@@ -38,6 +43,33 @@ if [ "$1" = api ] && [[ "$2" == repos/*/releases/latest ]]; then
     exit 1
   fi
   echo "$latest"
+  exit 0
+fi
+if [ "$1" = api ] && [ "$2" = --paginate ] && [[ "$3" == "repos/"*"/releases?per_page=100" ]]; then
+  filter=""
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = --jq ]; then filter="$arg"; fi
+    prev="$arg"
+  done
+  jq -c 'map({tag_name: .tag, assets: (.assets | map({name: .}))})' "$FAKE_STATE/releases.json" |
+    jq -c "\${filter:-.}"
+  exit 0
+fi
+if [ "$1 $2" = "release delete-asset" ]; then
+  if [ -f "$FAKE_STATE/fail-deletes" ]; then
+    echo "gh: Server Error (HTTP 502)" >&2
+    exit 1
+  fi
+  if ! jq -e --arg tag "$3" --arg name "$4" \\
+    'any(.[]; .tag == $tag and (.assets | index($name)) != null)' "$FAKE_STATE/releases.json" > /dev/null; then
+    echo "asset $4 not found in release $3" >&2
+    exit 1
+  fi
+  jq --arg tag "$3" --arg name "$4" \\
+    'map(if .tag == $tag then .assets |= map(select(. != $name)) else . end)' \\
+    "$FAKE_STATE/releases.json" > "$FAKE_STATE/releases.next" &&
+    mv "$FAKE_STATE/releases.next" "$FAKE_STATE/releases.json"
   exit 0
 fi
 if [ "$1 $2" = "release edit" ]; then
@@ -146,6 +178,12 @@ export type FakeRepo = {
   /** What the release holds under `name`, as the last upload of it left it. */
   file(name: string): string;
   assets(): string[];
+  /** Every release in the repository and its asset names, newest first, as GitHub lists them. */
+  releases(list: { tag: string; assets: string[] }[]): void;
+  releaseList(): { tag: string; assets: string[] }[];
+  setLatest(tag: string): void;
+  /** Every `gh release delete-asset` fails, as a server error would fail it. */
+  failDeletes(): void;
   cleanup(): void;
 };
 
@@ -164,6 +202,7 @@ export function fakeRepo(latest: string): FakeRepo {
   chmodSync(join(bin, "curl"), 0o755);
   writeFileSync(join(state, "latest"), latest);
   writeFileSync(join(state, "assets"), "");
+  writeFileSync(join(state, "releases.json"), "[]");
   const log = join(dir, "calls.log");
   writeFileSync(log, "");
   return {
@@ -203,6 +242,12 @@ export function fakeRepo(latest: string): FakeRepo {
             .filter(Boolean),
         ),
       ].sort(),
+    releases: (list) =>
+      writeFileSync(join(state, "releases.json"), JSON.stringify(list)),
+    releaseList: () =>
+      JSON.parse(readFileSync(join(state, "releases.json"), "utf8")),
+    setLatest: (tag) => writeFileSync(join(state, "latest"), tag),
+    failDeletes: () => writeFileSync(join(state, "fail-deletes"), ""),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
 }

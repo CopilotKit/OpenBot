@@ -2,10 +2,14 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { installAppErrorReporting } from "./lib/error-reporting";
 import { queryClient } from "./query-client";
 import { router } from "./router";
 import "@copilotkit/react-core/v2/styles.css";
 import "./styles.css";
+
+// Before anything draws, so an error the first screen throws is told to OpenBot too.
+installAppErrorReporting();
 
 const rootElement = document.getElementById("root");
 

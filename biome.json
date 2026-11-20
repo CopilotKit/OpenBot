@@ -11,8 +11,7 @@
       "!app/src/routeTree.gen.ts",
       "!desktop/src-tauri/gen",
       "!**/target",
-      "!server/drizzle",
-      "!server/tests/fixtures/arcade-catalogue.json"
+      "!app/tests/fixtures/arcade-catalogue.json"
     ]
   },
   "formatter": {
@@ -29,49 +28,21 @@
   },
   "overrides": [
     {
+      "includes": [
+        "app/src/lib/api/generated/**",
+        "mobile/src/api/generated/**",
+        "extension/src/shared/generated/**"
+      ],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["**/tests/**", "**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {
           "style": {
             "noNonNullAssertion": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["toolkit/src/**", "!toolkit/src/copilotkit/**"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "patterns": [
-                  {
-                    "group": ["../**"],
-                    "message": "The toolkit runs turns without the server. Take what it needs as a port in toolkit/ports.ts instead of importing server code."
-                  },
-                  {
-                    "group": [
-                      "./copilotkit/**",
-                      "@openbot/toolkit/copilotkit",
-                      "@openbot/toolkit/copilotkit/**"
-                    ],
-                    "message": "The toolkit core does not depend on CopilotKit. Code that needs @copilotkit/runtime lives in toolkit/src/copilotkit and imports the core, not the other way round."
-                  },
-                  {
-                    "group": [
-                      "@copilotkit/**",
-                      "drizzle-orm",
-                      "drizzle-orm/**",
-                      "hono",
-                      "hono/**"
-                    ],
-                    "message": "The toolkit core depends on @ag-ui, rxjs, zod and @openbot/shared only. CopilotKit-specific code goes in toolkit/src/copilotkit."
-                  }
-                ]
-              }
-            }
           }
         }
       }
@@ -87,9 +58,6 @@
                 "patterns": [
                   {
                     "group": [
-                      "../../server/**",
-                      "../../../server/**",
-                      "../../../../server/**",
                       "drizzle-orm",
                       "drizzle-orm/**",
                       "hono",
@@ -99,35 +67,6 @@
                       "@/query-client"
                     ],
                     "message": "The extension runs in the browser. It talks to OpenBot over HTTP only, and takes only OpenBot's UI primitives and layout parts from the app."
-                  }
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "includes": ["toolkit/src/copilotkit/**"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "patterns": [
-                  {
-                    "group": ["../../**"],
-                    "message": "The CopilotKit adapters run without the server. Take what they need as a port or a constructor option instead of importing server code."
-                  },
-                  {
-                    "group": [
-                      "drizzle-orm",
-                      "drizzle-orm/**",
-                      "hono",
-                      "hono/**"
-                    ],
-                    "message": "The CopilotKit adapters do not reach the database or the HTTP framework."
                   }
                 ]
               }
@@ -164,6 +103,61 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "app/src/**",
+        "mobile/app/**",
+        "mobile/src/**",
+        "extension/src/**",
+        "!app/src/lib/api/generated/**",
+        "!mobile/src/api/generated/**",
+        "!extension/src/shared/generated/**",
+        "!**/tests/**",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "fetch": "Reach the server through the API's generated client (app/src/lib/api/generated), never by hand. A request that must stay outside it is named, with its rule, in api/client-boundary.allow.ts.",
+                  "WebSocket": "Open the API's sockets at the address app/src/lib/socket-url.ts builds (api/asyncapi.yaml). A socket that must stay outside it is named, with its rule, in api/client-boundary.allow.ts.",
+                  "EventSource": "OpenBot streams over WebSockets (api/asyncapi.yaml), never server-sent events.",
+                  "XMLHttpRequest": "Reach the server through the API's generated client (app/src/lib/api/generated), never by hand."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "app/src/lib/client.ts",
+        "app/src/lib/auth/client.ts",
+        "app/src/lib/plugins/finish-on-return.ts",
+        "app/src/components/channels/attachment-view.tsx",
+        "app/src/lib/channels/use-channel-events.ts",
+        "app/src/components/computer/live-screen.tsx",
+        "app/src/components/computer/live-terminal.tsx",
+        "app/src/lib/voice/websocket.ts",
+        "mobile/src/api/request.ts",
+        "mobile/app/computer.tsx",
+        "mobile/src/security-floor.ts",
+        "extension/src/shared/openbot-client.ts",
+        "extension/src/main-world/network-hook.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": "off"
           }
         }
       }

@@ -22,7 +22,7 @@ const SIGNED_OUT = {
 function noticeSentence(notice: RecorderNotice): string {
   switch (notice.kind) {
     case "interrupted":
-      return "Your last recording stopped when the browser closed. Everything recorded until then goes to OpenBot's back end.";
+      return "Your last recording stopped when the browser closed. Everything recorded until then goes to OpenBot's backend.";
     case "signed-out":
       return notice.reason === "organization"
         ? SIGNED_OUT.organization

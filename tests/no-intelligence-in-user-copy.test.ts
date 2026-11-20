@@ -5,64 +5,29 @@ import ts from "typescript";
 
 /**
  * Guard: no text a person reads names Intelligence. To a person it is all OpenBot, and the part of
- * OpenBot they mean is the back end (see .claude/skills/openbot-copy).
+ * OpenBot they mean is the backend (see .claude/skills/openbot-copy), one word.
  *
  * Read are the string literals, template text and JSX text of the desktop window, the app, the
- * server, the Recorder extension and the shared Recorder disclosure, and the string literals of the
- * desktop's native side, whose problems, notices, progress lines and menu items reach the window and
- * the tray.
+ * Recorder extension and the shared Recorder disclosure, and the string literals of the desktop's
+ * native side, whose problems, notices, progress lines and menu items reach the window and the tray.
  * Not read: code identifiers and env names (`intelligenceStack`, `INTELLIGENCE_API_URL`; the check
- * is for the capitalised word), comments, tests, log calls, and docs/ and charts/, which operators
- * read to configure Intelligence by name.
+ * is for the capitalised word), comments, tests, log calls, and docs/, which operators read to
+ * configure Intelligence by name. The server's text comes with the published OpenBot images, not
+ * from this tree.
  */
 const REPO = join(import.meta.dir, "..");
 const WORD = /\bIntelligence\b/;
 
 /**
- * Text that names Intelligence and never reaches a person: written only to the server's log, or
- * refused before the server serves anything. Each entry must still match, so one that goes stale
- * is removed rather than kept as a hole.
+ * Text that names Intelligence and never reaches a person: written only to a log, refused before
+ * anything is served, or only compared with an answer. Each entry must still match, so one that
+ * goes stale is removed rather than kept as a hole.
  */
 const NOT_SHOWN: { file: string; text: string; why: string }[] = [
   {
-    file: "server/src/config.ts",
-    text: "CopilotKit Intelligence is required and is not configured",
-    why: "a boot refusal, printed to the operator's terminal before the server listens",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "both say where the browser reaches the Intelligence gateway",
-    why: "a boot refusal, printed before the server listens",
-  },
-  {
-    file: "server/src/config.ts",
-    text: "must be the Intelligence project's numeric ID",
-    why: "a boot refusal, printed before the server listens",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence has no valid licence. Give Intelligence's own deployment",
-    why: "the boot log's advice, which names the Helm keys an operator sets",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence's licence has expired. Renew it and replace COPILOTKIT_LICENSE_TOKEN",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Managed Intelligence could not resolve this project's entitlement",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence answers that this deployment's entitlement is not active",
-    why: "the boot log's advice",
-  },
-  {
-    file: "server/src/intelligence-entitlement-check.ts",
-    text: "Intelligence did not confirm this deployment's entitlement",
-    why: "the boot log's advice",
+    file: "extension/src/offscreen/grant.ts",
+    text: "Could not connect to Intelligence",
+    why: "the CopilotKit runtime's own sentence, which the Recorder looks for in an answer and never shows; reworded, it matches nothing",
   },
 ];
 
@@ -90,8 +55,8 @@ function logged(node: ts.Node): boolean {
   return false;
 }
 
-/** Every piece of text in a TypeScript file that names Intelligence, as `file:line  text`. */
-function scriptText(path: string): string[] {
+/** Every piece of text in a TypeScript file that says `word`, as `file:line  text`. */
+function scriptText(path: string, word = WORD): string[] {
   const text = readFileSync(path, "utf8");
   const file = ts.createSourceFile(
     path,
@@ -111,7 +76,7 @@ function scriptText(path: string): string[] {
       ts.isJsxText(node)
         ? node.text
         : null;
-    if (said !== null && WORD.test(said) && !logged(node)) {
+    if (said !== null && word.test(said) && !logged(node)) {
       const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
       found.push(`${relative(REPO, path)}:${line + 1}  ${said.trim()}`);
     }
@@ -122,11 +87,11 @@ function scriptText(path: string): string[] {
 }
 
 /**
- * Every string literal in a Rust file's own code that names Intelligence. Comments and every
+ * Every string literal in a Rust file's own code that says `word`. Comments and every
  * `#[cfg(test)] mod … { … }` block are passed over, and a literal inside `eprintln!` or `println!`
  * is a log line.
  */
-function nativeText(path: string): string[] {
+function nativeText(path: string, word = WORD): string[] {
   const text = readFileSync(path, "utf8");
   const found: string[] = [];
   // Strings, comments and braces in one pass, so neither a `//` nor a brace inside a string counts.
@@ -148,7 +113,7 @@ function nativeText(path: string): string[] {
       if (depth === tests) tests = null;
     }
     if (tests !== null || !/^b?r?#*"/.test(literal)) continue;
-    if (!WORD.test(literal)) continue;
+    if (!word.test(literal)) continue;
     const before = text.slice(0, match.index);
     const statement = before.slice(
       Math.max(
@@ -167,16 +132,16 @@ function nativeText(path: string): string[] {
   return found;
 }
 
-function shown(): string[] {
+function shown(word = WORD): string[] {
   const found = [
-    ...["desktop/src", "app/src", "server/src", "extension/src"].flatMap(
-      (root) => [...files(join(REPO, root), /\.tsx?$/)],
-    ),
+    ...["desktop/src", "app/src", "extension/src"].flatMap((root) => [
+      ...files(join(REPO, root), /\.tsx?$/),
+    ]),
     join(REPO, "shared/recorder-disclosure.ts"),
-  ].flatMap(scriptText);
+  ].flatMap((path) => scriptText(path, word));
   found.push(
     ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
-      nativeText,
+      (path) => nativeText(path, word),
     ),
   );
   return found;
@@ -187,8 +152,89 @@ const isNotShown = (hit: string) =>
     (entry) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
   );
 
-test("no text a person reads in the desktop app, the app, the server or the Recorder says Intelligence", () => {
+test("no text a person reads in the desktop app, the app or the Recorder says Intelligence", () => {
   expect(shown().filter((hit) => !isNotShown(hit))).toEqual([]);
+});
+
+/**
+ * "Backend" is one word in what a person reads, never "back end" or "Back-end". The bare "back-end"
+ * is the id of a group of containers (partNames.ts), never shown.
+ */
+test("no text a person reads says back end in two words", () => {
+  expect(
+    shown(/\b[Bb]ack(?:[\s-]|\\\n)+ends?\b/).filter(
+      (hit) => !/\s{2}back-end$/.test(hit),
+    ),
+  ).toEqual([]);
+});
+
+/**
+ * "CopilotKit" alone, where a person reads it. Product copy says OpenBot, and "OpenBot by
+ * CopilotKit" where the company has to be named: the license agreement, a privacy line, the Account
+ * step's header (see .claude/skills/openbot-copy). Not caught: an address
+ * (`github.com/CopilotKit/OpenBot`) or a name inside one (`X-CopilotKit-Telemetry-Id`), which a
+ * person follows or never sees.
+ */
+const COPILOTKIT = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
+
+/**
+ * Text that says CopilotKit and is never shown, or says it beside OpenBot's name. Each entry must
+ * still match, so one that goes stale is removed rather than kept as a hole.
+ */
+const COPILOTKIT_ALLOWED: { file: string; text: string; why: string }[] = [
+  {
+    file: "desktop/src/Sections.tsx",
+    text: "by CopilotKit",
+    why: "the Account step's header, beside OpenBot's name: it reads OpenBot by CopilotKit",
+  },
+];
+
+test("no text a person reads says CopilotKit, except as OpenBot by CopilotKit", () => {
+  expect(
+    shown(COPILOTKIT).filter(
+      (hit) =>
+        !COPILOTKIT_ALLOWED.some(
+          (entry) =>
+            hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
+        ),
+    ),
+  ).toEqual([]);
+});
+
+test("every exception for CopilotKit still matches", () => {
+  const found = shown(COPILOTKIT);
+  expect(
+    COPILOTKIT_ALLOWED.filter(
+      (entry) =>
+        !found.some(
+          (hit) => hit.startsWith(`${entry.file}:`) && hit.includes(entry.text),
+        ),
+    ),
+  ).toEqual([]);
+});
+
+test("the CopilotKit scan catches the name alone and passes OpenBot by CopilotKit and addresses", () => {
+  for (const said of [
+    "Sign in to CopilotKit",
+    "OpenBot sends CopilotKit usage data",
+    "CopilotKit's dashboard",
+    "Your CopilotKit🪁 account",
+  ])
+    expect({ said, caught: COPILOTKIT.test(said) }).toEqual({
+      said,
+      caught: true,
+    });
+  for (const said of [
+    "accept the OpenBot by CopilotKit license agreement",
+    "the OpenBot by\n        CopilotKit license agreement",
+    "https://github.com/CopilotKit/OpenBot/issues/new/choose",
+    "X-CopilotKit-Telemetry-Id",
+    "@copilotkit/react-core",
+  ])
+    expect({ said, caught: COPILOTKIT.test(said) }).toEqual({
+      said,
+      caught: false,
+    });
 });
 
 test("every exception for text that is never shown still matches", () => {

@@ -1,28 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { PageShell } from "@/components/layout/page-shell";
-import { LearningReview } from "@/components/settings/learning-review";
-import { LearningSharing } from "@/components/settings/learning-sharing";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/**
+ * Learning is part of Skills now: learned skills are rows of Your skills, with their
+ * sharing choice, and what waits for review is its own section there.
+ */
 export const Route = createFileRoute("/_authed/settings/learning")({
-  component: LearningSettingsPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/skills", replace: true });
+  },
 });
-
-export function LearningSettingsPage() {
-  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  const personal = capabilities?.edition === "personal";
-  return (
-    <PageShell
-      title="Learning"
-      description={
-        personal
-          ? "Your recordings and conversations teach your Bots new skills. Review what they learned here."
-          : "Every recording you make goes into your own Learning space, and the Skills learned there reach every Bot you use. Choose who else's Bots may use them too."
-      }
-    >
-      <LearningReview />
-      <LearningSharing />
-    </PageShell>
-  );
-}

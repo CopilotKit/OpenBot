@@ -6,6 +6,7 @@ import { cleanup, render } from "@testing-library/react";
 import { failedComputerCall } from "@/lib/computers/call";
 import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useFrontendTool } from "@/lib/copilot/approval-tools";
+import { problemResponse } from "./approvals-api";
 
 /**
  * The handler the SDK keeps for a computer change.
@@ -72,12 +73,17 @@ test("a change goes to the server's gate even when nothing about approvals has l
         path: String(path),
         ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
       });
-      if (String(path).startsWith("/api/approvals/threads/"))
+      if (
+        String(path).startsWith(
+          "/api/v2/organizations/default/people/me/approval-modes/",
+        )
+      )
         return Response.json({ asksEveryStep: false });
-      return Response.json(
-        { waiting: true, approvalId: "approval-1" },
-        { status: 202 },
-      );
+      return Response.json({
+        outcome: "waiting",
+        approvalId: "approval-1",
+        reason: "This action is waiting for your approval.",
+      });
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -143,16 +149,19 @@ test("a change goes to the server's gate even when nothing about approvals has l
     stop();
     expect(direct).toEqual([]);
     expect(posted).toEqual([
-      { path: "/api/approvals/threads/thread" },
+      { path: "/api/v2/organizations/default/people/me/approval-modes/thread" },
       {
-        path: "/api/approvals/computer/default",
-        body: expect.objectContaining({
-          runId: "run-1",
-          threadId: "thread",
-          toolCallId: "click-call",
-          toolName: "computer_click",
-          args: { ref: "e7", snapshotId: 3 },
-        }),
+        path: "/api/v2/organizations/default/people/me/computer-steps",
+        body: {
+          botId: "default",
+          conversation: expect.objectContaining({
+            runId: "run-1",
+            threadId: "thread",
+            toolCallId: "click-call",
+            toolName: "computer_click",
+            args: { ref: "e7", snapshotId: 3 },
+          }),
+        },
       },
     ]);
     expect(result).toEqual({ waiting: true });
@@ -241,12 +250,9 @@ async function clickAgainstGate(
 
 test("a change the computer could not make comes back to the Bot as a result, not a throw", async () => {
   const result = await clickAgainstGate(async () =>
-    Response.json(
-      {
-        error:
-          "Element e7 is not on the page any more. Take a fresh snapshot and use the refs from it.",
-      },
-      { status: 409 },
+    problemResponse(
+      409,
+      "Element e7 is not on the page any more. Take a fresh snapshot and use the refs from it.",
     ),
   );
   expect(result).toEqual({
@@ -254,21 +260,22 @@ test("a change the computer could not make comes back to the Bot as a result, no
     reason:
       "Element e7 is not on the page any more. Take a fresh snapshot and use the refs from it.",
     staleRefs: true,
+    // Every answer says when it finished, for the time beside it in Activity (`withFinishedAt`).
+    finishedAt: expect.any(String),
   });
 });
 
 test("a refused change comes back as a refusal the Bot can explain", async () => {
   const result = await clickAgainstGate(async () =>
-    Response.json(
-      { error: "Your team does not allow this.", rule: "team-rule-1" },
-      { status: 403 },
-    ),
+    problemResponse(403, "Your team does not allow this."),
   );
   expect(result).toEqual({
     ok: false,
     reason: "Your team does not allow this.",
     refused: true,
-    rule: "team-rule-1",
+    // A problem names no rule: the sentence is what the Bot has to explain it with.
+    rule: null,
+    finishedAt: expect.any(String),
   });
 });
 
@@ -280,10 +287,15 @@ test("a gate that cannot be reached, or answers with no result, is still a resul
   ).toEqual({
     ok: false,
     reason: "The assistant's computer could not be reached.",
+    finishedAt: expect.any(String),
   });
   expect(
-    await clickAgainstGate(async () => Response.json({}, { status: 200 })),
-  ).toEqual({ ok: false, reason: "The computer action returned no result." });
+    await clickAgainstGate(async () => Response.json({ outcome: "done" })),
+  ).toEqual({
+    ok: false,
+    reason: "The computer action returned no result.",
+    finishedAt: expect.any(String),
+  });
 });
 
 /*
@@ -396,7 +408,7 @@ async function navigateWith(
 const threadAnswers =
   (asksEveryStep: boolean, rest: () => Promise<Response>) =>
   async (path: string) =>
-    path === "/api/approvals/threads/thread"
+    path === "/api/v2/organizations/default/people/me/approval-modes/thread"
       ? Response.json({ asksEveryStep })
       : rest();
 
@@ -410,16 +422,17 @@ test("a look a rule asks about goes again through the gate, with its conversatio
   });
   const { result, paths } = await navigateWith(
     threadAnswers(false, async () =>
-      Response.json(
-        { waiting: true, approvalId: "approval-2" },
-        { status: 202 },
-      ),
+      Response.json({
+        outcome: "waiting",
+        approvalId: "approval-2",
+        reason: "This action is waiting for your approval.",
+      }),
     ),
   );
   expect(looked).toHaveLength(1);
   expect(paths).toEqual([
-    "/api/approvals/threads/thread",
-    "/api/approvals/computer/default",
+    "/api/v2/organizations/default/people/me/approval-modes/thread",
+    "/api/v2/organizations/default/people/me/computer-steps",
   ]);
   expect(result).toEqual({ waiting: true });
   expect(stopped).toHaveLength(1);
@@ -435,8 +448,14 @@ test("a look nothing asks about goes straight to the computer and nowhere else",
   );
   expect(looked).toHaveLength(1);
   // Asked once about the conversation, and the answer kept: it never changes.
-  expect(paths).toEqual(["/api/approvals/threads/thread"]);
-  expect(result).toEqual({ ok: true, title: "Example Domain" });
+  expect(paths).toEqual([
+    "/api/v2/organizations/default/people/me/approval-modes/thread",
+  ]);
+  expect(result).toEqual({
+    ok: true,
+    title: "Example Domain",
+    finishedAt: expect.any(String),
+  });
 });
 
 test("in a task's own conversation, opened with no conversation list loaded, a look goes to the gate first", async () => {
@@ -446,16 +465,17 @@ test("in a task's own conversation, opened with no conversation list loaded, a l
   lookOutcome = { ok: true, title: "Example Domain" };
   const { result, paths } = await navigateWith(
     threadAnswers(true, async () =>
-      Response.json(
-        { waiting: true, approvalId: "approval-3" },
-        { status: 202 },
-      ),
+      Response.json({
+        outcome: "waiting",
+        approvalId: "approval-3",
+        reason: "This action is waiting for your approval.",
+      }),
     ),
   );
   expect(looked).toEqual([]);
   expect(paths).toEqual([
-    "/api/approvals/threads/thread",
-    "/api/approvals/computer/default",
+    "/api/v2/organizations/default/people/me/approval-modes/thread",
+    "/api/v2/organizations/default/people/me/computer-steps",
   ]);
   expect(result).toEqual({ waiting: true });
   expect(stopped).toHaveLength(1);
@@ -465,16 +485,23 @@ test("a look whose conversation couldn't be checked goes through the gate, where
   looked.length = 0;
   lookOutcome = { ok: true, title: "Example Domain" };
   const { result, paths } = await navigateWith(async (path) =>
-    path === "/api/approvals/threads/thread"
+    path === "/api/v2/organizations/default/people/me/approval-modes/thread"
       ? Response.json({ error: "Unavailable." }, { status: 503 })
-      : Response.json({ result: { ok: true, title: "Example Domain" } }),
+      : Response.json({
+          outcome: "done",
+          result: { ok: true, title: "Example Domain" },
+        }),
   );
   expect(looked).toEqual([]);
   expect(paths).toEqual([
-    "/api/approvals/threads/thread",
-    "/api/approvals/computer/default",
+    "/api/v2/organizations/default/people/me/approval-modes/thread",
+    "/api/v2/organizations/default/people/me/computer-steps",
   ]);
-  expect(result).toEqual({ ok: true, title: "Example Domain" });
+  expect(result).toEqual({
+    ok: true,
+    title: "Example Domain",
+    finishedAt: expect.any(String),
+  });
 });
 
 test("in a task's own conversation, a look with no conversation to ask in is not taken at all", async () => {
@@ -487,11 +514,14 @@ test("in a task's own conversation, a look with no conversation to ask in is not
     { observed: false },
   );
   expect(looked).toEqual([]);
-  expect(paths).toEqual(["/api/approvals/threads/thread"]);
+  expect(paths).toEqual([
+    "/api/v2/organizations/default/people/me/approval-modes/thread",
+  ]);
   expect(result).toEqual({
     ok: false,
     reason:
       "Not done: this conversation asks before every step, and this step couldn't be asked about here.",
+    finishedAt: expect.any(String),
   });
 });
 

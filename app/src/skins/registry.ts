@@ -1,7 +1,7 @@
 import { appConfig } from "@/lib/generated/application-config";
 import { opendots } from "./opendots";
 import { openduet } from "./openduet";
-import { openmuse } from "./openmuse";
+import { openfuse } from "./openfuse";
 import { useSkinId } from "./store";
 import type { Skin, SkinId } from "./types";
 
@@ -21,7 +21,7 @@ export const SKINS: Record<SkinId, Skin> = {
   openbot,
   openduet,
   opendots,
-  openmuse,
+  openfuse,
 };
 
 export function useActiveSkin(): Skin {

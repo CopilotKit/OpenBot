@@ -9,6 +9,7 @@ import { RecorderCollectsRows } from "@/components/recorder/recorder-collects";
 import { ConnectedBrowsers } from "@/components/settings/browsers/connected-browsers";
 import { ThisBrowser } from "@/components/settings/browsers/this-browser";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
 
 /**
  * What the Recorder collects, first, so the person reads it before they connect a browser (the Recorder's own setup page
@@ -24,6 +25,7 @@ export function BrowserSections() {
   return (
     <>
       <PageSection
+        id={COMPUTER_SECTION.browsers}
         title={RECORDER_DISCLOSURE_TITLE}
         description={recorderDisclosureFor(edition)}
       >

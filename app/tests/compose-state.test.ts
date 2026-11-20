@@ -60,6 +60,11 @@ describe("canSend", () => {
     expect(canSend([KNOWLEDGE], "   ")).toBe(false);
   });
 
+  test("takes files with no words, as a message in a conversation does", () => {
+    expect(canSend([KNOWLEDGE], "", 1)).toBe(true);
+    expect(canSend([], "", 1)).toBe(false);
+  });
+
   test("the cap is the server's limit for a group", () => {
     expect(MAX_RECIPIENTS).toBe(20);
   });

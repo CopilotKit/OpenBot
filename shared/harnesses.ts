@@ -48,12 +48,12 @@ export type Harness = {
   /** The file stem under `shared/marks/`, or null where no maintained set has one. */
   mark: string | null;
   /**
-   * Whether the web create API can actually make this row work.
+   * Whether the web create API can actually make this row work. A row it can't would make a Bot
+   * that appears, accepts a grant, and answers nothing, so the dialog leaves it out.
    *
-   * False for Mastra alone: the server reaches it as `remote_mastra` through the `@ag-ui/mastra`
-   * bridge and needs a roster id to say which agent it means, and the create endpoint can send
-   * neither. Offered in the dialog it would make a Bot that appears, accepts a grant, and answers
-   * nothing.
+   * True for every row today. Mastra was the last to arrive: the server reaches it through the
+   * `@ag-ui/mastra` bridge, and a create that names it is now proved against Mastra's own API and
+   * saved as a Mastra Bot. See {@link reachedThroughMastra}.
    */
   webCreate: boolean;
 };
@@ -72,16 +72,13 @@ export const HARNESSES: readonly Harness[] =
  * The catalogue is ranked stars-first, which suits the desktop installer choosing an image to run
  * but not somebody scanning for their own framework: Atai, October 19, read CrewAI, LlamaIndex and
  * Agno at the top as "the ones on top don't make sense", and reported LangChain and ADK missing when
- * they were fourth and fifth. Atai later named Claude Agent SDK, LangChain, Google ADK and AWS Strands
- * as the four to read first, in that order. These lead; everything else follows in the catalogue's
- * own order.
+ * they were fourth and fifth. These lead; everything else follows in the catalogue's own order.
  */
 const WEB_LEAD: readonly string[] = [
   "claude-agent-sdk",
-  "langgraph",
   "google-adk",
-  "strands",
   "antigravity",
+  "langgraph",
 ];
 
 /** Where a harness sits in the web list: its lead position, or after every lead. */
@@ -98,9 +95,87 @@ export const WEB_HARNESSES: readonly Harness[] = HARNESSES.filter(
   (harness) => harness.webCreate,
 ).sort((a, b) => webRank(a) - webRank(b));
 
+/**
+ * Whether OpenBot reaches an agent on this framework through Mastra's own API, by harness id.
+ *
+ * Every other framework serves an AG-UI route, and an address for one is tried with a real AG-UI run
+ * before it is saved. A Mastra server has no such route, so that run can only fail against it. The
+ * create names the framework instead, and the server proves the address by asking the Mastra server
+ * which agents it runs. It connects to a server that runs one.
+ */
+export function reachedThroughMastra(id: string | null | undefined): boolean {
+  return id === "mastra";
+}
+
 /** The sentence to draw on a web surface: the override where there is one, else the installer's. */
 export function summaryFor(harness: Harness): string {
   return harness.webSummary ?? harness.summary;
+}
+
+/**
+ * Names the catalogue gave a framework before its current one, by harness id.
+ *
+ * A Bot an earlier version seeded under one of these is still named after its framework: the
+ * installer moves it like one under the current name, and its subtitle reads the current name.
+ */
+export const EARLIER_HARNESS_NAMES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  langgraph: ["LangGraph", "LangChain (LangGraph)"],
+};
+
+/**
+ * The Personal Assistant's subtitle as a person reads it, when it runs on a framework the installer
+ * picked: what it is, what runs it, and that any other agent can be brought along, with the article
+ * the name reads with ("an AWS Strands agent"). Atai's wording and punctuation, November 10. Shown
+ * only: the starter is still stored, and told to the Bot, as "Everyday life. Powered by <name>.".
+ *
+ * The subtitle is itself in parentheses, so a name with its own ("LangGraph (TypeScript)") reads
+ * without them ("a LangGraph TypeScript agent") rather than nesting one pair inside the other.
+ */
+export function starterSubtitle(name: string): string {
+  const plain = name.replace(/\s*\(([^()]*)\)/g, " $1").trim();
+  const article = /^[AEIOU]/.test(plain) ? "an" : "a";
+  return `Everyday life agent. (powered by ${article} ${plain} agent; you can bring your own agent from any stack.)`;
+}
+
+/** Every name a harness the installer can run has had, with the harness it belongs to now. */
+function namesWithHarness(): Array<[string, Harness]> {
+  return HARNESSES.filter(({ image }) => image !== null).flatMap((harness) =>
+    [harness.name, ...(EARLIER_HARNESS_NAMES[harness.id] ?? [])].map(
+      (name): [string, Harness] => [name, harness],
+    ),
+  );
+}
+
+/**
+ * A subtitle OpenBot wrote, as a person reads it now. For the profile a person sees, never for what
+ * a Bot is told.
+ *
+ * - The Personal Assistant's seed, "Everyday life. Powered by <framework>.", exactly as seeded under
+ *   any of the framework's names, reads as {@link starterSubtitle} for its current name.
+ * - Any other "Powered by <earlier name>" reads with the framework's current name.
+ *
+ * Only what OpenBot wrote changes. A subtitle the person rewrote no longer matches the seed, and the
+ * person's own words around a "Powered by" stay as they wrote them.
+ */
+export function withCurrentFrameworkNames(title: string): string {
+  for (const [name, harness] of namesWithHarness()) {
+    if (title === `Everyday life. Powered by ${name}.`) {
+      return starterSubtitle(harness.name);
+    }
+  }
+  let current = title;
+  for (const harness of HARNESSES) {
+    for (const earlier of EARLIER_HARNESS_NAMES[harness.id] ?? []) {
+      const escaped = earlier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      current = current.replace(
+        new RegExp(`Powered by ${escaped}(?![\\w(])`, "g"),
+        `Powered by ${harness.name}`,
+      );
+    }
+  }
+  return current;
 }
 
 /**
@@ -108,6 +183,16 @@ export function summaryFor(harness: Harness): string {
  * framework it is told it runs on.
  */
 export const OPENBOT_HARNESS_NAME = "OpenBot";
+
+/**
+ * The engine a new Bot that runs inside OpenBot is made on, by harness id: OpenBot's own LangGraph
+ * agent in TypeScript (`agent-langgraph-ts`).
+ *
+ * The New Bot sheet sends it with a Bot that has no address, and the server records it on that Bot.
+ * The server still decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and
+ * a deployment whose administrator switched the default back runs its Bots on the built-in agent.
+ */
+export const DEFAULT_BOT_ENGINE = "langgraph-ts";
 
 /**
  * A framework a person may declare for an agent they run themselves, by id: any named harness, never

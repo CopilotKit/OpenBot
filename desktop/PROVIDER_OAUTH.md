@@ -3,7 +3,9 @@
 OpenBot's Google, xAI and Unbiased AI model connections are separate from signing
 in to OpenBot or CopilotKit. API keys remain available for all three providers.
 Google and xAI sign-ins leave a refreshable session in a private credential
-file; Unbiased AI's mints an API key, which is kept like a typed one.
+file; Unbiased AI's mints an API key, which is kept like a typed one. The
+ChatGPT and Claude plan sign-ins for OpenAI and Anthropic are a separate path
+and are not covered here.
 
 ## Google Gemini
 
@@ -25,9 +27,10 @@ process environment variables can override those defaults:
 For GitHub-built artifacts, configure repository Actions **variables** named
 `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID` and
 `OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT`, plus an Actions **secret** named
-`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` when the client has one. Both the
-Desktop artifact workflow and the Windows signing workflow pass these settings
-to the native build. They become defaults inside the distributed desktop app;
+`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` when the client has one. Every
+workflow that builds the desktop app passes these settings to the native build:
+Desktop build (which Desktop, Internal build and Publish release call) and
+both signing workflows. They become defaults inside the distributed desktop app;
 the desktop client credential is not a user access or refresh token.
 
 When calling the Desktop workflow as a reusable workflow, pass its optional

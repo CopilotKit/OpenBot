@@ -1,5 +1,6 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
+import { InlineApproval } from "@/components/approvals/inline-approval";
 import { ToolLine } from "@/components/channels/tool-line";
 import { HANDED_OVER } from "@/lib/copilot/markers";
 import { saidItWentAhead } from "@/lib/plugins/tool-result";
@@ -39,10 +40,17 @@ export function HandoffTool() {
   useRenderTool({
     name: "message_bot",
     parameters,
-    render: ({ parameters: given, result, status }) => {
+    render: ({ parameters: given, result, status, toolCallId }) => {
       const asked = given?.bot?.trim();
       const running = status !== "complete" && result === undefined;
-      return (
+      /*
+       * WHILE OPENBOT ASKS ABOUT IT, ITS CARD IS DRAWN HERE INSTEAD. Handing work to another
+       * person's Bot shares this conversation with them, and a person can ask before every hand-off,
+       * so the server stops the turn and opens a request. Drawn as only the line, it shimmered with no
+       * way to answer it but the Bots page. The same card an app's call and a browser step draw, from
+       * the same inbox, and the line comes back once it is decided.
+       */
+      const line = (
         <ToolLine
           label={asked ? `Asked ${asked}` : "Asked another Bot"}
           detail={given?.task}
@@ -72,6 +80,7 @@ export function HandoffTool() {
           </div>
         </ToolLine>
       );
+      return <InlineApproval toolCallId={toolCallId} fallback={line} />;
     },
   });
 

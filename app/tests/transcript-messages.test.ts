@@ -59,6 +59,7 @@ describe("the first-message stash", () => {
     stashFirstMessage("channel_a", "/tally-card hello");
     expect(takeFirstMessage("channel_a")).toEqual({
       text: "/tally-card hello",
+      attachments: [],
     });
   });
 

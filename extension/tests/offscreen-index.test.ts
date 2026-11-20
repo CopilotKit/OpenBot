@@ -115,7 +115,7 @@ const parkedPass = () =>
   Response.json(
     {
       code: "INTELLIGENCE_RUNTIME_REQUIRED",
-      message: "OpenBot's back end is not configured.",
+      message: "OpenBot's backend is not configured.",
     },
     { status: 503 },
   );
@@ -189,7 +189,7 @@ async function setup(): Promise<Harness> {
   let gateway: FakeGateway | null = null;
   const route = (request: Request): Response | Promise<Response> | null => {
     const path = new URL(request.url).pathname;
-    if (path.startsWith("/api/recorder/")) {
+    if (path.startsWith("/api/v2/organizations/default/recorder")) {
       openbot.recorderRequests.push(`${request.method} ${path}`);
       return Response.json({ error: "Not found." }, { status: 404 });
     }
@@ -578,7 +578,7 @@ describe("offscreen controller", () => {
       capture: {
         intelligence: "off",
         intelligenceReason:
-          "The Recorder could not start sending this recording to OpenBot's back end.",
+          "The Recorder could not start sending this recording to OpenBot's backend.",
         events: { sent: 0, pending: 0, rejected: 0, dropped: 2 },
       },
     });
@@ -600,7 +600,7 @@ describe("offscreen controller", () => {
         type: "offscreen.done",
         recordingId: "rec-1",
         failed:
-          "Nothing of this recording reached OpenBot's back end: the Recorder could not start sending it. Try recording again.",
+          "Nothing of this recording reached OpenBot's backend: the Recorder could not start sending it. Try recording again.",
       },
     ]);
     const types = h.latest().map((message) => message.type);
@@ -625,7 +625,7 @@ describe("offscreen controller", () => {
         type: "offscreen.kept",
         recordingId: "rec-1",
         reason:
-          "The Recorder could not start sending this recording to OpenBot's back end.",
+          "The Recorder could not start sending this recording to OpenBot's backend.",
         parked: true,
         events: 0,
       },

@@ -26,7 +26,7 @@ function RouteComponent() {
 
   return (
     <PageShell
-      description="Choose which components each Bot can display. Published components are available to all Bots by default. Changes and blocked requests appear in Audit."
+      description="Choose which components each Bot can display. Published components are available to all Bots by default. Changes and blocked requests appear in Activity."
       title="UI components"
     >
       {/*
@@ -36,7 +36,7 @@ function RouteComponent() {
        */}
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load components. Reload the page.
+          Couldn't load components. Try again in a moment.
         </p>
       ) : components.data?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">

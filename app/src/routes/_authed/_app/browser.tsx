@@ -4,9 +4,9 @@ import { BrowserPage } from "@/components/browser/browser-page";
 /**
  * The person's own browser, with the OpenBot Recorder in it.
  *
- * `_authed/_app`, beside Bots, Capabilities and Connections: it is somebody's own, like those, and a browser shown in
- * the page needs the app's full-height pane. Reached from the sidebar's Teach a Bot link, which shows only where OpenBot
- * can run a browser for the person.
+ * `_authed/_app`, beside Bots, Skills and Connections: it is somebody's own, like those, and a browser shown in the
+ * page needs the app's full-height pane. Reached from Teach a Bot on the Skills page, which shows only where OpenBot can
+ * run a browser for the person.
  */
 export const Route = createFileRoute("/_authed/_app/browser")({
   component: BrowserPage,

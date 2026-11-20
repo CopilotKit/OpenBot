@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink } from "./ExternalLink";
 import {
   type CopilotKitSignInPage,
@@ -21,15 +21,35 @@ const ASK_EVERY_MS = 500;
 export function CopilotKitSignInWait({
   attempt,
   waiting,
+  before = waiting,
+  onPage,
   onCancel,
 }: {
   /** The sign-in being waited on (`signInToCopilotKit`). */
   attempt: string;
   /** What is said while it waits. */
   waiting: string;
+  /**
+   * What is said until the CLI has opened a page. It checks for a sign-in it already has first, and
+   * opens nothing when it finds one.
+   */
+  before?: string;
+  /** The CLI has opened its page: the person is signing in. */
+  onPage?: () => void;
   onCancel: () => void;
 }) {
-  const [page, setPage] = useState<CopilotKitSignInPage | null>(null);
+  /*
+   * Kept with the sign-in that printed it. A Try again is a new sign-in with a new code: the code
+   * before it has timed out or been stopped, and approving it says it expired. So only this
+   * sign-in's own page is shown, and an earlier sign-in's answer that lands late is dropped.
+   */
+  const [shown, setShown] = useState<{
+    attempt: string;
+    page: CopilotKitSignInPage;
+  } | null>(null);
+  const page = shown?.attempt === attempt ? shown.page : null;
+  const onPageNow = useRef(onPage);
+  onPageNow.current = onPage;
 
   useEffect(() => {
     let current = true;
@@ -38,7 +58,10 @@ export function CopilotKitSignInWait({
       copilotKitSignInPage(attempt)
         .then(
           (found) => {
-            if (current && found) setPage(found);
+            if (current && found) {
+              setShown({ attempt, page: found });
+              onPageNow.current?.();
+            }
           },
           () => {},
         )
@@ -55,7 +78,7 @@ export function CopilotKitSignInWait({
 
   return (
     <>
-      <StatusLine>{waiting}</StatusLine>
+      <StatusLine>{page ? waiting : before}</StatusLine>
       {page && (
         <>
           <p className="footnote">
@@ -67,8 +90,8 @@ export function CopilotKitSignInWait({
             <ExternalLink href={page.url}>Open the sign-in page</ExternalLink>
           </p>
           <p className="footnote">
-            If your browser shows the CopilotKit dashboard after you choose an
-            organization, open the sign-in page again.
+            If your browser shows a dashboard after you choose an organization,
+            open the sign-in page again.
           </p>
         </>
       )}

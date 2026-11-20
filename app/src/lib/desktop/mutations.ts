@@ -1,9 +1,24 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import {
   type DesktopAppUpdateCheck,
+  type DesktopUsageData,
   desktopKeys,
   invokeDesktop,
 } from "./queries";
+
+/**
+ * Turn Share usage data on or off. The desktop app keeps the choice for the next launch, stops its
+ * own events and the CLI's at once, and starts the server with it the next time OpenBot starts.
+ * It answers with the setting as it now stands.
+ */
+export function setUsageDataMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (share: boolean): Promise<DesktopUsageData> =>
+      invokeDesktop("set_usage_data", { share }),
+    onSuccess: (usageData) =>
+      queryClient.setQueryData(desktopKeys.usageData, usageData),
+  });
+}
 
 function invalidateDesktop(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: desktopKeys.all });
@@ -28,6 +43,37 @@ export function restartOpenBotMutationOptions(queryClient: QueryClient) {
 export function stopOpenBotMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<void> => invokeDesktop("stop"),
+  });
+}
+
+/**
+ * Change the AI connection. The desktop app stops OpenBot and its window shows setup at the AI
+ * screen, where the new choice starts OpenBot again. Like Stop, this page goes with it.
+ */
+export function changeAiConnectionMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("change_ai_connection"),
+  });
+}
+
+/**
+ * Sign out of the OpenBot this app is connected to. The desktop app ends the sign-in there, forgets
+ * it on this computer and shows setup with the address still filled in. Like Stop, this page goes
+ * with it.
+ */
+export function signOutOfConnectedOpenBotMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("sign_out"),
+  });
+}
+
+/**
+ * Go back to OpenBot on this computer. The desktop app signs out of the OpenBot it is connected to
+ * and shows setup at the choice of where OpenBot runs. Nothing on this computer is changed by it.
+ */
+export function changeConnectionMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<void> => invokeDesktop("change_connection"),
   });
 }
 
@@ -87,8 +133,8 @@ export function intelligenceMutationOptions(queryClient: QueryClient) {
       if (report.outcome !== "completed")
         throw new Error(
           action === "start"
-            ? "The back end did not start."
-            : "The back end did not stop.",
+            ? "OpenBot's services didn't start. Try again."
+            : "OpenBot's services didn't stop. Try again.",
         );
     },
     onSettled: () => invalidateDesktop(queryClient),

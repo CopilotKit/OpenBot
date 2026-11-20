@@ -15,7 +15,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { problem } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
+
+/** What the server answers here: an upload to a conversation, and an attachment by its id. */
+const SERVED =
+  /^\/api\/v2\/organizations\/default\/(conversations\/[^/]+\/attachments|attachments\/[^/]+)$/;
 
 /**
  * What the composer does with a file, from the outside: the button that opens the picker, the drop
@@ -44,12 +49,18 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+/** Where this composer's conversation takes an upload: the API's address for it. */
+const UPLOADS =
+  "/api/v2/organizations/default/conversations/channel-1/attachments";
+
 /** Every upload this composer attempted: where it went, and what it carried. */
 let uploads: { path: string; name: string }[];
 
 beforeEach(() => {
   uploads = [];
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     const body = init.body as FormData;
     uploads.push({ path, name: (body.get("file") as File).name });
     return new Response(
@@ -57,6 +68,7 @@ beforeEach(() => {
         id: "attachment-id",
         name: (body.get("file") as File).name,
         mimeType: "text/plain",
+        sizeBytes: (body.get("file") as File).size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -66,11 +78,13 @@ beforeEach(() => {
 /**
  * The same upload stub, with the one answer that matters here under the test's control: what the
  * SERVER says the file is, having read its bytes, as against what the browser claimed when it was
- * picked up. `POST /api/channels/:id/attachments` returns a sniffed `mimeType`, and
+ * picked up. The API's `POST /conversations/:id/attachments` returns a sniffed `mimeType`, and
  * `uploadToChannel` puts it on the `url` source it hands back to the SDK.
  */
 function serverSniffs(mimeType: string) {
   global.fetch = (async (path: string, init: RequestInit) => {
+    // Only the API's addresses answer: an upload to a conversation, or an attachment given back.
+    if (!SERVED.test(path)) return problem(404, "Not found.");
     const body = init.body as FormData;
     uploads.push({ path, name: (body.get("file") as File).name });
     return new Response(
@@ -78,6 +92,7 @@ function serverSniffs(mimeType: string) {
         id: "attachment-id",
         name: (body.get("file") as File).name,
         mimeType,
+        sizeBytes: (body.get("file") as File).size,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -154,19 +169,19 @@ test("a composer with a channel offers a file picker behind the plus button", ()
  * silent drop is what says they are not; the text file is one that WOULD upload, so its absence
  * from `uploads` is what says nothing was sent.
  */
-test("a composer with no channel keeps the button that says so, and takes no files", async () => {
+test("a composer with no channel has no attach control, and takes no files", async () => {
   const view = render(<Composer compact onSubmit={() => {}} />);
   const { container, getByLabelText, queryByLabelText, rerender } = view;
   const form = () => container.querySelector("form") as HTMLFormElement;
 
-  // The old affordance, untouched: nothing to offer and it says so, rather than a live button
-  // that would open a picker with nowhere to upload to.
-  const placeholder = getByLabelText(
-    "More message options unavailable",
-  ) as HTMLButtonElement;
-  expect(placeholder.disabled).toBe(true);
+  // Nothing to attach to, and nothing else behind a plus, so there is no plus: not a live button
+  // that would open a picker with nowhere to upload to, and not a disabled one that explains nothing.
+  expect(queryByLabelText("More message options unavailable")).toBeNull();
   expect(queryByLabelText("Attach a file")).toBeNull();
+  expect(container.querySelector('[data-slot="composer-attach"]')).toBeNull();
   expect(container.querySelector('input[type="file"]')).toBeNull();
+  // The rest of the toolbar is still there.
+  expect(getByLabelText("Message")).toBeDefined();
 
   /*
    * THE DROP IS CAUGHT AND ANSWERED, WHICH INVERTS WHAT THESE TWO LINES USED TO PIN.
@@ -226,6 +241,84 @@ test("a dropped file the screen refuses says why, in our words", async () => {
   expect(uploads).toEqual([]);
 });
 
+/**
+ * A screenshot dragged onto a conversation: the chip with its preview, and the upload that carries
+ * the image to the Bot. OpenBot Desktop dropped exactly this on the floor while Tauri's own
+ * drag-and-drop handler took the file (see `dragDropEnabled` in `desktop/src-tauri/tauri.conf.json`
+ * and `main_window_leaves_dropped_files_to_the_page`); this pins the page's half of that path.
+ */
+test("a dropped screenshot shows its preview and goes up to the conversation", async () => {
+  serverSniffs("image/png");
+  const screenshot = new File(
+    [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    "Screenshot 2026-11-09 at 14.20.00.png",
+    { type: "image/png" },
+  );
+  const view = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  drop(view.container.querySelector("form") as HTMLFormElement, [screenshot]);
+  await uploaded(view, screenshot.name);
+
+  expect(uploads).toEqual([{ path: UPLOADS, name: screenshot.name }]);
+  expect(view.container.querySelector("img")).not.toBeNull();
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+/*
+ * THE CHIP IS DRAWN FROM THE FILE ON THIS DEVICE, NOT FETCHED BACK. Pictures go up to 100MB, and a
+ * chip drawn from the server's address downloads the whole file again straight after uploading it,
+ * to draw an 80px square.
+ */
+test("an uploaded picture's chip draws from the file on this device, not from the server", async () => {
+  serverSniffs("image/png");
+  const picture = new File(
+    [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    "site-survey.png",
+    { type: "image/png" },
+  );
+  const view = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  drop(view.container.querySelector("form") as HTMLFormElement, [picture]);
+  await uploaded(view, picture.name);
+
+  const src = view.container.querySelector("img")?.getAttribute("src") ?? "";
+  expect(src.startsWith("blob:")).toBe(true);
+});
+
+/**
+ * A drag that announced files and handed over none (the webview could not read what was dragged)
+ * used to stage an empty list: no chip, no refusal, nothing. It says so now.
+ */
+test("a drop that carries files the page cannot read says so instead of doing nothing", async () => {
+  const { container, findByRole } = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  drop(container.querySelector("form") as HTMLFormElement, []);
+
+  const alert = await findByRole("alert");
+  expect(alert.textContent).toContain("Dropped file");
+  expect(alert.textContent).toContain("Attach it with +");
+  expect(uploads).toEqual([]);
+});
+
+test("a drag carrying no file at all is not answered with a refusal", async () => {
+  const { container } = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+
+  fireEvent.drop(container.querySelector("form") as HTMLFormElement, {
+    dataTransfer: { files: [], items: [], types: ["text/plain"] },
+  });
+  await settleReactWork();
+
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
 test("a text file the screen accepts is not refused a second time by the SDK", async () => {
   // The two-gate collision, pinned. `processFiles` compares `file.type` to the accept list
   // exactly, while our screen (and the server behind it) drop MIME parameters first. A `File`
@@ -246,9 +339,7 @@ test("a text file the screen accepts is not refused a second time by the SDK", a
 
   await uploaded(view, "notes.txt");
 
-  expect(uploads).toEqual([
-    { path: "/api/channels/channel-1/attachments", name: "notes.txt" },
-  ]);
+  expect(uploads).toEqual([{ path: UPLOADS, name: "notes.txt" }]);
   // Asked once the SDK has been all the way through the file it was handed, which is the only
   // point at which the absence of a second refusal means anything: waiting on `uploads` put this
   // question before `processFiles` could have answered it either way.
@@ -339,9 +430,7 @@ test("a text file whose type differs only in case is not refused by the SDK", as
 
   await uploaded(view, "notes.txt");
 
-  expect(uploads).toEqual([
-    { path: "/api/channels/channel-1/attachments", name: "notes.txt" },
-  ]);
+  expect(uploads).toEqual([{ path: UPLOADS, name: "notes.txt" }]);
   expect(container.querySelector('[role="alert"]')).toBeNull();
 });
 

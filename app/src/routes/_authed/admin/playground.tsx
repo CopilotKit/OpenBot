@@ -16,15 +16,15 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  deleteSandboxedMutationOptions,
-  publishSandboxedMutationOptions,
-  type SandboxedDraftInput,
-  saveSandboxedDraftMutationOptions,
-} from "@/lib/sandboxed/mutations";
+  deletePlaygroundComponentMutationOptions,
+  type PlaygroundDraftInput,
+  publishPlaygroundMutationOptions,
+  savePlaygroundDraftMutationOptions,
+} from "@/lib/components/mutations";
 import {
-  type SandboxedRecord,
-  sandboxedListQueryOptions,
-} from "@/lib/sandboxed/queries";
+  type PlaygroundRecord,
+  playgroundListQueryOptions,
+} from "@/lib/components/queries";
 
 /**
  * Browser-authored components are edited as drafts, previewed in the production sandbox renderer,
@@ -52,7 +52,7 @@ type JsonObjectResult =
   | { ok: false; message: string };
 
 type PlaygroundValidation =
-  | { ok: true; input: SandboxedDraftInput }
+  | { ok: true; input: PlaygroundDraftInput }
   | {
       ok: false;
       fields: { argumentSchema?: string; sampleArguments?: string };
@@ -118,7 +118,7 @@ export function validatePlaygroundDraft(draft: Draft): PlaygroundValidation {
 function PlaygroundPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const { data: components } = useQuery(sandboxedListQueryOptions());
+  const { data: components } = useQuery(playgroundListQueryOptions());
   const [draft, setDraft] = useState<Draft>(STARTER);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -135,22 +135,22 @@ function PlaygroundPage() {
   /* Every write here reports into the same banner, so they share one failure handler. */
   const report = { onError: (thrown: Error) => setError(thrown.message) };
   const saveDraft = useMutation({
-    ...saveSandboxedDraftMutationOptions(queryClient),
+    ...savePlaygroundDraftMutationOptions(queryClient),
     ...report,
   });
   const publishDraft = useMutation({
-    ...publishSandboxedMutationOptions(queryClient),
+    ...publishPlaygroundMutationOptions(queryClient),
     ...report,
   });
   const removeComponent = useMutation({
-    ...deleteSandboxedMutationOptions(queryClient),
+    ...deletePlaygroundComponentMutationOptions(queryClient),
     ...report,
   });
   const busy =
     saveDraft.isPending || publishDraft.isPending || removeComponent.isPending;
   const canWrite = Boolean(draft.slug && draft.title) && validation.ok && !busy;
 
-  const input = (): SandboxedDraftInput | null => {
+  const input = (): PlaygroundDraftInput | null => {
     const current = validatePlaygroundDraft(draft);
     if (!current.ok) {
       setNotice(null);
@@ -179,7 +179,7 @@ function PlaygroundPage() {
     publishDraft.mutate(payload, { onSuccess: () => setNotice("Published.") });
   };
 
-  const load = (component: SandboxedRecord) =>
+  const load = (component: PlaygroundRecord) =>
     setDraft({
       slug: component.name.replace(/^custom_/, ""),
       title: component.title,
@@ -400,7 +400,7 @@ function PlaygroundPage() {
           <DialogHeader>
             <DialogTitle>Delete {deleting}?</DialogTitle>
             <DialogDescription>
-              It's removed from this deployment, and no Bot can draw it. You
+              It's removed from this organization, and no Bot can draw it. You
               can't undo this.
             </DialogDescription>
           </DialogHeader>

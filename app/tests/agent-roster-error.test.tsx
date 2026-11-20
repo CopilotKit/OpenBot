@@ -85,6 +85,9 @@ function agent(
   overrides: Partial<AgentProfile> & { id: string },
 ): AgentProfile {
   return {
+    assignedToMe: false,
+    runsOnOpenBotModel: false,
+    keyFromOpenBot: false,
     name: "Agent",
     title: "Title",
     roleDescription: "Role",
@@ -157,7 +160,7 @@ test("a failed roster on / reports the failure and explains the disabled compose
   // saying why unless this alert renders.
   expect(
     await view.findByText(
-      "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
+      "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
       {},
       HOME_FIND_TIMEOUT,
     ),
@@ -190,7 +193,7 @@ test("a failed REFETCH on / keeps the roster and does not disclaim the composer"
   ).toBeTruthy();
   expect(
     view.queryByText(
-      "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
+      "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
     ),
   ).toBeNull();
   expect(
@@ -227,7 +230,7 @@ test("a failed REFETCH on / with explore empty shows it as empty, not broken", a
   // enabled — the alert claiming a load failure must not appear beside that working composer.
   expect(
     view.queryByText(
-      "Couldn't load your Bots, so there's no one to send this to. Reload the page.",
+      "Couldn't load your Bots, so there's no one to send this to. Try again in a moment.",
     ),
   ).toBeNull();
 });

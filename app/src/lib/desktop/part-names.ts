@@ -14,7 +14,7 @@ export type PartGroup = "bots" | "back-end";
 const BOTS: [RegExp, string][] = [
   // Identity for the Bots' computers in an earlier team install. Before `server`, which it ends with.
   [/(^|-)spire-/, "Bot computer identity"],
-  [/(^|-)server-\d+$/, "Front end and Bots"],
+  [/(^|-)server-\d+$/, "App and Bots"],
   [/(^|-)worker-\d+$/, "Background jobs"],
   [/(^|-)postgres-\d+$/, "Database"],
   [/(^|-)migrate-\d+$/, "Database setup"],
@@ -34,14 +34,14 @@ const BACK_END: [RegExp, string][] = [
   [/^k3d-.+-tools$/, "Setup helper"],
 ];
 
-/** A container OpenBot runs that the table doesn't know yet still says which side it's on. */
-const UNKNOWN: Record<PartGroup, string> = {
-  bots: "OpenBot service",
-  "back-end": "Back-end service",
-};
+/**
+ * A container OpenBot runs that the table doesn't know yet. The card it is listed under already
+ * says which side it's on.
+ */
+const UNKNOWN = "OpenBot service";
 
 export function partLabel(name: string, group: PartGroup): string {
   for (const [pattern, label] of group === "bots" ? BOTS : BACK_END)
     if (pattern.test(name)) return label;
-  return UNKNOWN[group];
+  return UNKNOWN;
 }

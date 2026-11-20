@@ -147,7 +147,7 @@ function BoundariesPage() {
               <ItemTitle>Trial mode</ItemTitle>
               <ItemDescription>
                 {trial
-                  ? "On. A matching action goes ahead and is recorded in Audit, so you can see what a rule catches before it stops anything."
+                  ? "On. A matching action goes ahead and is recorded in Activity, so you can see what a rule catches before it stops anything."
                   : "Off. A matching action is stopped, and the Bot is told which rule stopped it."}
               </ItemDescription>
             </ItemContent>
@@ -176,8 +176,8 @@ function BoundariesPage() {
             <ItemContent>
               <ItemTitle>Stopped actions</ItemTitle>
               <ItemDescription>
-                In Audit, choose Blocked to see every action a rule stopped and
-                which rule it was.
+                In Activity, choose Blocked to see every action a rule stopped
+                and which rule it was.
               </ItemDescription>
             </ItemContent>
             <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />

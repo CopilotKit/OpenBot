@@ -1,4 +1,28 @@
 /**
+ * What each piece of leftover data holds, in the person's words, by the name native setup gives
+ * it: a project's `postgres-data` is the database, `agent-profiles` and a Bot's
+ * `openbot-profile-*` its browsers' sign-ins, and a Bot's `openbot-workspace-*` its files. Windows
+ * F listed the names themselves ("openbot-desktop_agent-profiles").
+ */
+const HELD: [RegExp, string][] = [
+  [/postgres-data$/, "Saved chats, Bots and settings"],
+  [/workspace/, "Bot files"],
+  [/profile/, "Browser sign-ins"],
+];
+const OTHER = "Other data from the previous installation";
+
+export function heldIn(volumes: string[]): string[] {
+  const kinds = new Set(
+    volumes.map(
+      (volume) => HELD.find(([name]) => name.test(volume))?.[1] ?? OTHER,
+    ),
+  );
+  return [...HELD.map(([, said]) => said), OTHER].filter((said) =>
+    kinds.has(said),
+  );
+}
+
+/**
  * Only rendered when native setup has identified leftover data it can remove.
  *
  * A choice, not a failure. Somebody whose previous installation left data most likely deleted its
@@ -30,7 +54,9 @@ export function StartFresh({
         ? "its database of saved chats, Bots, and settings"
         : "its Bot files and browser sign-ins";
   return (
-    <section className="blocker" aria-labelledby="start-fresh-title">
+    // Drawn as a step waiting on the person, as the offer to pause their Podman is: a choice, not
+    // the alert a failure gets.
+    <section className="local-alert needs" aria-labelledby="start-fresh-title">
       <h2 id="start-fresh-title">
         A previous OpenBot installation left data here
       </h2>
@@ -55,27 +81,17 @@ export function StartFresh({
       </p>
       <details>
         <summary>What Start fresh deletes</summary>
+        <p>All of this, permanently:</p>
         <ul>
-          {volumes.map((volume) => (
-            <li key={volume}>
-              <code>{volume}</code>
-            </li>
+          {heldIn(volumes).map((said) => (
+            <li key={said}>{said}</li>
           ))}
         </ul>
         {containers.length > 0 && (
-          <>
-            <p>
-              It first removes these stopped containers from the previous
-              installation, which still use those volumes:
-            </p>
-            <ul>
-              {containers.map((container) => (
-                <li key={container}>
-                  <code>{container}</code>
-                </li>
-              ))}
-            </ul>
-          </>
+          <p>
+            It first removes the stopped parts of the previous installation that
+            still use that data.
+          </p>
         )}
       </details>
     </section>

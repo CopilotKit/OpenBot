@@ -363,12 +363,52 @@ test("desktop-build.yml restores no cache for a release", () => {
   };
   const steps = workflow.jobs.app.steps;
   const bun = steps.find((step) => step.uses?.startsWith("oven-sh/setup-bun@"));
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow's own expression, unexpanded.
-  expect(bun?.with?.["no-cache"]).toBe("${{ inputs.channel == 'release' }}");
+  expect(bun?.with?.["no-cache"]).toBe(
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow's own expression, unexpanded.
+    "${{ inputs.channel == 'release' || runner.os == 'Windows' }}",
+  );
   const rust = steps.find((step) =>
     step.uses?.startsWith("Swatinem/rust-cache@"),
   );
   expect(rust?.if).toBe("inputs.channel != 'release'");
+});
+
+// Since 2026-11-11 every startup (windows-latest) run failed in setup-bun with "Unable to locate
+// executable file: C:\Users\runneradmin\.bun\bin\bun.exe": the cached bun.exe is kept relative to
+// the workspace, so one saved on a C: workspace restored beside D: on a runner whose workspace is
+// there. A Windows job installs Bun without the cache.
+test("setup-bun on a Windows job never restores the cached Bun", () => {
+  for (const file of ["ci.yml", "desktop-build.yml"]) {
+    const text = readFileSync(
+      join(import.meta.dir, "../../.github/workflows", file),
+      "utf8",
+    );
+    const workflow = Bun.YAML.parse(text) as {
+      jobs: Record<
+        string,
+        {
+          "runs-on"?: unknown;
+          strategy?: unknown;
+          steps?: { uses?: string; with?: Record<string, unknown> }[];
+        }
+      >;
+    };
+    for (const [name, job] of Object.entries(workflow.jobs)) {
+      // A job that can run on Windows names it in its runner or its matrix.
+      const onWindows = /windows/i.test(
+        JSON.stringify([job["runs-on"], job.strategy]),
+      );
+      if (!onWindows) continue;
+      for (const step of job.steps ?? []) {
+        if (!step.uses?.startsWith("oven-sh/setup-bun@")) continue;
+        expect({ file, name, noCache: step.with?.["no-cache"] }).toEqual({
+          file,
+          name,
+          noCache: expect.stringContaining("runner.os == 'Windows'"),
+        });
+      }
+    }
+  }
 });
 
 // The Intel signing job ran on macos-15-intel and took 22 minutes for a build macos-15 makes in 12.

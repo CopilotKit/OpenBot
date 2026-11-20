@@ -9,7 +9,7 @@ import type { ChannelSummary } from "@/lib/channels/queries";
  * worth knowing before that: a Bot is already working. One note, for the conversation that changed last; the sidebar
  * marks every one that is working.
  *
- * Floats over the page on a solid surface, as a popover does (frame.css keeps glass to the sidebar), and it is drawn
+ * Floats over the page on a solid surface, as a popover does, and it is drawn
  * only while something works, so an idle home is the greeting and the composer and nothing else.
  */
 export function WorkingNow({

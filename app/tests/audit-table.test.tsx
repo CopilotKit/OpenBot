@@ -96,7 +96,7 @@ const whats = (container: HTMLElement) =>
 
 test("the page fills the shell's panel and only the table scrolls", async () => {
   const view = await renderAudit();
-  const heading = view.getByRole("heading", { name: "Audit" });
+  const heading = view.getByRole("heading", { name: "Activity" });
   const page = heading.closest(".overflow-hidden");
   expect(page).not.toBeNull();
   expect(page?.className).toContain("flex-1");

@@ -5,6 +5,11 @@ import {
   standardUI,
 } from "@copilotkit/react-core/v2/generative-ui";
 import { SERIES_COLOURS } from "@/components/gallery/palette";
+import {
+  A2UIBreakdown,
+  BREAKDOWN_DESCRIPTION,
+  breakdownProps,
+} from "./a2ui-breakdown";
 import { A2UITextField } from "./a2ui-text-field";
 import { A2UICode, A2UIMarkdown } from "./a2ui-markdown";
 
@@ -35,6 +40,9 @@ export const OMITTED_STANDARD_COMPONENTS = [
  *
  * `TextField` is the standard one, except that a number field writes a number into the data model,
  * so a total a Bot computes from the fields adds rather than joins text; see a2ui-text-field.tsx.
+ *
+ * `Breakdown` is OpenBot's own: amounts that add up to a total, each editable and in its own colour,
+ * with a bar of how the total splits; see a2ui-breakdown.tsx.
  */
 export const OPENBOT_UI = createGenerativeUI({
   id: "openbot/ui@1",
@@ -44,7 +52,14 @@ export const OPENBOT_UI = createGenerativeUI({
     Markdown: { component: A2UIMarkdown },
     TextField: { component: A2UITextField },
   },
-  components: {},
+  components: {
+    Breakdown: {
+      description: BREAKDOWN_DESCRIPTION,
+      component: A2UIBreakdown,
+      props: breakdownProps,
+      writable: ["items"],
+    },
+  },
 });
 
 const radius = (scale: number) => `calc(var(--radius) * ${scale})`;

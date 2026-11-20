@@ -7,7 +7,7 @@ import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
  * Which of your Agents carry this skill.
  *
  * WITHOUT THIS THE SKILL DOES NOTHING. A skill reaches a Bot's `/` menu only through a grant: the
- * menu is fed by `GET /api/plugins/for/:agentId`, which returns what that Bot HOLDS, and a row in
+ * menu is fed by the Bot's grants (listBotGrants), which return what that Bot HOLDS, and a row in
  * `plugin_grants` IS the grant — absence is the refusal. A skill nobody granted is written, listed,
  * and invisible everywhere it would actually be used.
  *

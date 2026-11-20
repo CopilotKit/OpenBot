@@ -19,6 +19,18 @@ import { listenPort } from "@openbot/shared/listen-port";
 import { appListenHosts } from "@openbot/shared/this-machine";
 import { file, type ServerWebSocket } from "bun";
 
+/**
+ * The API's addresses that wait on a provider, and so need longer than the default before an idle
+ * connection is closed: dictation, starting a voice call, and saving one.
+ */
+const ORGANIZATION = "/api/v2/organizations/[^/]+";
+const TRANSCRIPTIONS = new RegExp(`^${ORGANIZATION}/transcriptions$`);
+const VOICE_CALLS = new RegExp(
+  `^${ORGANIZATION}/conversations/[^/]+/voice-calls$`,
+);
+const VOICE_SESSIONS = new RegExp(
+  `^${ORGANIZATION}/conversations/[^/]+/voice-sessions$`,
+);
 const DIST = join(import.meta.dir, "dist");
 const appPort = listenPort(process.env.APP_PORT, 3010);
 if (!appPort.ok) {
@@ -226,11 +238,12 @@ if (import.meta.main) {
       },
       async fetch(request, server) {
         const url = new URL(request.url);
-        if (url.pathname === "/api/audio/transcriptions") {
-          server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
-        }
-        if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
-        if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
+        // The API's addresses for dictation and voice, which wait on a provider.
+        const dictation = TRANSCRIPTIONS.test(url.pathname);
+        const voiceCall = VOICE_CALLS.test(url.pathname);
+        if (dictation) server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
+        if (voiceCall || VOICE_SESSIONS.test(url.pathname))
+          server.timeout(request, 30);
 
         if (isApiCall(url.pathname)) {
           const target = SERVER + url.pathname + url.search;
@@ -265,10 +278,7 @@ if (import.meta.main) {
             headers: request.headers,
             body: request.body,
             redirect: "manual",
-            ...(url.pathname === "/api/audio/transcriptions" ||
-            url.pathname === "/api/voice/calls"
-              ? { signal: request.signal }
-              : {}),
+            ...(dictation || voiceCall ? { signal: request.signal } : {}),
             // @ts-expect-error duplex is required by fetch for a streamed body and is not yet typed.
             duplex: "half",
           });

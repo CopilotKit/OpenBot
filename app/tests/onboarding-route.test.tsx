@@ -28,22 +28,36 @@ import userEvent from "@testing-library/user-event";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
+import {
+  ME_PATH,
+  meResponse,
+  ONBOARDING_ADVANCE_PATH,
+  ONBOARDING_COMPLETE_PATH,
+  personBody,
+} from "./accounts-api";
+import { DEPLOYMENT_PATH, SETUP_CHECKLIST_PATH } from "./admin-settings-api";
+import {
+  APPROVAL_PREFERENCES_PATH,
+  approvalInboxResponse,
+  approvalPreferencesBody,
+} from "./approvals-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** Book a call opens the OpenBot for Business page, with its booking calendar, never CopilotKit's generic one. */
 const OPENBOT_FOR_BUSINESS = "https://open.bot/business";
 /**
  * The calendar Book a demo embeds: the OpenBot for Business event on Calendly, as an inline embed
- * for this page's host, without the event's details. No colours here: the test DOM has no canvas
+ * for this page's host, without the event's details or Calendly's cookie banner. No colours here: the test DOM has no canvas
  * to read the app's tokens from.
  */
 const BOOKING_CALENDAR =
-  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business?embed_domain=localhost%3A3010&embed_type=Inline&hide_event_type_details=1";
+  "https://calendly.com/d/dwfr-k64-8d2/openbot-for-business?embed_domain=localhost%3A3010&embed_type=Inline&hide_event_type_details=1&hide_gdpr_banner=1";
 
 /**
  * Where somebody is in onboarding lives in the address: `?step=<id>`. A reload stays on the step,
  * browser Back walks back one, and every move is saved, so arriving without a step opens the one
- * they were on. There are three steps at most: Welcome, Book a demo for somebody trying OpenBot
+ * they were on. There are three steps at most: Welcome, OpenBot for Business for somebody trying OpenBot
  * alone, and the name, which is left out once the name is known. The last step's button is the way
  * out: it completes onboarding, plays its finish and opens the app.
  */
@@ -92,12 +106,12 @@ let completed: boolean;
 let completeFail: boolean;
 let named: string | null;
 let localEvaluation: boolean;
-/** What `GET /api/setup` answers. */
+/** What the API's `setup-checklist` answers. */
 let checklist: { audience: string; rows: unknown[] };
-/** Ask before making changes, as `GET /api/approvals` says it, and every change asked for. */
+/** Ask before making changes, as the approval preferences say it, and every change asked for. */
 let askFirst: boolean;
 let askFirstChanges: unknown[];
-/** Whether `/api/capabilities` answers, and how many times it was asked. */
+/** Whether the API's `deployment` answers, and how many times it was asked. */
 let capabilitiesFail: boolean;
 let capabilitiesAsked: number;
 const defaults = queryClient.getDefaultOptions();
@@ -128,8 +142,8 @@ beforeEach(() => {
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       const method = init?.method ?? "GET";
-      if (path === "/api/me")
-        return Response.json({
+      if (path === ME_PATH && method === "GET")
+        return meResponse({
           user: {
             id: "person-1",
             email: "maya@example.com",
@@ -142,23 +156,27 @@ beforeEach(() => {
             },
           },
         });
-      if (path === "/api/me/profile" && method === "PATCH") {
+      if (path === ME_PATH && method === "PATCH") {
         named = (JSON.parse(String(init?.body)) as { name: string }).name;
-        return Response.json({ profile: { name: named, needsName: false } });
+        return Response.json({
+          person: personBody({
+            id: "person-1",
+            email: "maya@example.com",
+            name: named,
+            role: "admin",
+          }),
+        });
       }
-      if (path === "/api/me/onboarding" && method === "POST") {
-        const body = JSON.parse(String(init?.body)) as {
-          step?: number;
-          completed?: boolean;
-        };
-        if (body.completed) {
-          if (completeFail)
-            return Response.json({ error: "down" }, { status: 503 });
-          completed = true;
-          return Response.json({
-            onboarding: { step: saved, completedAt: "2026-10-23T00:00:00Z" },
-          });
-        }
+      if (path === ONBOARDING_COMPLETE_PATH && method === "POST") {
+        if (completeFail)
+          return Response.json({ error: "down" }, { status: 503 });
+        completed = true;
+        return Response.json({
+          onboarding: { step: saved, completedAt: "2026-10-23T00:00:00Z" },
+        });
+      }
+      if (path === ONBOARDING_ADVANCE_PATH && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { step?: number };
         if (body.step === undefined) throw new Error("Missing onboarding step");
         saves.push(body.step);
         saved = body.step;
@@ -166,22 +184,24 @@ beforeEach(() => {
           onboarding: { step: saved, completedAt: null },
         });
       }
-      if (path === "/api/capabilities") {
+      if (path === DEPLOYMENT_PATH) {
         capabilitiesAsked += 1;
         return capabilitiesFail
           ? Response.json({ error: "down" }, { status: 503 })
           : Response.json({ localEvaluation });
       }
-      if (path.startsWith("/api/agents"))
-        return Response.json({ agents: [BOT] });
-      if (path === "/api/setup") return Response.json({ checklist });
-      if (path === "/api/approvals")
-        return Response.json({ enabled: askFirst, rules: [], pending: [] });
-      if (path === "/api/approvals/preferences" && method === "PATCH") {
+      const bots = answerBotsList(path, init, { visible: [BOT] });
+      if (bots) return bots;
+      if (path === SETUP_CHECKLIST_PATH) return Response.json(checklist);
+      if (path === APPROVAL_PREFERENCES_PATH && method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as { enabled?: boolean };
         askFirstChanges.push(body);
         if (body.enabled !== undefined) askFirst = body.enabled;
-        return Response.json({ enabled: askFirst });
+        return Response.json(approvalPreferencesBody({ enabled: askFirst }));
+      }
+      {
+        const approvals = approvalInboxResponse(path, { enabled: askFirst });
+        if (approvals) return approvals;
       }
       return Response.json({});
     },
@@ -291,6 +311,11 @@ const calendar = (view: ReturnType<typeof render>) => {
   if (!found) throw new Error("no booking calendar");
   return found;
 };
+/** Book a demo on OpenBot for Business, which puts the calendar in the step in place of the picture. */
+async function bookDemo(view: ReturnType<typeof render>) {
+  fireEvent.click(await view.findByRole("button", { name: "Book a demo" }));
+  await waitFor(() => calendar(view));
+}
 /** Stands in for `window.open`, and puts it back after. */
 async function withOpen(run: (opened: unknown[][]) => Promise<void>) {
   const opened: unknown[][] = [];
@@ -362,7 +387,7 @@ test("somebody trying OpenBot alone has three steps: Welcome, Book a demo, then 
 
   expect(stepNames(await openSteps(view))).toEqual([
     "Welcome to OpenBot",
-    "Book a demo",
+    "OpenBot for Business™",
     "What should we call you?",
   ]);
 });
@@ -405,21 +430,21 @@ test("on every step, its name in the list of steps is its heading", async () => 
   }
   expect(seen).toEqual([
     "Welcome to OpenBot",
-    "Book a demo",
+    "OpenBot for Business™",
     "What should we call you?",
   ]);
 });
 
-test("Welcome asks to set up permissions, with Always ask before making changes beside the words, not in the picture", async () => {
+test("Welcome asks when Bots should ask, with Extra vigilant beside the words, not in the picture", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const permissions = view.getByRole("heading", {
-    name: "Set up your permissions",
+    name: "Choose when Bots ask",
   });
   expect(permissions.tagName).toBe("H2");
   const ask = await view.findByRole("switch", {
-    name: "Always ask before making changes",
+    name: "Extra vigilant",
   });
   // A real control: with the words, and nowhere inside the inert illustration.
   expect(ask.closest("[data-onboarding-intro]")).not.toBeNull();
@@ -436,53 +461,44 @@ test("Welcome asks to set up permissions, with Always ask before making changes 
  * switch where it was missed. What always asks is said first, above the switch, and the switch says
  * it adds routine changes on top (server/src/approvals/policy.ts: safety before the default).
  */
-test("Welcome says what always asks before the switch, and the switch says it covers every change", async () => {
+test("Welcome says what always asks before the switch, and the switch says what it adds, in a few lines", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const ask = await view.findByRole("switch", {
-    name: "Always ask before making changes",
+    name: "Extra vigilant",
   });
   const always = view.getByText(
-    /^Bots always ask for your approval before deleting, sending, sharing, or posting content in your apps or on websites\./,
-  );
-  expect(always.textContent).toContain(
-    "Bots leave payments and account security changes for you to do yourself.",
+    "Bots ask before they delete, send, share, post, or pay in your apps or on websites.",
   );
   // Above the switch in the reading order, not under it.
   expect(
     always.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 
+  // The switch says what it adds, in the words Settings → Approvals uses.
   const row = ask.closest("[data-slot='item']");
-  expect(row?.textContent).toContain("Always ask before making changes");
+  expect(row?.textContent).toContain("Extra vigilant");
   expect(row?.textContent).toContain(
     "Require your approval for every change to your apps, websites, and files, including routine edits and updates.",
   );
-  expect(row?.textContent).not.toContain(
-    "Review a Bot's changes to websites, connected apps, and files.",
-  );
 
-  // The workspace exception and where to change it later come after the switch, each on its own.
-  const workspace = view.getByText(
-    "Bots can create, edit, and delete files in their own workspace without asking, unless this is on.",
-  );
-  const later = view.getByText(
-    "You can change this setting anytime in Settings.",
-  );
+  const later = view.getByText("You can change this anytime in Settings.");
   expect(
-    ask.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ask.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  expect(workspace).not.toBe(later);
+  // The detail stays in Settings, not on this step.
+  expect(view.queryByText(/payments/)).toBeNull();
+  expect(view.queryByText(/own workspace/)).toBeNull();
   expect(view.queryByText(/always wait for you/)).toBeNull();
 });
 
-test("switching Always ask before making changes on Welcome saves it, and moves nothing on", async () => {
+test("switching Extra vigilant on Welcome saves it, and moves nothing on", async () => {
   const view = open("/onboarding?step=welcome");
   await heading(view, "Welcome to OpenBot");
 
   const ask = await view.findByRole("switch", {
-    name: "Always ask before making changes",
+    name: "Extra vigilant",
   });
   await waitFor(() => expect(ask.hasAttribute("data-disabled")).toBe(false));
   expect(ask.getAttribute("aria-checked")).toBe("false");
@@ -493,7 +509,7 @@ test("switching Always ask before making changes on Welcome saves it, and moves 
   await waitFor(() =>
     expect(
       view
-        .getByRole("switch", { name: "Always ask before making changes" })
+        .getByRole("switch", { name: "Extra vigilant" })
         .getAttribute("aria-checked"),
     ).toBe("true"),
   );
@@ -577,7 +593,7 @@ test("Back on a step opened by reload replaces it with the step before", async (
 test("on a desktop, a step already passed can be picked from the list", async () => {
   localEvaluation = true;
   const view = open("/onboarding?step=selfhost");
-  await heading(view, "Book a demo");
+  await heading(view, "OpenBot for Business");
 
   const list = await openSteps(view);
   expect(
@@ -589,9 +605,11 @@ test("on a desktop, a step already passed can be picked from the list", async ()
   expect(searchOf(view).step).toBe("welcome");
   // It has seen Book a demo, so the list leads back to it.
   fireEvent.click(
-    within(await openSteps(view)).getByRole("button", { name: /Book a demo/ }),
+    within(await openSteps(view)).getByRole("button", {
+      name: /OpenBot for Business/,
+    }),
   );
-  expect(await heading(view, "Book a demo")).toBeTruthy();
+  expect(await heading(view, "OpenBot for Business")).toBeTruthy();
 });
 
 test("a reload stays on the step in the address", async () => {
@@ -606,7 +624,7 @@ test("arriving with no step opens the one the server saved", async () => {
   saved = 2;
   const view = open("/onboarding");
 
-  expect(await heading(view, "Book a demo")).toBeTruthy();
+  expect(await heading(view, "OpenBot for Business")).toBeTruthy();
   await waitFor(() => expect(searchOf(view).step).toBe("selfhost"));
 });
 
@@ -676,9 +694,18 @@ test("somebody trying OpenBot alone gets Book a demo before the name, with the b
     await heading(view, "Welcome to OpenBot");
     fireEvent.click(await continueButton(view));
 
-    expect(await heading(view, "Book a demo")).toBeTruthy();
+    expect(await heading(view, "OpenBot for Business")).toBeTruthy();
     expect(searchOf(view).step).toBe("selfhost");
+    // What it is comes first: the words and the picture, and no calendar until it is asked for.
+    expect(
+      view.container.querySelector('[data-demo="self-host"]'),
+    ).toBeTruthy();
+    expect(view.container.querySelector("iframe")).toBeNull();
+    expect(footerButtons(view)).toEqual(["Back", "Book a demo", "Not now"]);
+
+    await bookDemo(view);
     expect(calendar(view).getAttribute("src")).toBe(BOOKING_CALENDAR);
+    expect(view.container.querySelector('[data-demo="self-host"]')).toBeNull();
 
     // Before a booking there is one way on, and it says it skips: no Continue that reads as booking.
     expect(footerButtons(view)).toEqual(["Back", "Not now"]);
@@ -698,7 +725,8 @@ test("when the calendar can't load, Book a demo shows its picture and Book a cal
   localEvaluation = true;
   await withOpen(async (opened) => {
     const view = open("/onboarding?step=selfhost");
-    await heading(view, "Book a demo");
+    await heading(view, "OpenBot for Business");
+    await bookDemo(view);
 
     fireEvent.error(calendar(view));
 
@@ -730,7 +758,8 @@ test("offline, Book a demo goes straight to Book a call", async () => {
   });
   try {
     const view = open("/onboarding?step=selfhost");
-    await heading(view, "Book a demo");
+    await heading(view, "OpenBot for Business");
+    fireEvent.click(await view.findByRole("button", { name: "Book a demo" }));
 
     expect(await ready(view, "Book a call")).toBeTruthy();
     expect(view.container.querySelector("iframe")).toBeNull();
@@ -742,7 +771,8 @@ test("offline, Book a demo goes straight to Book a call", async () => {
 test("a booking made in the calendar turns Not now into Continue; a message from anywhere else does not", async () => {
   localEvaluation = true;
   const view = open("/onboarding?step=selfhost");
-  await heading(view, "Book a demo");
+  await heading(view, "OpenBot for Business");
+  await bookDemo(view);
   const frame = calendar(view);
   const scheduled = { event: "calendly.event_scheduled", payload: {} };
 
@@ -782,7 +812,7 @@ test("Not now on Book a demo moves on without opening anything", async () => {
   localEvaluation = true;
   await withOpen(async (opened) => {
     const view = open("/onboarding?step=selfhost");
-    await heading(view, "Book a demo");
+    await heading(view, "OpenBot for Business");
 
     fireEvent.click(view.getByRole("button", { name: "Not now" }));
 
@@ -798,14 +828,16 @@ test("an organization's people never see the self-hosting step", async () => {
   fireEvent.click(await continueButton(view));
 
   expect(await heading(view, "What should we call you?")).toBeTruthy();
-  expect(view.queryByRole("heading", { name: "Book a demo" })).toBeNull();
+  expect(
+    view.queryByRole("heading", { name: "OpenBot for Business" }),
+  ).toBeNull();
 });
 
 test("the self-hosting step in the address waits for the answer, rather than flashing step 1", async () => {
   localEvaluation = true;
   const view = open("/onboarding?step=selfhost");
 
-  expect(await heading(view, "Book a demo")).toBeTruthy();
+  expect(await heading(view, "OpenBot for Business")).toBeTruthy();
   expect(
     view.queryByRole("heading", { name: "Welcome to OpenBot" }),
   ).toBeNull();
@@ -901,8 +933,8 @@ test("somebody trying OpenBot alone whose name is known ends on Book a demo, whe
       ),
     );
     fireEvent.click(await continueButton(view));
-    await heading(view, "Book a demo");
-    expect(footerButtons(view)).toEqual(["Back", "Not now"]);
+    await heading(view, "OpenBot for Business");
+    expect(footerButtons(view)).toEqual(["Back", "Book a demo", "Not now"]);
 
     fireEvent.click(view.getByRole("button", { name: "Not now" }));
 
@@ -914,12 +946,26 @@ test("somebody trying OpenBot alone whose name is known ends on Book a demo, whe
   });
 });
 
+test("on the last step, Book a demo opens the calendar and stays, rather than opening the app", async () => {
+  named = "Maya";
+  localEvaluation = true;
+  const view = open("/onboarding?step=selfhost");
+  await heading(view, "OpenBot for Business");
+
+  await bookDemo(view);
+
+  expect(calendar(view).getAttribute("src")).toBe(BOOKING_CALENDAR);
+  expect(completed).toBe(false);
+  expect(footerButtons(view)).toEqual(["Back", "Not now"]);
+});
+
 test("somebody trying OpenBot alone whose name is known, without the calendar, books a call in a new tab, and that opens the app", async () => {
   named = "Maya";
   localEvaluation = true;
   await withOpen(async (opened) => {
     const view = open("/onboarding?step=selfhost");
-    await heading(view, "Book a demo");
+    await heading(view, "OpenBot for Business");
+    await bookDemo(view);
     fireEvent.error(calendar(view));
 
     fireEvent.click(await ready(view, "Book a call"));

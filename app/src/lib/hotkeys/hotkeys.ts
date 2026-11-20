@@ -36,6 +36,13 @@ export const HOTKEYS = [
     description: "Start a new conversation from anywhere in OpenBot.",
     combo: { key: "n", shift: true },
   },
+  {
+    id: "command-menu",
+    label: "Command palette",
+    description:
+      "Open a page, a Bot or a conversation by typing its name. Works while you're typing a message.",
+    combo: { key: "k", mod: true },
+  },
 ] as const satisfies readonly Hotkey[];
 
 export type HotkeyId = (typeof HOTKEYS)[number]["id"];

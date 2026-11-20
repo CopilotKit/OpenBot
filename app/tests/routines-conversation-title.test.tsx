@@ -8,9 +8,10 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
-import { RoutinesList } from "@/components/routines/routines-list";
+import { RoutineRoutePage } from "@/components/routines/routine-page";
 import type { RoutinesPage } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
+import { answerScheduleLists } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -42,13 +43,14 @@ const PAGE: RoutinesPage = {
   routines: [
     {
       id: "routine-eks",
-      agentId: "general-assistant",
+      botId: "general-assistant",
       schedule: "Every 15 minutes",
+      cron: "*/15 * * * *",
       timezone: "UTC",
       instruction:
         "Reply with the current UTC time and the words 'routine check from EKS'.",
       title: null,
-      channel: {
+      conversation: {
         id: "conversation-eks",
         name: "General Assistant",
         title: "15-Minute EKS UTC Routine",
@@ -57,15 +59,18 @@ const PAGE: RoutinesPage = {
       enabled: true,
       nextRunAt: "2026-11-05T07:45:00.000Z",
       lastRun: null,
+      goalId: null,
+      createdAt: "2026-11-01T09:00:00.000Z",
     },
     {
       id: "routine-new",
-      agentId: "general-assistant",
+      botId: "general-assistant",
       schedule: "Every day at 09:00",
+      cron: "0 9 * * *",
       timezone: "UTC",
       instruction: "Post the morning summary.",
       title: null,
-      channel: {
+      conversation: {
         id: "conversation-new",
         name: "General Assistant",
         title: "New conversation",
@@ -74,19 +79,22 @@ const PAGE: RoutinesPage = {
       enabled: true,
       nextRunAt: "2026-11-06T09:00:00.000Z",
       lastRun: null,
+      goalId: null,
+      createdAt: "2026-11-01T09:00:00.000Z",
     },
   ],
-  sweep: { lastSweptAt: "2026-11-05T07:30:00.000Z", working: true },
 };
 
-function draw() {
+/** One routine's page, as its row's link opens it. */
+function draw(routineId: string) {
   global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).startsWith("/api/routines")
-      ? Response.json(PAGE)
-      : Response.json({})) as unknown as typeof fetch;
+    answerScheduleLists(input, undefined, PAGE) ??
+    Response.json({ runs: [], nextCursor: null })) as unknown as typeof fetch;
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
-    routeTree: createRootRoute({ component: () => <RoutinesList /> }),
+    routeTree: createRootRoute({
+      component: () => <RoutineRoutePage routineId={routineId} />,
+    }),
   });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -96,11 +104,14 @@ function draw() {
 }
 
 test("each routine names its conversation by the sidebar's title, not by its Bot", async () => {
-  const view = draw();
-
+  // Where it posts is on its page, opened from the row.
+  const view = draw("routine-eks");
   const eks = (await view.findByText("15-Minute EKS UTC Routine")).closest("a");
   expect(eks?.getAttribute("href")).toBe("/channel/conversation-eks");
-  const fresh = view.getByText("New conversation").closest("a");
+  cleanup();
+
+  const other = draw("routine-new");
+  const fresh = (await other.findByText("New conversation")).closest("a");
   expect(fresh?.getAttribute("href")).toBe("/channel/conversation-new");
-  expect(view.queryByText("General Assistant")).toBeNull();
+  expect(other.queryByText("General Assistant")).toBeNull();
 });

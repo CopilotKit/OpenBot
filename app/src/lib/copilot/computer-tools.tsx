@@ -1,13 +1,21 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
+import { SECRET_FIELD_BY_REF } from "@openbot/shared/computer-control";
+import {
+  SEND_FILE_NO_CONVERSATION,
+  SEND_FILE_TOOL,
+  SEND_FILE_TOOL_DESCRIPTION,
+} from "@openbot/shared/send-file";
 import { z } from "zod";
+import { SentFileCard } from "@/components/channels/sent-file-card";
 import { ToolLine } from "@/components/channels/tool-line";
+import { ComputerView } from "@/components/computer/computer-view";
+import { HelpRequestCard } from "@/components/computer/help-request-card";
 import {
   commandStatus,
   TerminalBlock,
 } from "@/components/computer/terminal-block";
-import { ComputerView } from "@/components/computer/computer-view";
-import { HelpRequestCard } from "@/components/computer/help-request-card";
-import { tryClient } from "@/lib/client";
+import { reportBotDecline } from "@/lib/api/generated/bots/bots";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
 import { type ControlState, readControl } from "@/lib/computers/control";
@@ -16,6 +24,8 @@ import {
   runHelpRequest,
   runNavigation,
 } from "@/lib/computers/handoff";
+import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
+import { sentFileOf } from "@/lib/computers/sent-file";
 import {
   type ToolCallContext,
   useActiveBotHolder,
@@ -133,12 +143,15 @@ function ActionLine({
   running,
   refused,
   failed,
+  failedLabel,
   notYet,
   byYou,
 }: {
   label: string;
   /** What was tried, said when the step was refused. See `ToolLine`. */
   attempted?: string;
+  /** What a failed step says instead of "<label>, didn't work". See `ToolLine`. */
+  failedLabel?: string;
   detail?: string;
   running?: boolean;
   /** A policy or a boundary said no. Final: nothing the Bot does differently will help. */
@@ -156,6 +169,7 @@ function ActionLine({
       byYou={byYou}
       detail={notYet ? STILL_STARTING_DETAIL : detail}
       failed={failed}
+      failedLabel={failedLabel}
       label={label}
       notYet={notYet}
       refused={refused}
@@ -175,6 +189,16 @@ const STILL_STARTING_DETAIL = "The computer is still starting.";
 function refusedDetail(target: string | undefined, outcome: ComputerOutcome) {
   const reason = outcomeForPerson(String(outcome.reason ?? ""));
   return [target, reason].filter(Boolean).join(" · ");
+}
+
+/**
+ * A file that was not sent: the server's sentence already names the file ("budget.xlsx can't be
+ * sent. ..."), so the line leads with it rather than saying the name twice in a narrow column.
+ */
+function sendRefusedDetail(path: string | undefined, outcome: ComputerOutcome) {
+  const reason = outcomeForPerson(String(outcome.reason ?? ""));
+  const name = path?.split("/").pop();
+  return name && reason.includes(name) ? reason : refusedDetail(path, outcome);
 }
 
 /** Whether a result is an ordinary failure rather than a refusal, so the two can render differently. */
@@ -202,6 +226,103 @@ function byPerson(outcome: ComputerOutcome): boolean {
   return outcome.doneByPerson === true;
 }
 
+/** The site a navigation was asked to open, as its line names it: "x.com", not the whole address. */
+function siteOf(url: unknown): string | undefined {
+  if (typeof url !== "string" || !url.trim()) return undefined;
+  try {
+    return new URL(url.trim()).hostname.replace(/^www\./, "") || url.trim();
+  } catch {
+    return url.trim();
+  }
+}
+
+/**
+ * A navigation in the conversation: the screen while it runs, and the page it opened once it is over.
+ *
+ * ONE LINE, NOT A SCREEN, FOR A NAVIGATION THAT OPENED NOTHING. Refused by a boundary, failed,
+ * stopped, or turned away by a computer still starting, it has no page to show, and its screen used
+ * to stay on as a grey box the width of the conversation saying only "This turn did not open a page."
+ * It is drawn as every other step that did not happen is drawn: "Blocked: Open x.com", in the words
+ * and colours of the lines around it. A step with nothing to report yet, such as one held for the
+ * person's approval, draws nothing here: its approval card says what it is waiting for.
+ */
+function NavigationStep({
+  computerId,
+  url,
+  result,
+  status,
+  toolCallId,
+}: {
+  computerId: string;
+  /** The address the Bot asked for, as it wrote it. */
+  url: unknown;
+  result: string | undefined;
+  status: string;
+  toolCallId: string | undefined;
+}) {
+  /*
+   * A RESULT IS WHAT MAKES A TURN OVER, not the status.
+   *
+   * A restored tool call arrives with its result already in hand and a status that is briefly
+   * something other than complete, so keying on the status alone made every reopened turn look
+   * like one still running: the tile polled the live screen, put today's page under yesterday's
+   * answer, and only then restored the frame it should have shown from the start.
+   */
+  const finished = status === "complete" || result !== undefined;
+  const said = finished ? readOutcome(result) : null;
+  const outcome = (said ?? {}) as ComputerOutcome;
+  /*
+   * The page this turn left open, so reopening the conversation shows what it browsed rather than
+   * what the Bot has open now. Only once the turn is finished: while it runs, the live frames are
+   * its own.
+   */
+  const page =
+    typeof outcome.url === "string"
+      ? {
+          url: outcome.url,
+          ...(typeof outcome.title === "string"
+            ? { title: outcome.title }
+            : {}),
+        }
+      : undefined;
+
+  if (finished && !page) {
+    if (!said) return null;
+    return (
+      <ActionLine
+        label="Opened"
+        attempted="Open"
+        /*
+         * The site alone, even for a refusal. The Bot's answer right after says why it could not go,
+         * and a boundary's reason is the sentence written for the model, rule and all.
+         */
+        detail={siteOf(url)}
+        refused={outcome.refused === true}
+        failed={didNotWork(outcome)}
+        notYet={stillStarting(outcome)}
+        byYou={byPerson(outcome)}
+      />
+    );
+  }
+
+  return (
+    <div className="my-2">
+      <ComputerView
+        computerId={computerId}
+        active={!finished}
+        /*
+         * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it had a
+         * page, so a navigation that was refused, failed or stopped never settled: it kept polling
+         * the live screen under a turn that was over, and offered control of it.
+         */
+        finished={finished}
+        {...(page ? { page } : {})}
+        {...(toolCallId ? { toolCallId } : {})}
+      />
+    </div>
+  );
+}
+
 /**
  * Who is offered each computer tool: a Bot this person may drive, as far as this deployment's
  * switches allow. Not offered to a Team Bot's teammates, nor where a switch would refuse it; see
@@ -222,6 +343,7 @@ const OFFERED: Readonly<Record<string, OfferRule>> = {
   computer_read_file: offeredComputer,
   computer_run_command: offeredComputer,
   computer_write_file: offeredComputer,
+  [SEND_FILE_TOOL]: offeredComputer,
   computer_scroll: offeredBrowser,
 };
 
@@ -256,50 +378,15 @@ export function ComputerTools() {
       if (result.ok) noteBrowsed(computerId);
       return result;
     },
-    render: ({ result, status, toolCallId }) => {
-      /*
-       * The page this turn left open, so reopening the conversation shows what it browsed rather
-       * than what the Bot has open now. Only once the turn is finished: while it runs, the live
-       * frames are its own.
-       */
-      /*
-       * A RESULT IS WHAT MAKES A TURN OVER, not the status.
-       *
-       * A restored tool call arrives with its result already in hand and a status that is briefly
-       * something other than complete, so keying on the status alone made every reopened turn look
-       * like one still running: the tile polled the live screen, put today's page under yesterday's
-       * answer, and only then restored the frame it should have shown from the start.
-       */
-      const finished = status === "complete" || result !== undefined;
-      const outcome = finished ? outcomeOf(result) : {};
-      const page =
-        typeof outcome.url === "string"
-          ? {
-              url: outcome.url,
-              ...(typeof outcome.title === "string"
-                ? { title: outcome.title }
-                : {}),
-            }
-          : undefined;
-      return (
-        <div className="my-2">
-          <ComputerView
-            computerId={bot.current}
-            active={!finished}
-            /*
-             * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it
-             * had a page, so a navigation that was refused, failed or stopped never settled: it kept
-             * polling the live screen under a turn that was over, and offered control of it. Those
-             * are the turns most worth freezing, because the thing on screen has nothing to do with
-             * what the person is reading.
-             */
-            finished={finished}
-            {...(page ? { page } : {})}
-            {...(toolCallId ? { toolCallId } : {})}
-          />
-        </div>
-      );
-    },
+    render: ({ args, result, status, toolCallId }) => (
+      <NavigationStep
+        computerId={bot.current}
+        url={args?.url}
+        result={result}
+        status={status}
+        toolCallId={toolCallId}
+      />
+    ),
   });
 
   useFrontendTool({
@@ -507,12 +594,14 @@ export function ComputerTools() {
   useFrontendTool({
     name: "computer_request_secret",
     description:
-      "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
-      "Focus the field first with computer_click, then call this with the ref of that field and a " +
-      "short label for what you need. They type it into a masked box that goes straight to the page. " +
+      "Ask the person for a single value you must not be told: a password, a one-time code, a card number. " +
+      `${SECRET_FIELD_BY_REF} Add a short label for what you need. ` +
+      "They type it into a masked box that goes straight to the page. " +
       "You will never see the value, and you must not ask for it any other way. Prefer this over a " +
-      "full takeover when you only need one field filled in. The value is only TYPED into the field: " +
-      "if the form needs submitting, do that yourself afterwards with computer_click.",
+      "full takeover when you only need one field filled in, unless the person asked to type it " +
+      "themselves or to take over the browser: then call computer_request_help instead. The value is " +
+      "only TYPED into the field: if the form needs submitting, do that yourself afterwards with " +
+      "computer_click.",
     parameters: z.object({
       label: z
         .string()
@@ -542,21 +631,20 @@ export function ComputerTools() {
       );
       if (!asked.ok) return asked;
 
-      // Completion is `secretWanted` clearing; the value never returns to the model.
+      // Over when this request is, and answered only if the computer says its value was typed
+      // (`secretAnswer`). The value never returns to the model.
+      const id =
+        typeof asked.secretId === "string" ? asked.secretId : undefined;
+      const seen: { last: ControlState | null } = { last: null };
       const outcome = await waitForSecret(
         botId,
-        (state) => state.secretWanted === undefined,
+        (state) => {
+          seen.last = state;
+          return secretRequestOver(id, state);
+        },
         signal,
       );
-      return {
-        ok: true,
-        result:
-          outcome === "answered"
-            ? `The person has entered ${input.label} into the field. It was typed straight into the page and you were not told what it is.`
-            : outcome === "cancelled"
-              ? "The request was cancelled."
-              : `Nobody entered ${input.label}. Do not ask for it another way.`,
-      };
+      return secretAnswer(input.label, id, outcome, seen.last);
     },
     // Rendered by ComputerView as a masked prompt.
     render: () => null,
@@ -585,13 +673,17 @@ export function ComputerTools() {
       { signal, agent }: ToolCallContext = {},
     ) => {
       try {
-        const response = await tryClient(
-          `/api/agents/${encodeURIComponent(botOf(agent))}/declined`,
-          { method: "POST", body: input, signal },
+        await reportBotDecline(
+          organizationId(),
+          botOf(agent),
+          {
+            reason: input.reason,
+            ...(input.request !== undefined ? { request: input.request } : {}),
+          },
+          { "Idempotency-Key": idempotencyKey() },
+          { signal },
         );
-        return response.ok
-          ? "Recorded. Now tell the person what you decided and why."
-          : "That could not be recorded. Tell the person what you decided anyway.";
+        return "Recorded. Now tell the person what you decided and why.";
       } catch {
         // Audit bookkeeping must not prevent the Bot from answering.
         return "That could not be recorded. Tell the person what you decided anyway.";
@@ -609,7 +701,9 @@ export function ComputerTools() {
       "Use this INSTEAD of giving up, and instead of ever asking them to type a password to you. " +
       "This call is the only thing that reaches them: until you make it they are not looking at the " +
       "page and have no way to help, so saying you need them to sign in, or asking whether they would " +
-      "like to proceed, hands over nothing and leaves the page where it is.",
+      "like to proceed, hands over nothing and leaves the page where it is. " +
+      "Also call this whenever the person asks to take over the browser, or to type a password or " +
+      "anything else into it themselves: they are asking for the browser, not for computer_request_secret.",
     parameters: z.object({
       reason: z
         .string()
@@ -729,6 +823,11 @@ export function ComputerTools() {
       "directory is your workspace, so paths are relative to it and files you write here are the " +
       "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
       "truncated from the start, and a command that runs too long is stopped. " +
+      "Installed: Python 3 (`python3`) with pip, openpyxl, pandas, python-docx, python-pptx, " +
+      "matplotlib, pypdf, pdfplumber and reportlab; Node.js and Bun; curl, unzip and the usual " +
+      "Linux tools. There is no LibreOffice, so nothing here calculates spreadsheet formulas: " +
+      "write them with openpyxl and Excel or Google Sheets calculates them when the file is " +
+      "opened. `pip install <package>` adds a Python package. " +
       "For package installation, check `id -u` first. As root (0), use " +
       "`apt-get update && apt-get install -y <package>` directly; otherwise use " +
       "`sudo openbot-apt update && sudo openbot-apt install <package>`, which takes package " +
@@ -836,6 +935,12 @@ export function ComputerTools() {
           // The words the approval card and Activity use for the same action.
           label={args?.append === true ? "Added to a file" : "Saved a file"}
           attempted={args?.append === true ? "Add to a file" : "Save a file"}
+          // Not "Saved a file, didn't work": nothing was saved, so the line says so.
+          failedLabel={
+            args?.append === true
+              ? "Didn't add to a file"
+              : "Didn't save a file"
+          }
           // Show the path, never file contents.
           detail={
             outcome.refused === true
@@ -846,6 +951,50 @@ export function ComputerTools() {
               : typeof args?.path === "string"
                 ? args.path
                 : undefined
+          }
+          refused={outcome.refused === true}
+          failed={didNotWork(outcome)}
+          notYet={stillStarting(outcome)}
+          byYou={byPerson(outcome)}
+        />
+      );
+    },
+  });
+
+  useFrontendTool({
+    name: SEND_FILE_TOOL,
+    description: SEND_FILE_TOOL_DESCRIPTION,
+    parameters: z.object({
+      path: z
+        .string()
+        .describe(
+          "Path of the file relative to your workspace, such as reports/august.pdf",
+        ),
+    }),
+    /*
+     * NEVER CALLED IN A CONVERSATION. Sending a file is in the approval wrapper's `writes`, so it
+     * always goes to the server's gate with the conversation: the server pulls the file through the
+     * governed download, stores it in this conversation and answers with it. This answers only a
+     * surface with no conversation to send a file into.
+     */
+    handler: async () => ({ ok: false, reason: SEND_FILE_NO_CONVERSATION }),
+    render: ({ args, result, status }) => {
+      const sent = sentFileOf(readOutcome(result));
+      if (sent) return <SentFileCard file={sent} />;
+      const outcome = outcomeOf(result);
+      const path = typeof args?.path === "string" ? args.path : undefined;
+      const finished = status === "complete" || result !== undefined;
+      return (
+        <ActionLine
+          running={!finished}
+          label={finished ? "Sent a file" : "Sending a file"}
+          attempted="Send a file"
+          // Not "Sent a file, didn't work": nothing arrived, so the line says so.
+          failedLabel="Didn't send a file"
+          detail={
+            outcome.refused === true || didNotWork(outcome)
+              ? sendRefusedDetail(path, outcome)
+              : path
           }
           refused={outcome.refused === true}
           failed={didNotWork(outcome)}

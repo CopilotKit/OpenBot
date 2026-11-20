@@ -1,15 +1,21 @@
 import {
   type Icon,
   IconBolt,
-  IconBox,
   IconPlug,
   IconSettings,
   IconShieldLock,
+  IconSitemap,
+  IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import {
+  deploymentCapabilitiesQueryOptions,
+  offersMemory,
+} from "@/lib/deployment/queries";
+import { primitive } from "@/lib/primitives";
 
 /**
  * Where a person can go in OpenBot, in one list.
@@ -21,27 +27,50 @@ import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
  * `account` ones in the menu under the person's name. A skin may group them its own way.
  *
- * Bots, Capabilities and Connections are each somebody's own, which is why they sit beside each
- * other and not inside Admin. Capabilities are your skills and what your Bots remember about you;
- * Connections are the apps a Bot reaches as you. Capabilities links to `/capabilities` rather than
- * a tab, so it stays lit on both of its tabs.
+ * The primary entries are what a person makes and comes back to: their Bots and the agents they
+ * hand work to, then the every-Bot
+ * pages of Routines, Memory, Skills and Apps (Connections: the apps a Bot reaches as you), in the
+ * order of `lib/primitives.ts`. Each is somebody's own, so none is inside Admin. What is set once
+ * for every Bot (the computer, approvals, activity) is in Settings, and a Bot's own is on its page
+ * (`docs/how-openbot-works.md`).
  */
 export type NavigationItem =
   | {
       kind?: undefined;
-      id: "bots" | "capabilities" | "connections" | "admin" | "settings";
+      id:
+        | "bots"
+        | "agents"
+        | "routines"
+        | "memory"
+        | "skills"
+        | "connections"
+        | "teams"
+        | "admin"
+        | "settings";
       label: string;
-      to: "/bots" | "/capabilities" | "/connections" | "/admin" | "/settings";
+      to:
+        | "/bots"
+        | "/agents"
+        | "/routines"
+        | "/memory"
+        | "/skills"
+        | "/connections"
+        | "/teams"
+        | "/admin"
+        | "/settings";
       icon: Icon;
       section: "primary" | "account";
       /** Admin routes are guarded on the server; the entry is hidden from people who cannot open them. */
       adminOnly?: boolean;
+      /** Shown only in the team edition: the personal edition has one person and no teams. */
+      teamOnly?: boolean;
+      /** Shown only where OpenBot offers memory (see `offersMemory`). */
+      memoryOnly?: boolean;
     }
   | {
       /**
-       * Not a page: the personal edition's list of team features, opened as a dialog where Admin
-       * would be. See `components/edition/team-features-dialog.tsx`, which every frame draws it
-       * through.
+       * Not a page: the personal edition's list of team features, opened as a dialog beside Admin.
+       * See `components/edition/team-features-dialog.tsx`, which every frame draws it through.
        */
       kind: "dialog";
       id: "team-features";
@@ -50,7 +79,7 @@ export type NavigationItem =
       section: "account";
     };
 
-/** An entry that is a page. Bots, Capabilities, Connections and Settings always are. */
+/** An entry that is a page. All but the team features list are. */
 export type NavigationLink = Extract<NavigationItem, { to: string }>;
 
 export function isNavigationLink(item: NavigationItem): item is NavigationLink {
@@ -74,10 +103,33 @@ export const NAVIGATION: readonly NavigationItem[] = [
     section: "primary",
   },
   {
-    id: "capabilities",
-    label: "Capabilities",
-    to: "/capabilities",
-    icon: IconBox,
+    // The agents Bots hand work to: the organization's, and a person's own private ones.
+    id: "agents",
+    label: "Agents",
+    to: "/agents",
+    icon: IconSitemap,
+    section: "primary",
+  },
+  {
+    id: "routines",
+    label: primitive("routines").label,
+    to: "/routines",
+    icon: primitive("routines").icon,
+    section: "primary",
+  },
+  {
+    id: "memory",
+    label: primitive("memory").label,
+    to: "/memory",
+    icon: primitive("memory").icon,
+    section: "primary",
+    memoryOnly: true,
+  },
+  {
+    id: "skills",
+    label: primitive("skills").label,
+    to: "/skills",
+    icon: primitive("skills").icon,
     section: "primary",
   },
   {
@@ -86,6 +138,20 @@ export const NAVIGATION: readonly NavigationItem[] = [
     to: "/connections",
     icon: IconPlug,
     section: "primary",
+  },
+  {
+    /*
+     * The organization's teams, for everybody in it: which there are, which the person is in, and
+     * a team's own page, where its maintainers keep its people. Under the person's name with their
+     * organizations, because a team is the organization's and not something a Bot has. Not inside
+     * Admin: a team's members and maintainers are mostly not admins.
+     */
+    id: "teams",
+    label: "Teams",
+    to: "/teams",
+    icon: IconUsersGroup,
+    section: "account",
+    teamOnly: true,
   },
   {
     id: "admin",
@@ -105,28 +171,46 @@ export const NAVIGATION: readonly NavigationItem[] = [
 ];
 
 /**
- * The destinations this person may open, in order. The personal edition has no Admin: the team
- * features entry takes its place, for everybody, since nobody there administers anybody else. It has
- * no Capabilities either: a person's skills and what their Bots remember are on the Bots page, so
- * there are three places to go rather than four.
+ * The destinations this person may open, in order. Admin is in every edition, for an admin: in the
+ * personal edition that is the one person, whom single-user mode makes the admin. The personal
+ * edition also lists what the team edition adds, right after Admin, and has no Memory (see
+ * `offersMemory`) and no Teams.
  */
 export function navigationFor(
   role: string | undefined,
   edition: "team" | "personal" = "team",
 ): readonly NavigationItem[] {
-  if (edition === "personal") {
-    return NAVIGATION.filter((item) => item.id !== "capabilities").map(
-      (item) => (item.id === "admin" ? TEAM_FEATURES_ITEM : item),
+  const offered = NAVIGATION.filter(
+    (item) =>
+      item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
+  )
+    .filter(
+      (item) =>
+        item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),
+    )
+    .filter(
+      (item) => item.kind === "dialog" || !item.teamOnly || edition === "team",
     );
-  }
-  return NAVIGATION.filter(
-    (item) => item.kind === "dialog" || !item.adminOnly || role === "admin",
-  );
+  if (edition !== "personal") return offered;
+  const settings = offered.findIndex((item) => item.id === "settings");
+  return [
+    ...offered.slice(0, settings),
+    TEAM_FEATURES_ITEM,
+    ...offered.slice(settings),
+  ];
 }
 
-/** `navigationFor` the signed-in person, on this deployment's edition. */
+/**
+ * `navigationFor` the signed-in person, on this deployment's edition. Memory and Teams wait for the
+ * edition, so the personal edition never shows either for a moment.
+ */
 export function useNavigationItems(): readonly NavigationItem[] {
   const { data: user } = useQuery(currentUserQueryOptions());
   const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
-  return navigationFor(user?.role, capabilities?.edition ?? "team");
+  const items = navigationFor(user?.role, capabilities?.edition ?? "team");
+  return capabilities
+    ? items
+    : items.filter(
+        (item) => item.kind === "dialog" || !(item.memoryOnly || item.teamOnly),
+      );
 }

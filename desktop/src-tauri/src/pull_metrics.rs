@@ -165,11 +165,12 @@ pub struct ImageSize {
 
 /// What Install has downloaded, over every image, and how much it downloads in all.
 ///
-/// The total is the size of every layer the images name in their registries, less each layer the
-/// engine says it already has. It is known only once every image's registry has answered: until
-/// then, and for good when one cannot be read, it is None, and the window says the size is not
-/// known. Counted by layer, so a layer two images share counts once, as the engine downloads it
-/// once.
+/// The total is the size of every layer the images name in their registries. It is known only once
+/// every image's registry has answered: until then, and for good when one cannot be read, it is
+/// None, and the window says the size is not known. Once known it does not change: a layer the
+/// engine turns out to have already counts as done, in the bytes, rather than coming out of the
+/// total. Windows G read "33.0 MB of 977.4 MB" and then "54.2 MB of 826.7 MB". Counted by layer, so
+/// a layer two images share counts once, as the engine downloads it once.
 #[derive(Default)]
 pub struct Transfer {
     images: Vec<ImageState>,
@@ -202,10 +203,9 @@ impl LayerState {
         self.expected.or(self.advertised)
     }
 
+    /// Done: downloaded so far, or all of it for a layer this computer already has.
     fn downloaded(&self) -> u64 {
-        if self.cached {
-            0
-        } else if self.finished {
+        if self.cached || self.finished {
             self.size().unwrap_or(self.current).max(self.current)
         } else {
             self.current
@@ -289,12 +289,13 @@ impl Transfer {
         }
     }
 
-    /// Downloaded so far, over every image. It never goes down.
+    /// Done so far, over every image: downloaded, or already here. It never goes down.
     pub fn bytes(&self) -> u64 {
         self.layers.values().map(LayerState::downloaded).sum()
     }
 
-    /// The whole download, once every image's registry has said. Never less than `bytes`.
+    /// The whole download, once every image's registry has said, and the same from then on. Never
+    /// less than `bytes`.
     pub fn size(&self) -> Option<u64> {
         if self.images.iter().any(|image| image.expected.is_none()) {
             return None;
@@ -302,7 +303,6 @@ impl Transfer {
         let size: u64 = self
             .layers
             .values()
-            .filter(|layer| !layer.cached)
             .map(|layer| layer.size().unwrap_or(layer.current))
             .sum();
         Some(size.max(self.bytes()))
@@ -491,7 +491,7 @@ pub struct Downloads {
     /// Pulls FINISHED, of `total`.
     pub done: usize,
     pub total: usize,
-    /// Downloaded so far, over every image: see `Transfer::bytes`.
+    /// Done so far, over every image: see `Transfer::bytes`.
     pub bytes: u64,
     /// The whole download, once it is known: see `Transfer::size`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -693,10 +693,16 @@ impl Speed {
 
 /// Paces `Downloads` reports for the window: at most one per `interval`, except that a pull
 /// finishing is always shown at once. Measures the speed from every report it is offered.
+///
+/// It also holds the total still. A layer the engine finds already on this computer partway
+/// through drops out of the download (`Transfer::size`), and on Windows the total read 944.2 MB,
+/// then 747.6 MB: a total that shrinks reads as wrong. So the largest total stands, and what
+/// dropped out of it counts as done, which it is. The speed is measured from what was downloaded.
 pub struct Pacer {
     interval: Duration,
     last: Option<(Instant, usize)>,
     speed: Speed,
+    largest: Option<u64>,
 }
 
 impl Default for Pacer {
@@ -705,6 +711,7 @@ impl Default for Pacer {
             interval: Duration::from_millis(250),
             last: None,
             speed: Speed::default(),
+            largest: None,
         }
     }
 }
@@ -712,6 +719,15 @@ impl Default for Pacer {
 impl Pacer {
     pub fn offer(&mut self, now: Instant, downloads: &Downloads) -> Option<Downloads> {
         let bytes_per_second = self.speed.observe(now, downloads.bytes);
+        // The total as the person has seen it: never smaller than before.
+        let (bytes, size) = match downloads.size {
+            Some(size) => {
+                let largest = self.largest.unwrap_or(size).max(size);
+                self.largest = Some(largest);
+                (downloads.bytes + (largest - size), Some(largest))
+            }
+            None => (downloads.bytes, None),
+        };
         let due = match self.last {
             None => true,
             Some((at, done)) => {
@@ -723,6 +739,8 @@ impl Pacer {
         }
         self.last = Some((now, downloads.done));
         Some(Downloads {
+            bytes,
+            size,
             bytes_per_second,
             ..downloads.clone()
         })
@@ -819,7 +837,11 @@ fn run_with_progress(
         bytes,
     });
     let output = output.map_err(|error| {
-        Problem::plain(format!("Could not pull the images OpenBot needs: {error}"))
+        Problem::with(
+            "OpenBot couldn't download what it needs. Check your internet connection, then try \
+             again.",
+            format!("could not pull the images OpenBot needs: {error}"),
+        )
     })?;
     if output.status.success() {
         return Ok(());
@@ -1364,6 +1386,41 @@ Executing external compose provider
         );
     }
 
+    /// Seen on Windows: the total read 944.2 MB, then 747.6 MB, once the engine found layers it
+    /// already had. The person sees a total that never shrinks, and what dropped out counts as done.
+    #[test]
+    fn the_total_shown_never_shrinks_and_what_dropped_out_counts_as_done() {
+        let mut pacer = Pacer::default();
+        let at = Instant::now();
+        let report = |bytes: u64, size: u64| Downloads {
+            done: 0,
+            total: 5,
+            bytes,
+            size: Some(size),
+            bytes_per_second: None,
+        };
+        let first = pacer.offer(at, &report(0, 944_200_000)).unwrap();
+        assert_eq!((first.bytes, first.size), (0, Some(944_200_000)));
+        // 196.6 MB of layers turn out to be here already.
+        let later = pacer
+            .offer(
+                at + Duration::from_secs(1),
+                &report(100_000_000, 747_600_000),
+            )
+            .unwrap();
+        assert_eq!(later.size, Some(944_200_000));
+        assert_eq!(later.bytes, 100_000_000 + 196_600_000);
+        // The speed is what downloaded, not what was found here.
+        assert!(later.bytes_per_second.unwrap_or(0) <= 100_000_000);
+        let done = pacer
+            .offer(
+                at + Duration::from_secs(2),
+                &report(747_600_000, 747_600_000),
+            )
+            .unwrap();
+        assert_eq!((done.bytes, done.size), (944_200_000, Some(944_200_000)));
+    }
+
     /// Compose not reaching the engine at all still says to start it.
     #[test]
     fn an_engine_that_does_not_answer_a_pull_still_says_to_start_it() {
@@ -1371,7 +1428,7 @@ Executing external compose provider
             include_str!("../test-fixtures/image-pull-failures/compose-engine-not-running.txt");
         let problem = failed_pull(&crate::quiet::said(captured.as_bytes()));
         assert!(
-            problem.said.contains("Start Docker or Podman"),
+            problem.said.contains("can't reach the software it runs on"),
             "{problem:?}"
         );
         assert!(
@@ -1602,11 +1659,21 @@ Executing external compose provider
                     && report.size == Some(whole)),
             "{reports:#?}"
         );
-        // Finished: the base layer it already had is not counted as downloaded, nor as to come.
+        // The total, once known, never changes: Windows G read "33.0 MB of 977.4 MB" and then
+        // "54.2 MB of 826.7 MB" as layers it already had came out of it.
+        assert!(
+            reports
+                .iter()
+                .all(|report| report.size.is_none() || report.size == Some(whole)),
+            "{:#?}",
+            reports.iter().map(|report| report.size).collect::<Vec<_>>()
+        );
+        // Finished: the base layer it already had counts as done, not as a smaller total.
         let last = reports.last().unwrap();
         assert_eq!((last.done, last.total), (1, 1));
-        assert_eq!(last.bytes, whole - base);
-        assert_eq!(last.size, Some(whole - base));
+        assert_eq!(last.bytes, whole);
+        assert_eq!(last.size, Some(whole));
+        assert!(base < whole);
         // Never down, and never past the size.
         assert!(reports.windows(2).all(|w| w[0].bytes <= w[1].bytes));
         assert!(reports
@@ -1651,7 +1718,8 @@ Executing external compose provider
                 event: LayerEvent::Cached,
             },
         );
-        assert_eq!(transfer.size(), Some(150));
+        // A layer already here is done, and the total stays what it was.
+        assert_eq!((transfer.bytes(), transfer.size()), (70, Some(180)));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import type { TriggerConfig, TriggerSuggestion } from "prompt-area/helpers";
 import { commandTrigger, mentionTrigger } from "prompt-area/helpers";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { shownSubtitle } from "@/lib/agents/subtitle";
 import { AGENT_TRIGGER, COMMAND_TRIGGER, type CommandOption } from "./draft";
 
 /**
@@ -43,7 +44,7 @@ export function toAgentOptions(
     .map((profile) => ({
       id: profile.id,
       name: profile.name,
-      description: profile.title,
+      description: shownSubtitle(profile.title),
       // A group's roster carries no seed, and draws each Bot from its id; this matches it.
       avatarSeed: profile.avatarSeed ?? profile.id,
     }));

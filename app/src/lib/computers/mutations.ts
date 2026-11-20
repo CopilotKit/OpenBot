@@ -1,7 +1,13 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { replaceBoundaries } from "@/lib/api/generated/boundaries/boundaries";
+import {
+  resetComputer,
+  stopComputer,
+  updateComputer,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { client } from "@/lib/client";
 import { clearActivity } from "./activity";
 import { type ActionPolicy, computerKeys } from "./queries";
 
@@ -77,15 +83,20 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
       botId?: string;
       action: ComputerAction;
     }) => {
-      await client("/api/computers/fleet", {
-        method: "POST",
-        body: {
-          action: variables.action,
+      const act = {
+        stop: stopComputer,
+        reset: resetComputer,
+        update: updateComputer,
+      }[variables.action];
+      await act(
+        organizationId(),
+        {
           computer: variables.computer,
           ...(variables.botId ? { botId: variables.botId } : {}),
         },
-        fallback: `The computer could not be ${PAST[variables.action]}.`,
-      });
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: `The computer could not be ${PAST[variables.action]}.` },
+      );
     },
     /** A reset deletes the profile those commands ran on; a stop keeps it, so only reset forgets. */
     onSuccess: async (_result, variables) => {
@@ -104,14 +115,23 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
  * difference would leave the server deciding where a new rule belongs, and where a deny sits
  * relative to an allow is most of what a policy means.
  */
+/**
+ * A rule written from a sentence in plain English, recorded with the save that adds it: the trail
+ * keeps what the admin asked for beside the rule that was enforced.
+ */
+export type PolicyAuthoring = { source: "english"; text: string };
+
 export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (next: ActionPolicy): Promise<ActionPolicy> =>
-      client("/api/computers/policy", "policy", {
-        method: "PUT",
-        body: next,
-        fallback: "The boundary could not be saved.",
-      }),
+    mutationFn: (
+      next: ActionPolicy & { authoring?: PolicyAuthoring },
+    ): Promise<ActionPolicy> =>
+      replaceBoundaries(
+        organizationId(),
+        next,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "The boundary could not be saved." },
+      ),
     onSuccess: () => invalidateComputers(queryClient),
   });
 }

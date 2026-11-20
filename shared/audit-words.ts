@@ -49,6 +49,7 @@ const ACTIONS: Readonly<Record<string, string>> = {
  * its stored name.
  */
 export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
+  "ai_connection.replaced": "Change the AI provider",
   "configuration.changed": "Change a setting",
   "credential.created": "Save a credential",
   "credential.rotated": "Replace a credential",
@@ -97,8 +98,11 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "app_access.approved": "Approve a request for an app",
   "app_access.dismissed": "Dismiss a request for an app",
   "app_access.refused": "Ask for an app",
-  "app_access.owner_granted": "Share an app",
-  "app_access.owner_revoked": "Stop sharing an app",
+  // A Bot's owner switching an app on or off for their own Bot: nothing is shared with anybody.
+  "app_access.owner_granted": "Give a Bot an app",
+  "app_access.owner_revoked": "Take an app from a Bot",
+  "plugin.grants_translated": "Choose a Bot's actions from a description",
+  "plugin.grants_changed": "Change a Bot's actions in an app",
   "computer.action_allowed": "Use the computer",
   "computer.action_refused": "Use the computer",
   "computer.action_failed": "Use the computer",
@@ -118,7 +122,11 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.reset": "Reset the computer",
   "computer.browser_cleared": "Clear the browser",
   "computer.updated": "Update the computer",
+  "computer.suspended": "Turn off an idle computer",
+  "computer.resumed": "Start a computer again",
   "computer.policy_loaded": "Start the computer",
+  "computer.policy_changed": "Change the boundaries",
+  "computer.policy_translated": "Write a boundary from a description",
   "computer.isolation_loaded": "Start the computer",
   "computer.terminated": "Shut down a computer",
   "computer.terminated_inactive": "Shut down an idle computer",
@@ -135,6 +143,12 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "bot.deleted": "Delete a Bot",
   "bot.callback_token_issued": "Issue a Bot's callback token",
   "bot.callback_token_revoked": "Revoke a Bot's callback token",
+  "bot_agent.created": "Add an agent",
+  "bot_agent.updated": "Change an agent",
+  "bot_agent.deleted": "Delete an agent",
+  "bot_agent.callback_token_issued": "Issue an agent's callback token",
+  "bot_agent.callback_token_revoked": "Revoke an agent's callback token",
+  "bot.delegation_changed": "Change how a Bot hands out work",
   "bot.isolation_refused": "Give a Bot its own computer",
   "bot.paused": "Pause a Bot",
   "bot.resumed": "Resume a Bot",
@@ -162,7 +176,19 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "person.provisioned": "Add a person",
   "person.deprovisioned": "Remove a person",
   "person.reprovisioned": "Add a person back",
+  // What happened to an organization itself, each on that organization's own trail, so the row
+  // needs no "in an organization" to say where. "Member" keeps them apart from the person.* rows.
+  "organization.created": "Create an organization",
+  "organization.renamed": "Rename an organization",
+  "organization.member_invited": "Invite a person",
+  "organization.invitation_canceled": "Cancel an invitation",
+  "organization.member_joined": "Join an organization",
+  "organization.member_removed": "Remove a member",
+  "organization.member_role_changed": "Change a member's role",
   "audit.exported": "Export events",
+  "audit.asked": "Ask the audit trail",
+  "what_if.asked": "Ask what would happen",
+  "what_if.checked": "Check what would happen",
   "session.signed_in": "Sign in",
   "session.refused": "Sign in",
   "session.break_glass": "Use emergency sign-in",
@@ -183,11 +209,16 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "approval.person_decided": "Decide on an action",
   "approval.withdrawn": "Withdraw a request",
   "approval.rule_changed": "Change an approval rule",
+  "approval.rules_translated": "Write approval rules from a description",
+  "approval.guidance_changed": "Change guidance for auto-review",
   "approval.settings_changed": "Change approval settings",
   "capability.changed": "Change a permission",
+  "capability.changes_translated":
+    "Write permission changes from a description",
   "enterprise.setting_changed": "Change an organization setting",
   "network_policy.changed": "Change the network policy",
   "network_policy.removed": "Remove a network policy",
+  "network_policy.translated": "Write a network allowlist from a description",
   "model.refused": "Use a model",
   "recorder.bearer_refused": "Use the Recorder",
   "recorder.connected": "Connect the Recorder",
@@ -330,4 +361,24 @@ export function auditEventWords(eventType: string): string {
           .replace(/^agent\./, "bot.")
           .replace(/\./g, " "),
       );
+}
+
+/**
+ * The rows an admin filters for most often, in the words the Audit page's views use: "Computer
+ * actions" and "App calls", then how they ended. The event words above say what a
+ * row was for a person reading one row ("Use the computer"); a filter is about a kind of row.
+ */
+const TYPE_WORDS: Record<string, string> = {
+  "computer.action_allowed": "Computer actions, allowed",
+  "computer.action_refused": "Computer actions, blocked",
+  "computer.action_failed": "Computer actions, failed",
+  "computer.action_stopped": "Computer actions, stopped",
+  "mcp.call_succeeded": "App calls, done",
+  "mcp.call_rejected": "App calls, blocked",
+  "mcp.call_failed": "App calls, failed",
+};
+
+/** One event type as a filter names it: a kind of row, then how it ended where that matters. */
+export function auditTypeWords(type: string): string {
+  return TYPE_WORDS[type] ?? auditEventWords(type);
 }

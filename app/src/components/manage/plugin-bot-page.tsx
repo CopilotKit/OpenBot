@@ -14,6 +14,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { DescribeGrants } from "@/components/manage/describe-grants";
 import {
   SharedApprovalFields,
   sharedSectionSentence,
@@ -38,7 +39,9 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
@@ -46,16 +49,14 @@ import {
   invalidatePlugins,
   setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
+import type { PluginTool } from "@/lib/plugins/queries";
 import {
-  type PluginTool,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
-import { toolsListError } from "@/lib/plugins/tools-error";
-import {
+  approvalNamesNobody,
   botSharedAppsQueryOptions,
   type SharedUseApproval,
   sharedUseKeys,
 } from "@/lib/plugins/shared-use";
+import { toolsListError } from "@/lib/plugins/tools-error";
 
 /**
  * One Bot and one app: every action the app offers, and which of them this Bot holds.
@@ -104,14 +105,17 @@ export function PluginBotPage({
   const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
-  const plugins = useQuery(pluginsPageQueryOptions());
-  const agents = useQuery(agentListQueryOptions());
+  const plugins = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const agents = useQuery(agentListQueryOptions(false, scope));
   /*
    * The ones this person has hidden. A hidden Bot is still a Bot, and still holds whatever it was
    * granted; the connector page links here for it (see `grantRoster`), and this page must not then
    * say there is no such Bot.
    */
-  const hiddenAgents = useQuery(agentListQueryOptions(true));
+  const hiddenAgents = useQuery(agentListQueryOptions(true, scope));
   const [error, setError] = useState<string | null>(null);
   /** What the list is narrowed to, over action names. Never over what is switched on. */
   const [search, setSearch] = useState("");
@@ -132,7 +136,7 @@ export function PluginBotPage({
     onError: (thrown: Error) => setError(thrown.message),
   });
 
-  const server = plugins.data?.servers.find((row) => row.id === key);
+  const server = plugins.data?.find((row) => row.id === key);
   /*
    * Shared only once the server itself says so. `exposure` is fetched for exactly that case — it is
    * this Bot's whole shared-apps picture, and here it is read for one app's current approval, so a
@@ -157,7 +161,7 @@ export function PluginBotPage({
   });
   const [grantingShared, setGrantingShared] = useState(false);
   const appTitle =
-    plugins.data?.catalogue.find((item) => item.key === key)?.title ??
+    catalogue.data?.find((item) => item.key === key)?.title ??
     server?.title ??
     key;
   const bot =
@@ -233,10 +237,10 @@ export function PluginBotPage({
     return (
       <PageShell
         backButton={{ label: paths.pluginsLabel, linkProps: paths.plugins() }}
-        title="Plugins"
+        title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Reload the page.
+          Couldn't load apps. Try again in a moment.
         </p>
       </PageShell>
     );
@@ -447,6 +451,28 @@ export function PluginBotPage({
         </PageEmpty>
       ) : (
         <>
+          {/*
+           * The whole set in a sentence, above the switches that set it one action at a time. Not for
+           * an app every Bot always has: there is nothing to choose.
+           */}
+          {alwaysOn ? null : (
+            <DescribeGrants
+              agentId={agentId}
+              appKey={key}
+              appTitle={appTitle}
+              botName={botName}
+              sharedNeeded={
+                shared && !sharedApp?.approval
+                  ? (sharedApp?.needed ?? {
+                      audience: "team",
+                      outsideInput: false,
+                      members: [],
+                    })
+                  : null
+              }
+            />
+          )}
+
           <Input
             aria-label={`Search ${appTitle} actions`}
             className="mt-6"
@@ -544,7 +570,7 @@ export function PluginBotPage({
                   Let {botName} use the shared {appTitle} account?
                 </DialogTitle>
               </DialogHeader>
-              <DialogBody className="mt-4">
+              <DialogBody className="mt-4 overflow-y-auto">
                 <SharedApprovalFields onChange={setApproval} value={approval} />
               </DialogBody>
               {/*
@@ -566,7 +592,7 @@ export function PluginBotPage({
                   Cancel
                 </Button>
                 <Button
-                  disabled={grantingShared}
+                  disabled={grantingShared || approvalNamesNobody(approval)}
                   onClick={() => void confirmSharedGrant()}
                   size="sm"
                 >

@@ -12,12 +12,14 @@
 //! - **Arguments are fixed.** Only `status`, `start`, `stop` and `login`, a validated stack id and
 //!   `--json`, plus the constant `list`, `setup`, `connect` and `login --help` lists and the sign-in's
 //!   `--mode openbot`, and `integrations composio provision` with a validated installation id and
-//!   a file OpenBot made, and `local setup --model-config` with a model file OpenBot made, as
-//!   separate arguments with no shell. The CLI's `resumeCommand` strings
+//!   a file OpenBot made, `local setup --model-config` with a model file OpenBot made, and
+//!   `telemetry link` with validated installation and account IDs, as separate arguments with
+//!   no shell. The CLI's `resumeCommand` strings
 //!   are text for a terminal user; they are dropped here and never executed.
 //! - **Only allowlisted facts leave.** Raw stdout, stderr, error messages and recovery text never
 //!   cross IPC. Failures are static categories with no payload. The one place CLI words go is the
-//!   log, scrubbed, when a call that sets up, starts, updates or stops the stack ends: its exit,
+//!   log, scrubbed, when a call that sets up, starts, updates or stops the stack, or connects
+//!   OpenBot to it, ends: its exit,
 //!   its report's error and the end of its stderr (`ending_entry`), so a setup that stops can be
 //!   told apart from one OpenBot stopped. The account
 //!   sign-in's approval page and code are the one CLI-printed text the window shows, checked
@@ -27,6 +29,10 @@
 //! retry of one that did not finish) and a resumed `local setup` pull. The CLI pulls each under a
 //! fixed limit that a slow line cannot meet, so OpenBot downloads the same images into the same
 //! node first (`local_images`, `run_with`, `setup_installed`) and the CLI finds them there.
+//!
+//! And one more: a `local update` stopped partway leaves a stack no later update can get past, so
+//! Cancel and Quit let an update finish once it has begun changing the release with Helm, and a
+//! failed update is repaired and tried once more (`local_update`, `update_repairing`).
 //!
 //! A command that *completed* is not Intelligence that is ready or licensed. Those two facts come
 //! only from the additive v1 `readiness` and `license` fields of `local status`, read by exact
@@ -64,7 +70,7 @@ pub enum Action {
 }
 
 impl Action {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Action::Status => "status",
             Action::Start => "start",
@@ -133,6 +139,9 @@ pub enum Failure {
     /// The back end's images stopped downloading: no new bytes for `local_images::Limits::stall`.
     /// What arrived is kept, and the next attempt continues from there. See `local_images`.
     DownloadStalled,
+    /// This version of OpenBot is below the security floor (`security_floor`): nothing of it starts
+    /// on this computer until it is updated.
+    BelowSecurityFloor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -193,12 +202,18 @@ pub enum Reason {
     DashboardUnavailable,
     /// `login`: the CLI could not open the browser. Its fallback is a code approved in a terminal.
     BrowserOpenFailed,
-    /// The CLI's own resource check: the engine has too few free CPUs, or too little free memory
-    /// or disk. Read from `error.code`, since its `nextAction.reason` is only
+    /// The CLI's own resource check: the engine has too few CPUs in total, or too little free
+    /// memory or disk. Read from `error.code`, since its `nextAction.reason` is only
     /// `local_command_failed`. Which of them is short is the report's `shortfall`.
     ResourcesShort,
     /// A reason this build does not know. Treated as blocking, never as success.
     Unrecognized,
+    /// Not the CLI's: OpenBot's own finding, behind a status the CLI could only fail
+    /// (`local_command_failed` with no stack, its ownership check answering 404 in its log). The
+    /// backend OpenBot created is recorded but its cluster is gone from the engine, with everything
+    /// in it, as when OpenBot's Podman machine was removed and made again (`stack_lost`). Waiting or
+    /// Retry can't bring it back; setting it up again starts over.
+    StackLost,
 }
 
 impl Reason {
@@ -254,6 +269,24 @@ pub struct Report {
     pub shortfall: Option<Shortfall>,
 }
 
+impl Report {
+    /// The answer for a call made while the engine OpenBot runs on does not answer, without asking
+    /// the CLI: blocked, as the CLI says it (`docker_unavailable`), with nothing known.
+    pub fn engine_not_answering() -> Self {
+        Report {
+            outcome: Outcome::Blocked,
+            stack: None,
+            reason: Some(Reason::DockerUnavailable),
+            readiness: Readiness::Unknown,
+            licence: Licence::Unknown,
+            licence_expires_at: None,
+            update_to: None,
+            checks_passed: false,
+            shortfall: None,
+        }
+    }
+}
+
 /// Which of the engine's resources are below what local setup needs, and whether the engine is
 /// Podman, so the window names the right resource and the right settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -287,9 +320,24 @@ pub struct Shortfall {
     /// resources there, and its disk is freed on the drive that holds it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub wsl: bool,
-    /// That drive, `C:`, when WSL says where the machine's disk is.
+    /// The drive that holds the engine's disk on Windows, `C:`: a Podman machine's, as WSL says,
+    /// or Docker Desktop's (`machine_drive`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drive: Option<String>,
+    /// `disk_gb` is what is free on that drive, which ran short rather than the machine's own
+    /// disk: the window says it as the person sees it, "This computer has 13.2 GB of free space on
+    /// drive C:" (`EngineCheck::free_on_drive`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub free_on_drive: bool,
+    /// That drive is this Mac's own disk (`windows::mac_drive`): "This Mac has 7.5 GB of free space".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mac: bool,
+    /// What is short is room for an update (`update_room`), not for a first setup: `needed_gb` is
+    /// what the update needs free where `disk_gb` was measured.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub updating: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needed_gb: Option<String>,
 }
 
 /// A number the CLI printed, to one decimal and rounded down as it rounds, without a trailing `.0`.
@@ -300,7 +348,8 @@ fn shown(value: f64) -> String {
 }
 
 impl Shortfall {
-    fn named(&self) -> bool {
+    /// Something is short, or recovering from being short.
+    pub fn named(&self) -> bool {
         self.cpu || self.memory || self.disk || self.recovering
     }
 }
@@ -338,6 +387,25 @@ pub struct Stack {
     /// The update the CLI keeps on record because it did not finish, when its record names it.
     pub unfinished_update: Option<UnfinishedUpdate>,
     pub observed: Option<Observed>,
+    /// The app folders the CLI records the stack for (`appPaths`), as it reported them. Kept only
+    /// to tell OpenBot's own stack from another app's (`lists_folder`); never sent to the window.
+    #[serde(skip)]
+    pub app_paths: Vec<String>,
+}
+
+impl Stack {
+    /// Whether the CLI records this stack for `folder`, compared as real paths, as the CLI keeps
+    /// them. A folder that is not there lists nothing.
+    pub fn lists_folder(&self, folder: &std::path::Path) -> bool {
+        let Ok(folder) = folder.canonicalize() else {
+            return false;
+        };
+        self.app_paths.iter().any(|path| {
+            std::path::Path::new(path)
+                .canonicalize()
+                .is_ok_and(|path| path == folder)
+        })
+    }
 }
 
 /**
@@ -349,7 +417,7 @@ Nothing in the cluster had changed and every check passed, yet the CLI reports `
 long as the record stays, and the window said the back end was not healthy and stopped.
 
 Only facts the window turns into its own sentences: the release (an identifier, like
-`installedRelease`), whether the update was still `prepared`, and whether it stopped downloading.
+`installedRelease`), how far the update got (`UpdateState`), and whether it stopped downloading.
 The recovery command and the schema are not kept.
 */
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -360,8 +428,46 @@ pub struct UnfinishedUpdate {
     /// The CLI's update state is still `prepared`: no migration has started, so the release that
     /// answers is the one installed (`installedRelease`).
     pub prepared: bool,
+    /// How far the update got, from the CLI's `update.state`.
+    pub state: UpdateState,
     /// The step that failed was one of the image downloads.
     pub stopped_downloading: bool,
+    /// The step the CLI recorded as failed (`failedStep`), an identifier such as `update-quiesce`,
+    /// so the window can say where the update stopped. Absent when none is recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_step: Option<String>,
+}
+
+/**
+How far an unfinished update got, as the CLI's `update.state` records it. The window says whether the
+services still run the version they had from this, never from the CLI's own text.
+
+Found on a Mac, rc.11 to rc.13: the CLI was stopped at `migrated`, while the new services started.
+The database was already on the new release, yet the window said the services ran the version they
+had.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateState {
+    /// Nothing migrated yet: the release installed is the one that answers.
+    Prepared,
+    /// The database migration started and did not finish: part-way.
+    Migrating,
+    /// The database is on the new release; the new services had not finished starting.
+    Migrated,
+    /// A state this build does not know.
+    Other,
+}
+
+impl UpdateState {
+    fn read(state: Option<&str>) -> Self {
+        match state {
+            Some("prepared") => Self::Prepared,
+            Some("migrating") => Self::Migrating,
+            Some("migrated") => Self::Migrated,
+            _ => Self::Other,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -382,6 +488,91 @@ pub struct Service {
     pub name: String,
     pub phase: String,
     pub ready: bool,
+}
+
+/// One `local status` answer as the log says it while Start waits for the back end: its readiness
+/// and licence, whether the CLI's checks of the addresses below passed, and which services are not
+/// ready yet. Service names and loopback addresses only; nothing secret is in a report.
+pub fn status_said(report: &Report) -> String {
+    let name = |value: serde_json::Value| value.as_str().unwrap_or("unknown").to_string();
+    let mut said = format!(
+        "readiness {}, licence {}, checks {}",
+        name(serde_json::json!(report.readiness)),
+        name(serde_json::json!(report.licence)),
+        if report.checks_passed {
+            "passed"
+        } else {
+            "not passed"
+        }
+    );
+    if let Some(reason) = report.reason {
+        said.push_str(&format!(", reason {}", name(serde_json::json!(reason))));
+    }
+    let Some(stack) = &report.stack else {
+        said.push_str(", no stack");
+        return said;
+    };
+    if let Some(observed) = &stack.observed {
+        let waiting: Vec<String> = observed
+            .services
+            .iter()
+            .filter(|service| !service.ready)
+            .map(|service| format!("{} {}", service.name, service.phase))
+            .collect();
+        said.push_str(&format!(
+            ", services {} of {} ready",
+            observed.services.len() - waiting.len(),
+            observed.services.len()
+        ));
+        if !waiting.is_empty() {
+            said.push_str(&format!(" (not ready: {})", waiting.join(", ")));
+        }
+    }
+    said.push_str(&format!(
+        "; API {}, gateway {}, dashboard {}",
+        stack.urls.api, stack.urls.gateway, stack.urls.dashboard
+    ));
+    said
+}
+
+/// A wait for the back end nobody ended (Stop, Quit, a window reloaded) is over after this long
+/// without a status, so the next one starts its own.
+pub const WAIT_FORGOTTEN: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The lines one `local status` answer adds to Start's wait for the back end
+/// (`logging::WaitLog`): what it answered, when that is new or a minute has passed, and that the
+/// wait ended once the back end is ready with a valid licence. The window ends a wait that gives up
+/// (`back_end_wait_ended`).
+pub fn status_waited(
+    wait: &mut Option<crate::logging::WaitLog>,
+    now: std::time::Instant,
+    answer: &Result<Report, Failure>,
+) -> Vec<String> {
+    if wait
+        .as_ref()
+        .is_some_and(|wait| wait.quiet_for(now) >= WAIT_FORGOTTEN)
+    {
+        *wait = None;
+    }
+    let waiting = wait.get_or_insert_with(|| {
+        crate::logging::WaitLog::new(
+            "the backend, `local status` until it is ready with a valid licence",
+            now,
+        )
+    });
+    let said = match answer {
+        Ok(report) => status_said(report),
+        Err(failure) => format!("the status call failed: {failure:?}"),
+    };
+    let mut lines: Vec<String> = waiting.answered(now, &said).into_iter().collect();
+    let ready = answer.as_ref().is_ok_and(|report| {
+        report.readiness == Readiness::Ready && report.licence == Licence::Valid
+    });
+    if ready {
+        lines.push(waiting.ended(now, "ready"));
+        *wait = None;
+    }
+    lines
 }
 
 /// The fixed argument list for one call. Built only from validated types.
@@ -835,7 +1026,8 @@ pub fn normalize_account_sign_in(exit_code: i32, stdout: &[u8]) -> Result<Accoun
     Ok(AccountSignIn { signed_in })
 }
 
-/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept.
+/// The evaluation agreement the licence needs, as the window shows it. No CLI prose is kept but
+/// the one sentence of a preflight that blocked (`Blocked`).
 ///
 /// The window reads the CLI's own status words (`signed-out`) and camelCase fields
 /// (`organizationName`). A variant named in camelCase reaches it as `signedOut`, which it does not
@@ -857,8 +1049,24 @@ pub enum Terms {
     Unavailable,
     SignedOut,
     /// The CLI answers nothing about the agreement until a container engine answers it. On a new
-    /// Windows computer Install is still putting Podman in while the person signs in.
-    EngineNotReady,
+    /// computer Install is still putting Podman in while the person signs in.
+    EngineNotReady {
+        /// What the CLI's preflight said, for the log only (`AccountWait`): `docker_unavailable`,
+        /// or `engine_mismatch`. The window is told only that the engine is not ready.
+        #[serde(skip)]
+        cause: &'static str,
+    },
+    /// The CLI's preflight refused this computer for a reason waiting does not change: an engine
+    /// local setup does not run on, such as OrbStack on a Mac, or too few CPUs. `said` is the CLI's
+    /// own sentence for it, when it is one plain line.
+    Blocked {
+        reason: Reason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        said: Option<String>,
+        /// The engine itself is refused: the fix is Docker Desktop or Podman instead.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        switch_engine: bool,
+    },
     /// The engine has fewer CPUs or less memory than local setup needs (`engine_size_terms`).
     /// Not a CLI answer: OpenBot's own check, so a small engine is caught before Start.
     EngineTooSmall {
@@ -866,12 +1074,35 @@ pub enum Terms {
         cpu: bool,
         memory: bool,
         disk: bool,
-        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds its disk.
+        /// Podman on Windows, in WSL (`Shortfall::wsl`), and the drive that holds the engine's disk.
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         wsl: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         drive: Option<String>,
+        /// With disk short: the free disk that counts (`EngineCheck::free_disk`), in GiB to one
+        /// decimal as `Shortfall::disk_gb`, so the window says what is free beside what is needed.
+        /// Windows F had 13.2 GiB free on C: and was told only "OpenBot is out of disk space".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        disk_gb: Option<String>,
+        /// That figure is what is free on `drive` (`Shortfall::free_on_drive`).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        free_on_drive: bool,
+        /// The drive is this Mac's own disk (`Shortfall::mac`).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        mac: bool,
+        /// What was measured, for the desktop's usage data only. Never sent to the window.
+        #[serde(skip)]
+        measured: EngineMeasure,
     },
+}
+
+/// The engine's CPUs, memory and free disk as OpenBot measured them (`EngineCheck`), in counts and
+/// bytes. Free disk that could not be measured is absent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineMeasure {
+    pub cpus: u64,
+    pub memory_bytes: u64,
+    pub free_disk_bytes: Option<u64>,
 }
 
 /// `onboard local-terms --json`: one object, exit 0. The address must be https; the organization
@@ -893,15 +1124,7 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
         Some("not-required") => Ok(Terms::NotRequired),
         Some("unavailable") => Ok(Terms::Unavailable),
         Some("signed-out") => Ok(Terms::SignedOut),
-        Some("blocked")
-            if wire
-                .get("preflight")
-                .and_then(|preflight| preflight.get("status"))
-                .and_then(Value::as_str)
-                == Some("fail") =>
-        {
-            Ok(Terms::EngineNotReady)
-        }
+        Some("blocked") => preflight_terms(wire.get("preflight")),
         Some("required") => {
             let url = wire
                 .get("url")
@@ -935,6 +1158,156 @@ pub fn normalize_terms(exit_code: i32, stdout: &[u8]) -> Result<Terms, Failure> 
             })
         }
         _ => Err(Failure::InvalidStatus),
+    }
+}
+
+/**
+`onboard local-terms` blocked by its preflight (`preflight.status` "fail").
+
+Only an engine that is not there yet is waited for: one that does not answer (`docker_unavailable`),
+or, while Install is still choosing the engine, a Docker address that answers with Podman
+(`engine_mismatch`). Anything else is said at once, since trying again every few seconds cannot
+change it.
+*/
+fn preflight_terms(preflight: Option<&Value>) -> Result<Terms, Failure> {
+    let field = |name: &str| {
+        preflight
+            .and_then(|preflight| preflight.get(name))
+            .and_then(Value::as_str)
+    };
+    if field("status") != Some("fail") {
+        return Err(Failure::InvalidStatus);
+    }
+    let reason = field("reason").unwrap_or("");
+    let detail = field("failureDetail");
+    if reason == "docker_unavailable" {
+        return Ok(Terms::EngineNotReady {
+            cause: "docker_unavailable",
+        });
+    }
+    if reason == "unsupported_engine" && detail == Some("engine_mismatch") {
+        return Ok(Terms::EngineNotReady {
+            cause: "engine_mismatch",
+        });
+    }
+    Ok(Terms::Blocked {
+        reason: Reason::from_wire(reason),
+        // Shown as the CLI wrote it, so only as one bounded line of plain text.
+        said: field("detail")
+            .map(str::trim)
+            .filter(|said| {
+                !said.is_empty()
+                    && said.chars().count() <= 400
+                    && !said.chars().any(char::is_control)
+            })
+            .map(str::to_owned),
+        switch_engine: reason == "unsupported_engine"
+            && detail == Some("engine_not_docker_desktop"),
+    })
+}
+
+/**
+What the Account step's sign-in check is waiting on, kept from one check to the next so the desktop
+log says each change once. The window asks every 2 seconds while no engine answers.
+
+On a new Mac the step said "Checking your CopilotKit account…" for minutes while Install put Podman
+in, and only the CLI's own log, a failed preflight every few seconds, said why.
+*/
+#[derive(Debug, Default)]
+pub struct AccountWait {
+    engine: Option<EngineWait>,
+}
+
+#[derive(Debug)]
+struct EngineWait {
+    since: Instant,
+    checks: u32,
+    step: Option<String>,
+}
+
+impl AccountWait {
+    pub const fn new() -> Self {
+        Self { engine: None }
+    }
+
+    /**
+    The log entry for one sign-in check that ended at `now` after `took`, or None when it changes
+    nothing the log has said. `step` is the setup step running now, if any, such as
+    `create-machine`.
+    */
+    pub fn heard(
+        &mut self,
+        now: Instant,
+        took: Duration,
+        answer: &Result<Terms, Failure>,
+        step: Option<&str>,
+    ) -> Option<String> {
+        let step_said = step.unwrap_or("none running");
+        if let Ok(Terms::EngineNotReady { cause }) = answer {
+            let Some(wait) = &mut self.engine else {
+                self.engine = Some(EngineWait {
+                    since: now.checked_sub(took).unwrap_or(now),
+                    checks: 1,
+                    step: step.map(str::to_owned),
+                });
+                return Some(format!(
+                    "[account] waiting for the engine before the sign-in check: the CLI's \
+                     preflight says {cause}; install step: {step_said}"
+                ));
+            };
+            wait.checks += 1;
+            if wait.step.as_deref() == step {
+                return None;
+            }
+            wait.step = step.map(str::to_owned);
+            return Some(format!(
+                "[account] still waiting for the engine after {}s ({} checks); install step: \
+                 {step_said}",
+                now.saturating_duration_since(wait.since).as_secs(),
+                wait.checks,
+            ));
+        }
+        let took = took.as_secs_f32();
+        let checked = match answer {
+            Ok(terms) => format!(
+                "sign-in check answered {} after {took:.1}s",
+                terms_said(terms)
+            ),
+            Err(failure) => format!("sign-in check failed after {took:.1}s: {failure:?}"),
+        };
+        Some(match self.engine.take() {
+            Some(wait) => format!(
+                "[account] {} after {}s ({} checks); {checked}",
+                if answer.is_ok() {
+                    "engine answering"
+                } else {
+                    "stopped waiting for the engine"
+                },
+                now.saturating_duration_since(wait.since).as_secs(),
+                wait.checks + 1,
+            ),
+            None => format!("[account] {checked}"),
+        })
+    }
+}
+
+/// An answer as the log says it, in the CLI's own status words.
+fn terms_said(terms: &Terms) -> String {
+    match terms {
+        Terms::Required { accepted: true, .. } => "required, accepted".to_owned(),
+        Terms::Required {
+            accepted: false, ..
+        } => "required, not accepted".to_owned(),
+        Terms::NotRequired => "not-required".to_owned(),
+        Terms::Unavailable => "unavailable".to_owned(),
+        Terms::SignedOut => "signed-out".to_owned(),
+        Terms::EngineNotReady { cause } => format!("engine-not-ready ({cause})"),
+        // The CLI's own sentence for it: the window says OpenBot's, and the log keeps this one.
+        Terms::Blocked { reason, said, .. } => match said {
+            Some(said) => format!("blocked ({reason:?}): {said}"),
+            None => format!("blocked ({reason:?})"),
+        },
+        Terms::EngineTooSmall { .. } => "engine-too-small".to_owned(),
     }
 }
 
@@ -1117,8 +1490,9 @@ fn reason(outcome: Outcome, wire: &Map<String, Value>) -> Result<Option<Reason>,
 
 /**
 The `error.code` the CLI gives when its resource check fails (`LocalResourceShortfallError`): too
-few free CPUs, too little free memory or too little free storage in the engine. A probe that could
-not measure (`LOCAL_DOCKER_RESOURCES_UNMEASURABLE`) is not a shortfall and stays a plain failure.
+few CPUs in total, too little free memory or too little free storage in the engine. A probe that
+could not measure (`LOCAL_DOCKER_RESOURCES_UNMEASURABLE`) is not a shortfall and stays a plain
+failure.
 */
 const RESOURCES_SHORT: &str = "LOCAL_DOCKER_RESOURCES_SHORT";
 const MEMORY_SHORT: &str = "LOCAL_DOCKER_MEMORY_SHORT";
@@ -1189,16 +1563,22 @@ fn on_podman() -> bool {
     cli_engine().is_some_and(|address| address.engine == crate::engine::Engine::Podman)
 }
 
+/// The Podman machine the CLI runs on, by name, when it runs on one (`acquire::machine_reached`).
+pub fn engine_machine() -> Option<String> {
+    cli_engine().and_then(|address| crate::acquire::machine_reached(&address))
+}
+
 const GIB: u64 = 1024 * 1024 * 1024;
 
 /**
 The smallest engine OpenBot lets through before local setup: 4 CPUs, 4 GiB of memory and 40 GiB of
 free disk.
 
-The CLI's own check wants 4 free CPUs and 4 GiB of free memory inside a container, so an engine
-below those totals can never pass it. Anything larger is left to the CLI at Start: OpenBot's own
-Podman machine is 4 CPUs and 6 GiB and passes there, so a stricter total here would stop every
-Podman install. Free disk is the CLI's own 40 GiB, measured as it measures it, inside a container.
+The CLI's own check wants 4 CPUs in the engine's total, whatever already runs on it, and 4 GiB of
+free memory inside a container, so an engine below those totals can never pass it. Anything larger
+is left to the CLI at Start: OpenBot's own Podman machine is 4 CPUs and 6 GiB and passes there, so
+a stricter total here would stop every Podman install. Free disk is the CLI's own 40 GiB, measured
+as it measures it, inside a container.
 */
 pub const MIN_ENGINE_CPUS: u64 = 4;
 pub const MIN_ENGINE_MEMORY_BYTES: u64 = 4 * GIB;
@@ -1248,6 +1628,48 @@ pub fn parse_free_disk(output: &str) -> Option<u64> {
     parse_disk(output).map(|disk| disk.free)
 }
 
+/**
+How long each engine command of the check may take: `info` and `image ls`, and the `run` that
+measures disk, which starts a container. An engine that does not answer within it is not measured,
+as one that fails is, so a hung engine never holds the account step or a Start.
+*/
+const ENGINE_QUERY_LIMIT: Duration = Duration::from_secs(15);
+const ENGINE_RUN_LIMIT: Duration = Duration::from_secs(20);
+/// The most of an engine command's output the check reads: a long image list, at most.
+const ENGINE_OUTPUT_CAP: usize = 1024 * 1024;
+
+/// What a test sets the engine check's limits to.
+#[cfg(test)]
+static ENGINE_CHECK_LIMIT_FOR_TESTS: std::sync::Mutex<Option<Duration>> =
+    std::sync::Mutex::new(None);
+
+/// `args` on the engine, within `limit`: whether it succeeded, and its stdout. Nothing when it did
+/// not finish in time or could not run.
+fn engine_answer(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+) -> Option<(bool, String)> {
+    #[cfg(test)]
+    let limit = ENGINE_CHECK_LIMIT_FOR_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or(limit);
+    let mut command = address.command();
+    command.args(args);
+    let (succeeded, stdout) = crate::local_images::run_within(command, limit, ENGINE_OUTPUT_CAP)?;
+    Some((succeeded, String::from_utf8_lossy(&stdout).into_owned()))
+}
+
+/// `args` on the engine, within `limit`: its stdout when it succeeded, or nothing.
+fn engine_output(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+) -> Option<String> {
+    engine_answer(address, args, limit).and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
+}
+
 /// The engine's CPUs and memory from its `info`.
 fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
     let format = if address.engine == crate::engine::Engine::Podman {
@@ -1255,28 +1677,25 @@ fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
     } else {
         "{{.NCPU}} {{.MemTotal}}"
     };
-    let output = address
-        .command()
-        .args(["info", "--format", format])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    parse_engine_size(&String::from_utf8_lossy(&output.stdout))
+    parse_engine_size(&engine_output(
+        address,
+        &["info", "--format", format],
+        ENGINE_QUERY_LIMIT,
+    )?)
 }
 
 /**
 The engine's disk inside a container, the way the CLI measures it: `df -Pk /` in a container of an
 image the engine already has, so nothing is downloaded. An engine with no image that has a shell
-gives no answer, and disk is then not judged.
+gives no answer, and disk is then not judged. Also what `update_ready` measures before it downloads
+an update's images ahead of time.
 */
-fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
-    let images = address
-        .command()
-        .args(["image", "ls", "--quiet", "--no-trunc"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let images = String::from_utf8_lossy(&images.stdout).into_owned();
+pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
+    let images = engine_output(
+        address,
+        &["image", "ls", "--quiet", "--no-trunc"],
+        ENGINE_QUERY_LIMIT,
+    )?;
     let mut tried = Vec::new();
     for image in images.lines().map(str::trim).filter(|id| !id.is_empty()) {
         if tried.contains(&image) {
@@ -1286,9 +1705,10 @@ fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
             break;
         }
         tried.push(image);
-        let measured = address
-            .command()
-            .args([
+        // No answer in time is an engine that hangs: another image would only hang too.
+        let (succeeded, measured) = engine_answer(
+            address,
+            &[
                 "run",
                 "--rm",
                 "--pull=never",
@@ -1298,35 +1718,42 @@ fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
                 image,
                 "-c",
                 "df -Pk /",
-            ])
-            .output();
-        let disk = measured
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| parse_disk(&String::from_utf8_lossy(&output.stdout)));
-        if disk.is_some() {
-            return disk;
+            ],
+            ENGINE_RUN_LIMIT,
+        )?;
+        if let Some(disk) = succeeded.then(|| parse_disk(&measured)).flatten() {
+            return Some(disk);
         }
     }
     None
 }
 
+/**
+What Windows or a Mac says of the drive that holds the engine's disk, for the tests, in place of
+`windows::podman_machine_drive`, `windows::docker_data_drive` and `windows::mac_drive`. For the whole process, so a check
+on another thread reads it too, and a test never reads the drives of the computer it runs on: the
+Windows runner measured its own C: in a check made on another thread. Tests that set it run in a
+process of their own (`StartLab`).
+*/
 #[cfg(test)]
-thread_local! {
-    /// What Windows says of the drive that holds the Podman machine's disk, for the tests: Some
-    /// stands in for `windows::podman_machine_drive` on this thread.
-    static MACHINE_DRIVE: std::cell::RefCell<Option<Option<crate::windows::MachineDrive>>> =
-        const { std::cell::RefCell::new(None) };
-}
+static MACHINE_DRIVE: std::sync::Mutex<Option<crate::windows::MachineDrive>> =
+    std::sync::Mutex::new(None);
 
-/// The drive that holds the Podman machine `address` names, on Windows (`podman_machine_drive`).
+/**
+The drive that holds the engine's disk, and what is free on it: on Windows the Podman machine
+`address` names (`podman_machine_drive`), or Docker Desktop's disks (`docker_data_drive`); on a Mac
+its own disk (`mac_drive`). All are sparse virtual disks of 64 GB to a terabyte, so a container's own
+free space says nothing of the drive. Measured whether or not the engine answers: the drive is there
+either way.
+*/
+#[cfg(not(test))]
 fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
-    if address.engine != crate::engine::Engine::Podman {
-        return None;
+    // A Mac's own disk, under Docker Desktop's and Podman's machine disk alike.
+    if cfg!(target_os = "macos") {
+        return crate::windows::mac_drive();
     }
-    #[cfg(test)]
-    if let Some(said) = MACHINE_DRIVE.with(|drive| drive.borrow().clone()) {
-        return said;
+    if address.engine == crate::engine::Engine::Docker {
+        return crate::windows::docker_data_drive();
     }
     let connection = address
         .connection
@@ -1335,9 +1762,17 @@ fn machine_drive(address: &crate::engine::Address) -> Option<crate::windows::Mac
     crate::windows::podman_machine_drive(crate::acquire::machine_of(&connection))
 }
 
+#[cfg(test)]
+fn machine_drive(_address: &crate::engine::Address) -> Option<crate::windows::MachineDrive> {
+    MACHINE_DRIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /**
 What OpenBot measured of the engine the back end runs on (`[local check]` in the log): its CPUs and
-memory, its disk as a container sees it, on Windows the drive that holds a Podman machine's disk, and
+memory, its disk as a container sees it, on Windows the drive that holds the engine's disk, and
 after a call that failed, whether the back end's node says it is short of disk.
 */
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1411,6 +1846,14 @@ impl EngineCheck {
         self.pressure == Some(true) && self.free_disk().is_some() && !self.low_on_disk()
     }
 
+    /// The free disk that counts is the drive's, under the machine's disk: what ran short is on
+    /// this computer's drive, not inside the machine.
+    fn free_on_drive(&self) -> bool {
+        self.drive
+            .as_ref()
+            .is_some_and(|drive| Some(drive.free) == self.free_disk())
+    }
+
     /// Podman on Windows, whose machine runs in WSL.
     fn wsl(&self) -> bool {
         self.podman && (cfg!(target_os = "windows") || self.drive.is_some())
@@ -1434,7 +1877,19 @@ impl EngineCheck {
                 .map(|disk| gib(disk.size));
         }
         short.drive = self.drive.as_ref().and_then(|drive| drive.drive.clone());
+        // k3s's own line is inside the machine, whatever the drive has.
+        short.free_on_drive = short.disk && !short.nearly_full && self.drive_named();
+        short.mac = short.free_on_drive && self.drive.as_ref().is_some_and(|drive| drive.mac);
         short
+    }
+
+    /// The free disk that counts is a drive the window can name: `C:`, or this Mac's disk.
+    fn drive_named(&self) -> bool {
+        self.free_on_drive()
+            && self
+                .drive
+                .as_ref()
+                .is_some_and(|drive| drive.drive.is_some() || drive.mac)
     }
 
     /// `4 CPUs and 5.8 GiB of memory, 30.5 GiB free of 983.2 GiB in a container, 120.0 GiB free on
@@ -1453,10 +1908,11 @@ impl EngineCheck {
             None => "free disk not measured".to_owned(),
         });
         if let Some(drive) = &self.drive {
-            let on = drive
-                .drive
-                .as_deref()
-                .unwrap_or("the drive that holds its disk");
+            let on = match (drive.drive.as_deref(), drive.mac) {
+                (Some(letter), _) => letter,
+                (None, true) => "this Mac's disk",
+                (None, false) => "the drive that holds its disk",
+            };
             said.push(format!("{} GiB free on {on}", gib(drive.free)));
         }
         match self.pressure {
@@ -1493,6 +1949,22 @@ impl EngineCheck {
     }
 }
 
+/// The engine the back end runs on, when the app has said: the one troubleshooting logs measure.
+pub fn engine_in_use() -> Option<crate::engine::Address> {
+    cli_engine()
+}
+
+/// The engine measured as `[local check]` logs it (`EngineCheck::said`): CPUs and memory, free disk
+/// inside a container and on the drive under a Podman machine, and what is short.
+pub fn measured_engine(address: &crate::engine::Address) -> String {
+    EngineCheck::of(address).said()
+}
+
+/// `args` on the engine within the check's limit for a query: its stdout when it succeeded.
+pub fn engine_query(address: &crate::engine::Address, args: &[&str]) -> Option<String> {
+    engine_output(address, args, ENGINE_QUERY_LIMIT)
+}
+
 /// Log a check: `[local check] before local start: ...`. A shortfall is a warning.
 fn log_check(when: &str, check: &EngineCheck) {
     let level = if check.shortfall().named() {
@@ -1513,7 +1985,15 @@ pub fn engine_size_terms() -> Option<Terms> {
     let address = cli_engine()?;
     let check = EngineCheck::of(&address);
     let (cpus, memory) = check.size?;
-    let short = engine_shortfall(cpus, memory, check.free_disk());
+    let free = check.free_disk();
+    let short = engine_shortfall(cpus, memory, free);
+    // While the person is asked to free space, the downloads behind the step hold, so they do not
+    // fill the disk meanwhile: on Windows F free space went from 15.0 to 11.0 GB on this step.
+    if short.disk {
+        crate::early_downloads::hold_for_room();
+    } else {
+        crate::early_downloads::room_again();
+    }
     if !short.named() {
         return None;
     }
@@ -1524,8 +2004,25 @@ pub fn engine_size_terms() -> Option<Terms> {
         memory: short.memory,
         disk: short.disk,
         wsl: check.wsl(),
+        disk_gb: free.filter(|_| short.disk).map(gib),
+        free_on_drive: short.disk && check.drive_named(),
+        mac: short.disk
+            && check.drive_named()
+            && check.drive.as_ref().is_some_and(|drive| drive.mac),
+        measured: EngineMeasure {
+            cpus,
+            memory_bytes: memory,
+            free_disk_bytes: free,
+        },
         drive: check.drive.and_then(|drive| drive.drive),
     })
+}
+
+/// The free disk the account step's check counts (`EngineCheck::free_disk`) on the engine the back
+/// end runs on, for downloads that hold until there is room (`early_downloads::wait_for_room`).
+/// Nothing when no engine is known or its disk is not measured.
+pub fn engine_free_disk() -> Option<u64> {
+    EngineCheck::of(&cli_engine()?).free_disk()
 }
 
 /**
@@ -1553,6 +2050,18 @@ the CLI enforces that only at a first setup. After a call that failed, it is che
 back end's node asked whether it is short of disk, and anything short becomes the report's reason
 with its numbers, so the card names it and says where to raise or free it. A failure the CLI already
 named, or one OpenBot stopped, keeps its own words.
+
+On OpenBot's own machine on Windows, its dead port rules are cleared before the call, so the back end
+it starts is not reached through rules for its containers' addresses from before
+(`acquire::readied_for_backend`).
+
+Except a setup on a drive that is short: the CLI measures its 40 GiB inside a container, where the
+sparse disk of Docker Desktop or a Podman machine on Windows shows about a terabyte free whatever the
+drive under it has. Windows G had 938.3 GiB in a container and 15 GB on C:, and the setup took C:
+down to 11.8 GB. That setup is not started: the report says the drive is short, with its numbers,
+and the downloads behind it hold until there is room (`early_downloads::hold_for_room`).
+
+And an update the computer has no room for (`update_room`): not started, said the same way.
 */
 fn checked_call(
     command: &str,
@@ -1562,8 +2071,28 @@ fn checked_call(
     let Some(address) = cli_engine() else {
         return call();
     };
-    log_check(&format!("before {command}"), &EngineCheck::of(&address));
-    let result = call();
+    let before = EngineCheck::of(&address);
+    log_check(&format!("before {command}"), &before);
+    if command == "local setup" {
+        if let Some(short) = drive_short_of(&before) {
+            log::warn!(
+                "[local check] {command} not started: the drive that holds the engine's disk has less than OpenBot needs"
+            );
+            crate::early_downloads::hold_for_room();
+            return Ok(short_of_drive(short));
+        }
+    }
+    // An update the computer has no room for is not started: nothing is downloaded, paused or
+    // changed, and the report says what is short with its numbers (`update_room`).
+    if command == "local update" {
+        let database = *INSTALLATION_DATABASE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(short) = update_room_of(&before, database) {
+            return Ok(short_of_drive(short));
+        }
+    }
+    let result = crate::acquire::readied_for_backend(Some(&address), call);
     let unexplained = match &result {
         Ok(report) => {
             report.outcome == Outcome::Failed
@@ -1596,6 +2125,150 @@ fn checked_call(
             Ok(report)
         }
         other => other,
+    }
+}
+
+/// The drive that holds the engine's disk is what is short, by `check`: a setup waits for room.
+fn drive_short_of(check: &EngineCheck) -> Option<Shortfall> {
+    let short = check.shortfall();
+    short.free_on_drive.then_some(short)
+}
+
+/**
+While a setup waits for room on a drive that is short (`checked_call`): that drive's shortfall now,
+measured as the setup measures it, or nothing once there is room. The window asks every few seconds
+and on Try again, and sets up again by itself once there is room. Nothing when no engine is known.
+*/
+pub fn drive_short() -> Option<Shortfall> {
+    let short = drive_short_of(&EngineCheck::of(&cli_engine()?));
+    if short.is_none() {
+        crate::early_downloads::room_again();
+    }
+    short
+}
+
+/**
+ROOM FOR AN UPDATE, checked before an update does anything: before the back end's `local update`
+(`checked_call`) and before OpenBot's own update stops, backs up or downloads (`upgrade::run`).
+
+The first setup's 40 GiB is what the back end needs free before it is installed. An installation
+already uses part of that, so an update is held to what the update itself writes, beside what is
+there, until it removes what it replaced:
+
+- New images: an update downloads at most `MOST_AN_UPDATE_DOWNLOADS` (every image of OpenBot's and
+  the back end's changed), and an image takes `update_ready::ON_DISK` times its download on disk.
+- The database, twice: the backup `upgrade` writes before anything changes (`upgrade::DUMP`, a
+  `pg_dump` of it), and the copy a failed update restores into before it swaps it in
+  (`stack::restore_runtime_database`). Measured when OpenBot can (`installation_database`), and
+  counted as `UNMEASURED_DATABASE` when not.
+
+Then the same lines `update_ready` holds its downloads to: inside the engine, what is left keeps
+`update_ready::KEEP_FREE_PERCENT` of its disk free, below which k3s removes the back end's images;
+and on the computer's drive under the engine's disk, the update takes at most half of what is free.
+That drive runs out first on a Mac: its Docker disk is a sparse file that shows room whatever the
+Mac has, and an update on a Mac with 7.5 GB free of 926 GB filled it mid-update and broke Docker's
+disk ("Detected aborted journal").
+
+CPUs and memory are the first setup's (`MIN_ENGINE_CPUS`, `MIN_ENGINE_MEMORY_BYTES`).
+*/
+pub const MOST_AN_UPDATE_DOWNLOADS: u64 = 1_700_000_000;
+pub const UNMEASURED_DATABASE: u64 = GIB;
+
+/// Bytes an update writes, with a database of `database` bytes (`update_room`).
+pub fn update_needs(database: Option<u64>) -> u64 {
+    MOST_AN_UPDATE_DOWNLOADS * crate::update_ready::ON_DISK
+        + 2 * database.unwrap_or(UNMEASURED_DATABASE)
+}
+
+/// The size of OpenBot's own database, as the window last measured it, for the back end's update.
+static INSTALLATION_DATABASE: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+/// The size of this installation's database, for the room an update needs (`update_needs`).
+pub fn installation_database(bytes: Option<u64>) {
+    *INSTALLATION_DATABASE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = bytes;
+}
+
+/// Bytes as whole GiB, rounded up: what an update needs is never said as less than it is.
+fn whole_gib(bytes: u64) -> String {
+    bytes.div_ceil(GIB).to_string()
+}
+
+/// What `check` is short of for an update writing `needs` bytes (see `update_needs`). Anything not
+/// measured is not judged. The drive under the engine's disk is said first: it is what the person
+/// frees, and what runs out first.
+fn update_shortfall(check: &EngineCheck, needs: u64) -> Shortfall {
+    let (cpus, memory) = check.size.unwrap_or((u64::MAX, u64::MAX));
+    let mut short = engine_shortfall(cpus, memory, None);
+    short.podman = check.podman;
+    short.wsl = check.wsl();
+    short.updating = true;
+    let on_drive = needs.saturating_mul(2);
+    let in_engine = check.disk.map(|disk| {
+        (
+            disk,
+            needs.saturating_add(disk.size / 100 * crate::update_ready::KEEP_FREE_PERCENT),
+        )
+    });
+    if let Some(drive) = check.drive.as_ref().filter(|drive| drive.free < on_drive) {
+        short.disk = true;
+        short.disk_gb = Some(gib(drive.free));
+        short.needed_gb = Some(whole_gib(on_drive));
+        short.drive = drive.drive.clone();
+        short.mac = drive.mac;
+        short.free_on_drive = drive.drive.is_some() || drive.mac;
+    } else if let Some((disk, needed)) = in_engine.filter(|(disk, needed)| disk.free < *needed) {
+        short.disk = true;
+        short.disk_gb = Some(gib(disk.free));
+        short.needed_gb = Some(whole_gib(needed));
+    }
+    short
+}
+
+/**
+The update's preflight on `address`: what it is short of for an update, with a database of
+`database` bytes (`update_needs`), or nothing when it has room. Logged either way, as
+`[local check] before an update: ...`.
+*/
+pub fn update_room(address: &crate::engine::Address, database: Option<u64>) -> Option<Shortfall> {
+    update_room_of(&EngineCheck::of(address), database)
+}
+
+fn update_room_of(check: &EngineCheck, database: Option<u64>) -> Option<Shortfall> {
+    let needs = update_needs(database);
+    let short = update_shortfall(check, needs);
+    let said = format!(
+        "[local check] before an update: {}; the update writes about {} GiB, with {}",
+        check.said(),
+        whole_gib(needs),
+        database.map_or("the database not measured".to_owned(), |bytes| format!(
+            "a database of {} GiB",
+            gib(bytes)
+        ))
+    );
+    if short.named() {
+        log::warn!("{said}; not started, short of {short:?}");
+        Some(short)
+    } else {
+        log::info!("{said}; room");
+        None
+    }
+}
+
+/// A setup OpenBot did not start, for a drive short of disk (`checked_call`): blocked on resources,
+/// with what was measured, as the CLI's own resource check reports it.
+fn short_of_drive(shortfall: Shortfall) -> Report {
+    Report {
+        outcome: Outcome::Blocked,
+        stack: None,
+        reason: Some(Reason::ResourcesShort),
+        readiness: Readiness::Unknown,
+        licence: Licence::Unknown,
+        licence_expires_at: None,
+        update_to: None,
+        checks_passed: false,
+        shortfall: Some(shortfall),
     }
 }
 
@@ -1704,11 +2377,13 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
             Some(UnfinishedUpdate {
                 to: text(update.get("attemptedRelease"))?,
                 prepared: update.get("state").and_then(Value::as_str) == Some("prepared"),
+                state: UpdateState::read(update.get("state").and_then(Value::as_str)),
                 // The steps the CLI's own progress calls downloading the release's images.
                 stopped_downloading: matches!(
                     saved.get("failedStep").and_then(Value::as_str),
                     Some("image-download" | "system-image-download" | "system-image-tag")
                 ),
+                failed_step: text(saved.get("failedStep")).ok(),
             })
         }
         _ => None,
@@ -1726,7 +2401,25 @@ fn stack(value: &Value) -> Result<Stack, Failure> {
         update_in_progress,
         unfinished_update,
         observed: observation(saved.get("observed"))?,
+        app_paths: app_paths(saved.get("appPaths")),
     })
+}
+
+/// More app folders than anyone shares one stack with is not a listing.
+const MAX_APP_PATHS: usize = 256;
+
+/// `appPaths` as `local list`, `status`, `setup` and `connect` report it: `[{path, missing}]`. Only
+/// the paths are kept. Anything else lists no folder, so a stack it describes is never OpenBot's.
+fn app_paths(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(MAX_APP_PATHS)
+        .filter_map(|path| path.get("path").and_then(Value::as_str))
+        .filter(|path| !path.is_empty() && path.len() <= 4096)
+        .map(str::to_owned)
+        .collect()
 }
 
 fn observation(value: Option<&Value>) -> Result<Option<Observed>, Failure> {
@@ -2027,18 +2720,85 @@ calling `start`, and on a stopped one the CLI refuses `start` while a `prepared`
 left alone.
 */
 pub fn update_due(report: &Report, target: Option<&str>) -> Option<String> {
-    let target = target?;
+    let (to, newer) = update_releases(report, target)?;
+    newer.then(|| to.to_owned())
+}
+
+/// The release `local update` on `report`'s stack installs (the one an unfinished update on record
+/// moves to, else `target`), and whether it is newer than the release the stack runs. `None` when
+/// the report is not a completed status with a stack, or either version cannot be read.
+fn update_releases<'a>(report: &'a Report, target: Option<&'a str>) -> Option<(&'a str, bool)> {
     let stack = report.stack.as_ref()?;
     if report.outcome != Outcome::Completed {
         return None;
     }
     let version = |text: &str| semver::Version::parse(text.trim().trim_start_matches('v')).ok();
     let to = if stack.update_in_progress {
-        &stack.unfinished_update.as_ref()?.to
+        stack.unfinished_update.as_ref()?.to.as_str()
     } else {
-        target
+        target?
     };
-    (version(to)? > version(&stack.installed_release)?).then(|| to.to_owned())
+    Some((to, version(to)? > version(&stack.installed_release)?))
+}
+
+/**
+Whether a `local update` the CLI refused as `incompatible_release` was refused only because the stack
+already runs the release it would install, or a newer one: nothing to update, not a failure.
+
+THE PROBLEM. The CLI refuses an update that does not move to a newer release with the same reason,
+`incompatible_release`, as the two that are real failures: a release whose database schema cannot
+be migrated in place, and one that needs a new local Kubernetes cluster. Its JSON names no other
+code and carries no stack, so the refusal alone cannot tell them apart. Every upgrader's Desktop
+sent `setup_failed` for it (`local_update`, `incompatible_release`), and the window said the
+services couldn't update, while the stack ran the release the app installs.
+
+THE RULE. Read from `status`, the stack's `local status` after the refusal: already on it when the
+release the update would install, as `update_releases` reads it, is not newer than the one the stack
+runs. That is the CLI's own first check, and the schema and cluster refusals come only after it
+passed, so a stack behind its update is never taken for one already on it. Never when the status did
+not complete, or a version cannot be read: then the refusal stands, and is reported as before.
+*/
+fn already_on_release(status: &Report, target: Option<&str>) -> bool {
+    update_releases(status, target).is_some_and(|(_, newer)| !newer)
+}
+
+/**
+`report`, `local update`'s answer, or the stack's `local status` in its place when the update was
+refused only because the stack already runs that release (`already_on_release`): a completed answer,
+so neither the window nor telemetry treats it as a failed update. Any other answer is kept as it is,
+and `status` is asked only after an `incompatible_release` refusal.
+*/
+fn nothing_to_update(
+    report: Result<Report, Failure>,
+    status: impl FnOnce() -> Option<Report>,
+    target: Option<&str>,
+) -> Result<Report, Failure> {
+    let refused = matches!(
+        &report,
+        Ok(Report {
+            outcome: Outcome::Blocked,
+            reason: Some(Reason::IncompatibleRelease),
+            ..
+        })
+    );
+    if !refused {
+        return report;
+    }
+    match status() {
+        Some(status) if already_on_release(&status, target) => {
+            if let Some(stack) = &status.stack {
+                log::info!(
+                    "[local update] nothing to update: the backend already runs {}",
+                    stack.installed_release
+                );
+            }
+            Ok(Report {
+                update_to: None,
+                ..status
+            })
+        }
+        _ => report,
+    }
 }
 
 pub fn installed() -> Result<PinnedCli, Failure> {
@@ -2357,10 +3117,72 @@ fn command_inheriting(
     cli_environment(&mut command, engine, var, docker_config);
     if let Some(folder) = folder {
         command.current_dir(folder);
+        if let Some(ceiling) = git_ceiling(folder) {
+            command.env(GIT_CEILING, ceiling);
+        }
     }
     command.args(arguments);
+    if let (Some(folder), ["local", ..]) = (folder, arguments) {
+        // Absolute, as `current_dir` reads it: the CLI resolves a relative one inside the folder.
+        let folder = std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf());
+        command.arg(APP_PATH).arg(folder);
+    }
     command
 }
+
+/// Git's list of folders it never goes up into while it looks for a repository.
+const GIT_CEILING: &str = "GIT_CEILING_DIRECTORIES";
+
+/**
+The folder above OpenBot's own, as `GIT_CEILING_DIRECTORIES`, for every call that runs in OpenBot's
+folder: git run there by the CLI never finds a repository above it.
+
+Before `local connect` writes the backend's key into `.env`, the CLI asks git whether `.env` is
+ignored, and also that `.env.example` is not. A Mac whose home folder is a git repository that
+ignores everything (`*`, as dotfiles repositories do) ignored `~/OpenBot` whole, so `.env.example`
+came out ignored too, and the `!.env.example` the CLI adds in `~/OpenBot/.gitignore` cannot undo
+an ignored parent folder. Connect failed every time, and Retry failed the same way. Outside any
+repository git cannot say, and the CLI goes on, as on a computer with no git at all.
+
+A repository in OpenBot's own folder is still found: git always looks in the folder it runs in, and
+only going up is stopped. Its own ignore rules then decide, as before. OpenBot's `.env` holds no key
+once connect is done: the key moves to the credential store (`connect_local_eval_at`).
+
+Both forms of the parent where they differ, as given and with links resolved, so a folder reached
+through a link stops at its real parent too. Windows' resolved form is a `\\?\` path git does not
+read, so only the given form is used there. None for a folder with no parent, or one whose parent
+holds the list separator.
+*/
+fn git_ceiling(folder: &std::path::Path) -> Option<std::ffi::OsString> {
+    let given = std::path::absolute(folder).ok()?.parent()?.to_path_buf();
+    let mut parents = vec![given];
+    if !cfg!(windows) {
+        if let Some(real) = folder
+            .canonicalize()
+            .ok()
+            .and_then(|real| real.parent().map(std::path::Path::to_path_buf))
+        {
+            if !parents.contains(&real) {
+                parents.push(real);
+            }
+        }
+    }
+    std::env::join_paths(parents).ok()
+}
+
+/**
+`--app-path <folder>`, added to every `local` call that runs in OpenBot's folder (`local setup` and
+`local connect`): the CLI acts for exactly that folder.
+
+Without it the CLI finds a folder's stack through `.copilotkit/local.json` in the folder or in any
+folder above it. Someone who once ran `copilotkit local setup` in their home folder had that stack
+resumed for `~/OpenBot`, and `local connect` wrote the home folder's `.env`, so Start found
+`~/OpenBot/.env` naming no stack it set up. With it, setup creates or resumes the stack the CLI
+records for OpenBot's folder, and connect writes OpenBot's `.env` (Intelligence
+`apps/cli/src/commands/local.ts`, in the CLI pinned since `desktop/intelligence-cli.json` named
+f5c45eb).
+*/
+pub const APP_PATH: &str = "--app-path";
 
 /// The container engine the CLI runs on, with the environment the CLI itself gets: for
 /// `local_images`, which pulls into the same k3d node the CLI pulls into.
@@ -2376,6 +3198,13 @@ fn engine_command(engine: Option<&CliEngine>) -> std::process::Command {
     command
 }
 
+/// `engine_command` on the engine the app last named, for `update_ready`, which downloads into
+/// the back end's node as `local update` does.
+pub fn node_engine() -> impl Fn() -> std::process::Command + Send + Sync + 'static {
+    let engine = recorded_engine();
+    move || engine_command(engine.as_ref())
+}
+
 /// Only `INHERITED`, OpenBot's Docker configuration, the engines' directories on `PATH` and the
 /// variables that name the engine.
 fn cli_environment(
@@ -2389,6 +3218,10 @@ fn cli_environment(
         if let Some(value) = var(name) {
             command.env(name, value);
         }
+    }
+    // Share usage data turned off in Settings is the same opt-out as the variable.
+    if crate::usage_data::off() {
+        command.env("COPILOTKIT_TELEMETRY_DISABLED", "1");
     }
     // Docker's configuration without the person's credential helper, which macOS stops to ask
     // about when OpenBot runs it, so the chart and image downloads never wait on a dialog. See
@@ -2434,8 +3267,56 @@ pub fn run(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<Report, Failure> {
-    let (code, bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+    let (mut code, mut bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+    if action == Action::Start {
+        for wait in START_REFUSED_WAITS {
+            if !engine_refused_start(code, &bytes) {
+                break;
+            }
+            log::warn!(
+                "[local start] the engine refused to start the backend's node (exit 125); asking again in {}s",
+                wait.as_secs()
+            );
+            if !waited_uncancelled(wait, cancel) {
+                return Err(Failure::Cancelled);
+            }
+            (code, bytes) = execute(cli, &arguments(action, stack), None, limits, cancel)?;
+        }
+    }
     normalize(action, code, &bytes)
+}
+
+/**
+How long `local start` waits before it is asked again, after the engine refused to start the back
+end's node: twice at most, so a start that keeps being refused fails within about half a minute.
+
+Windows G: OpenBot quit, opened again within seconds, and its `local start` failed in 0.3 s, the
+CLI's `podman start` of the node exiting 125, the engine's own error before anything ran. The window
+said "Setup stopped partway through with an error. Retry.", and Retry started it at once.
+*/
+const START_REFUSED_WAITS: [Duration; 2] = [Duration::from_secs(3), Duration::from_secs(8)];
+
+/// The CLI's `local start` failed because the engine would not start the node: its `start` exited
+/// 125. The CLI keeps the engine's words to itself, so this is the one sign there is.
+fn engine_refused_start(code: i32, stdout: &[u8]) -> bool {
+    code == 1
+        && serde_json::from_slice::<Value>(stdout).is_ok_and(|wire| {
+            wire.pointer("/error/message")
+                .and_then(Value::as_str)
+                .is_some_and(|said| said.starts_with("Local start failed (exit 125)"))
+        })
+}
+
+/// Waits `wait` unless the call is cancelled first; false when it was.
+fn waited_uncancelled(wait: Duration, cancel: &Cancel) -> bool {
+    let until = Instant::now() + wait;
+    while Instant::now() < until {
+        if cancel.requested() {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !cancel.requested()
 }
 
 /// `local setup` in `installation`, the folder the stack is created for.
@@ -2487,14 +3368,26 @@ pub fn model_file(file: &std::path::Path) -> Result<&str, Failure> {
         .ok_or(Failure::Spawn)
 }
 
-/// `login --json`: the CopilotKit account sign-in. `shown` hears each new approval page the CLI
-/// prints while it waits, so the window can show it (`sign_in_page`).
+/**
+`login --json`: the CopilotKit account sign-in. `shown` hears each new approval page the CLI
+prints while it waits, so the window can show it (`sign_in_page`).
+
+Every sign-in OpenBot starts gets a new code. The CLI saves the code a `login` is waiting on in
+`saved_code` and shows it again in the next `login`, unless the one before ended by itself. OpenBot
+stops a `login` that waits too long, or is cancelled, so after "Sign-in didn't finish" Try again
+showed the code that had just timed out, and approving it said it had expired. So the saved code is
+forgotten first. This runs in the CLI's turn (`one_at_a_time`): no other `login` is waiting on it.
+*/
 pub fn account_sign_in(
     cli: &PinnedCli,
+    saved_code: Option<&std::path::Path>,
     limits: Limits,
     cancel: &Cancel,
     shown: &mut dyn FnMut(SignInPage),
 ) -> Result<AccountSignIn, Failure> {
+    if let Some(saved_code) = saved_code {
+        forget_saved_sign_in_code(saved_code);
+    }
     let arguments = account_sign_in_arguments(login_takes_mode(cli, cancel)?);
     let mut last: Option<SignInPage> = None;
     let mut watch = |so_far: &[u8]| {
@@ -2503,8 +3396,29 @@ pub fn account_sign_in(
             shown(page);
         }
     };
-    let (code, bytes) = execute_watching(cli, &arguments, None, limits, cancel, Some(&mut watch))?;
+    let (code, bytes) = execute_watching(
+        cli,
+        &arguments,
+        None,
+        limits,
+        cancel,
+        Some(&mut watch),
+        None,
+    )?;
     normalize_account_sign_in(code, &bytes)
+}
+
+/// Remove the code an earlier `login` left saved. None saved is the usual case. A file that will
+/// not go is logged, and the sign-in goes on: at worst it shows that code again, as before.
+fn forget_saved_sign_in_code(saved_code: &std::path::Path) {
+    match std::fs::remove_file(saved_code) {
+        Ok(()) => log::info!("[account] forgot the sign-in code an earlier sign-in left waiting"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::warn!(
+            "[account] could not forget the sign-in code an earlier sign-in left waiting: {:?}",
+            error.kind()
+        ),
+    }
 }
 
 /**
@@ -2613,7 +3527,7 @@ fn execute(
     limits: Limits,
     cancel: &Cancel,
 ) -> Result<(i32, Vec<u8>), Failure> {
-    execute_watching(cli, arguments, folder, limits, cancel, None)
+    execute_watching(cli, arguments, folder, limits, cancel, None, None)
 }
 
 /// Hears the stdout a running CLI has written so far. See `execute_watching`.
@@ -2624,6 +3538,8 @@ type Watch<'a> = &'a mut dyn FnMut(&[u8]);
 ///
 /// How a call that sets up, starts, updates or stops the stack ended goes to the log
 /// (`ending_entry`), so a setup that stops is never a blank in it.
+///
+/// `update` follows a `local update` through the CLI's log (`UpdateWatch`).
 fn execute_watching(
     cli: &PinnedCli,
     arguments: &[&str],
@@ -2631,6 +3547,7 @@ fn execute_watching(
     limits: Limits,
     cancel: &Cancel,
     watch: Option<Watch>,
+    update: Option<&mut UpdateWatch>,
 ) -> Result<(i32, Vec<u8>), Failure> {
     let started = Instant::now();
     let logged = logs_its_ending(arguments);
@@ -2644,6 +3561,7 @@ fn execute_watching(
         limits,
         cancel,
         watch,
+        update,
         errors.as_ref(),
         &mut status,
     );
@@ -2669,13 +3587,21 @@ thread_local! {
     static LAST_ENDING: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
-/// The calls whose ending is logged: the ones that change the stack. `status`, `list` and the
-/// account, connection and apps calls are not, since their stdout can carry a sign-in code or a key
-/// and a polled `status` would fill the log.
+/// The calls whose ending is logged: the ones that change the stack, and `connect`. `status`,
+/// `list`, the account and the apps calls are not, since their stdout can carry a sign-in code or a
+/// key and a polled `status` would fill the log.
+///
+/// `connect` is: a connect that failed left nothing in either log, since the CLI says why only in
+/// its report. Its report never holds the key, and only its status, error and reason are read from
+/// it (`ending_entry`); a connect that finished logs that it did and nothing more.
 fn logs_its_ending(arguments: &[&str]) -> bool {
     matches!(
         arguments,
-        ["local", "setup" | "start" | "update" | "stop", ..]
+        [
+            "local",
+            "setup" | "start" | "update" | "stop" | "delete" | "connect",
+            ..
+        ]
     )
 }
 
@@ -2763,6 +3689,10 @@ fn exit_described(status: std::process::ExitStatus) -> String {
 
 /// `execute_watching`'s process: the CLI's stderr goes to `errors`, when there is one, and how it
 /// exited to `status`.
+///
+/// A cancel stops the process tree, except an update's once it has begun changing the release with
+/// Helm (`UpdateWatch::committed`): stopping it there is what leaves a stack no later update can
+/// get past (`local_update`), so it is let finish, within its deadline.
 #[allow(clippy::too_many_arguments)]
 fn execute_child(
     cli: &PinnedCli,
@@ -2771,6 +3701,7 @@ fn execute_child(
     limits: Limits,
     cancel: &Cancel,
     mut watch: Option<Watch>,
+    mut update: Option<&mut UpdateWatch>,
     errors: Option<&Output>,
     status: &mut Option<std::process::ExitStatus>,
 ) -> Result<(i32, Vec<u8>), Failure> {
@@ -2779,7 +3710,7 @@ fn execute_child(
     let output = Output::create()?;
     let mut command = command_for(cli, arguments, folder, engine.as_ref());
     // stderr can carry anything a dependency prints. It is read only for the log, and only for a
-    // call that changes the stack (`logs_its_ending`).
+    // call that changes the stack or connects to it (`logs_its_ending`).
     let stderr = match errors.and_then(|errors| errors.file.try_clone().ok()) {
         Some(file) => Stdio::from(file),
         None => Stdio::null(),
@@ -2801,7 +3732,11 @@ fn execute_child(
 
     let deadline = Instant::now() + limits.timeout;
     let mut watched = 0;
+    let mut letting_finish = false;
     loop {
+        if let Some(update) = update.as_deref_mut() {
+            update.poll_now_and_then();
+        }
         if exited(&mut child)? {
             let exit = child.wait().map_err(|_| Failure::Spawn)?;
             *status = Some(exit);
@@ -2821,13 +3756,223 @@ fn execute_child(
             }
         }
         if cancel.requested() {
-            return Err(stop_tree(&mut child, limits.grace, Failure::Cancelled));
+            let committed = update.as_deref_mut().is_some_and(|update| {
+                update.poll();
+                update.committed()
+            });
+            if !committed {
+                return Err(stop_tree(&mut child, limits.grace, Failure::Cancelled));
+            }
+            if !letting_finish {
+                letting_finish = true;
+                log::warn!(
+                    "[local update] asked to stop after it began changing the backend with Helm: \
+                     letting it finish, since stopping it there leaves the backend half updated"
+                );
+            }
         }
         if Instant::now() >= deadline {
             return Err(stop_tree(&mut child, limits.grace, Failure::Timeout));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/**
+A running `local update`, followed through the CLI's log (`local_update::StepLog`).
+
+While it runs, `update_step` answers for its attempt with the step it is in, and each step it ends
+is logged. Once it has begun changing the release with Helm (`committed`), it counts as finishing
+(`Finishing`): Cancel and Quit let it end on its own rather than stop it there.
+*/
+struct UpdateWatch {
+    attempt: String,
+    stack: StackId,
+    engine: Option<CliEngine>,
+    log: crate::local_update::StepLog,
+    finishing: Option<Finishing>,
+    read: Option<Instant>,
+    /// The Jobs in the cluster when the update began changing the release: an earlier attempt's.
+    jobs_before: Option<Vec<String>>,
+    /// What the update's own Jobs were doing when last asked, while it is in them.
+    jobs: Option<crate::local_update::Jobs>,
+    jobs_read: Option<Instant>,
+    node_read: Option<Instant>,
+}
+
+impl UpdateWatch {
+    /// None when there is no home to find the CLI's log in: the update then runs as before.
+    fn new(attempt: &str, stack: &StackId) -> Option<Self> {
+        let path = crate::local_update::cli_log()?;
+        Some(Self {
+            attempt: attempt.to_owned(),
+            stack: stack.clone(),
+            engine: recorded_engine(),
+            log: crate::local_update::StepLog::at_end_of(path),
+            finishing: None,
+            read: None,
+            jobs_before: None,
+            jobs: None,
+            jobs_read: None,
+            node_read: None,
+        })
+    }
+
+    /// From the first Helm step on, every few seconds: a cordoned node, uncordoned
+    /// (`local_update::uncordon_if_cordoned`). The CLI starts a stopped node itself, inside the
+    /// update, and the databases it then waits on cannot be scheduled on a cordoned one.
+    fn watch_node(&mut self) {
+        let due = self
+            .node_read
+            .is_none_or(|read| read.elapsed() >= Duration::from_secs(5));
+        if !self.log.committed() || !due {
+            return;
+        }
+        self.node_read = Some(Instant::now());
+        if let Err(why) = crate::local_update::uncordon_if_cordoned(
+            || engine_command(self.engine.as_ref()),
+            self.stack.as_str(),
+        ) {
+            log::info!("[local update] node not checked: {why}");
+        }
+    }
+
+    /// The cluster's Jobs, as `kubectl get jobs -o json` in the stack's node answers.
+    fn cluster_jobs(&self) -> Option<String> {
+        crate::local_update::cluster_jobs(engine_command(self.engine.as_ref()), self.stack.as_str())
+    }
+
+    /**
+    While the update waits on the chart's Jobs, what they are doing, every few seconds: which one
+    it waits on, and a failed one as soon as it fails. The CLI waits a failed Job's full ten
+    minutes (`kubectl wait --for=condition=complete`) and says nothing until then.
+    */
+    fn watch_jobs(&mut self) {
+        if self.log.committed() && self.jobs_before.is_none() {
+            self.jobs_before = self
+                .cluster_jobs()
+                .and_then(|answer| crate::local_update::job_names(&answer));
+        }
+        let due = self
+            .jobs_read
+            .is_none_or(|read| read.elapsed() >= Duration::from_secs(3));
+        if !self.log.in_jobs() || !due {
+            return;
+        }
+        let Some(before) = self.jobs_before.as_ref() else {
+            return;
+        };
+        self.jobs_read = Some(Instant::now());
+        let Some(jobs) = self
+            .cluster_jobs()
+            .and_then(|answer| crate::local_update::jobs(&answer, before))
+        else {
+            return;
+        };
+        if jobs.failed.is_some()
+            && jobs.failed != self.jobs.as_ref().and_then(|seen| seen.failed.clone())
+        {
+            log::error!(
+                "[local update] Job {} failed; the CLI waits up to ten minutes for it before the update stops",
+                jobs.failed.as_deref().unwrap_or_default()
+            );
+        }
+        if jobs.running.is_some()
+            && jobs.running != self.jobs.as_ref().and_then(|seen| seen.running.clone())
+        {
+            log::info!(
+                "[local update] waiting on Job {}",
+                jobs.running.as_deref().unwrap_or_default()
+            );
+        }
+        self.log.saw_jobs(&jobs);
+        self.jobs = Some(jobs);
+    }
+
+    /// `poll`, at most four times a second.
+    fn poll_now_and_then(&mut self) {
+        if self
+            .read
+            .is_none_or(|read| read.elapsed() >= Duration::from_millis(250))
+        {
+            self.poll();
+        }
+    }
+
+    fn poll(&mut self) {
+        self.read = Some(Instant::now());
+        for step in self.log.poll() {
+            log::info!("[local update] {step} finished");
+        }
+        if self.log.committed() && self.finishing.is_none() {
+            log::info!(
+                "[local update] it is changing the backend with Helm now; Cancel and Quit let it finish"
+            );
+            self.finishing = Some(Finishing::begin());
+        }
+        self.watch_node();
+        self.watch_jobs();
+        let jobs = self.jobs.as_ref().filter(|_| self.log.in_jobs());
+        let mut steps = update_steps();
+        steps.retain(|(attempt, _)| attempt != &self.attempt);
+        if let Some(now) = self.log.now(jobs) {
+            steps.push((self.attempt.clone(), now));
+        }
+    }
+
+    fn committed(&self) -> bool {
+        self.log.committed()
+    }
+}
+
+impl Drop for UpdateWatch {
+    fn drop(&mut self) {
+        update_steps().retain(|(attempt, _)| attempt != &self.attempt);
+    }
+}
+
+type ShownStep = (String, crate::local_update::UpdateStep);
+
+/// The step each running update is in, by attempt id. See `update_step`.
+static UPDATE_STEPS: std::sync::Mutex<Vec<ShownStep>> = std::sync::Mutex::new(Vec::new());
+
+fn update_steps() -> std::sync::MutexGuard<'static, Vec<ShownStep>> {
+    UPDATE_STEPS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The step the update `attempt` is in, once it is in one that waits: so a step that takes minutes
+/// shows which one it is, and for how long, rather than nothing.
+pub fn update_step(attempt: &str) -> Option<crate::local_update::UpdateStep> {
+    update_steps()
+        .iter()
+        .find(|(id, _)| id == attempt)
+        .map(|(_, step)| step.clone())
+}
+
+/// Updates, and repairs of one, that must not be stopped partway. See `close_for_quit_reporting`.
+static FINISHING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Counts one update or repair as finishing for as long as it is held.
+struct Finishing;
+
+impl Finishing {
+    fn begin() -> Self {
+        FINISHING.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Finishing {
+    fn drop(&mut self) {
+        FINISHING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Whether an update past the point it can safely stop, or a repair of one, is running now.
+pub fn update_finishing() -> bool {
+    FINISHING.load(Ordering::SeqCst) > 0
 }
 
 /// The owner-only file the CLI writes its report to, removed when the call ends.
@@ -2981,13 +4126,38 @@ fn stop_tree(child: &mut Child, grace: Duration, failure: Failure) -> Failure {
 ///
 /// A cancel can arrive before its call has registered: the window sends both, and nothing orders
 /// them. So a cancel for an unknown attempt is kept, and the call finds itself already cancelled.
-static IN_FLIGHT: std::sync::Mutex<Vec<(String, Cancel)>> = std::sync::Mutex::new(Vec::new());
+static IN_FLIGHT: std::sync::Mutex<Vec<(String, Cancel, Kind)>> = std::sync::Mutex::new(Vec::new());
 
 /// At most this many attempts are remembered, so cancels for calls that never come cannot grow
 /// the list without bound.
 const REMEMBERED: usize = 64;
 
-fn in_flight() -> std::sync::MutexGuard<'static, Vec<(String, Cancel)>> {
+/// Whose shutdown a `stop_for_shutdown` is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShutdownBy {
+    Stop,
+    Quit,
+}
+
+/**
+What a call in `IN_FLIGHT` is, which decides what may cancel it.
+
+- A call the window asked for: every Stop and Quit cancels it, and the window can.
+- A stop of the stack, a Stop's or Quit's own: nothing cancels it. Another Stop leaves it to finish
+  and waits its turn; cancelling it only cut a stop short for the later one to start again, and
+  the earlier Stop said some services didn't stop. Quit waits for a Stop's and takes its answer
+  as its own (`a_stops_answer`), and refuses one a Stop starts once Quit has begun. Quit used to
+  cancel a Stop's and run its own: on Windows cancelling is a hard kill, which runs none of the
+  CLI's cleanup, so the killed CLI's lock outlived it, Quit's own stop was refused as busy
+  (`local_command_busy`), and the stack was left running.
+*/
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Call,
+    Shutdown(ShutdownBy),
+}
+
+fn in_flight() -> std::sync::MutexGuard<'static, Vec<(String, Cancel, Kind)>> {
     IN_FLIGHT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -3020,7 +4190,8 @@ Refuse new calls and cancel the running ones, until the returned guard is droppe
 Cancelling once is not enough. A status or start the window sends while Stop is taking OpenBot's
 containers down would otherwise take its turn ahead of the shutdown's own stop, or start after it
 and leave the stack running. So every call registered while closing is cancelled before it begins,
-except the shutdown's own (`stop_for_shutdown`).
+except the shutdown's own (`stop_for_shutdown`). A stop of the stack already running for another
+Stop or for Quit is left to finish (`Kind`).
 */
 pub fn closing_for_stop() -> Closing {
     STOPPING.fetch_add(1, Ordering::SeqCst);
@@ -3028,15 +4199,48 @@ pub fn closing_for_stop() -> Closing {
     Closing(())
 }
 
-/// As `closing_for_stop`, for good. Quitting also cancels a Stop's own stop, so Quit never waits
-/// behind it; Quit runs its own.
+/// As `closing_for_stop`, for good. A Stop's own stop already running is left to finish, and Quit
+/// takes its answer (`stop_for_shutdown`); one a Stop starts later is refused.
 pub fn close_for_quit() {
+    close_for_quit_reporting(|| {});
+}
+
+/**
+`close_for_quit`, telling `finishing` once when it waits for a back end update to finish.
+
+Cancelling only asks: each call stops its CLI's process tree on its own thread, and the CLI forwards
+SIGTERM to its children rather than exiting, so the tree goes at SIGKILL, after the grace. An app
+that exits before then leaves it running with nobody to stop it. So this waits, up to ten seconds,
+until no CLI is running.
+
+Except an update that has begun changing the release with Helm, or a repair of one
+(`update_finishing`). Stopping either partway is what left stacks no later update could get past
+(`local_update`), so Quit waits for it to end on its own, within its own deadline, and says so.
+True when it waited for one.
+*/
+pub fn close_for_quit_reporting(finishing: impl FnOnce()) -> bool {
+    // Before anything else, and read under the lock a Stop's own stop registers with, so it is
+    // either refused there or already on record for Quit to wait for.
     QUITTING.store(true, Ordering::SeqCst);
     cancel_all();
-    // Cancelling only asks: each call stops its CLI's process tree on its own thread, and the CLI
-    // forwards SIGTERM to its children rather than exiting, so the tree goes at SIGKILL, after the
-    // grace. An app that exits before then leaves it running with nobody to stop it.
-    wait_until_stopped(Duration::from_secs(10));
+    let mut finishing = Some(finishing);
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        if update_finishing() {
+            if let Some(say) = finishing.take() {
+                log::info!("[quit] letting the backend update finish before OpenBot quits");
+                say();
+            }
+        } else if RUNNING.load(Ordering::SeqCst) == 0 || Instant::now() >= until {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let waited = finishing.is_none();
+    if waited {
+        log::info!("[quit] the backend update ended");
+    }
+    waited
 }
 
 /// CLI process trees started and not yet stopped or finished, across every call.
@@ -3058,55 +4262,191 @@ impl Drop for Running {
     }
 }
 
-/// Waits, at most `patience`, until no CLI process tree is running. True when none is.
-fn wait_until_stopped(patience: Duration) -> bool {
-    let until = Instant::now() + patience;
-    while RUNNING.load(Ordering::SeqCst) > 0 {
-        if Instant::now() >= until {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    true
+/// An attempt's place in `IN_FLIGHT`, removed however the call ends, and for a Stop's own stop of
+/// the stack, its place in `STOPS`.
+struct Attempt(Cancel, Option<Arc<StopOfTheStack>>);
+
+/**
+A Stop's own stop of the stack, from the moment it is let through until it ends, and its answer.
+
+Quit waits on these rather than cancel them (`Kind`), and answers with theirs.
+*/
+#[derive(Default)]
+struct StopOfTheStack {
+    /// Whether it has ended, and what it answered if it got as far as answering.
+    done: std::sync::Mutex<(bool, Option<Result<Report, Failure>>)>,
+    ended: std::sync::Condvar,
 }
 
-/// An attempt's place in `IN_FLIGHT`, removed however the call ends.
-struct Attempt(Cancel);
+impl StopOfTheStack {
+    fn done(&self) -> std::sync::MutexGuard<'_, (bool, Option<Result<Report, Failure>>)> {
+        self.done
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Every Stop's own stop of the stack let through and not yet ended.
+static STOPS: std::sync::Mutex<Vec<Arc<StopOfTheStack>>> = std::sync::Mutex::new(Vec::new());
+
+fn stops() -> std::sync::MutexGuard<'static, Vec<Arc<StopOfTheStack>>> {
+    STOPS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 impl Attempt {
     /// Read under the same lock `cancel_all` takes, so a call registering as closing begins is
     /// either refused here or cancelled there.
     fn register(id: &str) -> Self {
-        Self::enter(id, true)
+        Self::enter(id, Kind::Call)
     }
 
-    fn register_for_shutdown(id: &str) -> Self {
-        Self::enter(id, false)
+    fn register_for_shutdown(id: &str, by: ShutdownBy) -> Self {
+        Self::enter(id, Kind::Shutdown(by))
     }
 
-    fn enter(id: &str, refused_while_closing: bool) -> Self {
+    fn enter(id: &str, kind: Kind) -> Self {
         let mut held = in_flight();
-        let cancel = match held.iter().position(|(attempt, _)| attempt == id) {
-            Some(index) => held.remove(index).1,
-            None => Cancel::default(),
+        let earlier = held
+            .iter()
+            .position(|(attempt, _, _)| attempt == id)
+            .map(|index| held.remove(index).1);
+        let cancel = match kind {
+            Kind::Call => earlier.unwrap_or_default(),
+            // Not even a cancel sent ahead for its id stops a stop of the stack.
+            Kind::Shutdown(_) => Cancel::default(),
         };
-        if refused_while_closing && closed() {
+        let refused = match kind {
+            Kind::Call => closed(),
+            // Once Quit has begun it stops the stack itself, and a Stop's would only hold it up.
+            Kind::Shutdown(ShutdownBy::Stop) => QUITTING.load(Ordering::SeqCst),
+            Kind::Shutdown(ShutdownBy::Quit) => false,
+        };
+        if refused {
             cancel.cancel();
         }
-        held.push((id.to_owned(), cancel.clone()));
-        Self(cancel)
+        // On record before the lock is let go, so a Quit beginning now waits for it.
+        let stop = (kind == Kind::Shutdown(ShutdownBy::Stop) && !refused).then(|| {
+            let stop = Arc::new(StopOfTheStack::default());
+            stops().push(stop.clone());
+            stop
+        });
+        held.push((id.to_owned(), cancel.clone(), kind));
+        Self(cancel, stop)
+    }
+
+    /// What the call answered, for a Quit waiting on this Stop's stop of the stack.
+    fn answered(&self, answer: &Result<Report, Failure>) {
+        if let Some(stop) = &self.1 {
+            stop.done().1 = Some(answer.clone());
+        }
     }
 }
 
 impl Drop for Attempt {
     fn drop(&mut self) {
-        in_flight().retain(|(_, cancel)| !Arc::ptr_eq(&cancel.0, &self.0 .0));
+        in_flight().retain(|(_, cancel, _)| !Arc::ptr_eq(&cancel.0, &self.0 .0));
+        if let Some(stop) = self.1.take() {
+            stops().retain(|other| !Arc::ptr_eq(other, &stop));
+            stop.done().0 = true;
+            stop.ended.notify_all();
+        }
     }
+}
+
+/**
+Quit's answer when a Stop is already stopping the stack: that stop's, once it has ended, within
+`bound`. None when no Stop's stop is running, or none got as far as answering: Quit then runs its
+own.
+
+Quit used to cancel it and run its own. Cancelling cuts the CLI short, which on Windows is a hard
+kill that leaves the CLI's lock behind, so Quit's own stop was refused as busy and the stack kept
+running. Waiting for it costs Quit no more than its own stop would have: a stop takes about 12 s on
+macOS and 13 s on Windows (measured on OpenBot 1.1.0), and `bound` is the two minutes Quit allows
+its own stop (`Limits::for_quit`).
+
+When `bound` runs out first, Quit says the stop did not finish in time (`Failure::Timeout`) and
+leaves that stop running: it is the CLI's own `local stop`, and cut short it would leave the stack
+half stopped, so it finishes on its own after OpenBot has exited.
+*/
+fn a_stops_answer(bound: Duration) -> Option<Result<Report, Failure>> {
+    let running: Vec<_> = stops().clone();
+    if running.is_empty() {
+        return None;
+    }
+    log::info!("[quit] a Stop is already stopping the backend: waiting for it");
+    let deadline = Instant::now() + bound;
+    let mut answer = None;
+    for stop in running {
+        let mut done = stop.done();
+        while !done.0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                log::warn!(
+                    "[quit] the Stop's stop of the backend did not end within {bound:?}; it carries on"
+                );
+                return Some(Err(Failure::Timeout));
+            }
+            done = stop
+                .ended
+                .wait_timeout(done, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        match done.1.clone() {
+            // The stack is stopped: nothing a later Stop's stop says changes that.
+            Some(Ok(report)) if report.outcome == Outcome::Completed => return Some(Ok(report)),
+            Some(other) => answer = Some(other),
+            None => {}
+        }
+    }
+    answer
 }
 
 /// Held by the one call that is running. The CLI refuses a second `local` command while one is in
 /// progress (`local_command_busy`), so a start racing a stop would fail one of them for nothing.
 static CALLS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static REQUIRED_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static BACKGROUND_TELEMETRY: std::sync::Mutex<Option<Cancel>> = std::sync::Mutex::new(None);
+
+/// Required CLI work cancels optional attribution before waiting for the process slot.
+struct RequiredCliCall;
+
+impl RequiredCliCall {
+    fn begin() -> Self {
+        REQUIRED_CALLS.fetch_add(1, Ordering::SeqCst);
+        cancel_background_telemetry();
+        Self
+    }
+}
+
+impl Drop for RequiredCliCall {
+    fn drop(&mut self) {
+        REQUIRED_CALLS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Start may also need the native identity lock held by the background handshake.
+pub fn cancel_background_telemetry() {
+    let active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(cancel) = active.as_ref() {
+        cancel.cancel();
+    }
+}
+
+/// Clear the optional process before releasing its CLI slot, including after an error.
+struct BackgroundTelemetryCall;
+
+impl Drop for BackgroundTelemetryCall {
+    fn drop(&mut self) {
+        *BACKGROUND_TELEMETRY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
 
 /**
 Run `call` once every earlier call has finished, with what is left of `limits.timeout`.
@@ -3120,6 +4460,7 @@ fn one_at_a_time<T>(
     limits: Limits,
     call: impl FnOnce(Limits) -> Result<T, Failure>,
 ) -> Result<T, Failure> {
+    let _priority = RequiredCliCall::begin();
     let deadline = Instant::now() + limits.timeout;
     let _turn = loop {
         if cancel.requested() {
@@ -3161,16 +4502,23 @@ pub fn run_installed_with(
     run_attempt(attempt, Attempt::register(attempt), action, stack, limits)
 }
 
-/// `stop` for Stop or Quit itself: the one call let through while closing. A later Quit still
-/// cancels it.
+/// `stop` for Stop or Quit itself: the one call let through while closing, and never cancelled.
+/// Quit's answers with a Stop's already running when there is one (`a_stops_answer`), and a
+/// Stop's is refused once Quit has begun.
 pub fn stop_for_shutdown(
     attempt: &str,
     stack: &StackId,
+    by: ShutdownBy,
     limits: Limits,
 ) -> Result<Report, Failure> {
+    if by == ShutdownBy::Quit {
+        if let Some(answer) = a_stops_answer(limits.timeout) {
+            return answer;
+        }
+    }
     run_attempt(
         attempt,
-        Attempt::register_for_shutdown(attempt),
+        Attempt::register_for_shutdown(attempt, by),
         Action::Stop,
         stack,
         limits,
@@ -3184,7 +4532,21 @@ fn run_attempt(
     stack: &StackId,
     limits: Limits,
 ) -> Result<Report, Failure> {
+    let answer = run_turn(id, &attempt, action, stack, limits);
+    attempt.answered(&answer);
+    answer
+}
+
+fn run_turn(
+    id: &str,
+    attempt: &Attempt,
+    action: Action,
+    stack: &StackId,
+    limits: Limits,
+) -> Result<Report, Failure> {
     one_at_a_time(&attempt.0, limits, |remaining| {
+        // Its turn: the CLI's log from here on is this call's (`Trail`).
+        let _trail = Trail::begin(id, action.into());
         let cli = installed()?;
         run_with(
             &cli,
@@ -3220,9 +4582,23 @@ pub(crate) fn run_with(
     let call = || run_downloading(cli, attempt, action, stack, limits, cancel, images_limits);
     match action {
         // The calls that start the back end: the engine is checked around them.
-        Action::Start | Action::Update => {
-            checked_call(&format!("local {}", action.as_str()), Some(stack), call)
-        }
+        Action::Start => checked_call("local start", Some(stack), call),
+        Action::Update => nothing_to_update(
+            checked_call("local update", Some(stack), || {
+                update_repairing(stack, cancel, call)
+            }),
+            || {
+                run(
+                    cli,
+                    Action::Status,
+                    stack,
+                    Limits::for_action(Action::Status),
+                    cancel,
+                )
+                .ok()
+            },
+            bundled_release().as_deref(),
+        ),
         Action::Status => call().map(|report| checked_when_unhealthy(report, stack)),
         Action::Stop => call(),
     }
@@ -3256,6 +4632,98 @@ fn checked_when_unhealthy(mut report: Report, stack: &StackId) -> Report {
     report
 }
 
+/**
+`local update`, and once more after repairing the stack when it failed on something a repair puts
+right (`local_update`): an update stopped partway earlier, which every later one fails on at once.
+
+Only after a failure the CLI reported. Not after one OpenBot stopped, or while closing: the next
+Start repairs then (`repaired_before`), and Quit is not held behind a second update.
+*/
+fn update_repairing(
+    stack: &StackId,
+    cancel: &Cancel,
+    update: impl Fn() -> Result<Report, Failure>,
+) -> Result<Report, Failure> {
+    uncordoned(stack, "before the update");
+    let first = update();
+    let failed = match &first {
+        Ok(report) => report.outcome == Outcome::Failed,
+        Err(failure) => *failure == Failure::UnexpectedExit,
+    };
+    if !failed || cancel.requested() || closed() {
+        return first;
+    }
+    log::warn!(
+        "[local update] failed; checking whether an update stopped earlier left the backend needing repair"
+    );
+    match repair_stack(stack) {
+        Ok(repaired) if repaired.changed() => {
+            log::info!("[local update] repaired ({repaired:?}); trying the update once more");
+            uncordoned(stack, "before the retry");
+            update()
+        }
+        Ok(_) => {
+            log::info!("[update repair] nothing to repair");
+            first
+        }
+        Err(why) => {
+            log::warn!("[update repair] not repaired: {why}");
+            first
+        }
+    }
+}
+
+/// `local_update::uncordon_if_cordoned` on `stack`'s node, when it is running. A node that does
+/// not answer is stopped, and the CLI starts it; the update's own watch looks again then
+/// (`UpdateWatch::watch_node`).
+fn uncordoned(stack: &StackId, when: &str) {
+    let engine = recorded_engine();
+    match crate::local_update::uncordon_if_cordoned(
+        || engine_command(engine.as_ref()),
+        stack.as_str(),
+    ) {
+        Ok(true) => log::info!("[local update] uncordoned the backend's node {when}"),
+        Ok(false) => {}
+        Err(why) => log::info!("[local update] node not checked {when}: {why}"),
+    }
+}
+
+/// `local_update::repair` on `stack`, with the CLI's Helm and folder and the environment and
+/// engine every CLI call gets. Counts as finishing (`update_finishing`) while it runs.
+fn repair_stack(stack: &StackId) -> Result<crate::local_update::Repaired, String> {
+    let directory = crate::local_update::stack_dir(stack.as_str())
+        .ok_or("no home folder to find the CLI's files in")?;
+    let tools = directory
+        .parent()
+        .map(|parent| parent.join("tools"))
+        .ok_or("no tools folder")?;
+    let helm =
+        crate::local_update::cli_helm(&tools).ok_or("the CLI has not downloaded its Helm")?;
+    let engine = recorded_engine();
+    let command = |program: &std::ffi::OsStr| tool_command(program, engine.as_ref());
+    let engine_command = || engine_command(engine.as_ref());
+    let _finishing = Finishing::begin();
+    crate::local_update::repair(&crate::local_update::Reach {
+        stack: stack.as_str(),
+        directory,
+        helm,
+        command: &command,
+        engine: &engine_command,
+    })
+}
+
+/// A program the CLI runs (its Helm), with the environment the CLI itself gets.
+fn tool_command(program: &std::ffi::OsStr, engine: Option<&CliEngine>) -> std::process::Command {
+    let mut command = crate::quiet::command(program);
+    cli_environment(
+        &mut command,
+        engine,
+        |name| std::env::var_os(name),
+        crate::docker_config::owned(),
+    );
+    command
+}
+
 /// `run_with`, without the engine check.
 fn run_downloading(
     cli: &PinnedCli,
@@ -3283,7 +4751,31 @@ fn run_downloading(
         _ => false,
     };
     let limits = if downloaded { limits.0 } else { limits.1 };
+    if action == Action::Update {
+        return run_update(cli, attempt, stack, limits, cancel);
+    }
     run(cli, action, stack, limits, cancel)
+}
+
+/// `run` for `local update`, followed through the CLI's log while it runs (`UpdateWatch`).
+fn run_update(
+    cli: &PinnedCli,
+    attempt: &str,
+    stack: &StackId,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<Report, Failure> {
+    let mut watch = UpdateWatch::new(attempt, stack);
+    let (code, bytes) = execute_watching(
+        cli,
+        &arguments(Action::Update, stack),
+        None,
+        limits,
+        cancel,
+        None,
+        watch.as_mut(),
+    )?;
+    normalize(Action::Update, code, &bytes)
 }
 
 /// What `cli` pulls, read from its own bytes (`local_images::cli_images`): the script a runtime
@@ -3297,6 +4789,13 @@ fn cli_images_of(cli: &PinnedCli) -> Option<crate::local_images::CliImages> {
         .read_to_end(&mut bytes)
         .ok()?;
     crate::local_images::cli_images(&String::from_utf8_lossy(&bytes))
+}
+
+/// What the CLI this app runs pulls when it updates a stack (`cli_images_of`), for `update_ready`,
+/// which downloads the next release's images by the same repositories. None without a CLI whose
+/// images can be read.
+pub fn bundled_cli_images() -> Option<crate::local_images::CliImages> {
+    cli_images_of(&installed().ok()?)
 }
 
 /**
@@ -3361,12 +4860,15 @@ fn update_resumes(
             outcome: Outcome::Completed,
             stack: Some(saved),
             ..
-        }) => Ok(match saved.unfinished_update {
-            Some(unfinished) => Some(Some(unfinished.to)),
-            // An update on record that does not name its release is the CLI's own business.
-            None if saved.update_in_progress => None,
-            None => Some(None),
-        }),
+        }) => {
+            let saved = repaired_before(stack, saved);
+            Ok(match saved.unfinished_update {
+                Some(unfinished) => Some(Some(unfinished.to)),
+                // An update on record that does not name its release is the CLI's own business.
+                None if saved.update_in_progress => None,
+                None => Some(None),
+            })
+        }
         Err(Failure::Cancelled) => Err(Failure::Cancelled),
         // The update itself says what is wrong; this was only a look.
         _ => Ok(None),
@@ -3374,15 +4876,43 @@ fn update_resumes(
 }
 
 /**
+An update on record that got past its first step, on a running stack, is repaired before it resumes
+(`local_update`), so a stack an earlier update left half done does not fail it at once. A stopped
+stack is left to the CLI, which starts it; if the update then fails on it, `update_repairing`
+repairs it and tries once more.
+*/
+fn repaired_before(stack: &StackId, saved: Stack) -> Stack {
+    let past_first_step = saved
+        .unfinished_update
+        .as_ref()
+        .is_some_and(|update| !update.prepared);
+    let running = saved
+        .observed
+        .as_ref()
+        .is_some_and(|observed| observed.running);
+    if past_first_step && running {
+        log::info!(
+            "[update repair] an update is on record past its first step; checking the backend before it resumes"
+        );
+        match repair_stack(stack) {
+            Ok(repaired) => log::info!("[update repair] {repaired:?}"),
+            Err(why) => log::warn!("[update repair] not repaired: {why}"),
+        }
+    }
+    saved
+}
+
+/**
 The stack `local setup` in `installation` resumes, when it has images still to pull: the one the CLI
 recorded for that folder (`appPaths`, which it keeps as the folder's real path), with its release,
-and not already set up. `None` for a first setup, which has no node to download into yet.
+and not already set up, with the step it stopped at when it says one (`failedStep`). `None` for a
+first setup, which has no node to download into yet.
 */
 fn stack_set_up_in(
     cli: &PinnedCli,
     installation: &std::path::Path,
     cancel: &Cancel,
-) -> Result<Option<(StackId, String)>, Failure> {
+) -> Result<Option<(StackId, String, Option<String>)>, Failure> {
     let (code, bytes) = match execute(
         cli,
         &LIST_ARGUMENTS,
@@ -3424,7 +4954,11 @@ fn stack_set_up_in(
             let finished = saved.get("step").and_then(Value::as_str) == Some("ready")
                 && saved.get("failedStep").is_none_or(Value::is_null)
                 && saved.get("update").is_none_or(Value::is_null);
-            (!finished).then_some((id, release))
+            let failed_step = saved
+                .get("failedStep")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            (!finished).then_some((id, release, failed_step))
         }))
 }
 
@@ -3433,26 +4967,346 @@ fn stack_set_up_in(
 ///
 /// A setup that resumes a stack whose node is there downloads its images first (`local_images`):
 /// on a slow line that is how a first setup that stopped in its image download finishes.
+///
+/// A setup that stopped because this folder's stack lost its private files starts that stack over,
+/// or says in plain words what to do (`lost_stack`).
 pub fn setup_installed(
     attempt: &str,
     installation: &std::path::Path,
     accepted: Option<&EulaVersion>,
-) -> Result<(Report, String), Failure> {
+) -> Result<(Report, String), SetupStopped> {
     let id = attempt;
     let attempt = Attempt::register(attempt);
     one_at_a_time(&attempt.0, Limits::for_setup(), |remaining| {
+        // Its turn: the CLI's log from here on is this setup's (`Trail`).
+        let _trail = Trail::begin(id, TrailKind::Setup);
         let cli = installed()?;
-        let report = setup_with(
-            &cli,
-            id,
-            installation,
-            accepted,
-            (Limits::for_setup(), remaining),
-            &attempt.0,
-            crate::local_images::Limits::standard(),
-        )?;
-        Ok((report, cli.sha256().to_owned()))
+        let set_up = || {
+            setup_with(
+                &cli,
+                id,
+                installation,
+                accepted,
+                (Limits::for_setup(), remaining),
+                &attempt.0,
+                crate::local_images::Limits::standard(),
+            )
+        };
+        let report = set_up()?;
+        let report = match lost_stack(&cli, &report, installation, &attempt.0)? {
+            None => report,
+            Some(Lost::Said(problem)) => return Ok(Err(problem)),
+            // A delete that did not finish leaves the setup failed, as it was.
+            Some(Lost::Forgettable(stack)) => match forget(&cli, &stack, &attempt.0) {
+                Ok(()) => set_up()?,
+                Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+                Err(_) => report,
+            },
+        };
+        Ok(Ok((report, cli.sha256().to_owned())))
     })
+    .map_err(SetupStopped::Failure)?
+    .map_err(SetupStopped::Said)
+}
+
+/// Why `setup_installed` gave no report: the CLI's own static category, or OpenBot's plain words.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SetupStopped {
+    Failure(Failure),
+    Said(crate::problem::Problem),
+}
+
+/// What setup does about a stack that lost the files it resumes from.
+enum Lost {
+    /// The stack is this folder's alone and its files are gone: forgotten, and set up again.
+    Forgettable(StackId),
+    /// Kept as it is, with what the person can do about it.
+    Said(crate::problem::Problem),
+}
+
+/// The private files the CLI resumes a stack from, in `local-evaluation/<stack>`.
+#[derive(Debug, PartialEq, Eq)]
+enum PrivateFiles {
+    Present,
+    /// `setup.json` or `secrets.json` is not there.
+    Missing,
+    /// There, but not readable as the CLI writes it.
+    Damaged,
+}
+
+/**
+Whether `local setup` can still resume a stack from `folder`, its private folder. The CLI's own test,
+before it touches anything (Intelligence `apps/cli/src/services/local-setup.ts`): `setup.json` holds
+the stack's licence and `secrets.json` its keys, and with either gone it refuses with "Restore the
+private setup and credentials files before resuming this stack", never making new keys.
+*/
+fn private_files(folder: &std::path::Path) -> PrivateFiles {
+    let read = |name: &str| std::fs::read(folder.join(name));
+    let gone = |result: &std::io::Result<Vec<u8>>| matches!(result, Err(error) if error.kind() == std::io::ErrorKind::NotFound);
+    let (setup, secrets) = (read("setup.json"), read("secrets.json"));
+    if gone(&setup) || gone(&secrets) {
+        return PrivateFiles::Missing;
+    }
+    let licensed = setup
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|setup| {
+            setup
+                .get("licenseToken")
+                .and_then(Value::as_str)
+                .map(|token| !token.is_empty())
+        })
+        .unwrap_or(false);
+    if licensed && secrets.is_ok() {
+        PrivateFiles::Present
+    } else {
+        PrivateFiles::Damaged
+    }
+}
+
+/**
+A failed `local setup` for a stack that can no longer be resumed.
+
+Found on OpenBot Desktop 1.0.0, reinstalled after the earlier installation's folder, app data and
+back end were deleted. The CLI still recorded a stack for `~/OpenBot`, and its private folder was
+gone, so every setup stopped with "Restore the private setup and credentials files before resuming
+this stack" and the window said "Back end setup stopped", with nothing the person could do.
+
+The stack is the one the CLI records for this folder (`appPaths`, by real path). With its private
+files missing and no other app using it, nothing can ever resume it, so it is forgotten and set up
+again. With them damaged, or with another app on it, it is kept and the person is told what to do.
+None for every other failure, and for a stack whose files are there.
+*/
+fn lost_stack(
+    cli: &PinnedCli,
+    report: &Report,
+    installation: &std::path::Path,
+    cancel: &Cancel,
+) -> Result<Option<Lost>, Failure> {
+    if report.outcome != Outcome::Failed || report.reason != Some(Reason::LocalCommandFailed) {
+        return Ok(None);
+    }
+    let (code, bytes) = match execute(
+        cli,
+        &LIST_ARGUMENTS,
+        None,
+        Limits::for_action(Action::Status),
+        cancel,
+    ) {
+        Ok(answer) => answer,
+        Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+        Err(_) => return Ok(None),
+    };
+    let Ok((Outcome::Completed, wire)) = parse_envelope("local list", code, &bytes) else {
+        return Ok(None);
+    };
+    let Ok(folder) = installation.canonicalize() else {
+        return Ok(None);
+    };
+    let is_here = |path: &str| {
+        std::path::Path::new(path)
+            .canonicalize()
+            .is_ok_and(|path| path == folder)
+    };
+    for saved in wire
+        .get("stacks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let paths: Vec<&str> = saved
+            .get("appPaths")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|path| path.get("path").and_then(Value::as_str))
+            .collect();
+        if !paths.iter().any(|path| is_here(path)) {
+            continue;
+        }
+        let Some(stack) = saved
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| StackId::parse(id).ok())
+        else {
+            return Ok(None);
+        };
+        let Some(private) = crate::local_update::stack_dir(stack.as_str()) else {
+            return Ok(None);
+        };
+        let shared = paths.iter().any(|path| !is_here(path));
+        let files = private_files(&private);
+        log::warn!(
+            "[local setup] {}'s private files are {files:?}{}",
+            stack.as_str(),
+            if shared {
+                "; another app uses it too"
+            } else {
+                ""
+            }
+        );
+        let gone = (files == PrivateFiles::Present && !shared)
+            .then(|| cluster_gone(&stack))
+            .flatten();
+        if gone == Some(true) {
+            log::warn!(
+                "[local setup] {}'s cluster is gone from OpenBot's engine; setting it up again",
+                stack.as_str()
+            );
+        }
+        if forgettable(&files, shared, gone) {
+            return Ok(Some(Lost::Forgettable(stack)));
+        }
+        return Ok(match files {
+            PrivateFiles::Present => None,
+            PrivateFiles::Missing if !shared => Some(Lost::Forgettable(stack)),
+            PrivateFiles::Missing => Some(Lost::Said(crate::problem::Problem::with(
+                format!(
+                    "OpenBot's services on this computer are missing their saved settings, and \
+                     another app on this computer uses them too. Restore {} from a backup, then try \
+                     again.",
+                    private.display()
+                ),
+                format!("{} lost setup.json or secrets.json", stack.as_str()),
+            ))),
+            PrivateFiles::Damaged => Some(Lost::Said(crate::problem::Problem::with(
+                format!(
+                    "The saved settings of OpenBot's services on this computer can't be read. \
+                     Restore {} from a backup, or delete that folder to set them up again from the \
+                     start. Then try again.",
+                    private.display()
+                ),
+                format!("{}: setup.json or secrets.json is unreadable", stack.as_str()),
+            ))),
+        });
+    }
+    Ok(None)
+}
+
+/// The shape of a status or setup the CLI could only fail on a stack whose cluster is gone: its
+/// ownership check answered 404 (box I's `cli.log`: `"step":"ownership-check","outcome":"failed",
+/// "reason":"status 404"`), and the answer is `local_command_failed` with no stack.
+pub fn failed_without_stack(report: &Report) -> bool {
+    report.reason == Some(Reason::LocalCommandFailed) && report.stack.is_none()
+}
+
+/// Whether `stack`'s cluster is gone from the engine OpenBot runs on (`use_engine`): k3d names every
+/// container of a cluster `k3d-<cluster>-…`, and the CLI names the cluster after the stack. None
+/// when that can't be said (`cluster_gone_at`): then nothing is said to be gone.
+pub fn cluster_gone(stack: &StackId) -> Option<bool> {
+    cluster_gone_at(cli_engine().as_ref(), stack, |address| {
+        let listed = address
+            .command()
+            .args(["ps", "--all", "--format", "{{.Names}}"])
+            .output()
+            .ok()?;
+        listed
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&listed.stdout).into_owned())
+    })
+}
+
+/**
+`cluster_gone`, with the engine and its container listing passed in.
+
+Only in OpenBot's own Podman machine (`acquire::MACHINE`). Nothing but OpenBot runs a cluster there,
+and a cluster that isn't there went with the machine, as on box I. Anywhere else, Docker or a
+machine of the person's, the stack may live in an engine OpenBot isn't asking: a test's process on a
+Mac found the computer's own Docker, saw no cluster in it, and setup would have deleted a stack whose
+files were all there. So there it can't be said, and nothing is.
+*/
+pub fn cluster_gone_at(
+    address: Option<&crate::engine::Address>,
+    stack: &StackId,
+    list: impl FnOnce(&crate::engine::Address) -> Option<String>,
+) -> Option<bool> {
+    let address = address?;
+    let ours = address.engine == crate::engine::Engine::Podman
+        && address.connection.as_deref().is_some_and(|connection| {
+            crate::acquire::machine_of(connection) == crate::acquire::MACHINE
+        });
+    if !ours {
+        return None;
+    }
+    Some(cluster_gone_in(&list(address)?, stack))
+}
+
+/// `cluster_gone`, from the container names the engine listed, one per line.
+pub fn cluster_gone_in(names: &str, stack: &StackId) -> bool {
+    let prefix = format!("k3d-{}-", stack.as_str());
+    !names.lines().any(|name| name.trim().starts_with(&prefix))
+}
+
+/// Whether setup forgets `stack` and sets the backend up again: this folder's alone, and either its
+/// private files are gone or its cluster is (`cluster_gone`). Another app's stack, or one whose
+/// files are only damaged, is never forgotten here.
+fn forgettable(files: &PrivateFiles, shared: bool, gone: Option<bool>) -> bool {
+    !shared
+        && (*files == PrivateFiles::Missing
+            || (*files == PrivateFiles::Present && gone == Some(true)))
+}
+
+/// `local delete --stack <stack> --confirm-delete <stack> --json`: the CLI's own way to forget a
+/// stack. It removes the stack's cluster when k3d still lists one, its private folder and its
+/// record, and leaves every other stack as it is.
+pub fn forget_arguments(stack: &StackId) -> [&str; 7] {
+    [
+        "local",
+        "delete",
+        "--stack",
+        stack.as_str(),
+        "--confirm-delete",
+        stack.as_str(),
+        "--json",
+    ]
+}
+
+/// `local delete` for `stack` with the installed CLI, for the Windows uninstaller when the person
+/// deletes OpenBot's data (`uninstall`): the stack's cluster, its private folder and its record go, as
+/// when setup forgets one. Anything but a completed delete is a failure.
+pub fn delete_installed(stack: &StackId) -> Result<(), Failure> {
+    let cli = installed()?;
+    let (code, bytes) = execute(
+        &cli,
+        &forget_arguments(stack),
+        None,
+        Limits::for_action(Action::Stop),
+        &Cancel::default(),
+    )?;
+    let (outcome, _) = parse_envelope("local delete", code, &bytes)?;
+    if outcome != Outcome::Completed {
+        log::warn!(
+            "[uninstall] the CLI did not delete {}: {outcome:?}",
+            stack.as_str()
+        );
+        return Err(Failure::InvalidStatus);
+    }
+    Ok(())
+}
+
+/// Forget `stack` (`forget_arguments`). Anything but a completed delete leaves setup failed.
+fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failure> {
+    let (code, bytes) = execute(
+        cli,
+        &forget_arguments(stack),
+        None,
+        Limits::for_action(Action::Stop),
+        cancel,
+    )?;
+    let (outcome, _) = parse_envelope("local delete", code, &bytes)?;
+    if outcome != Outcome::Completed {
+        log::warn!(
+            "[local setup] the CLI did not forget {}: {outcome:?}",
+            stack.as_str()
+        );
+        return Err(Failure::InvalidStatus);
+    }
+    log::info!(
+        "[local setup] forgot {}, whose private files were gone; setting the backend up again",
+        stack.as_str()
+    );
+    Ok(())
 }
 
 /// `configure_learning_model` against the installed CLI, in its turn like every other call.
@@ -3504,7 +5358,7 @@ fn setup_downloading(
 ) -> Result<Report, Failure> {
     let downloaded = match cli_images_of(cli) {
         Some(images) => match stack_set_up_in(cli, installation, cancel)? {
-            Some((stack, release)) => download_images(
+            Some((stack, release, _)) => download_images(
                 &images,
                 &setup_arguments(accepted),
                 &stack,
@@ -3516,11 +5370,22 @@ fn setup_downloading(
             // A first setup: its node does not exist until the CLI makes it, so its download is
             // followed while the CLI pulls (`local_images::follow_new_stack`).
             None => {
-                return setup_followed(
+                let first = setup_followed(
                     cli,
                     installation,
                     accepted,
                     limits.1,
+                    cancel,
+                    &images,
+                    attempt,
+                    images_limits,
+                )?;
+                return resumed_once_if_download_stopped(
+                    first,
+                    cli,
+                    installation,
+                    accepted,
+                    limits,
                     cancel,
                     &images,
                     attempt,
@@ -3530,6 +5395,62 @@ fn setup_downloading(
         },
         None => false,
     };
+    let limits = if downloaded { limits.0 } else { limits.1 };
+    setup(cli, installation, accepted, limits, cancel)
+}
+
+/// The steps the CLI's own progress calls downloading the release's images.
+const DOWNLOAD_STEPS: [&str; 3] = [
+    "image-download",
+    "system-image-download",
+    "system-image-tag",
+];
+
+/**
+A first setup that stopped in its image download, resumed once, as Retry resumes it.
+
+The CLI pulls a first setup's images itself, into the node it has just made, each pull failing for
+good the first time containerd cannot connect: 30 s for the mirror, then 30 s for the registry
+(containerd 1.7 `remotes/docker/config/hosts.go`). On the EC2 Mac pass, the first setup after a
+Podman machine was resized stopped there, every pull at 60.5 s, 2 times out of 2, and a Retry a
+minute later finished. Retry finds the stack the CLI recorded, with its node, so OpenBot downloads
+its images first (`local_images::download`, which waits out a line that stalls) and the CLI finds
+them present. So a setup that stopped in its download does the same, once, before it is reported.
+Any other failure, or one with no stack on record, is reported as the CLI said it.
+*/
+#[allow(clippy::too_many_arguments)]
+fn resumed_once_if_download_stopped(
+    first: Report,
+    cli: &PinnedCli,
+    installation: &std::path::Path,
+    accepted: Option<&EulaVersion>,
+    limits: (Limits, Limits),
+    cancel: &Cancel,
+    images: &crate::local_images::CliImages,
+    attempt: &str,
+    images_limits: crate::local_images::Limits,
+) -> Result<Report, Failure> {
+    if first.outcome != Outcome::Failed || first.reason != Some(Reason::LocalCommandFailed) {
+        return Ok(first);
+    }
+    let Some((stack, release, Some(step))) = stack_set_up_in(cli, installation, cancel)? else {
+        return Ok(first);
+    };
+    if !DOWNLOAD_STEPS.contains(&step.as_str()) {
+        return Ok(first);
+    }
+    log::warn!(
+        "[local setup] a first setup stopped at {step}; downloading its images and resuming it once"
+    );
+    let downloaded = download_images(
+        images,
+        &setup_arguments(accepted),
+        &stack,
+        Some(&release),
+        attempt,
+        cancel,
+        images_limits,
+    )?;
     let limits = if downloaded { limits.0 } else { limits.1 };
     setup(cli, installation, accepted, limits, cancel)
 }
@@ -3579,15 +5500,120 @@ fn setup_followed(
     })
 }
 
-/// The CopilotKit account sign-in against the installed CLI. While it waits, `shown_sign_in_page`
-/// answers for `attempt` with the page the CLI opened.
+/// The CopilotKit account sign-in against the installed CLI, always with a new code. While it
+/// waits, `shown_sign_in_page` answers for `attempt` with the page the CLI opened.
 pub fn account_sign_in_installed(attempt: &str) -> Result<AccountSignIn, Failure> {
     let showing = ShowingSignIn(attempt.to_owned());
     let attempt = Attempt::register(attempt);
+    let saved_code = crate::local_update::cli_saved_sign_in_code();
     one_at_a_time(&attempt.0, Limits::for_account_sign_in(), |limits| {
         let cli = installed()?;
-        account_sign_in(&cli, limits, &attempt.0, &mut |page| showing.show(page))
+        account_sign_in(
+            &cli,
+            saved_code.as_deref(),
+            limits,
+            &attempt.0,
+            &mut |page| showing.show(page),
+        )
     })
+}
+
+/// Closed output of the CLI's authenticated desktop identity handshake.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TelemetryIdentity {
+    Account { account_id: String },
+    Linked { account_id: String },
+    SignedOut,
+    Skipped,
+}
+
+/// Background attribution never queues ahead of required CLI work, and yields if it arrives.
+fn background_telemetry_call<T>(
+    call: impl FnOnce(&Cancel, Limits) -> Result<T, Failure>,
+) -> Result<T, Failure> {
+    let cancel = Cancel::default();
+    let mut active = BACKGROUND_TELEMETRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if REQUIRED_CALLS.load(Ordering::SeqCst) != 0 {
+        return Err(Failure::Cancelled);
+    }
+    let _turn = match CALLS.try_lock() {
+        Ok(turn) => turn,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Err(Failure::Cancelled),
+    };
+    *active = Some(cancel.clone());
+    drop(active);
+    let _cleanup = BackgroundTelemetryCall;
+    call(&cancel, telemetry_link_limits())
+}
+
+/// Use the same verified CLI contract, but let required account/setup calls preempt it.
+pub fn link_telemetry_background_installed(
+    installation: &Installation,
+    account: Option<&str>,
+) -> Result<TelemetryIdentity, Failure> {
+    background_telemetry_call(|cancel, limits| {
+        let cli = installed()?;
+        link_telemetry(&cli, installation, account, limits, cancel)
+    })
+}
+
+/// Bound the optional handshake separately from product CLI operations.
+fn telemetry_link_limits() -> Limits {
+    Limits {
+        timeout: Duration::from_secs(8),
+        grace: Duration::from_millis(250),
+        output: MAX_OUTPUT,
+    }
+}
+
+/// Execute the fixed identity command through the same bounded process boundary as setup.
+fn link_telemetry(
+    cli: &PinnedCli,
+    installation: &Installation,
+    account: Option<&str>,
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<TelemetryIdentity, Failure> {
+    if account.is_some_and(|value| !crate::telemetry::is_account_id(value)) {
+        return Err(Failure::ContractMismatch);
+    }
+    let mut arguments = vec![
+        "telemetry",
+        "link",
+        "--installation-id",
+        installation.as_str(),
+        "--json",
+    ];
+    if let Some(account) = account {
+        arguments.extend(["--account-id", account]);
+    }
+    let (code, bytes) = execute(cli, &arguments, None, limits, cancel)?;
+    normalize_telemetry_identity(code, &bytes)
+}
+
+/// Refuse unexpected or private fields before returning anything to the shell.
+pub fn normalize_telemetry_identity(code: i32, bytes: &[u8]) -> Result<TelemetryIdentity, Failure> {
+    if code != 0 {
+        return Err(Failure::UnexpectedExit);
+    }
+    if bytes.len() > MAX_OUTPUT {
+        return Err(Failure::OutputLimit);
+    }
+    let result: TelemetryIdentity =
+        serde_json::from_slice(bytes).map_err(|_| Failure::InvalidJson)?;
+    match &result {
+        TelemetryIdentity::Account { account_id } | TelemetryIdentity::Linked { account_id }
+            if !crate::telemetry::is_account_id(account_id) =>
+        {
+            return Err(Failure::ContractMismatch)
+        }
+        _ => {}
+    }
+    Ok(result)
 }
 
 /// The approval page each waiting account sign-in has shown, by attempt id.
@@ -3615,6 +5641,134 @@ impl Drop for ShowingSignIn {
     fn drop(&mut self) {
         sign_in_pages().retain(|(attempt, _)| attempt != &self.0);
     }
+}
+
+/**
+The steps a running CLI call has finished, as its `cli.log` lines say, while it runs: so the window
+can say what a long setup, start or update is doing now and how far along it is, and never sit on
+one line for minutes.
+
+From the call's turn on (`one_at_a_time`), the log's new `local.step` lines are the call's own:
+OpenBot runs one CLI call at a time. Only the steps' names, which are identifiers, leave this
+module, and the seconds since the last one ended.
+*/
+struct Trail(String);
+
+struct Followed {
+    attempt: String,
+    kind: TrailKind,
+    log: crate::local_update::StepLog,
+    ended: Vec<String>,
+    since: Instant,
+}
+
+/// Which CLI call a trail follows, for the journey its steps belong to (`stall`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailKind {
+    /// `local setup`.
+    Setup,
+    /// `local update`.
+    Update,
+    /// Any other call: `local start`, `stop` or `status`.
+    Other,
+}
+
+impl From<Action> for TrailKind {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Update => TrailKind::Update,
+            Action::Status | Action::Start | Action::Stop => TrailKind::Other,
+        }
+    }
+}
+
+static TRAILS: std::sync::Mutex<Vec<Followed>> = std::sync::Mutex::new(Vec::new());
+
+fn trails() -> std::sync::MutexGuard<'static, Vec<Followed>> {
+    TRAILS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl Trail {
+    fn begin(attempt: &str, kind: TrailKind) -> Self {
+        if let Some(path) = crate::local_update::cli_log() {
+            let mut held = trails();
+            held.retain(|followed| followed.attempt != attempt);
+            held.push(Followed {
+                attempt: attempt.to_owned(),
+                kind,
+                log: crate::local_update::StepLog::at_end_of(path),
+                ended: Vec::new(),
+                since: Instant::now(),
+            });
+        }
+        Self(attempt.to_owned())
+    }
+}
+
+impl Drop for Trail {
+    fn drop(&mut self) {
+        trails().retain(|followed| followed.attempt != self.0);
+    }
+}
+
+/// What the call `attempt` has done so far, by the CLI's own step names, in the order they ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Steps {
+    pub ended: Vec<String>,
+    /// Seconds since the last step ended, or since the call began.
+    pub quiet_seconds: u64,
+}
+
+/// The steps the running call `attempt` has finished, while it runs. None once it has ended.
+pub fn steps(attempt: &str) -> Option<Steps> {
+    let mut held = trails();
+    let followed = held
+        .iter_mut()
+        .find(|followed| followed.attempt == attempt)?;
+    followed.catch_up();
+    Some(Steps {
+        ended: followed.ended.clone(),
+        quiet_seconds: followed.since.elapsed().as_secs(),
+    })
+}
+
+impl Followed {
+    /// Read the steps logged since the last look.
+    fn catch_up(&mut self) {
+        let ended = self.log.poll();
+        if !ended.is_empty() {
+            self.since = Instant::now();
+            self.ended.extend(ended);
+        }
+    }
+}
+
+/// The setup or update running now, as `stall` times its steps: its attempt, the steps it has
+/// finished, and when the last of them ended (or the call began).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrailNow {
+    pub kind: TrailKind,
+    pub attempt: String,
+    pub ended: Vec<String>,
+    pub since: Instant,
+}
+
+/// The `local setup` or `local update` running now, if one is.
+pub fn trail_now() -> Option<TrailNow> {
+    let mut held = trails();
+    let followed = held
+        .iter_mut()
+        .find(|followed| followed.kind != TrailKind::Other)?;
+    followed.catch_up();
+    Some(TrailNow {
+        kind: followed.kind,
+        attempt: followed.attempt.clone(),
+        ended: followed.ended.clone(),
+        since: followed.since,
+    })
 }
 
 /// How far the back end's image download before the call `attempt` has got, while it runs.
@@ -3687,24 +5841,28 @@ pub fn list_installed(attempt: &str) -> Result<Listing, Failure> {
 /// Stop one call, whether or not it has started yet.
 pub fn cancel(attempt: &str) {
     let mut held = in_flight();
-    match held.iter().find(|(id, _)| id == attempt) {
-        Some((_, cancel)) => cancel.cancel(),
+    match held.iter().find(|(id, _, _)| id == attempt) {
+        Some((_, _, Kind::Shutdown(_))) => {}
+        Some((_, cancel, _)) => cancel.cancel(),
         None => {
             if held.len() >= REMEMBERED {
                 held.remove(0);
             }
             let cancel = Cancel::default();
             cancel.cancel();
-            held.push((attempt.to_owned(), cancel));
+            held.push((attempt.to_owned(), cancel, Kind::Call));
         }
     }
 }
 
-/// Stop every call in progress, before Stop or Quit asks the CLI to stop. Each stops its own
-/// process tree, and a call still waiting for its turn never starts.
+/// Stop every call the window asked for, before Stop or Quit asks the CLI to stop. Each stops its
+/// own process tree, and a call still waiting for its turn never starts. A stop of the stack
+/// already running, a Stop's or Quit's, is left to finish (`Kind`).
 pub fn cancel_all() {
-    for (_, cancel) in in_flight().iter() {
-        cancel.cancel();
+    for (_, cancel, kind) in in_flight().iter() {
+        if *kind == Kind::Call {
+            cancel.cancel();
+        }
     }
 }
 
@@ -3782,6 +5940,39 @@ mod tests {
     const PINNED_CLI: &str = r#"async function resolveDefaultLocalRelease(directory2, dependencies = {}) {   const pinnedVersion = false ? "" : "0.16.0-rc.9";   const support = supportSchema.parse("#;
 
     #[test]
+    fn telemetry_link_accepts_only_the_closed_account_handshake() {
+        let account = "a".repeat(64);
+        for kind in ["account", "linked"] {
+            let response = serde_json::json!({ "type": kind, "account_id": account });
+            assert!(normalize_telemetry_identity(0, response.to_string().as_bytes()).is_ok());
+            assert!(normalize_telemetry_identity(1, response.to_string().as_bytes()).is_err());
+            for field in [
+                "email",
+                "name",
+                "prompt",
+                "response",
+                "recording",
+                "filename",
+                "url",
+            ] {
+                let mut extra = response.clone();
+                extra[field] = serde_json::json!("synthetic private content");
+                assert!(normalize_telemetry_identity(0, extra.to_string().as_bytes()).is_err());
+            }
+        }
+        assert_eq!(
+            normalize_telemetry_identity(0, br#"{"type":"skipped"}"#),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(normalize_telemetry_identity(
+            0,
+            br#"{"type":"account","account_id":"private@example.com"}"#
+        )
+        .is_err());
+        assert!(normalize_telemetry_identity(0, b"not json").is_err());
+    }
+
+    #[test]
     fn the_release_a_cli_installs_is_read_out_of_the_cli_itself() {
         assert_eq!(
             crate::cli_release::pinned_release_in(PINNED_CLI).as_deref(),
@@ -3854,6 +6045,85 @@ mod tests {
         assert_eq!(update_due(&blocked, target), None);
     }
 
+    /// The CLI refuses `local update` as `incompatible_release` both for a stack already on the
+    /// release it would install and for a release that cannot update the stack in place. Only the
+    /// stack's status after the refusal tells them apart: on the release, or past it, there is
+    /// nothing to update; behind it, or with a version or status that cannot be read, the refusal
+    /// stands. No other answer asks the status at all.
+    #[test]
+    fn an_update_refused_on_a_stack_already_on_its_release_is_nothing_to_update() {
+        let target = Some("0.16.0-rc.9");
+        let refused: Result<Report, Failure> = Ok(Report {
+            outcome: Outcome::Blocked,
+            reason: Some(Reason::IncompatibleRelease),
+            ..Report::engine_not_answering()
+        });
+        for current in ["0.16.0-rc.9", "v0.16.0-rc.9", "0.16.0-rc.10", "0.16.0"] {
+            let answer =
+                nothing_to_update(refused.clone(), || Some(on_release(current)), target).unwrap();
+            assert_eq!(answer.outcome, Outcome::Completed, "{current}");
+            assert_eq!(answer.reason, None, "{current}");
+            assert_eq!(answer.update_to, None, "{current}");
+            assert_eq!(answer.stack.unwrap().installed_release, current);
+        }
+        // An update on record, moving to the release the stack already runs: the CLI's resume
+        // refuses it the same way, and there is nothing to update whatever this app installs.
+        let mut resuming = envelope();
+        resuming["stack"]["installedRelease"] = json!("0.16.0-rc.9");
+        resuming["stack"]["update"] =
+            json!({ "attemptedRelease": "0.16.0-rc.9", "state": "prepared" });
+        for target in [target, Some("0.16.0-rc.10"), None] {
+            let resuming = status(&resuming).unwrap();
+            let answer = nothing_to_update(refused.clone(), || Some(resuming), target).unwrap();
+            assert_eq!(answer.outcome, Outcome::Completed);
+        }
+        // Behind the release, it is a real refusal (a schema or a cluster it cannot update in
+        // place), as it is when the status fails or says nothing readable.
+        let mut moving_on = envelope();
+        moving_on["stack"]["installedRelease"] = json!("0.16.0-rc.9");
+        moving_on["stack"]["update"] =
+            json!({ "attemptedRelease": "0.16.0-rc.10", "state": "prepared" });
+        let mut not_completed = on_release("0.16.0-rc.9");
+        not_completed.outcome = Outcome::Blocked;
+        for status in [
+            Some(on_release("0.16.0-rc.8")),
+            Some(status(&moving_on).unwrap()),
+            Some(on_release("latest")),
+            Some(not_completed),
+            None,
+        ] {
+            assert_eq!(
+                nothing_to_update(refused.clone(), || status, target),
+                refused
+            );
+        }
+        // Without the release this app installs, a stack with nothing on record cannot be read.
+        assert_eq!(
+            nothing_to_update(refused.clone(), || Some(on_release("0.16.0-rc.9")), None),
+            refused
+        );
+        // Every other answer is kept as it is, without asking the status.
+        let mut recovery = refused.clone().unwrap();
+        recovery.reason = Some(Reason::UpdateRecoveryRequired);
+        let mut failed = refused.clone().unwrap();
+        failed.outcome = Outcome::Failed;
+        for other in [
+            Ok(on_release("0.16.0-rc.9")),
+            Ok(recovery),
+            Ok(failed),
+            Err(Failure::Timeout),
+        ] {
+            assert_eq!(
+                nothing_to_update(
+                    other.clone(),
+                    || -> Option<Report> { panic!("status asked") },
+                    target
+                ),
+                other
+            );
+        }
+    }
+
     /// `local update --stack <id> --json`, fixed like every other call, and read like them: its
     /// completed report, including the CLI's answer that the stack already runs that release.
     #[test]
@@ -3913,6 +6183,41 @@ mod tests {
             assert_eq!(observed.running, running);
             assert!(!observed.services[0].ready);
             assert_eq!(report.readiness, Readiness::Unknown);
+            assert!(!exposes_secret(&report));
+        }
+    }
+
+    /// The window is told how far an unfinished update got as one of four words, never the CLI's
+    /// own text: a state this build does not know is `other`.
+    #[test]
+    fn an_unfinished_update_tells_the_window_how_far_it_got() {
+        for (state, expected, said) in [
+            (json!("prepared"), UpdateState::Prepared, "prepared"),
+            (json!("migrating"), UpdateState::Migrating, "migrating"),
+            (json!("migrated"), UpdateState::Migrated, "migrated"),
+            (json!(SECRET), UpdateState::Other, "other"),
+            (json!(null), UpdateState::Other, "other"),
+        ] {
+            let mut input = envelope();
+            input["stack"]["update"] = json!({
+                "attemptedRelease": "0.16.0-rc.13",
+                "state": state,
+                "recoveryCommand": "copilotkit local update",
+            });
+            let report = status(&input).unwrap();
+            let update = report.stack.clone().unwrap().unfinished_update.unwrap();
+            assert_eq!(update.state, expected, "{state}");
+            assert_eq!(
+                update.prepared,
+                expected == UpdateState::Prepared,
+                "{state}"
+            );
+            let window = serde_json::to_value(&report).unwrap();
+            assert_eq!(
+                window["stack"]["unfinishedUpdate"]["state"],
+                json!(said),
+                "{state}"
+            );
             assert!(!exposes_secret(&report));
         }
     }
@@ -3991,6 +6296,69 @@ mod tests {
             "renewal": "none"
         });
         input
+    }
+
+    /// Start's wait for the back end, from the CLI's own status answers: each new answer said with
+    /// what is not ready and the addresses the CLI checks, a repeat not said again, a failed call
+    /// said as one, and the wait ended once the back end is ready with a valid licence.
+    #[test]
+    fn the_back_end_wait_says_each_status_and_ends_when_ready() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + std::time::Duration::from_secs(seconds);
+        let mut starting = canonical("starting", "valid", json!(null));
+        starting["stack"]["observed"]["services"] = json!([
+            { "name": "cpki-app-api", "phase": "Running", "ready": true },
+            { "name": "cpki-gateway", "phase": "Pending", "ready": false }
+        ]);
+        let starting = status(&starting).unwrap();
+        let mut wait = None;
+
+        let first = status_waited(&mut wait, at(0), &Ok(starting.clone()));
+        assert_eq!(first.len(), 1, "{first:#?}");
+        assert!(first[0].starts_with(
+            "[wait] the backend, `local status` until it is ready with a valid licence: readiness starting, licence valid"
+        ), "{first:#?}");
+        assert!(
+            first[0].contains("services 1 of 2 ready (not ready: cpki-gateway Pending)"),
+            "{first:#?}"
+        );
+        assert!(
+            first[0].contains(
+                "API http://localhost:8082, gateway ws://[::1]:4401, dashboard http://intelligence.localhost:8080"
+            ),
+            "{first:#?}"
+        );
+        assert!(!first[0].contains(SECRET), "{first:#?}");
+        assert!(status_waited(&mut wait, at(15), &Ok(starting.clone())).is_empty());
+        let failed = status_waited(&mut wait, at(30), &Err(Failure::Timeout));
+        assert!(
+            failed[0].contains("the status call failed: Timeout"),
+            "{failed:#?}"
+        );
+
+        // What the window gives up with, and the last answer it had.
+        let gave_up = wait.as_ref().unwrap().ended(
+            at(40),
+            "gave up: OpenBot didn't get ready in time. Retry to check again.",
+        );
+        assert!(gave_up.contains("after 40.0s and 3 checks"), "{gave_up}");
+        assert!(gave_up.ends_with("last answer: the status call failed: Timeout"));
+
+        let ready = status(&canonical("ready", "valid", json!(null))).unwrap();
+        let ended = status_waited(&mut wait, at(45), &Ok(ready));
+        assert!(
+            ended
+                .last()
+                .unwrap()
+                .contains(": ready after 45.0s and 4 checks"),
+            "{ended:#?}"
+        );
+        assert!(wait.is_none());
+
+        // A wait nobody ended is not carried on by the next one.
+        status_waited(&mut wait, at(400), &Ok(starting.clone()));
+        let next = status_waited(&mut wait, at(400 + 121), &Ok(starting));
+        assert!(next[0].contains("(0.0s in, check 1)"), "{next:#?}");
     }
 
     #[test]
@@ -4149,6 +6517,98 @@ mod tests {
         // Not a leap year.
         let report = status(&canonical("ready", "valid", json!("2026-02-29T00:00:00Z"))).unwrap();
         assert_eq!(report.licence, Licence::Unknown);
+    }
+
+    /// Box I, after OpenBot's machine was made again: `local status` for the recorded stack failed
+    /// at its ownership check (`cli.log`: `"step":"ownership-check","outcome":"failed","reason":
+    /// "status 404"`), and OpenBot read "local-command-failed, no stack". That answer, and only that
+    /// one, is the shape of a lost stack.
+    #[test]
+    fn a_status_that_failed_with_no_stack_is_the_shape_of_a_lost_stack() {
+        let failed = json!({
+            "version": 1,
+            "command": "local status",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "The local command did not finish."
+            },
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+            "diagnostics": []
+        });
+        let report = normalize(Action::Status, 1, failed.to_string().as_bytes()).unwrap();
+        assert_eq!(report.reason, Some(Reason::LocalCommandFailed));
+        assert!(report.stack.is_none());
+        assert!(failed_without_stack(&report));
+
+        let mut blocked = canonical("ready", "valid", Value::Null);
+        blocked["status"] = json!("blocked");
+        blocked["nextAction"] = json!({ "reason": "docker_unavailable" });
+        let report = normalize(Action::Status, 2, blocked.to_string().as_bytes()).unwrap();
+        assert!(!failed_without_stack(&report));
+    }
+
+    /// Box I's engine before and after: `podman ps` on OpenBot's old machine listed the backend's
+    /// node, `k3d-local-1915a7aafba78d6207a561b0-server-0`, beside OpenBot's containers; the machine
+    /// made again listed nothing.
+    #[test]
+    fn a_stack_whose_cluster_left_with_the_old_machine_is_found_gone() {
+        let stack = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
+        let before = "k3d-local-1915a7aafba78d6207a561b0-server-0\n\
+                      openbot-desktop-postgres-1\n\
+                      openbot-desktop-server-1\n";
+        assert!(!cluster_gone_in(before, &stack));
+        assert!(cluster_gone_in("", &stack));
+        // Another stack's cluster, or a container that only mentions the id, is not this one's.
+        assert!(cluster_gone_in("k3d-local-0000-server-0\nmy-web\n", &stack));
+        assert!(cluster_gone_in("local-1915a7aafba78d6207a561b0\n", &stack));
+    }
+
+    /// Only OpenBot's own machine is ever asked, and only there can a cluster be found gone.
+    #[test]
+    fn a_cluster_is_found_gone_only_in_openbots_own_machine() {
+        use crate::engine::{Address, Engine};
+        let stack = StackId::parse("local-1915a7aafba78d6207a561b0").unwrap();
+        let ours = Address::new(Engine::Podman, Some("openbot-root".into()));
+        assert_eq!(
+            cluster_gone_at(Some(&ours), &stack, |_| Some(String::new())),
+            Some(true)
+        );
+        assert_eq!(
+            cluster_gone_at(Some(&ours), &stack, |_| Some(
+                "k3d-local-1915a7aafba78d6207a561b0-server-0\n".into()
+            )),
+            Some(false)
+        );
+        // The engine couldn't list its containers: nothing is said.
+        assert_eq!(cluster_gone_at(Some(&ours), &stack, |_| None), None);
+        // Docker, the person's machine, or no engine known: never even listed.
+        for elsewhere in [
+            Some(Address::new(Engine::Docker, None)),
+            Some(Address::new(Engine::Podman, Some("mine-root".into()))),
+            Some(Address::new(Engine::Podman, None)),
+            None,
+        ] {
+            assert_eq!(
+                cluster_gone_at(elsewhere.as_ref(), &stack, |_| panic!("listed")),
+                None,
+                "{elsewhere:?}"
+            );
+        }
+    }
+
+    /// Setup forgets a stack and sets it up again only when it is this folder's alone and its
+    /// files or its cluster are gone. Damaged files, a cluster that is there or can't be asked
+    /// about, and another app's stack are never forgotten.
+    #[test]
+    fn setup_forgets_a_stack_whose_cluster_is_gone_only_when_it_is_this_folders() {
+        assert!(forgettable(&PrivateFiles::Present, false, Some(true)));
+        assert!(forgettable(&PrivateFiles::Missing, false, None));
+        assert!(!forgettable(&PrivateFiles::Present, false, Some(false)));
+        assert!(!forgettable(&PrivateFiles::Present, false, None));
+        assert!(!forgettable(&PrivateFiles::Present, true, Some(true)));
+        assert!(!forgettable(&PrivateFiles::Missing, true, None));
+        assert!(!forgettable(&PrivateFiles::Damaged, false, Some(true)));
     }
 
     #[test]
@@ -4317,9 +6777,13 @@ mod tests {
         .unwrap();
         assert_eq!(report.outcome, Outcome::Blocked);
         assert_eq!(report.reason, Some(Reason::EulaAcceptanceRequired));
+        // `--app-path`: the installation folder exactly, never a folder above it with its own stack.
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nsetup\n--defer-model\n--json"
+            format!(
+                "local\nsetup\n--defer-model\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
     }
@@ -4455,7 +6919,11 @@ mod tests {
         assert_eq!(report.outcome, Outcome::Completed);
         assert_eq!(
             fixture.argv().unwrap(),
-            format!("local\nsetup\n--model-config\n{}\n--json", file.display())
+            format!(
+                "local\nsetup\n--model-config\n{}\n--json\n--app-path\n{}",
+                file.display(),
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
 
@@ -4469,7 +6937,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nsetup\n--defer-model\n--json"
+            format!(
+                "local\nsetup\n--defer-model\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
 
         for refused in [Path::new("model.json"), Path::new("-x/model.json")] {
@@ -4528,9 +6999,129 @@ mod tests {
         assert_eq!(connection.stack.unwrap().id, "local-abc123");
         assert_eq!(
             fixture.argv().unwrap(),
-            "local\nconnect\n--approve-connection\n--json"
+            format!(
+                "local\nconnect\n--approve-connection\n--json\n--app-path\n{}",
+                installation.display()
+            )
         );
         assert_eq!(fixture.cwd(), installation.canonicalize().unwrap());
+    }
+
+    /// The real git on this computer's PATH, if it has one.
+    fn real_git() -> Option<PathBuf> {
+        let name = format!("git{}", std::env::consts::EXE_SUFFIX);
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(&name))
+            .find(|git| git.is_file())
+    }
+
+    /// `git <arguments>` in `dir`, free of any repository a git hook running these tests set.
+    fn git_in(git: &Path, dir: &Path, arguments: &[&str]) {
+        let status = std::process::Command::new(git)
+            .current_dir(dir)
+            .args(arguments)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove(GIT_CEILING)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {arguments:?} in {}", dir.display());
+    }
+
+    /// Every call in OpenBot's folder runs with git told not to go above it: the folder over it is
+    /// the ceiling, as given and as resolved. A call with no folder of its own is told nothing.
+    #[test]
+    fn calls_in_openbots_folder_tell_git_not_to_look_above_it() {
+        let fixture = Fixture::new(
+            "local-eval-git-ceiling",
+            &format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        );
+        let home = fixture.root.join("home");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&installation).unwrap();
+        connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        let ceiling = std::fs::read_to_string(fixture.root.join("git-ceiling")).unwrap();
+        let ceilings: Vec<PathBuf> = std::env::split_paths(&ceiling).collect();
+        assert!(
+            ceilings.contains(&std::path::absolute(&home).unwrap()),
+            "{ceiling}"
+        );
+        if cfg!(not(windows)) {
+            assert!(
+                ceilings.contains(&home.canonicalize().unwrap()),
+                "{ceiling}"
+            );
+        }
+        assert!(
+            !ceilings.iter().any(|ceiling| ceiling.ends_with("OpenBot")),
+            "{ceiling}"
+        );
+
+        std::fs::write(fixture.root.join("scenario"), format!("0\n{}", envelope())).unwrap();
+        fixture
+            .run(
+                Action::Status,
+                Limits::for_action(Action::Status),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("git-ceiling")).unwrap(),
+            ""
+        );
+    }
+
+    /// A Mac's home folder was a git repository that ignores everything (`*`), and `local connect`
+    /// failed on every try: before it writes the key, the CLI asks git that `.env.example` is not
+    /// ignored, and nothing inside an ignored folder can be un-ignored. Real git, asked in OpenBot's
+    /// folder with the environment the CLI is given: it finds no repository there now (128), which
+    /// the CLI passes, where it found the home folder's and said ignored (0). A repository in
+    /// OpenBot's own folder still answers with its own rules: not ignored (1), as the CLI requires.
+    #[test]
+    fn a_home_folder_repository_that_ignores_everything_does_not_reach_openbots_folder() {
+        let Some(git) = real_git() else {
+            eprintln!("no git on PATH, so there is nothing to ask");
+            return;
+        };
+        let fixture = Fixture::new(
+            "local-eval-home-repository",
+            &format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        );
+        let home = fixture.root.join("home");
+        let installation = home.join("OpenBot");
+        std::fs::create_dir_all(&installation).unwrap();
+        git_in(&git, &home, &["init", "-q"]);
+        std::fs::write(home.join(".gitignore"), "*\n!.gitignore\n").unwrap();
+        // What the CLI appends in OpenBot's folder before it asks.
+        std::fs::write(
+            installation.join(".gitignore"),
+            ".env\n.env.*\n!.env.example\n",
+        )
+        .unwrap();
+        std::fs::write(fixture.root.join("git-check"), git.display().to_string()).unwrap();
+        let asked = || {
+            connect(
+                &fixture.cli(),
+                &installation,
+                Limits::for_action(Action::Status),
+                &Cancel::default(),
+            )
+            .unwrap();
+            std::fs::read_to_string(fixture.root.join("git-checked")).unwrap()
+        };
+        assert_eq!(asked(), "128");
+
+        git_in(&git, &installation, &["init", "-q"]);
+        assert_eq!(asked(), "1");
     }
 
     #[test]
@@ -4587,6 +7178,82 @@ mod tests {
         for answer in [confirmation, conflict, failed] {
             assert!(!serde_json::to_string(&answer).unwrap().contains(SECRET));
         }
+    }
+
+    /// A first install on a Mac stopped at "Connecting OpenBot" with "Setup stopped partway through
+    /// with an error", and neither log said why: the CLI's error was in its report, and only the
+    /// reason was kept. A connect that fails now logs its exit and the CLI's own message, scrubbed
+    /// as every log line is, and one that finishes logs only that it did.
+    #[test]
+    fn a_connect_that_fails_logs_the_clis_message_scrubbed() {
+        let home = "/Users/dana";
+        let failed = json!({
+            "version": 1,
+            "command": "local connect",
+            "status": "failed",
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": format!(
+                    "The app .env is tracked or is not ignored by Git. Stop tracking that \
+                     credential file before approving the local connection. Read \
+                     {home}/OpenBot/.env with CPK_INTELLIGENCE_API_KEY={SECRET}"
+                )
+            },
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+            "diagnostics": []
+        });
+        let fixture = Fixture::new("local-eval-connect-failed-logged", &format!("1\n{failed}"));
+        std::fs::write(
+            fixture.root.join("stderr"),
+            format!("Error: git check-ignore failed in {home}/OpenBot\n"),
+        )
+        .unwrap();
+        let installation = fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        last_ending();
+        let connection = connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        assert_eq!(connection.reason, Some(Reason::LocalCommandFailed));
+        let entry = last_ending().expect("the connect's ending was logged");
+        assert!(
+            entry.starts_with("[local connect] failed after "),
+            "{entry}"
+        );
+        // As the log file writes it (`logging::line`): the key and the home folder are gone.
+        let written = crate::logging::scrub(&entry, Some(home));
+        for said in [
+            "exit 1",
+            "\"LOCAL_COMMAND_FAILED\"",
+            "\"local_command_failed\"",
+            "The app .env is tracked or is not ignored by Git.",
+            "~/OpenBot/.env",
+            "CPK_INTELLIGENCE_API_KEY=[redacted]",
+            "stderr ends: Error: git check-ignore failed in ~/OpenBot",
+        ] {
+            assert!(written.contains(said), "{said:?} is not in {written}");
+        }
+        assert!(!written.contains(SECRET), "{written}");
+        assert!(!written.contains(home), "{written}");
+
+        std::fs::write(
+            fixture.root.join("scenario"),
+            format!("0\n{}", connected("completed", json!([]), Value::Null)),
+        )
+        .unwrap();
+        connect(
+            &fixture.cli(),
+            &installation,
+            Limits::for_action(Action::Status),
+            &Cancel::default(),
+        )
+        .unwrap();
+        let entry = last_ending().expect("the finished connect's ending was logged");
+        assert!(entry.starts_with("[local connect] finished in "), "{entry}");
     }
 
     #[test]
@@ -4826,12 +7493,12 @@ mod tests {
         std::fs::create_dir_all(&installation).unwrap();
         assert_eq!(
             setup_installed("setup-no-cli", &installation, None).map(|(report, _)| report),
-            Err(Failure::Unavailable)
+            Err(SetupStopped::Failure(Failure::Unavailable))
         );
         cancel("setup-cancelled");
         assert_eq!(
             setup_installed("setup-cancelled", &installation, None).map(|(report, _)| report),
-            Err(Failure::Cancelled)
+            Err(SetupStopped::Failure(Failure::Cancelled))
         );
         std::fs::remove_dir_all(installation).unwrap();
     }
@@ -4934,7 +7601,7 @@ mod tests {
             Err(Failure::Unavailable)
         );
         // The attempt is gone however the call ended.
-        assert!(!in_flight().iter().any(|(id, _)| id == "no-cli-attempt"));
+        assert!(!in_flight().iter().any(|(id, _, _)| id == "no-cli-attempt"));
     }
 
     #[test]
@@ -4983,7 +7650,7 @@ mod tests {
         let attempt = Attempt::register("early-attempt");
         assert!(attempt.0.requested());
         drop(attempt);
-        assert!(!in_flight().iter().any(|(id, _)| id == "early-attempt"));
+        assert!(!in_flight().iter().any(|(id, _, _)| id == "early-attempt"));
     }
 
     #[test]
@@ -5013,6 +7680,42 @@ mod tests {
             run_installed_with("quit-no-cli", Action::Stop, &stack, quit),
             Err(Failure::Unavailable)
         );
+    }
+
+    #[test]
+    fn required_cli_work_preempts_background_attribution() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_preempts_background_attribution",
+        ) {
+            return;
+        }
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let background = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, _| {
+                entered.send(()).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !cancel.requested() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(cancel.requested())
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        let cancelled = background.join().unwrap().unwrap();
+        assert!(
+            cancelled,
+            "required account checks waited for optional telemetry"
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 
     #[test]
@@ -5141,7 +7844,7 @@ mod tests {
         assert_eq!(list_installed("list-during-stop"), Err(Failure::Cancelled));
         // The shutdown's own stop is the one call allowed through; this build then has no CLI.
         assert_eq!(
-            stop_for_shutdown("the-shutdown", &stack, Limits::for_quit()),
+            stop_for_shutdown("the-shutdown", &stack, ShutdownBy::Stop, Limits::for_quit()),
             Err(Failure::Unavailable)
         );
         let second = closing_for_stop();
@@ -5159,20 +7862,22 @@ mod tests {
     }
 
     #[test]
-    fn quitting_closes_for_good_and_cancels_a_stop_in_progress() {
+    fn quitting_closes_for_good_and_leaves_a_stop_in_progress_to_finish() {
         if crate::test_support::isolated_process(
-            "local_eval::tests::quitting_closes_for_good_and_cancels_a_stop_in_progress",
+            "local_eval::tests::quitting_closes_for_good_and_leaves_a_stop_in_progress_to_finish",
         ) {
             return;
         }
         let stack = StackId::parse("local-abc123").unwrap();
         let stopping = closing_for_stop();
-        let stops = Attempt::register_for_shutdown("stop-in-progress");
+        let stops = Attempt::register_for_shutdown("stop-in-progress", ShutdownBy::Stop);
         close_for_quit();
         assert!(
-            stops.0.requested(),
-            "Quit does not wait behind Stop's own stop"
+            !stops.0.requested(),
+            "Quit cut a Stop's stop of the stack short"
         );
+        // It ended without answering, so Quit runs its own.
+        drop(stops);
         drop(stopping);
         drop(closing_for_stop());
         assert_eq!(
@@ -5180,9 +7885,138 @@ mod tests {
             Err(Failure::Cancelled)
         );
         assert_eq!(
-            stop_for_shutdown("quit-shutdown", &stack, Limits::for_quit()),
+            stop_for_shutdown(
+                "quit-shutdown",
+                &stack,
+                ShutdownBy::Quit,
+                Limits::for_quit()
+            ),
             Err(Failure::Unavailable)
         );
+        // Once quitting, a Stop's own stop is refused: Quit stops the stack itself.
+        assert_eq!(
+            stop_for_shutdown(
+                "stop-after-quit",
+                &stack,
+                ShutdownBy::Stop,
+                Limits::for_quit()
+            ),
+            Err(Failure::Cancelled)
+        );
+    }
+
+    /// Who may cancel what (`Kind`): Stop and Quit cancel only the window's calls. Nothing, not a
+    /// Stop, a Quit, or a cancel sent for its id, cancels a stop of the stack, a Stop's or Quit's.
+    #[test]
+    fn nothing_cancels_a_stop_of_the_stack() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::nothing_cancels_a_stop_of_the_stack",
+        ) {
+            return;
+        }
+        cancel("quit-own");
+        cancel("stop-own");
+        let window = Attempt::register("window-call");
+        let stop_own = Attempt::register_for_shutdown("stop-own", ShutdownBy::Stop);
+        let quit_own = Attempt::register_for_shutdown("quit-own", ShutdownBy::Quit);
+        assert!(!stop_own.0.requested(), "a cancel sent ahead for its id");
+        assert!(!quit_own.0.requested(), "a cancel sent ahead for its id");
+
+        let stopping = closing_for_stop();
+        cancel_all();
+        assert!(window.0.requested());
+        // A second Stop's own stop, while the first's runs, is let through to wait its turn.
+        let second_stop = Attempt::register_for_shutdown("second-stop", ShutdownBy::Stop);
+        drop(stopping);
+        cancel("stop-own");
+        cancel("quit-own");
+        close_for_quit();
+        for (attempt, which) in [
+            (&stop_own, "a Stop's"),
+            (&second_stop, "a second Stop's"),
+            (&quit_own, "Quit's"),
+        ] {
+            assert!(
+                !attempt.0.requested(),
+                "{which} stop of the stack was cut short"
+            );
+        }
+        // Once quitting, a Stop's is refused before it starts: Quit stops the stack itself.
+        let late = Attempt::register_for_shutdown("late-stop", ShutdownBy::Stop);
+        assert!(late.0.requested());
+        assert!(
+            late.1.is_none(),
+            "Quit would wait for a stop that never runs"
+        );
+    }
+
+    fn completed() -> Report {
+        normalize(
+            Action::Stop,
+            0,
+            {
+                let mut done = envelope();
+                done["command"] = json!("local stop");
+                done.to_string()
+            }
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    /// Quit during a Stop's stop of the stack waits for it and answers with it, without running the
+    /// CLI again: a second `local stop` behind one cut short was what the CLI refused as busy.
+    #[test]
+    fn quit_waits_for_a_stops_stop_and_answers_with_it() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_waits_for_a_stops_stop_and_answers_with_it",
+        ) {
+            return;
+        }
+        let stack = StackId::parse("local-abc123").unwrap();
+        let stopping = Attempt::register_for_shutdown("stop-running", ShutdownBy::Stop);
+        // Held here, in STOPS and by the attempt: Quit holds one more while it waits.
+        let held = stopping.1.clone().unwrap();
+        close_for_quit();
+        let quitting = std::thread::spawn(move || {
+            stop_for_shutdown("quit-own", &stack, ShutdownBy::Quit, Limits::for_quit())
+        });
+        let until = Instant::now() + Duration::from_secs(30);
+        while Arc::strong_count(&held) < 4 {
+            assert!(
+                Instant::now() < until,
+                "Quit never waited for the Stop's stop"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!quitting.is_finished(), "Quit ran its own stop meanwhile");
+        stopping.answered(&Ok(completed()));
+        drop(stopping);
+        // This build has no CLI: an answer of Quit's own would be Unavailable.
+        assert_eq!(quitting.join().unwrap(), Ok(completed()));
+    }
+
+    /// When a Stop's stop of the stack outlasts Quit's bound, Quit says so and leaves it running.
+    #[test]
+    fn quit_says_when_a_stops_stop_outlasts_its_bound_and_leaves_it_running() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_says_when_a_stops_stop_outlasts_its_bound_and_leaves_it_running",
+        ) {
+            return;
+        }
+        let stack = StackId::parse("local-abc123").unwrap();
+        let stopping = Attempt::register_for_shutdown("stop-running", ShutdownBy::Stop);
+        close_for_quit();
+        assert_eq!(
+            stop_for_shutdown(
+                "quit-own",
+                &stack,
+                ShutdownBy::Quit,
+                short(Duration::from_millis(300))
+            ),
+            Err(Failure::Timeout)
+        );
+        assert!(!stopping.0.requested(), "Quit cut the Stop's stop short");
     }
 
     #[test]
@@ -5235,6 +8069,572 @@ mod tests {
             "the CLI's child outlived close_for_quit"
         );
         assert_eq!(call.join().unwrap(), Err(Failure::Cancelled));
+        drop(attempt);
+    }
+
+    /**
+    A back end like the one an interrupted `local update` leaves, with stand-ins for the programs
+    the CLI and the repair run, all keeping their state in files:
+
+    - `helm`, in the CLI's tool folder under its digest, as `cli_helm` finds it. `upgrade` with
+      `stopped.yaml` deletes the Learning Deployments and without it puts them back, as the chart
+      does; any upgrade of a release left `pending-upgrade` fails as Helm does; `rollback` deploys.
+    - `docker`, whose `exec <node> kubectl` answers `get deployment` and refuses to `scale` a
+      Deployment that is not there, with the NotFound the real one prints.
+    - the CLI, whose `local update` runs the update's steps in the CLI's order, against those two,
+      logging each to `cli.log` as the CLI does, and failing where the CLI fails.
+
+    Unix only: the stand-ins are shell scripts.
+    */
+    #[cfg(unix)]
+    struct UpdateWorld {
+        root: PathBuf,
+        state: PathBuf,
+        stack_dir: PathBuf,
+        cli: PinnedCli,
+    }
+
+    #[cfg(unix)]
+    impl UpdateWorld {
+        const STACK: &'static str = "local-abc123";
+
+        /// Sets this process's HOME and PATH: run only in an isolated test process.
+        fn new(label: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let root = temp_root(label);
+            let home = root.join("home");
+            let bin = root.join("bin");
+            let state = root.join("state");
+            for dir in [&home, &bin, &state] {
+                std::fs::create_dir_all(dir).unwrap();
+            }
+            std::env::set_var("HOME", &home);
+            std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+            std::env::set_var(
+                "PATH",
+                std::env::join_paths(
+                    std::iter::once(bin.clone())
+                        .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+                )
+                .unwrap(),
+            );
+            use_engine(&crate::engine::Address::new(
+                crate::engine::Engine::Docker,
+                None,
+            ));
+            let stack_dir = crate::local_update::stack_dir(Self::STACK).unwrap();
+            std::fs::create_dir_all(&stack_dir).unwrap();
+            for file in [
+                "kubeconfig",
+                "values.yaml",
+                "values-local-evaluation.yaml",
+                "intelligence-0.16.0-rc.10.tgz",
+                "stopped.yaml",
+            ] {
+                std::fs::write(stack_dir.join(file), file).unwrap();
+            }
+            // What the CLI records for the update it runs. The licence is not read.
+            std::fs::write(
+                stack_dir.join("install.json"),
+                json!({
+                    "licenseToken": SECRET,
+                    "chart": stack_dir.join("intelligence-0.16.0-rc.10.tgz"),
+                    "profile": stack_dir.join("values-local-evaluation.yaml"),
+                    "directory": stack_dir,
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let (os, arch) = crate::local_update::platform();
+            let download = b"helm-archive";
+            let tools = stack_dir.parent().unwrap().join("tools").join(format!(
+                "helm-3.17.3-{os}-{arch}-{}",
+                Sha256::digest(download)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ));
+            std::fs::create_dir_all(&tools).unwrap();
+            std::fs::write(tools.join("download"), download).unwrap();
+            let s = state.display();
+            let script = |path: &Path, body: String| {
+                std::fs::write(path, format!("#!/bin/sh\nS='{s}'\n{body}")).unwrap();
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            };
+            script(
+                &tools.join("helm"),
+                r#"echo "helm $*" >> "$S/calls"
+case "$1" in
+  list)
+    printf '[{"name":"cpki","namespace":"default","revision":"5","status":"%s","chart":"intelligence-0.16.0-rc.10"}]\n' "$(cat "$S/status")" ;;
+  history)
+    printf '[{"revision":3,"status":"superseded"},{"revision":4,"status":"deployed"},{"revision":5,"status":"%s"}]\n' "$(cat "$S/status")" ;;
+  rollback)
+    echo deployed > "$S/status" ;;
+  upgrade)
+    case "$(cat "$S/status")" in
+      pending-*) echo "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2; exit 1 ;;
+    esac
+    # An upgrade that fails leaves its revision `failed`, as Helm does.
+    case "$*" in
+      *stopped.yaml*)
+        if [ -e "$S/fail-install-once" ]; then
+          rm "$S/fail-install-once"
+          echo failed > "$S/status"
+          echo "Error: UPGRADE FAILED: context deadline exceeded" >&2
+          exit 1
+        fi ;;
+    esac
+    case "$*" in
+      *stopped.yaml*) echo cpki-app-api > "$S/deployments" ;;
+      *) printf 'cpki-app-api\ncpki-learning-reconciler\ncpki-learning-agent\n' > "$S/deployments" ;;
+    esac
+    echo deployed > "$S/status" ;;
+  *) exit 1 ;;
+esac
+"#
+                .to_owned(),
+            );
+            script(
+                &bin.join("docker"),
+                r#"echo "docker $*" >> "$S/calls"
+[ "$1" = exec ] || exit 1
+shift
+[ "$1" = -i ] && shift
+shift
+[ "$1" = kubectl ] || exit 1
+shift
+case "$1 $2" in
+  "get node")
+    cat "$S/unschedulable" 2>/dev/null || printf false
+    exit 0 ;;
+  "uncordon "*)
+    printf false > "$S/unschedulable"
+    echo "node/$2 uncordoned"
+    exit 0 ;;
+  "get jobs")
+    echo '{"items":[]}'
+    exit 0 ;;
+esac
+case "$1" in
+  get)
+    for name in cpki-learning-reconciler cpki-learning-agent; do
+      grep -qx "$name" "$S/deployments" && echo "deployment.apps/$name"
+    done
+    exit 0 ;;
+  scale)
+    for argument in "$@"; do
+      case "$argument" in
+        deployment/*)
+          name="${argument#deployment/}"
+          grep -qx "$name" "$S/deployments" || { echo "Error from server (NotFound): deployments.apps \"$name\" not found" >&2; exit 1; } ;;
+      esac
+    done
+    exit 0 ;;
+esac
+exit 1
+"#
+                .to_owned(),
+            );
+            let completed = {
+                let mut updated = envelope();
+                updated["command"] = json!("local update");
+                updated["stack"]["installedRelease"] = json!("0.16.0-rc.10");
+                updated.to_string()
+            };
+            let helm = tools.join("helm");
+            let chart = stack_dir.join("intelligence-0.16.0-rc.10.tgz");
+            let stopped = stack_dir.join("stopped.yaml");
+            let node = format!("k3d-{}-server-0", Self::STACK);
+            let program = root.join("copilotkit");
+            script(
+                &program,
+                format!(
+                    r#"echo "cli $*" >> "$S/calls"
+[ "$2" = update ] || exit 3
+mkdir -p "$HOME/.copilotkit"
+step() {{ printf '{{"level":30,"event":"local.step","step":"%s","outcome":"succeeded"}}\n' "$1" >> "$HOME/.copilotkit/cli.log"; }}
+fail() {{
+  printf '{{"level":50,"event":"local.step","step":"%s","outcome":"failed"}}\n' "$1" >> "$HOME/.copilotkit/cli.log"
+  printf '{{"version":1,"command":"local update","status":"failed","stack":null,"nextAction":null,"error":{{"code":"LOCAL_COMMAND_FAILED","message":"Local %s failed (exit 1)."}},"diagnostics":[]}}' "$1"
+  exit 1
+}}
+[ -e "$S/cordon-on-start" ] && printf true > "$S/unschedulable"
+step secrets-apply
+sleep "$(cat "$S/quiesce-seconds" 2>/dev/null || echo 0)"
+docker exec -i {node} kubectl scale deployment/cpki-app-api deployment/cpki-learning-reconciler --replicas=0 || fail update-quiesce
+step update-quiesce
+docker exec -i {node} kubectl scale deployment/cpki-learning-agent --replicas=0 || fail update-agent-stop
+step update-agent-stop
+step update-agent-wait
+'{helm}' upgrade --install cpki '{chart}' -f '{stopped}' --no-hooks || fail dependencies-install
+step dependencies-install
+sleep "$(cat "$S/wait-seconds" 2>/dev/null || echo 0)"
+# Held here, when a test asks, until it lets the update go on: two minutes at most.
+held=0
+while [ -e "$S/hold" ] && [ ! -e "$S/go-on" ] && [ "$held" -lt 2400 ]; do held=$((held + 1)); sleep 0.05; done
+# The databases' rollout: nothing schedules on a cordoned node. The real wait is ten minutes.
+tries=0
+while [ "$(cat "$S/unschedulable" 2>/dev/null)" = true ]; do
+  tries=$((tries + 1))
+  [ "$tries" -gt 100 ] && fail dependencies-wait
+  sleep 0.2
+done
+step dependencies-wait
+'{helm}' upgrade cpki '{chart}' --no-hooks || fail services-start
+step services-start
+touch "$S/finished"
+printf '%s' '{completed}'
+"#,
+                    helm = helm.display(),
+                    chart = chart.display(),
+                    stopped = stopped.display(),
+                ),
+            );
+            let cli = PinnedCli::verify(
+                &Pin {
+                    path: program.clone(),
+                    sha256: sha256(&program),
+                },
+                None,
+            )
+            .unwrap();
+            let world = Self {
+                root,
+                state,
+                stack_dir,
+                cli,
+            };
+            world.set("status", "deployed");
+            world.set(
+                "deployments",
+                "cpki-app-api\ncpki-learning-reconciler\ncpki-learning-agent\n",
+            );
+            world
+        }
+
+        fn set(&self, name: &str, value: &str) {
+            std::fs::write(self.state.join(name), value).unwrap();
+        }
+
+        fn calls(&self) -> Vec<String> {
+            std::fs::read_to_string(self.state.join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        }
+
+        fn finished(&self) -> bool {
+            self.state.join("finished").exists()
+        }
+
+        /// `local update` as the window runs it, through `run_with`.
+        fn update(&self, attempt: &str, cancel: &Cancel) -> Result<Report, Failure> {
+            let limits = short(Duration::from_secs(120));
+            run_with(
+                &self.cli,
+                attempt,
+                Action::Update,
+                &StackId::parse(Self::STACK).unwrap(),
+                (limits, limits),
+                cancel,
+                crate::local_images::Limits::standard(),
+            )
+        }
+
+        fn cli_log_has(&self, step: &str) -> bool {
+            std::fs::read_to_string(crate::local_update::cli_log().unwrap())
+                .unwrap_or_default()
+                .contains(&format!("\"step\":\"{step}\",\"outcome\":\"succeeded\""))
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for UpdateWorld {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /**
+    AN UPDATE QUIT STOPPED PARTWAY IS REPAIRED, AND THE NEXT ONE FINISHES.
+
+    Found on OpenBot Desktop, 0.16.0-rc.9 to rc.10: Quit stopped `local update` after its first
+    `helm upgrade`, which had deleted the Learning Deployments. Every Start after that failed in
+    under a second with "Local update-quiesce failed (exit 1)", the CLI scaling a Deployment that
+    was gone. Here the update fails exactly so, the repair applies the update's chart without hooks,
+    which puts them back, and the one retry runs to the end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn an_update_stopped_partway_is_repaired_and_the_retry_finishes() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_update_stopped_partway_is_repaired_and_the_retry_finishes",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-repaired");
+        // As the stopped update left it: its stopped.yaml upgrade done, Learning deleted.
+        world.set("deployments", "cpki-app-api\n");
+
+        let report = world.update("repaired-update", &Cancel::default()).unwrap();
+
+        assert_eq!(report.outcome, Outcome::Completed, "{:?}", world.calls());
+        assert!(world.finished());
+        let calls = world.calls();
+        let updates = calls
+            .iter()
+            .filter(|call| call.starts_with("cli local update"))
+            .count();
+        assert_eq!(updates, 2, "one failed update, one retry: {calls:?}");
+        let repair = calls
+            .iter()
+            .find(|call| call.starts_with("helm upgrade cpki ") && call.contains("--no-hooks"))
+            .unwrap_or_else(|| panic!("no repair upgrade: {calls:?}"));
+        let chart = world.stack_dir.join("intelligence-0.16.0-rc.10.tgz");
+        assert!(
+            repair.contains(&chart.canonicalize().unwrap().display().to_string()),
+            "the update's own chart: {repair}"
+        );
+        assert!(repair.contains("values.yaml") && !repair.contains("stopped.yaml"));
+        assert!(repair.contains(&format!(
+            "--kubeconfig {}",
+            world.stack_dir.join("kubeconfig").display()
+        )));
+        assert!(
+            !calls.iter().any(|call| call.starts_with("helm rollback")),
+            "a deployed release is not rolled back: {calls:?}"
+        );
+    }
+
+    /**
+    A RELEASE QUIT LEFT `pending-upgrade` IS ROLLED BACK, AND THE NEXT UPDATE FINISHES.
+
+    Quit that stops Helm itself leaves the release pending, and every later `helm upgrade` refuses
+    with "another operation (install/upgrade/rollback) is in progress". The repair rolls it back
+    to its last deployed revision, and the one retry runs to the end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn a_release_left_pending_is_rolled_back_and_the_retry_finishes() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_release_left_pending_is_rolled_back_and_the_retry_finishes",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-pending");
+        world.set("status", "pending-upgrade");
+
+        let report = world.update("pending-update", &Cancel::default()).unwrap();
+
+        assert_eq!(report.outcome, Outcome::Completed, "{:?}", world.calls());
+        assert!(world.finished());
+        let calls = world.calls();
+        let rollback = calls
+            .iter()
+            .position(|call| call.starts_with("helm rollback cpki 4 --no-hooks"))
+            .unwrap_or_else(|| panic!("not rolled back to the deployed revision: {calls:?}"));
+        let retry = calls
+            .iter()
+            .rposition(|call| call.starts_with("cli local update"))
+            .unwrap();
+        assert!(rollback < retry, "rolled back before the retry: {calls:?}");
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.starts_with("cli local update"))
+                .count(),
+            2
+        );
+    }
+
+    /**
+    A RELEASE AN UPDATE LEFT `failed` IS NOT REPAIRED, AND THE NEXT UPDATE FINISHES ON IT.
+
+    Found in a dogfooding report, 0.16.0-rc.10 to rc.11: the update's first `helm upgrade`
+    (`dependencies-install`) failed once, after `update-quiesce` had paused the services. Helm marks
+    that revision `failed`, and Helm 3 upgrades such a release from its last deployed revision, so
+    there is nothing to roll back or put back: the update is left to fail as it did, and the
+    window's next one (on Retry) runs to the end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn a_release_an_update_left_failed_is_not_repaired_and_the_next_update_finishes() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_release_an_update_left_failed_is_not_repaired_and_the_next_update_finishes",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-failed-release");
+        world.set("fail-install-once", "");
+
+        let first = world.update("failed-update", &Cancel::default()).unwrap();
+
+        assert_eq!(first.outcome, Outcome::Failed, "{:?}", world.calls());
+        assert!(!world.finished());
+        let calls = world.calls();
+        assert!(
+            calls.iter().any(|call| call.starts_with("helm list")),
+            "the repair looked at the release: {calls:?}"
+        );
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.starts_with("helm rollback") || call.contains("values.yaml")),
+            "a failed release is neither rolled back nor re-applied: {calls:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.starts_with("cli local update"))
+                .count(),
+            1,
+            "nothing repaired, so not retried here: {calls:?}"
+        );
+
+        let next = world.update("next-update", &Cancel::default()).unwrap();
+
+        assert_eq!(next.outcome, Outcome::Completed, "{:?}", world.calls());
+        assert!(world.finished());
+        assert!(
+            !world
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("helm rollback")),
+            "{:?}",
+            world.calls()
+        );
+    }
+
+    /**
+    A NODE LEFT CORDONED IS UNCORDONED, SO THE UPDATE'S DATABASES CAN START.
+
+    Found on a Mac: the update hung for minutes in `dependencies-wait`, the database, Redis and
+    object storage pods in `FailedScheduling: 0/1 nodes are available: 1 node(s) were
+    unschedulable`. k3s marks its node unschedulable as `local stop` stops it, and the CLI starts
+    the node again inside `local update`. Here the node comes up cordoned once the update has
+    started, as it did there, and the update's watch uncordons it while the CLI waits.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn a_node_left_cordoned_is_uncordoned_while_the_update_waits_on_it() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_node_left_cordoned_is_uncordoned_while_the_update_waits_on_it",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-cordoned");
+        world.set("unschedulable", "true");
+        world.set("cordon-on-start", "");
+
+        let report = world.update("cordoned-update", &Cancel::default()).unwrap();
+
+        assert_eq!(report.outcome, Outcome::Completed, "{:?}", world.calls());
+        let calls = world.calls();
+        let started = calls
+            .iter()
+            .position(|call| call.starts_with("cli local update"))
+            .unwrap();
+        let uncordons: Vec<usize> = calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| call.contains("kubectl uncordon k3d-local-abc123-server-0"))
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            uncordons.first().is_some_and(|first| *first < started),
+            "a cordoned node is uncordoned before the update: {calls:?}"
+        );
+        assert!(
+            uncordons.iter().any(|index| *index > started),
+            "and again while the update waits on it: {calls:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.starts_with("cli local update"))
+                .count(),
+            1,
+            "no retry was needed: {calls:?}"
+        );
+    }
+
+    /**
+    QUIT LETS AN UPDATE THAT HAS BEGUN CHANGING THE RELEASE FINISH.
+
+    Quit used to stop `local update` wherever it was: SIGTERM, then SIGKILL five seconds later,
+    mid-Helm. That is what left the stacks above. Before its first `helm upgrade` an update is
+    still stopped (here by Cancel, which takes the same path); from `update-agent-wait` on, Quit
+    waits for it, says so once, and the update runs to its end.
+    */
+    #[test]
+    #[cfg(unix)]
+    fn quit_lets_an_update_past_its_first_helm_step_finish() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::quit_lets_an_update_past_its_first_helm_step_finish",
+        ) {
+            return;
+        }
+        let world = UpdateWorld::new("update-quit");
+        // Waits for `done` while the update runs, however long a busy computer takes; an update
+        // that ends first, as its own limits end it, never got there.
+        let wait_for = |what: &str, ended: &dyn Fn() -> bool, done: &dyn Fn() -> bool| {
+            while !done() {
+                assert!(!ended() || done(), "the update ended before {what}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+
+        // Before Helm: stopped, in the pause before `update-quiesce`, which it never ends.
+        world.set("quiesce-seconds", "120");
+        let early = Attempt::register("update-before-helm");
+        let stopped = std::thread::scope(|scope| {
+            let call = scope.spawn(|| world.update("update-before-helm", &early.0));
+            wait_for("secrets-apply", &|| call.is_finished(), &|| {
+                world.cli_log_has("secrets-apply")
+            });
+            assert!(!update_finishing());
+            cancel("update-before-helm");
+            call.join().unwrap()
+        });
+        assert_eq!(stopped, Err(Failure::Cancelled));
+        // Stopped in the pause, not after it: the step that follows it never ran.
+        let calls = world.calls();
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.contains("kubectl scale deployment/cpki-app-api")),
+            "the update ran past its pause before it was stopped: {calls:?}"
+        );
+        assert!(!world.finished());
+        drop(early);
+
+        // Past its first Helm step: Quit waits for it. The update is held there until Quit says
+        // it is waiting, so it is still running when Quit comes however slow the computer.
+        world.set("quiesce-seconds", "0");
+        world.set("hold", "");
+        let attempt = Attempt::register("update-during-quit");
+        let (finished, said, waited) = std::thread::scope(|scope| {
+            let call = scope.spawn(|| world.update("update-during-quit", &attempt.0));
+            wait_for(
+                "the update past update-agent-wait",
+                &|| call.is_finished(),
+                &update_finishing,
+            );
+            assert!(!world.finished(), "still running when Quit comes");
+            let mut said = 0;
+            let waited = close_for_quit_reporting(|| {
+                said += 1;
+                world.set("go-on", "");
+            });
+            (call.join().unwrap(), said, waited)
+        });
+        assert!(waited, "Quit waited for the update");
+        assert_eq!(said, 1, "and said so once");
+        assert!(world.finished(), "the update ran to its end");
+        assert_eq!(finished.unwrap().outcome, Outcome::Completed);
+        assert!(!update_finishing());
         drop(attempt);
     }
 
@@ -5618,6 +9018,34 @@ mod tests {
         ));
     }
 
+    /// With the person's own machine passed over (`engine::passed_over_machine`), OpenBot runs on
+    /// its own, and the CLI is told that machine's API and connection. The machine behind Podman's
+    /// default connection, which is the person's, is never the one asked about.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn the_cli_is_told_openbots_own_machine_and_never_the_default_one() {
+        use crate::acquire::MachineFacts;
+        use crate::engine::{Address, Engine};
+        let pipe = "npipe:////./pipe/podman-openbot";
+        let address = Address::new(Engine::Podman, Some("openbot-root".into()));
+        let mut asked = Vec::new();
+        let engine = CliEngine::of_with(&address, |connection| {
+            asked.push(connection.to_string());
+            Ok(MachineFacts {
+                rootful: Some(true),
+                api: Some(pipe.into()),
+            })
+        });
+        assert_eq!(asked, ["openbot-root"]);
+        assert!(!engine.rootless);
+        let variables = engine_variables(Some(&engine));
+        assert_eq!(variables.get("DOCKER_HOST"), Some(&Some(pipe.to_string())));
+        assert_eq!(
+            variables.get("CONTAINER_CONNECTION"),
+            Some(&Some("openbot-root".to_string()))
+        );
+    }
+
     #[test]
     fn a_rootless_podman_declines_setup_start_and_update_and_nothing_else() {
         use crate::engine::Engine;
@@ -5681,6 +9109,7 @@ mod tests {
             Failure::InvalidAcceptance,
             Failure::RootlessPodman,
             Failure::DownloadStalled,
+            Failure::BelowSecurityFloor,
         ];
         // Adding a variant without listing it above stops compiling here.
         for failure in all {
@@ -5702,7 +9131,8 @@ mod tests {
                 | Failure::UnexpectedExit
                 | Failure::InvalidAcceptance
                 | Failure::RootlessPodman
-                | Failure::DownloadStalled => {}
+                | Failure::DownloadStalled
+                | Failure::BelowSecurityFloor => {}
             }
             let name = serde_json::to_string(&failure).unwrap();
             assert!(window.contains(&name), "localEvalCli.ts is missing {name}");
@@ -5789,7 +9219,22 @@ fn main() {
     std::fs::write(dir.join("argv"), args.join("\n")).unwrap();
     std::fs::write(dir.join("cwd"), std::env::current_dir().unwrap().display().to_string()).unwrap();
     let inherited = |name: &str| format!("{name}={}", std::env::var(name).is_ok());
-    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK")].join("\n")).unwrap();
+    std::fs::write(dir.join("env"), [inherited("NODE_OPTIONS"), inherited("HOME"), inherited("DO_NOT_TRACK"), inherited("COPILOTKIT_TELEMETRY_DISABLED")].join("\n")).unwrap();
+    std::fs::write(dir.join("git-ceiling"), std::env::var_os("GIT_CEILING_DIRECTORIES").map(|value| value.to_string_lossy().into_owned()).unwrap_or_default()).unwrap();
+    // The CLI's own question before connect writes the key (`ensureCredentialEnvIgnored`), asked
+    // with the real git named in `git-check`, in this folder and this environment. Only the
+    // person's global excludes file is left out, so the answer is the repository's alone.
+    if let Ok(git) = std::fs::read_to_string(dir.join("git-check")) {
+        let code = std::process::Command::new(git.trim())
+            .args(["-c", "core.excludesFile=", "check-ignore", "--quiet", "--", ".env.example"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .code()
+            .unwrap_or(-1);
+        std::fs::write(dir.join("git-checked"), code.to_string()).unwrap();
+    }
     let scenario = std::fs::read_to_string(dir.join("scenario")).unwrap();
     let (mode, body) = scenario.split_once('\n').unwrap_or((scenario.as_str(), ""));
     match mode {
@@ -5811,6 +9256,27 @@ fn main() {
             std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+        // `login --json` signing in with a device code, as the CLI does: it shows the code an
+        // earlier `login` left waiting (`pending-device-code.json`, `resumed`), or issues a new one
+        // and saves it there, then waits for the approval. Stopped mid-wait, it leaves the code
+        // saved; only a `login` that ends by itself forgets it.
+        "device" => {
+            let pending = dir.join("pending-device-code.json");
+            let (code, resumed) = match std::fs::read_to_string(&pending) {
+                Ok(code) => (code, true),
+                Err(_) => {
+                    let issued: usize = std::fs::read_to_string(dir.join("issued")).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0) + 1;
+                    std::fs::write(dir.join("issued"), issued.to_string()).unwrap();
+                    let code = format!("CODE-{issued:04}");
+                    std::fs::write(&pending, &code).unwrap();
+                    (code, false)
+                }
+            };
+            println!("{{\"type\":\"authentication_url\",\"url\":\"https://dashboard.copilotkit.ai/cli-auth/device?user_code={code}\",\"user_code\":\"{code}\",\"resumed\":{resumed}}}");
+            std::io::stdout().flush().unwrap();
+            std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
         // Like the real CLI, which forwards SIGTERM to its children instead of exiting: only
         // SIGKILL stops it.
         "stubborn" => {
@@ -5827,6 +9293,23 @@ fn main() {
             std::fs::write(dir.join("grandchild.tmp"), grandchild.id().to_string()).unwrap();
             std::fs::rename(dir.join("grandchild.tmp"), dir.join("grandchild")).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+        // One answer per call, in turn, the last one again once they run out: `code\nbody`
+        // blocks separated by a line of `---`.
+        "sequence" => {
+            let asked: usize = std::fs::read_to_string(dir.join("calls")).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+            std::fs::write(dir.join("calls"), (asked + 1).to_string()).unwrap();
+            let answers: Vec<&str> = body.split("\n---\n").collect();
+            let (code, said) = answers[asked.min(answers.len() - 1)].split_once('\n').unwrap();
+            print!("{said}");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(code.parse().unwrap());
+        }
+        // A valid machine response can precede the CLI's bounded telemetry flush.
+        "flush" => {
+            print!("{body}");
+            std::io::stdout().flush().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2300));
         }
         "flood" => {
             let chunk = vec![b' '; 65536];
@@ -5941,6 +9424,138 @@ fn main() {{
         }
     }
 
+    /**
+    THE EC2 MAC PASS, FINDING B: a first setup that stopped in its image download is resumed once.
+
+    After "Resize my Podman", the first setup made its node and then every image pull failed at
+    60.5 s, containerd's 30 s to connect to the mirror and 30 s to the registry, and the person saw
+    "Local image-download failed (exit 1)". One Retry finished it. Here a stand-in CLI answers as
+    that CLI did: no stack for the folder, then a setup that fails at `image-download` and leaves
+    the stack on record with that step, then a setup that completes. The person's one setup now
+    completes, by resuming the stack once as Retry does.
+    */
+    #[test]
+    fn a_first_setup_that_stopped_in_its_download_is_resumed_once() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_first_setup_that_stopped_in_its_download_is_resumed_once",
+        ) {
+            return;
+        }
+        let root = temp_root("first-setup-download-resumed");
+        std::fs::create_dir_all(&root).unwrap();
+        // Answers by command, in turn: `<command>-<n>` beside the program, the exit code on its
+        // first line and what it prints after. Every argument list is written to `copilotkit-argv`.
+        let source = root.join("copilotkit.rs");
+        std::fs::write(
+            &source,
+            r#"
+use std::io::Write;
+fn main() {
+    let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("copilotkit-argv")).unwrap();
+    writeln!(log, "{}", args.join(" ")).unwrap();
+    let command = if args.iter().any(|a| a == "list") { "list" } else if args.iter().any(|a| a == "setup") { "setup" } else { "other" };
+    let counter = dir.join(format!("{command}-count"));
+    let turn = std::fs::read_to_string(&counter).ok().and_then(|n| n.trim().parse::<u32>().ok()).unwrap_or(0) + 1;
+    std::fs::write(&counter, turn.to_string()).unwrap();
+    let answer = std::fs::read_to_string(dir.join(format!("{command}-{turn}"))).unwrap_or_else(|_| "1\n".to_string());
+    let (code, body) = answer.split_once('\n').unwrap();
+    print!("{body}");
+    std::io::stdout().flush().unwrap();
+    std::process::exit(code.parse().unwrap());
+}
+"#,
+        )
+        .unwrap();
+        let program = root.join(format!("copilotkit{}", std::env::consts::EXE_SUFFIX));
+        compile_fixture(&source, &program);
+        // An engine that answers nothing: no node is seen, and nothing is downloaded by OpenBot.
+        let engine_source = root.join("docker.rs");
+        std::fs::write(&engine_source, "fn main() { std::process::exit(1); }\n").unwrap();
+        compile_fixture(
+            &engine_source,
+            &root.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+        );
+        let entry = root.join("index.js");
+        std::fs::write(
+            &entry,
+            include_str!("../test-fixtures/local-images/cli-48a3863-excerpt.txt"),
+        )
+        .unwrap();
+        let cli = PinnedCli {
+            program,
+            entry: Some(entry),
+            sha256: String::new(),
+        };
+        let images = cli_images_of(&cli).expect("the bundle is read");
+        std::env::set_var("PATH", &root);
+        use_engine(&crate::engine::Address::new(
+            crate::engine::Engine::Docker,
+            None,
+        ));
+        let installation = root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        let answer = |name: &str, code: i32, body: Value| {
+            std::fs::write(root.join(name), format!("{code}\n{body}")).unwrap();
+        };
+        // No stack for the folder yet: a first setup.
+        answer("list-1", 0, listing(json!([])));
+        // The setup the EC2 Mac saw: the node made, then every pull failed.
+        answer(
+            "setup-1",
+            1,
+            json!({
+                "version": 1,
+                "command": "local setup",
+                "status": "failed",
+                "error": {
+                    "code": "LOCAL_COMMAND_FAILED",
+                    "message": "Local image-download failed (exit 1). Run `copilotkit local status` and retry the failed step."
+                },
+                "nextAction": { "reason": "local_command_failed", "resumeCommand": null },
+                "diagnostics": []
+            }),
+        );
+        // The stack the CLI recorded for the folder, stopped at that step.
+        let mut recorded = listed_stack("local-abc123");
+        recorded["installedRelease"] = json!(images.release);
+        recorded["step"] = json!("cluster");
+        recorded["failedStep"] = json!("image-download");
+        recorded["appPaths"] = json!([{
+            "path": installation.canonicalize().unwrap(),
+            "missing": false
+        }]);
+        answer("list-2", 0, listing(json!([recorded])));
+        let mut completed = envelope();
+        completed["command"] = json!("local setup");
+        answer("setup-2", 0, completed);
+
+        let limits = Limits::for_setup();
+        let report = setup_with(
+            &cli,
+            "first-setup-download-resumed",
+            &installation,
+            None,
+            (limits, limits),
+            &Cancel::default(),
+            crate::local_images::Limits::standard(),
+        )
+        .expect("a report");
+        let ran: Vec<String> = std::fs::read_to_string(root.join("copilotkit-argv"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                ["list", "setup"]
+                    .into_iter()
+                    .find(|command| line.split(' ').any(|word| word == *command))
+                    .map(str::to_owned)
+            })
+            .collect();
+        assert_eq!(report.outcome, Outcome::Completed, "ran {ran:?}");
+        assert_eq!(ran, ["list", "setup", "list", "setup"]);
+    }
+
     fn compiled() -> &'static Path {
         static BINARY: OnceLock<PathBuf> = OnceLock::new();
         BINARY.get_or_init(|| {
@@ -6023,6 +9638,12 @@ fn main() {{
             let root = temp_root(label);
             std::fs::create_dir_all(&root).unwrap();
             let program = root.join(format!("cli{}", std::env::consts::EXE_SUFFIX));
+            // On Linux, another test's fork can inherit fs::copy's writable descriptor
+            // until exec, even after copy returns. Executing that inode then fails ETXTBSY.
+            // The fixture binary is immutable; link it without opening a new write handle.
+            #[cfg(target_os = "linux")]
+            std::fs::hard_link(compiled(), &program).unwrap();
+            #[cfg(not(target_os = "linux"))]
             std::fs::copy(compiled(), &program).unwrap();
             std::fs::write(root.join("scenario"), scenario).unwrap();
             assert!(warm_copied_program(&program).success());
@@ -6042,6 +9663,13 @@ fn main() {{
 
         fn argv(&self) -> Option<String> {
             std::fs::read_to_string(self.root.join("argv")).ok()
+        }
+
+        /// How many times a `sequence` scenario was called.
+        fn calls(&self) -> usize {
+            std::fs::read_to_string(self.root.join("calls"))
+                .map(|n| n.trim().parse().unwrap())
+                .unwrap_or(0)
         }
 
         /// The folder the program ran in, resolved: Windows reports the temporary folder by its
@@ -6109,6 +9737,171 @@ fn main() {{
             grace: Duration::from_millis(500),
             output: MAX_OUTPUT,
         }
+    }
+
+    #[test]
+    fn fixture_executables_keep_scenarios_and_cleanup_independent() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let signed_out = Fixture::new(
+            "telemetry-fixture-signed-out",
+            "0\n{\"type\":\"signed_out\"}",
+        );
+        let skipped = Fixture::new("telemetry-fixture-skipped", "0\n{\"type\":\"skipped\"}");
+        assert_eq!(
+            link_telemetry(
+                &signed_out.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+        drop(signed_out);
+        assert_eq!(
+            link_telemetry(
+                &skipped.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::Skipped)
+        );
+        assert!(compiled().is_file());
+    }
+
+    #[test]
+    fn telemetry_process_uses_fixed_arguments_and_ignores_stderr() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let account = "a".repeat(64);
+        for bound in [None, Some(account.as_str())] {
+            let fixture = Fixture::new(
+                "telemetry-process",
+                &format!("0\n{{\"type\":\"account\",\"account_id\":\"{account}\"}}\n"),
+            );
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    bound,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Ok(TelemetryIdentity::Account {
+                    account_id: account.clone()
+                })
+            );
+            let mut expected = format!(
+                "telemetry\nlink\n--installation-id\n{}\n--json",
+                installation.as_str()
+            );
+            if let Some(bound) = bound {
+                expected.push_str(&format!("\n--account-id\n{bound}"));
+            }
+            assert_eq!(fixture.argv(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn telemetry_process_refuses_failed_and_old_cli_without_exposing_output() {
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        for body in ["private upstream failure", "Unknown telemetry subcommand"] {
+            let fixture = Fixture::new("telemetry-old-cli", &format!("1\n{body}"));
+            assert_eq!(
+                link_telemetry(
+                    &fixture.cli(),
+                    &installation,
+                    None,
+                    telemetry_link_limits(),
+                    &Cancel::default()
+                ),
+                Err(Failure::UnexpectedExit)
+            );
+        }
+    }
+
+    #[test]
+    fn telemetry_process_keeps_a_valid_response_while_cli_finishes_flushing() {
+        let fixture = Fixture::new("telemetry-flush", "flush\n{\"type\":\"signed_out\"}");
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        assert_eq!(
+            link_telemetry(
+                &fixture.cli(),
+                &installation,
+                None,
+                telemetry_link_limits(),
+                &Cancel::default()
+            ),
+            Ok(TelemetryIdentity::SignedOut)
+        );
+    }
+
+    #[test]
+    fn required_cli_work_stops_a_real_background_process_tree() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::required_cli_work_stops_a_real_background_process_tree",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new("telemetry-preempt", "stubborn");
+        let cli = fixture.cli();
+        let worker = std::thread::spawn(move || {
+            background_telemetry_call(|cancel, limits| {
+                link_telemetry(
+                    &cli,
+                    &Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap(),
+                    None,
+                    limits,
+                    cancel,
+                )
+            })
+        });
+        Fixture::wait_for_grandchild(&fixture.root);
+        let started = Instant::now();
+        assert_eq!(
+            one_at_a_time(
+                &Cancel::default(),
+                Limits::for_action(Action::Status),
+                |_| Ok(())
+            ),
+            Ok(())
+        );
+        assert_eq!(worker.join().unwrap(), Err(Failure::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "required work waited for the eight-second telemetry timeout"
+        );
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
+    }
+
+    #[test]
+    fn background_telemetry_defers_instead_of_queueing_behind_required_work() {
+        let _turn = hold_turn();
+        assert_eq!(
+            background_telemetry_call::<()>(|_, _| panic!("busy CLI must not run telemetry")),
+            Err(Failure::Cancelled)
+        );
+    }
+
+    #[test]
+    fn telemetry_process_bounds_startup_wait_and_kills_a_hung_cli() {
+        let limits = telemetry_link_limits();
+        // Each call remains bounded while leaving room for cold start, Ops and CLI flush.
+        assert!(limits.timeout + limits.grace <= Duration::from_millis(8250));
+        let fixture = Fixture::new("telemetry-timeout", "stubborn");
+        let cli = fixture.cli();
+        let installation = Installation::parse("ba7361bc-59d2-4ef3-b26c-476db6490ed7").unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            link_telemetry(&cli, &installation, None, limits, &Cancel::default()),
+            Err(Failure::Timeout)
+        );
+        // Allow scheduler overhead beyond the eight-second budget and kill grace.
+        assert!(started.elapsed() < Duration::from_secs(10));
+        #[cfg(unix)]
+        assert!(fixture.grandchild_stops());
     }
 
     #[test]
@@ -6260,6 +10053,77 @@ fn main() {{
         );
     }
 
+    /// `local start` as the CLI reports the engine refusing to start the back end's node: its
+    /// `podman start` (or `docker start`) exited 125.
+    fn start_refused_by_engine() -> String {
+        let mut refused: Value = serde_json::from_str(&start_failed()).unwrap();
+        refused["error"]["message"] = json!(
+            "Local start failed (exit 125). Run `copilotkit local status` and retry the failed step."
+        );
+        refused.to_string()
+    }
+
+    /**
+    Windows G: OpenBot quit, and opened again a few seconds later. `local start` failed in 0.3 s,
+    the engine refusing the node's start with exit 125, and the window said "Setup stopped partway
+    through with an error. Retry." Retry, a minute later, started it at once. The start is now asked
+    again, twice at most and within seconds, before its failure is the answer.
+    */
+    #[test]
+    fn a_start_the_engine_refuses_is_asked_again_before_it_fails() {
+        let refused = start_refused_by_engine();
+        let fixture = Fixture::new(
+            "local-eval-start-refused-once",
+            &format!("sequence\n1\n{refused}\n---\n0\n{}", start_completed()),
+        );
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Completed);
+        assert_eq!(fixture.calls(), 2);
+
+        // Refused every time: the failure, after the third ask, within the ceiling.
+        let fixture = Fixture::new(
+            "local-eval-start-refused-always",
+            &format!("sequence\n1\n{refused}"),
+        );
+        let started = Instant::now();
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(report.reason, Some(Reason::LocalCommandFailed));
+        assert_eq!(fixture.calls(), 3);
+        assert!(started.elapsed() < Duration::from_secs(30));
+
+        // Any other failure is the answer at once, as before.
+        let fixture = Fixture::new(
+            "local-eval-start-failed-otherwise",
+            &format!(
+                "sequence\n1\n{}\n---\n0\n{}",
+                start_failed(),
+                start_completed()
+            ),
+        );
+        let report = fixture
+            .run(
+                Action::Start,
+                short(Duration::from_secs(60)),
+                &Cancel::default(),
+            )
+            .unwrap();
+        assert_eq!(report.outcome, Outcome::Failed);
+        assert_eq!(fixture.calls(), 1);
+    }
+
     #[test]
     fn a_cancelled_call_stops_its_whole_tree() {
         let fixture = Fixture::new("local-eval-cancel", "sleep");
@@ -6346,6 +10210,33 @@ fn main() {{
             std::env::var_os("HOME").is_some(),
             "{env}"
         );
+    }
+
+    /// Share usage data turned off in Settings reaches the CLI as the variable it reads, though
+    /// nothing in the app's own environment set it.
+    #[test]
+    fn usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::usage_data_turned_off_in_settings_reaches_the_cli_as_its_opt_out",
+        ) {
+            return;
+        }
+        std::env::remove_var("COPILOTKIT_TELEMETRY_DISABLED");
+        let fixture = Fixture::new("local-eval-usage-data", &format!("0\n{}", envelope()));
+        let run = || {
+            fixture
+                .run(
+                    Action::Status,
+                    Limits::for_action(Action::Status),
+                    &Cancel::default(),
+                )
+                .unwrap();
+            std::fs::read_to_string(fixture.root.join("env")).unwrap()
+        };
+        assert!(run().contains("COPILOTKIT_TELEMETRY_DISABLED=false"));
+        crate::usage_data::set_off(true);
+        let env = run();
+        assert!(env.contains("COPILOTKIT_TELEMETRY_DISABLED=true"), "{env}");
     }
 
     fn listing(stacks: Value) -> Value {
@@ -6607,6 +10498,7 @@ fn main() {{
         assert_eq!(
             account_sign_in(
                 &current.cli(),
+                None,
                 Limits::for_account_sign_in(),
                 &Cancel::default(),
                 &mut |_| {}
@@ -6622,6 +10514,7 @@ fn main() {{
         assert_eq!(
             account_sign_in(
                 &older.cli(),
+                None,
                 Limits::for_account_sign_in(),
                 &Cancel::default(),
                 &mut |_| {}
@@ -6633,6 +10526,7 @@ fn main() {{
         // Asked once per CLI: these bytes do not change while they run.
         account_sign_in(
             &current.cli(),
+            None,
             Limits::for_account_sign_in(),
             &Cancel::default(),
             &mut |_| {},
@@ -6677,9 +10571,13 @@ fn main() {{
         let stop = cancel.clone();
         let (pages, shown) = std::sync::mpsc::channel();
         let signing_in = std::thread::spawn(move || {
-            account_sign_in(&cli, Limits::for_account_sign_in(), &cancel, &mut |page| {
-                pages.send(page).unwrap()
-            })
+            account_sign_in(
+                &cli,
+                None,
+                Limits::for_account_sign_in(),
+                &cancel,
+                &mut |page| pages.send(page).unwrap(),
+            )
         });
         let page = shown
             .recv_timeout(Duration::from_secs(20))
@@ -6708,6 +10606,64 @@ fn main() {{
         }
         // Shown once: the same page printed again is not news.
         assert!(shown.try_recv().is_err());
+    }
+
+    /**
+    The first Try again after "Sign-in didn't finish" showed the code that had just timed out, on two
+    Windows computers, and approving it said it had expired; only the second Try again got a new
+    one. OpenBot stops a `login` that waits too long, and a `login` stopped mid-wait leaves its code
+    saved, which the next `login` shows again. Each sign-in OpenBot starts forgets that code first:
+    the one before is stopped, and the next shows a new code.
+    */
+    #[test]
+    fn a_sign_in_after_one_that_timed_out_shows_a_new_code() {
+        let fixture = Fixture::new("local-eval-sign-in-fresh-code", "device\n");
+        let cli = fixture.cli();
+        let pending = fixture.root.join("pending-device-code.json");
+        let limits = Limits {
+            timeout: Duration::from_secs(5),
+            grace: Duration::from_secs(1),
+            output: MAX_OUTPUT,
+        };
+        let mut first = Vec::new();
+        assert_eq!(
+            account_sign_in(
+                &cli,
+                Some(&pending),
+                limits,
+                &Cancel::default(),
+                &mut |page| first.push(page.user_code)
+            ),
+            Err(Failure::Timeout)
+        );
+        assert_eq!(first, ["CODE-0001"]);
+        #[cfg(unix)]
+        {
+            let pid: libc::pid_t = std::fs::read_to_string(fixture.root.join("pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            // SAFETY: signal 0 only checks existence. The CLI was reaped, so it is gone.
+            assert_ne!(
+                unsafe { libc::kill(pid, 0) },
+                0,
+                "the timed-out CLI lived on"
+            );
+        }
+
+        // Try again: a new code, never the one that timed out.
+        let mut second = Vec::new();
+        assert_eq!(
+            account_sign_in(
+                &cli,
+                Some(&pending),
+                limits,
+                &Cancel::default(),
+                &mut |page| second.push(page.user_code)
+            ),
+            Err(Failure::Timeout)
+        );
+        assert_eq!(second, ["CODE-0002"]);
     }
 
     /// The window asks by attempt while the sign-in waits, and hears nothing once it has ended.
@@ -6958,7 +10914,7 @@ fn main() {{
                 false,
                 false,
             ),
-            // Fewer than 4 CPUs can never leave the CLI 4 free ones.
+            // Fewer than 4 CPUs can never meet the CLI's 4.
             (
                 "3 8217473024
 ",
@@ -7069,9 +11025,17 @@ overlay 164506208 20481024 135620148 14% /
                 disk: true,
                 wsl: false,
                 drive: None,
+                disk_gb: Some("1".into()),
+                free_on_drive: false,
+                mac: false,
+                measured: EngineMeasure {
+                    cpus: 8,
+                    memory_bytes: 8 * GIB,
+                    free_disk_bytes: Some(GIB),
+                },
             })
             .unwrap(),
-            json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true })
+            json!({ "status": "engine-too-small", "podman": false, "cpu": false, "memory": false, "disk": true, "diskGb": "1" })
         );
         assert_eq!(
             serde_json::to_value(Terms::EngineTooSmall {
@@ -7081,6 +11045,10 @@ overlay 164506208 20481024 135620148 14% /
                 disk: true,
                 wsl: true,
                 drive: Some("C:".into()),
+                disk_gb: None,
+                free_on_drive: false,
+                mac: false,
+                measured: EngineMeasure::default(),
             })
             .unwrap(),
             json!({ "status": "engine-too-small", "podman": true, "cpu": false, "memory": false, "disk": true, "wsl": true, "drive": "C:" })
@@ -7096,14 +11064,20 @@ overlay 164506208 20481024 135620148 14% /
             r#"{"command":"onboard local-terms","status":"blocked","preflight":{"status":"fail","reason":"docker_unavailable","detail":"Docker did not answer. Start Docker Desktop or the Docker service, and check that your user can run `docker info`, then try again."},"next":"Tell the developer `preflight.detail` in one sentence."}"#,
             r#"{"command":"onboard local-terms","status":"blocked","preflight":{"status":"fail","reason":"unsupported_engine","failureDetail":"engine_mismatch","detail":"The Docker address answers with Podman. Set COPILOTKIT_LOCAL_ENGINE=podman to use Podman, then retry."},"next":"Tell the developer `preflight.detail` in one sentence."}"#,
         ] {
-            assert_eq!(
-                normalize_terms(0, wire.as_bytes()),
-                Ok(Terms::EngineNotReady),
+            assert!(
+                matches!(
+                    normalize_terms(0, wire.as_bytes()),
+                    Ok(Terms::EngineNotReady { .. })
+                ),
                 "{wire}"
             );
         }
+        // The CLI's cause is for the log: the window is told only that the engine is not ready.
         assert_eq!(
-            serde_json::to_value(Terms::EngineNotReady).unwrap(),
+            serde_json::to_value(Terms::EngineNotReady {
+                cause: "docker_unavailable"
+            })
+            .unwrap(),
             serde_json::json!({ "status": "engine-not-ready" })
         );
         // Blocked for anything but the engine is still not an answer.
@@ -7113,6 +11087,130 @@ overlay 164506208 20481024 135620148 14% /
                 br#"{"command":"onboard local-terms","status":"blocked"}"#
             ),
             Err(Failure::InvalidStatus)
+        );
+    }
+
+    /**
+    1.0.0 on a new Mac: the Account step said "Checking your CopilotKit account…" for minutes while
+    Install put Podman in, and the desktop log said nothing about why. The CLI's answer for a Podman
+    that does not answer yet is waited out, and the log says each change in what the step waits on
+    once, not every 2 seconds. `local-eval-terms-no-engine.json` is what the window's test is given.
+    */
+    #[test]
+    fn the_account_steps_wait_for_the_engine_is_logged_once_per_change() {
+        let wire = include_str!("../test-fixtures/local-eval/onboard-local-terms-no-engine.json");
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-no-engine.json"
+        ))
+        .unwrap();
+        let no_engine = normalize_terms(0, wire.as_bytes());
+        assert_eq!(
+            serde_json::to_value(no_engine.clone().unwrap()).unwrap(),
+            window
+        );
+
+        let start = Instant::now();
+        let took = Duration::from_secs(1);
+        let mut wait = AccountWait::default();
+        let mut logged = Vec::new();
+        let mut hear = |seconds: u64, answer: &Result<Terms, Failure>, step: Option<&str>| {
+            logged.extend(wait.heard(start + Duration::from_secs(seconds), took, answer, step));
+        };
+        // As on that Mac: Podman installing, its machine made and started, then the engine answers.
+        hear(1, &no_engine, Some("install-engine"));
+        hear(4, &no_engine, Some("install-engine"));
+        hear(7, &no_engine, Some("install-engine"));
+        hear(121, &no_engine, Some("create-machine"));
+        hear(124, &no_engine, Some("create-machine"));
+        hear(179, &no_engine, Some("start-machine"));
+        hear(193, &Ok(Terms::SignedOut), Some("images"));
+        // Checks with no wait in them say what they answered, and how long the CLI took.
+        hear(500, &Ok(Terms::SignedOut), None);
+        hear(540, &Err(Failure::Timeout), None);
+        assert_eq!(
+            logged,
+            [
+                "[account] waiting for the engine before the sign-in check: the CLI's preflight \
+                 says docker_unavailable; install step: install-engine",
+                "[account] still waiting for the engine after 121s (4 checks); install step: \
+                 create-machine",
+                "[account] still waiting for the engine after 179s (6 checks); install step: \
+                 start-machine",
+                "[account] engine answering after 193s (7 checks); sign-in check answered \
+                 signed-out after 1.0s",
+                "[account] sign-in check answered signed-out after 1.0s",
+                "[account] sign-in check failed after 1.0s: Timeout",
+            ]
+        );
+    }
+
+    /**
+    1.0.0 on a Mac whose Docker is OrbStack: the CLI's preflight refuses the engine on every try,
+    and the account step waited 15 minutes for an engine that was already running, then said only
+    that it couldn't check the account. A refusal waiting cannot change is said at once, in the
+    CLI's own sentence. `local-eval-terms-orbstack.json` is what the window's own test is given.
+    */
+    #[test]
+    fn terms_blocked_on_an_engine_local_setup_does_not_run_on_say_so_at_once() {
+        let wire = include_str!("../test-fixtures/local-eval/onboard-local-terms-orbstack.json");
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-orbstack.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(normalize_terms(0, wire.as_bytes()).unwrap()).unwrap(),
+            window
+        );
+
+        let blocked = |preflight: Value| {
+            let wire = json!({ "command": "onboard local-terms", "status": "blocked", "preflight": preflight });
+            serde_json::to_value(normalize_terms(0, wire.to_string().as_bytes()).unwrap()).unwrap()
+        };
+        // An engine setting the CLI names its own fix for is not told to switch engines.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "rootless",
+                "detail": "Rootless Podman is not supported. Switch to rootful Podman (podman machine stop; podman machine set --rootful; podman machine start), then retry."
+            })),
+            json!({
+                "status": "blocked",
+                "reason": "unsupported-engine",
+                "said": "Rootless Podman is not supported. Switch to rootful Podman (podman machine stop; podman machine set --rootful; podman machine start), then retry."
+            })
+        );
+        // Too few CPUs is not waited out either. A reason this build does not know stays unknown.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "cpu_short",
+                "detail": "Docker has 2 CPUs. Local evaluation needs 4."
+            })),
+            json!({
+                "status": "blocked",
+                "reason": "unrecognized",
+                "said": "Docker has 2 CPUs. Local evaluation needs 4."
+            })
+        );
+        // A sentence that is not one plain line is not shown; the window says its own.
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "engine_not_docker_desktop",
+                "detail": "Docker Desktop is required.\u{1b}[31m"
+            })),
+            json!({ "status": "blocked", "reason": "unsupported-engine", "switchEngine": true })
+        );
+        assert_eq!(
+            blocked(json!({
+                "status": "fail",
+                "reason": "unsupported_engine",
+                "failureDetail": "engine_not_docker_desktop",
+                "detail": "x".repeat(401)
+            })),
+            json!({ "status": "blocked", "reason": "unsupported-engine", "switchEngine": true })
         );
     }
 
@@ -7215,6 +11313,8 @@ fn main() {
     }
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let file = match a.as_slice() {
+        ["info", "--format", format] if format.contains("Version") => "version",
+        ["system", "df"] => "system-df",
         ["info", "--format", _] => "info",
         ["image", "ls", "--quiet", "--no-trunc"] => "images",
         ["run", "--rm", "--pull=never", "--network=none", "--entrypoint", "/bin/sh", _, "-c", "df -Pk /"] => "df",
@@ -7222,6 +11322,10 @@ fn main() {
         ["machine", "inspect", "openbot"] => "inspect",
         _ => "",
     };
+    // An engine that hangs: `<file>.hang` beside it, and that answer never comes.
+    if !file.is_empty() && dir.join(format!("{file}.hang")).exists() {
+        std::thread::sleep(std::time::Duration::from_secs(120));
+    }
     if let Some(bytes) = (!file.is_empty()).then(|| std::fs::read(dir.join(file)).ok()).flatten() {
         std::io::stdout().write_all(&bytes).unwrap();
         return;
@@ -7441,7 +11545,9 @@ fn main() {
                     crate::engine::Address::new(engine, Some("openbot-root".into()))
                 }
             });
-            MACHINE_DRIVE.with(|said| *said.borrow_mut() = Some(drive));
+            *MACHINE_DRIVE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = drive;
         }
 
         fn start(&self, ends: &str) -> Report {
@@ -7461,11 +11567,179 @@ fn main() {
         }
     }
 
+    /**
+    An engine that stops answering, on the account step. `docker info`, `docker image ls` and the
+    `docker run` that measures disk had no time limit, so a hung engine left the step on
+    "Checking your CopilotKit account…" for good. Each has its own limit now, and what did not
+    answer is not measured, as when nothing answers at all: the CLI is asked next.
+    */
+    #[test]
+    fn an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_engine_that_hangs_is_not_measured_and_does_not_hold_the_account_step",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("engine-check-hangs");
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 500 * KIB_PER_GIB),
+            None,
+            None,
+        );
+        // Long enough for the fake engine to answer on a busy test machine, far short of a hang.
+        *ENGINE_CHECK_LIMIT_FOR_TESTS.lock().unwrap() = Some(Duration::from_secs(3));
+        let checked = |hangs: &[&str]| {
+            for file in ["info", "images", "df"] {
+                let _ = std::fs::remove_file(lab.bin.join(format!("{file}.hang")));
+            }
+            for file in hangs {
+                std::fs::write(lab.bin.join(format!("{file}.hang")), "").unwrap();
+            }
+            let (sender, received) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(engine_size_terms());
+            });
+            received
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap_or_else(|_| {
+                    panic!("the engine check waited on an engine hung in {hangs:?}")
+                })
+        };
+        // Nothing answers, so nothing is measured and nothing stops the step.
+        assert_eq!(checked(&["info", "images"]), None);
+        // Its disk check hangs: a small engine is still said small, from what it did answer.
+        std::fs::write(lab.bin.join("info"), "2 22011707392\n").unwrap();
+        assert_eq!(
+            checked(&["df"]),
+            Some(Terms::EngineTooSmall {
+                podman: false,
+                cpu: true,
+                memory: false,
+                disk: false,
+                wsl: false,
+                drive: None,
+                disk_gb: None,
+                free_on_drive: false,
+                mac: false,
+                measured: EngineMeasure {
+                    cpus: 2,
+                    memory_bytes: 22011707392,
+                    free_disk_bytes: None,
+                },
+            })
+        );
+        // The drive under the engine's disk is there whether the engine answers or not: it is
+        // measured while the engine's own disk check hangs.
+        *MACHINE_DRIVE.lock().unwrap() = drive(1200);
+        assert_eq!(
+            checked(&["df"]),
+            Some(Terms::EngineTooSmall {
+                podman: false,
+                cpu: true,
+                memory: false,
+                disk: false,
+                wsl: false,
+                drive: Some("C:".into()),
+                disk_gb: None,
+                free_on_drive: false,
+                mac: false,
+                measured: EngineMeasure {
+                    cpus: 2,
+                    memory_bytes: 22011707392,
+                    free_disk_bytes: drive(1200).map(|drive| drive.free),
+                },
+            })
+        );
+    }
+
+    /**
+    Troubleshooting logs from a Mac whose Docker disk is full, the case they were made for: the
+    engine's version and its numbers as `[local check]` measures them, both log tails, and the CLI's
+    sign-in line with its email and ids taken out.
+    */
+    #[test]
+    fn troubleshooting_logs_carry_both_log_tails_and_the_engines_numbers() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::troubleshooting_logs_carry_both_log_tails_and_the_engines_numbers",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("troubleshooting-logs");
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 0),
+            None,
+            None,
+        );
+        std::fs::write(lab.bin.join("version"), "28.5.1\n").unwrap();
+        std::fs::write(
+            lab.bin.join("system-df"),
+            "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          14        3         18.2GB    12.1GB (66%)\n",
+        )
+        .unwrap();
+        let home = lab.fixture.root.join("home");
+        std::fs::create_dir_all(home.join(".copilotkit")).unwrap();
+        std::fs::write(
+            home.join(".copilotkit").join("cli.log"),
+            concat!(
+                r#"{"level":30,"time":"2026-11-08T10:12:01.004Z","event":"auth.signed_in","email":"dana.rivera@acme-robotics.io","organizationId":"org_2xK9pQ7vLm","userId":"user_31aZ"}"#,
+                "\n",
+                r#"{"level":50,"time":"2026-11-08T10:15:39.900Z","event":"local.step.failed","step":"stack-images","message":"write /var/lib/docker/tmp/GetImageBlob123: no space left on device"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let logs = lab.fixture.root.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("openbot-desktop.log"),
+            "2026-11-08T10:15:40.003Z ERROR [local setup] failed after 88.1s: exit 1\n",
+        )
+        .unwrap();
+        let home = home.to_string_lossy().into_owned();
+
+        let text = crate::troubleshooting::gather(crate::troubleshooting::Sources {
+            desktop: "OpenBot Desktop 1.0.0 (Built 2026-11-08 06:40 UTC from 52ea4b5)".into(),
+            failure: Some("The backend could not start.".into()),
+            log_folder: Some(&logs),
+            home: Some(&home),
+            engine: engine_in_use(),
+            server_log: None,
+        });
+
+        // `~/.copilotkit/cli.log`, with Windows' separators on Windows.
+        let cli_log = format!("~{0}.copilotkit{0}cli.log", std::path::MAIN_SEPARATOR);
+        for expected in [
+            "Failed: The backend could not start.",
+            "Container engine: docker 28.5.1. 10 CPUs and 20.5 GiB of memory, 0 GiB free of 1006.8 GiB in a container; short of disk (nearly full).",
+            "$ docker system df\nTYPE",
+            "Images          14        3         18.2GB    12.1GB (66%)",
+            "[local setup] failed after 88.1s: exit 1",
+            &cli_log,
+            "no space left on device",
+            r#""email":"[email]","organizationId":"[id]","userId":"[id]""#,
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
+        for secret in [
+            "dana.rivera@acme-robotics.io",
+            "org_2xK9pQ7vLm",
+            "user_31aZ",
+            &home,
+        ] {
+            assert!(!text.contains(secret), "{secret} survived in\n{text}");
+        }
+    }
+
     /// Windows' answer for drive C: with `tenths` tenths of a GiB free, and a little more.
     fn drive(tenths: u64) -> Option<crate::windows::MachineDrive> {
         Some(crate::windows::MachineDrive {
             drive: Some("C:".into()),
             free: tenths * GIB / 10 + GIB / 100,
+            mac: false,
         })
     }
 
@@ -7646,7 +11920,7 @@ fn main() {
             wire["shortfall"],
             json!({
                 "podman": true, "cpu": false, "memory": false, "disk": true,
-                "diskGb": "30", "wsl": true, "drive": "C:"
+                "diskGb": "30", "wsl": true, "drive": "C:", "freeOnDrive": true
             })
         );
         assert_eq!(
@@ -7660,9 +11934,320 @@ fn main() {
             serde_json::to_value(engine_size_terms()).unwrap(),
             json!({
                 "status": "engine-too-small", "podman": true, "cpu": false, "memory": false,
-                "disk": true, "wsl": true, "drive": "C:"
+                "disk": true, "wsl": true, "drive": "C:", "diskGb": "30", "freeOnDrive": true
             })
         );
+    }
+
+    /// F's 16 CPUs and 30.8 GiB, a container whose `df` OpenBot can't read, and `tenths` of a GiB
+    /// free on C:, as Windows F's account step measured it.
+    fn windows_f(lab: &StartLab, tenths: u64) {
+        lab.engine(
+            crate::engine::Engine::Podman,
+            "16 33100000000\n",
+            "df: /: No such file or directory\n",
+            None,
+            drive(tenths),
+        );
+    }
+
+    /**
+    Windows F, filled to 15.0 GB free, after Install made OpenBot's machine. The account step's
+    check logged no disk measured in a container and 13.2 GiB on C:, and the step said only
+    "OpenBot is out of disk space. It needs 40 GB free.", with 13 GB free. Its answer carries what
+    is free, so the step says it. `local-eval-terms-windows-f-short-of-disk.json` is what the
+    window's own test is given.
+    */
+    #[test]
+    fn the_account_step_says_what_is_free_on_windows_f() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::the_account_step_says_what_is_free_on_windows_f",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("account-windows-f");
+        windows_f(&lab, 132);
+        let window: Value = serde_json::from_str(include_str!(
+            "../test-fixtures/local-eval/local-eval-terms-windows-f-short-of-disk.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(engine_size_terms()).unwrap(), window);
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, free disk not measured, 13.2 GiB free on C:; short of disk (OpenBot needs 40 GiB free)"]
+        );
+        // A machine whose own disk is what ran short, with room on C:, is never said as C:'s.
+        lab.engine(
+            crate::engine::Engine::Podman,
+            "16 33100000000\n",
+            &df(WSL_DISK, 10 * KIB_PER_GIB),
+            None,
+            drive(2000),
+        );
+        let machine = serde_json::to_value(engine_size_terms()).unwrap();
+        assert_eq!(machine["diskGb"], json!("10"));
+        assert!(machine.get("freeOnDrive").is_none(), "{machine}");
+    }
+
+    /**
+    Meanwhile on Windows F the downloads behind the account step went on, and free space fell from
+    15.0 to 11.0 GB while the person was asked to free some. A check that finds the disk short
+    holds them, and one that finds room (Try again, after F freed space) lets them go.
+    */
+    #[test]
+    fn the_account_step_holds_the_downloads_until_a_check_finds_room() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::the_account_step_holds_the_downloads_until_a_check_finds_room",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("account-windows-f-holds");
+        windows_f(&lab, 132);
+        assert!(engine_size_terms().is_some());
+        assert!(crate::early_downloads::held_for_room());
+        // What the held downloads look at: the same free disk, below the same 40 GiB.
+        assert_eq!(engine_free_disk(), Some(132 * GIB / 10 + GIB / 100));
+        windows_f(&lab, 970);
+        assert_eq!(engine_size_terms(), None);
+        assert!(!crate::early_downloads::held_for_room());
+    }
+
+    /// Windows G on Docker Desktop: 16 CPUs and 30.8 GiB, Docker's sparse disk with 938.3 GiB free
+    /// of 1006.8 GiB in a container, and `free` bytes on C:, where Docker keeps that disk.
+    fn windows_g(lab: &StartLab, free: u64) {
+        lab.engine(
+            crate::engine::Engine::Docker,
+            "16 33100000000\n",
+            &df(WSL_DISK, 983_880_000),
+            None,
+            Some(crate::windows::MachineDrive {
+                drive: Some("C:".into()),
+                free,
+                mac: false,
+            }),
+        );
+    }
+
+    /// What `statvfs` answers for the home folder of a 926 GB Mac with 7.5 GB free, as `df -h ~`
+    /// said it on the Mac whose update filled its disk: 4 KiB fragments, the free ones counted.
+    #[cfg(unix)]
+    fn full_mac_statvfs() -> libc::statvfs {
+        // SAFETY: statvfs is plain data; every field the free space is read from is set below.
+        let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+        stats.f_frsize = 4096;
+        stats.f_bsize = 4096;
+        stats.f_blocks = (926 * GIB / 4096) as _;
+        stats.f_bfree = (75 * GIB / 10 / 4096) as _;
+        stats.f_bavail = (75 * GIB / 10 / 4096) as _;
+        stats
+    }
+
+    /// An update, on the Mac above: Docker Desktop 4.67.0 with 10 CPUs and 20.5 GiB, and its sparse
+    /// disk showing 900 GiB free in a container, whatever the Mac has.
+    #[cfg(unix)]
+    fn update_on_a_full_mac(lab: &StartLab, free: u64) {
+        lab.engine(
+            crate::engine::Engine::Docker,
+            DOCKER_INFO,
+            &df(WSL_DISK, 900 * KIB_PER_GIB),
+            None,
+            Some(crate::windows::MachineDrive {
+                drive: None,
+                free,
+                mac: true,
+            }),
+        );
+        // OpenBot's own database, as the window measured it: 52 MiB.
+        installation_database(Some(52 * 1024 * 1024));
+    }
+
+    /**
+    The Mac that updated to 1.1.0 with 7.5 GB free of 926 GB. Docker's disk showed room, so nothing
+    stopped the update, which filled the Mac mid-way and broke Docker's disk. The back end's update
+    is checked first now, against the Mac's own disk: it is not started, the CLI never runs, and the
+    report says what the Mac has and what the update needs.
+    */
+    #[cfg(unix)]
+    #[test]
+    fn an_update_on_a_mac_short_of_disk_is_not_started_and_says_the_macs_figures() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::an_update_on_a_mac_short_of_disk_is_not_started_and_says_the_macs_figures",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("update-full-mac");
+        let free = crate::early_downloads::statvfs_free(&full_mac_statvfs());
+        update_on_a_full_mac(&lab, free);
+        std::fs::write(lab.fixture.root.join("scenario"), "0\n{}").unwrap();
+        let stack = StackId::parse("local-abc123").unwrap();
+        let report = run_installed("full-mac", Action::Update, &stack).unwrap();
+        assert_eq!(lab.fixture.argv(), None, "the backend's update ran");
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["outcome"], json!("blocked"));
+        assert_eq!(wire["reason"], json!("resources-short"));
+        // 4 x 1.7 GB of images and the 52 MiB database twice, 6.9 GB, at most half of what is free.
+        assert_eq!(
+            wire["shortfall"],
+            json!({
+                "podman": false, "cpu": false, "memory": false, "disk": true,
+                "diskGb": "7.5", "freeOnDrive": true, "mac": true,
+                "updating": true, "neededGb": "13"
+            })
+        );
+        let logged = checks_logged();
+        assert!(
+            logged.iter().any(
+                |entry| entry.starts_with("WARN [local check] before an update:")
+                    && entry.contains("7.5 GiB free on this Mac's disk")
+                    && entry.contains("not started")
+            ),
+            "{logged:?}"
+        );
+    }
+
+    /// The same update with room on the Mac and in Docker: the preflight lets it through.
+    #[test]
+    fn an_update_with_room_on_the_drive_and_in_the_engine_is_let_through() {
+        let check = EngineCheck {
+            podman: false,
+            size: Some((10, 22011707392)),
+            disk: Some(Disk {
+                size: 1006 * GIB,
+                free: 900 * GIB,
+            }),
+            drive: Some(crate::windows::MachineDrive {
+                drive: None,
+                free: 60 * GIB,
+                mac: true,
+            }),
+            pressure: None,
+        };
+        assert_eq!(update_room_of(&check, Some(52 * 1024 * 1024)), None);
+        // C: on Windows at 12 GB free, under the 13 GB an update needs free there: refused, said
+        // as C:'s.
+        let windows_g = EngineCheck {
+            drive: Some(crate::windows::MachineDrive {
+                drive: Some("C:".into()),
+                free: 12 * GIB,
+                mac: false,
+            }),
+            ..check.clone()
+        };
+        let short = update_room_of(&windows_g, Some(0)).unwrap();
+        assert_eq!(
+            (short.drive.as_deref(), short.free_on_drive, short.mac),
+            (Some("C:"), true, false)
+        );
+        assert_eq!(short.needed_gb.as_deref(), Some("13"));
+        // Docker Desktop's own disk limit, the Mac with room: what is short is inside Docker, and
+        // the update needs its images and the database, and the 15% k3s keeps free, there.
+        let small_docker = EngineCheck {
+            disk: Some(Disk {
+                size: 64 * GIB,
+                free: 12 * GIB,
+            }),
+            ..check.clone()
+        };
+        let short = update_room_of(&small_docker, Some(0)).unwrap();
+        assert_eq!(
+            (
+                short.disk_gb.as_deref(),
+                short.needed_gb.as_deref(),
+                short.free_on_drive
+            ),
+            (Some("12"), Some("16"), false)
+        );
+        // An engine with too little memory for OpenBot is short for an update too.
+        let small = EngineCheck {
+            size: Some((4, 2 * GIB)),
+            ..check
+        };
+        assert!(update_room_of(&small, Some(0)).unwrap().memory);
+    }
+
+    /**
+    Windows G on Docker Desktop, C: filled to 15 GB free. The check measured only the container,
+    "938.3 GiB free of 1006.8 GiB in a container; enough", so the account step never warned and
+    nothing held. Docker's disk is a sparse virtual disk on C:, and C: is what runs out: it is
+    measured, the smaller figure counts, and the step says it as C:'s. The downloads hold.
+    */
+    #[test]
+    fn on_docker_desktop_the_drive_under_its_disk_is_the_free_disk_that_counts() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::on_docker_desktop_the_drive_under_its_disk_is_the_free_disk_that_counts",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("account-windows-g");
+        // "free after: 14999998464 bytes (15 GB, 14 GiB)"
+        windows_g(&lab, 14_999_998_464);
+        assert_eq!(
+            serde_json::to_value(engine_size_terms()).unwrap(),
+            json!({
+                "status": "engine-too-small", "podman": false, "cpu": false, "memory": false,
+                "disk": true, "drive": "C:", "diskGb": "13.9", "freeOnDrive": true
+            })
+        );
+        assert_eq!(
+            checks_logged(),
+            ["WARN [local check] before local setup: 16 CPUs and 30.8 GiB of memory, 938.3 GiB free of 1006.8 GiB in a container, 13.9 GiB free on C:; short of disk (OpenBot needs 40 GiB free)"]
+        );
+        assert!(crate::early_downloads::held_for_room());
+        // What the held downloads look at is C:, below the same 40 GiB.
+        assert_eq!(engine_free_disk(), Some(14_999_998_464));
+        // "filler deleted at 04:46:16; C: free 97796845568 bytes (97.8 GB)"
+        windows_g(&lab, 97_796_845_568);
+        assert_eq!(engine_size_terms(), None);
+        assert!(!crate::early_downloads::held_for_room());
+    }
+
+    /**
+    Windows G again: C: was filled after the account step had passed, while the license agreement
+    was on screen. Then the back end's setup, "Preparing a place on this computer" and "Setting up
+    your data", took C: from 14.5 to 11.8 GB in 90 seconds: the CLI checks its 40 GiB inside the
+    container, which showed 938.3 GiB. A setup on a drive that short is not started. It says what
+    is free on C:, the downloads hold, and once there is room the setup runs.
+    */
+    #[test]
+    fn a_setup_on_a_drive_too_short_for_openbot_is_not_started() {
+        if crate::test_support::isolated_process(
+            "local_eval::tests::a_setup_on_a_drive_too_short_for_openbot_is_not_started",
+        ) {
+            return;
+        }
+        let lab = StartLab::new("setup-windows-g");
+        let installation = lab.fixture.root.join("installation");
+        std::fs::create_dir_all(&installation).unwrap();
+        windows_g(&lab, 14_999_998_464);
+        let Ok((report, _)) = setup_installed("setup-windows-g", &installation, None) else {
+            panic!("the setup answers with a report");
+        };
+        assert_eq!(
+            serde_json::to_value(&report).unwrap(),
+            json!({
+                "outcome": "blocked", "stack": null, "reason": "resources-short",
+                "readiness": "unknown", "licence": "unknown", "licenceExpiresAt": null,
+                "updateTo": null, "checksPassed": false,
+                "shortfall": {
+                    "podman": false, "cpu": false, "memory": false, "disk": true,
+                    "diskGb": "13.9", "drive": "C:", "freeOnDrive": true
+                }
+            })
+        );
+        assert_eq!(lab.fixture.argv(), None, "the CLI's setup was not started");
+        assert!(crate::early_downloads::held_for_room());
+        // What the window asks every 10 seconds while the setup waits: C: is still short.
+        assert_eq!(
+            drive_short().map(|short| (short.disk_gb, short.drive)),
+            Some((Some("13.9".to_owned()), Some("C:".to_owned())))
+        );
+        // Space freed on C:: there is room, the downloads carry on, and the setup runs.
+        windows_g(&lab, 97_796_845_568);
+        assert_eq!(drive_short(), None);
+        assert!(!crate::early_downloads::held_for_room());
+        let _ = setup_installed("setup-windows-g-room", &installation, None);
+        let ran = lab.fixture.argv().unwrap_or_default();
+        assert!(ran.contains("setup"), "the setup ran: {ran}");
     }
 
     /**

@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { conversationTitle } from "@/lib/channels/label";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { DeleteConversationDialog } from "./delete-conversation-dialog";
@@ -20,26 +21,31 @@ import { DeleteConversationDialog } from "./delete-conversation-dialog";
  * Whether it is pinned comes from the sidebar's list, which is already loaded, because the
  * conversation's own read does not carry the member's pin. The list's first page always holds every
  * pinned conversation, so a conversation missing from the pages loaded so far is not pinned.
+ *
+ * Its name for the Delete question comes from the same list, for the same reason: the conversation's
+ * own read carries only the channel `name`, which is its Bot's.
  */
 export function ConversationActions({
   channelId,
   leave,
-  name,
 }: {
   channelId: string;
   leave: () => Promise<unknown>;
-  name: string;
 }) {
   const queryClient = useQueryClient();
-  const pinned = useInfiniteQuery({
+  const row = useInfiniteQuery({
     ...channelListQueryOptions(),
-    select: (data) =>
-      data.pages.some((page) =>
-        page.channels.some(
-          (channel) => channel.id === channelId && channel.pinned,
-        ),
-      ),
+    select: (data) => {
+      const channel = data.pages
+        .flatMap((page) => page.channels)
+        .find((candidate) => candidate.id === channelId);
+      return {
+        pinned: channel?.pinned ?? false,
+        title: channel ? conversationTitle(channel) : "",
+      };
+    },
   }).data;
+  const pinned = row?.pinned;
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
 
@@ -80,9 +86,9 @@ export function ConversationActions({
       <DeleteConversationDialog
         channelId={channelId}
         leave={leave}
-        name={name}
         onOpenChange={setConfirming}
         open={confirming}
+        title={row?.title ?? ""}
       />
     </section>
   );

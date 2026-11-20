@@ -10,6 +10,7 @@ import {
 import { cleanup, render } from "@testing-library/react";
 import { BotProfile } from "@/components/bot-profile/profile";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { ME_PATH, meResponse } from "./accounts-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -30,6 +31,9 @@ afterEach(() => {
 });
 
 const BOT: AgentProfile = {
+  assignedToMe: false,
+  runsOnOpenBotModel: false,
+  keyFromOpenBot: false,
   id: "expenses",
   name: "Expenses",
   title: "Finance",
@@ -53,7 +57,10 @@ const BOT: AgentProfile = {
 function serving() {
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/shared-use/bot/")) {
+    // A Bot's shared apps, at the API's address.
+    if (
+      /^\/api\/v2\/organizations\/default\/bots\/[^/]+\/shared-use$/.test(url)
+    ) {
       return Response.json({
         apps: [{ serverId: "gmail", title: "Gmail", covered: false }],
         pending: [],
@@ -69,8 +76,8 @@ function serving() {
         },
       });
     }
-    if (url.includes("/api/me")) {
-      return Response.json({
+    if (url.includes(ME_PATH)) {
+      return meResponse({
         user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
       });
     }

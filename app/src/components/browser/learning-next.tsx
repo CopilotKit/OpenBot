@@ -1,7 +1,3 @@
-import type {
-  LearningProposal,
-  LearningRunSummary,
-} from "@openbot/shared/learning";
 import {
   IconAlertTriangle,
   IconLoader2,
@@ -21,7 +17,9 @@ import {
 } from "@/components/ui/item";
 import { startPersonalLearningRunMutationOptions } from "@/lib/learning/mutations";
 import {
+  type LearningRunSummary,
   personalReviewQueryOptions,
+  type RecordingSkill,
   recordingSkillsQueryOptions,
 } from "@/lib/learning/queries";
 import { cn } from "@/lib/utils";
@@ -29,12 +27,12 @@ import { queryClient } from "@/query-client";
 import type { Stopped } from "./recording";
 
 /** Where the skills learned from recordings are reviewed and listed. */
-export const YOUR_SKILLS = "/settings/learning";
+export const YOUR_SKILLS = "/skills";
 
 /** How much earlier than the recording's stop a run may be dated and still be after it: the two clocks can differ. */
 const CLOCK_SLACK_MS = 60_000;
 
-type Skill = LearningProposal & { container: string };
+type Skill = RecordingSkill;
 
 /** What has become of a saved recording in Learning, as Teach a Bot says it. */
 export type LearningNext =
@@ -78,9 +76,9 @@ export function savedToLearning(stopped: Stopped | undefined): boolean {
 /**
  * What Learning has made of the recording Stop just saved, read from the person's own review (their runs, and whether
  * they or an admin approve) and the skills proposed from that recording since it stopped. Learn now starts the same
- * run as Settings, Learning on each of the person's recording spaces.
+ * run as Skills on each of the person's recording spaces.
  *
- * While nothing has come of it yet the review is read again, every 10 seconds during a run and every 30 otherwise, so
+ * While nothing has come of it yet the review is read again, every 30 seconds during a run and every minute otherwise, so
  * an automatic run is seen too. Once a skill from it is there, the page tells the person, and the browser does too
  * (a notification, where they allowed them) when they are looking at something else.
  */
@@ -88,7 +86,7 @@ export function useLearningNext(stopped: Stopped) {
   const since = stopped.stoppedAt;
   const [started, setStarted] = useState<{ from: string | null } | null>(null);
   // How often the review is read again, set from what the last read said (below).
-  const pace = useRef<number | false>(30_000);
+  const pace = useRef<number | false>(60_000);
   const review = useQuery({
     ...personalReviewQueryOptions(),
     refetchInterval: () => pace.current,
@@ -97,7 +95,7 @@ export function useLearningNext(stopped: Stopped) {
     startPersonalLearningRunMutationOptions(queryClient),
   );
 
-  const sources = (review.data?.sources ?? []).filter(
+  const sources = (review.data?.spaces ?? []).filter(
     (source) => source.kind === "recordings",
   );
   const latest = sources
@@ -142,14 +140,16 @@ export function useLearningNext(stopped: Stopped) {
   const proposed = found.find((skill) => skill.status === "pending_review");
 
   let next: LearningNext;
-  if (review.error) next = { kind: "unreadable", reason: review.error.message };
+  // A read that failed after one that answered keeps what that one said: a busy backend is not news about the skill.
+  if (review.error && !review.data)
+    next = { kind: "unreadable", reason: review.error.message };
   else if (learned) next = { kind: "learned", skill: learned };
   else if (proposed) next = { kind: "proposed", skill: proposed };
   else if (review.data?.modelProblem)
     next = { kind: "model", reason: review.data.modelProblem };
   else if (off) next = { kind: "off" };
   else if (running) next = { kind: "learning" };
-  else if (skills.error)
+  else if (skills.error && !skills.data)
     next = { kind: "unreadable", reason: skills.error.message };
   else if (runSince?.status === "failed")
     next = {
@@ -172,8 +172,8 @@ export function useLearningNext(stopped: Stopped) {
       kind === "learned" || kind === "model" || kind === "off"
         ? false
         : kind === "learning"
-          ? 10_000
-          : 30_000;
+          ? 30_000
+          : 60_000;
   }, [kind]);
 
   useSkillNotice(stopped.title, next);
@@ -241,7 +241,7 @@ function useSkillNotice(title: string, next: LearningNext) {
           body:
             next.kind === "learned"
               ? "Open Teach a Bot to try it."
-              : "Review it in Settings, Learning.",
+              : "Review it on the Skills page.",
           tag: `openbot-learned-${skill}`,
         },
       );
@@ -268,7 +268,7 @@ export function learningNextWords(
     return canReview
       ? {
           heading: "Your new skill is ready to review",
-          sentence: `Learning made a skill from “${title}”. Approve it in Settings, Learning, then ask any Bot to do it.`,
+          sentence: `Learning made a skill from “${title}”. Approve it on the Skills page, then ask any Bot to do it.`,
         }
       : {
           heading: "Your new skill is waiting for an admin",
@@ -289,8 +289,8 @@ export function learningNextWords(
   return {
     heading: `Saved “${title}”`,
     sentence: autoApprove
-      ? "OpenBot learns a skill from it, and you'll find it in Settings, Learning. Once it's learned, ask any Bot to do it."
-      : "OpenBot learns a skill from it, and you'll see it in Settings, Learning to review. Once you approve it, ask any Bot to do it.",
+      ? "OpenBot learns a skill from it, and you'll find it on the Skills page. Once it's learned, ask any Bot to do it."
+      : "OpenBot learns a skill from it, and you'll see it on the Skills page to review. Once you approve it, ask any Bot to do it.",
   };
 }
 
@@ -375,7 +375,7 @@ export function LearningNextRow({
       icon = <IconAlertTriangle />;
       heading = "Learning is off";
       sentence =
-        "Learning isn't available in the back end, so no skill is learned from it.";
+        "Learning isn't available in the backend, so no skill is learned from it.";
       break;
     case "unreadable":
       tone = "warn";

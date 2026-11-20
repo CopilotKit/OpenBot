@@ -3,12 +3,15 @@
 //! The app updates itself with the signed updater. On the next Start, an installation whose
 //! deployment (`.openbot-deployment`) is not the app's own release is upgraded before it starts:
 //!
+//! 0. Check this computer has room for it (`Steps::room`). Without, nothing below runs.
 //! 1. Stop OpenBot.
 //! 2. Take one `pg_dump` of its database, if it has one, and keep the previous version's files
 //!    (`KEPT`) in `.openbot-previous/`.
 //! 3. Lay the app's release out exactly as Install does.
 //! 4. Pull its images.
 //! 5. Start. Its migrations run once, as the dependency Compose starts before the server.
+//! 6. Once it has started and answered, note the images only the previous version ran, for
+//!    removal after this start (`superseded_images`).
 //!
 //! If any step fails, the previous files go back, the database is restored from the dump, and the
 //! previous version starts. The person is told in one sentence.
@@ -25,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{deployment, preparation, problem::Problem};
+use crate::{deployment, engine::StepLine, preparation, problem::Problem};
 
 /// Where the previous version waits while an upgrade runs. Gone once the upgrade finished or was
 /// undone, so finding it at Start means the app stopped part way, and the previous version goes
@@ -143,6 +146,11 @@ pub trait Steps {
     /// line for the whole upgrade, and a step that said nothing left the one before it on that line:
     /// "Stopping OpenBot." under the rows through a whole download, install and start.
     fn now(&mut self, _now: Now) {}
+    /// Whether this computer has room for the update, before anything stops, is backed up or
+    /// downloads (`local_eval::update_room`). A problem that says what is short when it has not.
+    fn room(&mut self) -> Result<(), Problem> {
+        Ok(())
+    }
     /// Stop OpenBot: every container and host process of this installation. Volumes stay.
     fn stop(&mut self) -> Result<(), Problem>;
     /// Whether the installation has a database to back up. One that never started has none, and
@@ -166,6 +174,7 @@ pub trait Steps {
 /// The step an upgrade is on, said as it begins (see `Steps::now`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Now {
+    Checking,
     Stopping,
     BackingUp,
     Downloading,
@@ -177,26 +186,40 @@ pub enum Now {
 /// What the line under Start's rows says while `now` runs. Downloading and installing name the
 /// release `own` lays out, and starting names the one laid out now: the new release, or the
 /// previous one an upgrade that failed put back.
-pub fn now_said(now: Now, root: &Path, own: &Own) -> String {
+///
+/// The screen says what is happening in plain words; the release names (`v1.0.1`, or a build's
+/// `internal-…` tag) are in the log only, beside it.
+pub fn now_said(now: Now, root: &Path, own: &Own) -> StepLine {
     match now {
-        Now::Stopping => "Stopping OpenBot.".into(),
-        Now::BackingUp => "Backing up OpenBot's database.".into(),
-        Now::Downloading => format!("Downloading OpenBot {}.", own.version),
-        Now::Installing => format!("Installing OpenBot {}.", own.version),
-        Now::Starting => match deployment::installed(root) {
-            Some(found) => format!("Starting OpenBot {}.", found.version),
-            None => "Starting OpenBot.".into(),
-        },
-        Now::Restoring => "Putting OpenBot's database back.".into(),
+        Now::Checking => StepLine::here("Checking there's room for the update."),
+        Now::Stopping => StepLine::here("Stopping OpenBot."),
+        Now::BackingUp => {
+            StepLine::here("Backing up your data.").logged("Backing up OpenBot's database.")
+        }
+        Now::Downloading => StepLine::here("Downloading the update.")
+            .logged(format!("Downloading OpenBot {}.", own.version)),
+        Now::Installing => StepLine::here("Installing the update.")
+            .logged(format!("Installing OpenBot {}.", own.version)),
+        Now::Starting => {
+            StepLine::here("Starting OpenBot.").logged(match deployment::installed(root) {
+                Some(found) => format!("Starting OpenBot {}.", found.version),
+                None => "Starting OpenBot.".into(),
+            })
+        }
+        Now::Restoring => {
+            StepLine::here("Putting your data back.").logged("Putting OpenBot's database back.")
+        }
     }
 }
 
 /// An upgrade the app stopped part way is back on the version it was updating from.
-pub fn put_back_said(root: &Path) -> String {
-    match deployment::installed(root) {
-        Some(found) => format!("OpenBot is back on {}.", found.version),
-        None => "OpenBot is back on the version it was updating from.".into(),
-    }
+pub fn put_back_said(root: &Path) -> StepLine {
+    StepLine::here("OpenBot is back on the version it had.").logged(
+        match deployment::installed(root) {
+            Some(found) => format!("OpenBot is back on {}.", found.version),
+            None => "OpenBot is back on the version it was updating from.".into(),
+        },
+    )
 }
 
 /// How an upgrade ended.
@@ -204,6 +227,9 @@ pub fn put_back_said(root: &Path) -> String {
 pub enum Ran {
     /// The new version is running.
     Moved,
+    /// This computer has no room for the update (`Steps::room`): nothing stopped, moved or
+    /// downloaded, and the version it has is as it was.
+    Short(Problem),
     /// The upgrade failed, and the previous version is back, with its database, and running.
     Kept(Problem),
     /// The upgrade failed, the previous version is back, and then it did not start.
@@ -216,6 +242,11 @@ pub enum Ran {
 /// Upgrade the installation in `root`. See the module documentation for the steps.
 pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
     let previous = root.join(PREVIOUS);
+    // Before anything changes: an update that runs out of room part way can leave nothing to go
+    // back to (a Mac that filled mid-update broke Docker's disk, and its database with it).
+    if let Err(short) = said(steps, Now::Checking, |steps| steps.room()) {
+        return Ran::Short(short);
+    }
     if let Err(failed) = said(steps, Now::Stopping, |steps| steps.stop()) {
         return restart(steps, failed);
     }
@@ -262,6 +293,9 @@ pub fn run(root: &Path, steps: &mut dyn Steps) -> Ran {
         .and_then(|()| said(steps, Now::Starting, |steps| steps.start()));
     match upgraded {
         Ok(()) => {
+            // The new version answered, and nothing goes back to the previous one from here: its
+            // images are noted for removal while its records are still in `previous` to read.
+            crate::superseded_images::record(root, &previous);
             finish(&previous);
             Ran::Moved
         }
@@ -401,36 +435,47 @@ fn write_synced(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// What Start says while it upgrades.
-pub fn moving_said(planned: &Move) -> String {
-    format!(
-        "Updating OpenBot from {} to {}. Your Bots, sign-ins and data stay as they are.",
-        planned.from, planned.to
-    )
+/// What Start says while it upgrades. The releases are the log's: `moved_log`.
+pub fn moving_said(planned: &Move) -> StepLine {
+    StepLine::here("Updating OpenBot. Your Bots, sign-ins and data stay as they are.")
+        .logged(moved_log(planned))
+}
+
+/// The upgrade, by its releases, for the log beside what the screen says.
+pub fn moved_log(planned: &Move) -> String {
+    format!("updating OpenBot from {} to {}", planned.from, planned.to)
+}
+
+/// This computer is short of `short` for the update (`local_eval::update_room`): the problem Start
+/// reports, which the window says with the figures, as it says the back end's own shortfall.
+pub fn short_problem(short: crate::local_eval::Shortfall) -> Problem {
+    let mut problem =
+        Problem::plain("There isn't room on this computer for the update, so nothing changed.");
+    problem.room = Some(Box::new(crate::problem::Room {
+        shortfall: Some(short),
+        cause: None,
+    }));
+    problem
 }
 
 /// The upgrade failed, and the previous version is running again.
-pub fn kept_said(planned: &Move) -> String {
-    format!(
-        "OpenBot couldn't update to {}, so it's still on {}, with your data as it was.",
-        planned.to, planned.from
-    )
+pub fn kept_said(_planned: &Move) -> String {
+    "OpenBot couldn't update, so it's still on the version it had, with your data as it was.".into()
 }
 
 /// The upgrade failed, the previous version is back, and it did not start.
-pub fn back_said(planned: &Move, start: &Problem) -> String {
+pub fn back_said(_planned: &Move, start: &Problem) -> String {
     format!(
-        "OpenBot couldn't update to {} and went back to {}. {}",
-        planned.to, planned.from, start.said
+        "OpenBot couldn't update and went back to the version it had. {}",
+        start.said
     )
 }
 
 /// The upgrade failed, and the previous version could not be put back.
-pub fn stuck_said(planned: &Move) -> String {
-    format!(
-        "OpenBot couldn't update to {} or put {} back. Choose Retry to try putting it back again.",
-        planned.to, planned.from
-    )
+pub fn stuck_said(_planned: &Move) -> String {
+    "OpenBot couldn't update or put the version it had back. Choose Retry to try putting it back \
+     again."
+        .into()
 }
 
 /// What Start reports when it upgraded, or tried to.
@@ -490,11 +535,7 @@ mod tests {
     fn laid_out(version: &str, pinned: bool) -> PathBuf {
         let root = temp_root("upgrade-due");
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("docker-compose.yml"),
-            "services:\n  server: {}\n  worker: {}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services:\n  server: {}\n").unwrap();
         std::fs::write(deployment::images_path(&root), "{}").unwrap();
         deployment::record(&root, version, pinned).unwrap();
         root
@@ -613,13 +654,18 @@ mod tests {
             from: "v0.3.0".into(),
             to: "v0.3.1".into(),
         };
-        for said in [kept_said(&planned), moving_said(&planned)] {
+        for said in [kept_said(&planned), moving_said(&planned).said] {
             assert!(!said.contains('\u{2014}'), "{said}");
+            // The releases are the log's, never the screen's.
+            assert!(!said.contains("0.3"), "{said}");
         }
         assert_eq!(
             kept_said(&planned),
-            "OpenBot couldn't update to v0.3.1, so it's still on v0.3.0, with your data as it was."
+            "OpenBot couldn't update, so it's still on the version it had, with your data as it was."
         );
+        assert!(moving_said(&planned)
+            .log_entry()
+            .contains("from v0.3.0 to v0.3.1"));
     }
 
     /// The screen a failed Start leaves has Retry, Change AI connection and Repair installation,
@@ -649,6 +695,8 @@ mod tests {
         /// What the line under Start's rows says now, and what it said as each step ran.
         line: Option<String>,
         lines: Vec<Option<String>>,
+        /// What the computer is short of for the update, as its preflight found it.
+        short: Option<crate::local_eval::Shortfall>,
     }
 
     impl Recorded {
@@ -664,7 +712,17 @@ mod tests {
 
     impl Steps for Recorded {
         fn now(&mut self, now: Now) {
-            self.line = Some(now_said(now, &self.root, &released(&self.version)));
+            self.line = Some(now_said(now, &self.root, &released(&self.version)).said);
+        }
+        fn room(&mut self) -> Result<(), Problem> {
+            match self.short.take() {
+                Some(short) => {
+                    self.ran.push("room".into());
+                    self.lines.push(self.line.clone());
+                    Err(short_problem(short))
+                }
+                None => Ok(()),
+            }
         }
         fn stop(&mut self) -> Result<(), Problem> {
             self.step("stop")
@@ -681,10 +739,7 @@ mod tests {
             self.step("lay_out")?;
             std::fs::write(
                 self.root.join("docker-compose.yml"),
-                format!(
-                    "# {}\nservices:\n  server: {{}}\n  worker: {{}}\n",
-                    self.version
-                ),
+                format!("# {}\nservices:\n  server: {{}}\n", self.version),
             )
             .unwrap();
             std::fs::write(deployment::images_path(&self.root), &self.version).unwrap();
@@ -731,8 +786,55 @@ mod tests {
             has_database: true,
             line: None,
             lines: Vec::new(),
+            short: None,
         };
         (root, steps)
+    }
+
+    /**
+    A Mac with 7.5 GB free updating to 1.1.0. Nothing checked for room, so the update stopped
+    OpenBot, backed it up and downloaded until the Mac was full, Docker's disk stopped writing, and
+    neither the new version nor the one it had would start. The preflight runs first now, and short
+    of room nothing else does: OpenBot is not stopped, nothing is backed up, set aside or
+    downloaded, and the problem carries what is short for the window to say.
+    */
+    #[test]
+    fn an_update_without_room_stops_before_it_stops_or_backs_up_anything() {
+        let (root, mut steps) = installation();
+        let mac = crate::local_eval::Shortfall {
+            disk: true,
+            disk_gb: Some("7.5".into()),
+            needed_gb: Some("13".into()),
+            free_on_drive: true,
+            mac: true,
+            updating: true,
+            ..crate::local_eval::Shortfall::default()
+        };
+        steps.short = Some(mac.clone());
+        let Ran::Short(problem) = run(&root, &mut steps) else {
+            panic!("an update without room went ahead: {:?}", steps.ran);
+        };
+        assert_eq!(steps.ran, ["room"]);
+        assert_eq!(
+            steps.lines,
+            [Some("Checking there's room for the update.".to_string())]
+        );
+        assert_eq!(problem.shortfall(), Some(&mac));
+        assert!(!problem.said.contains('\u{2014}'), "{}", problem.said);
+        // The version it had, its files and its database, exactly as they were.
+        assert_eq!(deployment::installed(&root).unwrap().version, "v0.3.0");
+        assert!(!root.join(PREVIOUS).exists());
+        assert_eq!(steps.database, "rows at v0.3.0");
+        assert!(root.join("agent-computer/package.json").is_file());
+        untouched(&root);
+
+        // Room again, and Retry: the same update runs, every step in its order.
+        assert!(matches!(run(&root, &mut steps), Ran::Moved));
+        assert_eq!(
+            steps.ran,
+            ["room", "stop", "back_up", "lay_out", "install", "start"]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn untouched(root: &Path) {
@@ -798,10 +900,10 @@ mod tests {
             lines(&steps),
             said(&[
                 ("stop", "Stopping OpenBot."),
-                ("back_up", "Backing up OpenBot's database."),
-                ("lay_out", "Downloading OpenBot v0.3.1."),
-                ("install", "Installing OpenBot v0.3.1."),
-                ("start", "Starting OpenBot v0.3.1."),
+                ("back_up", "Backing up your data."),
+                ("lay_out", "Downloading the update."),
+                ("install", "Installing the update."),
+                ("start", "Starting OpenBot."),
             ])
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -814,9 +916,9 @@ mod tests {
             lines(&steps),
             said(&[
                 ("stop", "Stopping OpenBot."),
-                ("lay_out", "Downloading OpenBot v0.3.1."),
-                ("install", "Installing OpenBot v0.3.1."),
-                ("start", "Starting OpenBot v0.3.1."),
+                ("lay_out", "Downloading the update."),
+                ("install", "Installing the update."),
+                ("start", "Starting OpenBot."),
             ])
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -829,15 +931,22 @@ mod tests {
             lines(&steps),
             said(&[
                 ("stop", "Stopping OpenBot."),
-                ("back_up", "Backing up OpenBot's database."),
-                ("lay_out", "Downloading OpenBot v0.3.1."),
-                ("install", "Installing OpenBot v0.3.1."),
+                ("back_up", "Backing up your data."),
+                ("lay_out", "Downloading the update."),
+                ("install", "Installing the update."),
                 ("stop", "Stopping OpenBot."),
-                ("restore", "Putting OpenBot's database back."),
-                ("start", "Starting OpenBot v0.3.0."),
+                ("restore", "Putting your data back."),
+                ("start", "Starting OpenBot."),
             ])
         );
-        assert_eq!(put_back_said(&root), "OpenBot is back on v0.3.0.");
+        assert_eq!(
+            put_back_said(&root).said,
+            "OpenBot is back on the version it had."
+        );
+        assert_eq!(
+            put_back_said(&root).detail.as_deref(),
+            Some("OpenBot is back on v0.3.0.")
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1048,8 +1157,9 @@ mod tests {
 
 /// The upgrade against a real container engine, with the product's own layout (`deployment`), pull
 /// (`pull_metrics`), Start (`stack::up`), Stop (`stack::down`), `pg_dump` and `pg_restore` (`stack`).
-/// Releases are two versions of a fixture with the shape of OpenBot's own Compose file: Postgres, a
-/// `migrate` that `server` depends on, and the other services Start raises, all from a "server"
+/// Releases are two versions of a fixture with the shape of OpenBot's Compose file up to 1.0.3,
+/// which Start still raises as that file requires: Postgres, a `migrate` that `server` depends on, a
+/// `worker`, and the other services Start raises, all from a "server"
 /// image the fixture pushes to a local registry, so every pull is a real pull. Each migration
 /// records that it ran, so "once" is counted rather than assumed. Its own Compose project, volume,
 /// folder and image tags; nothing else on the engine is touched.
@@ -1698,3 +1808,8 @@ volumes:
         }
     }
 }
+
+/// The upgrade from a real published release to this tree, on a real engine. See the file.
+#[cfg(test)]
+#[path = "upgrade_release_tests.rs"]
+mod real_release;

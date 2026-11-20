@@ -2943,10 +2943,58 @@
           "markdownDescription": "Denies the show command without any pre-configured scope."
         },
         {
+          "description": "Enables the ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-ai-connection",
+          "markdownDescription": "Enables the ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ai_providers command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-ai-providers",
+          "markdownDescription": "Enables the ai_providers command without any pre-configured scope."
+        },
+        {
           "description": "Enables the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-appearance",
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the begin_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-begin-plan-sign-in",
+          "markdownDescription": "Enables the begin_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the begin_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-begin-provider-sign-in",
+          "markdownDescription": "Enables the begin_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-cancel-plan-sign-in",
+          "markdownDescription": "Enables the cancel_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-cancel-provider-sign-in",
+          "markdownDescription": "Enables the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the change_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-change-ai-connection",
+          "markdownDescription": "Enables the change_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the change_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-change-connection",
+          "markdownDescription": "Enables the change_connection command without any pre-configured scope."
         },
         {
           "description": "Enables the check_update command without any pre-configured scope.",
@@ -2955,10 +3003,28 @@
           "markdownDescription": "Enables the check_update command without any pre-configured scope."
         },
         {
+          "description": "Enables the connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-connection",
+          "markdownDescription": "Enables the connection command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dismiss_update command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-dismiss-update",
           "markdownDescription": "Enables the dismiss_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the finish_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-finish-plan-sign-in",
+          "markdownDescription": "Enables the finish_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the finish_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-finish-provider-sign-in",
+          "markdownDescription": "Enables the finish_provider_sign_in command without any pre-configured scope."
         },
         {
           "description": "Enables the install_update command without any pre-configured scope.",
@@ -2985,6 +3051,12 @@
           "markdownDescription": "Enables the open_logs command without any pre-configured scope."
         },
         {
+          "description": "Enables the prepare_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-prepare-ai-connection",
+          "markdownDescription": "Enables the prepare_ai_connection command without any pre-configured scope."
+        },
+        {
           "description": "Enables the quit command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-quit",
@@ -2995,6 +3067,30 @@
           "type": "string",
           "const": "openbot-desktop:allow-restart",
           "markdownDescription": "Enables the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_organization command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-organization",
+          "markdownDescription": "Enables the set_organization command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-usage-data",
+          "markdownDescription": "Enables the set_usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the settle_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-settle-ai-connection",
+          "markdownDescription": "Enables the settle_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-sign-out",
+          "markdownDescription": "Enables the sign_out command without any pre-configured scope."
         },
         {
           "description": "Enables the speech_abort command without any pre-configured scope.",
@@ -3039,10 +3135,70 @@
           "markdownDescription": "Enables the update_offer command without any pre-configured scope."
         },
         {
+          "description": "Enables the usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-usage-data",
+          "markdownDescription": "Enables the usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-zoom",
+          "markdownDescription": "Enables the zoom command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-ai-connection",
+          "markdownDescription": "Denies the ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ai_providers command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-ai-providers",
+          "markdownDescription": "Denies the ai_providers command without any pre-configured scope."
+        },
+        {
           "description": "Denies the appearance command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-appearance",
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the begin_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-begin-plan-sign-in",
+          "markdownDescription": "Denies the begin_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the begin_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-begin-provider-sign-in",
+          "markdownDescription": "Denies the begin_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-cancel-plan-sign-in",
+          "markdownDescription": "Denies the cancel_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-cancel-provider-sign-in",
+          "markdownDescription": "Denies the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the change_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-change-ai-connection",
+          "markdownDescription": "Denies the change_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the change_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-change-connection",
+          "markdownDescription": "Denies the change_connection command without any pre-configured scope."
         },
         {
           "description": "Denies the check_update command without any pre-configured scope.",
@@ -3051,10 +3207,28 @@
           "markdownDescription": "Denies the check_update command without any pre-configured scope."
         },
         {
+          "description": "Denies the connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-connection",
+          "markdownDescription": "Denies the connection command without any pre-configured scope."
+        },
+        {
           "description": "Denies the dismiss_update command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-dismiss-update",
           "markdownDescription": "Denies the dismiss_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the finish_plan_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-finish-plan-sign-in",
+          "markdownDescription": "Denies the finish_plan_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the finish_provider_sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-finish-provider-sign-in",
+          "markdownDescription": "Denies the finish_provider_sign_in command without any pre-configured scope."
         },
         {
           "description": "Denies the install_update command without any pre-configured scope.",
@@ -3081,6 +3255,12 @@
           "markdownDescription": "Denies the open_logs command without any pre-configured scope."
         },
         {
+          "description": "Denies the prepare_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-prepare-ai-connection",
+          "markdownDescription": "Denies the prepare_ai_connection command without any pre-configured scope."
+        },
+        {
           "description": "Denies the quit command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-quit",
@@ -3091,6 +3271,30 @@
           "type": "string",
           "const": "openbot-desktop:deny-restart",
           "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_organization command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-organization",
+          "markdownDescription": "Denies the set_organization command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-usage-data",
+          "markdownDescription": "Denies the set_usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the settle_ai_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-settle-ai-connection",
+          "markdownDescription": "Denies the settle_ai_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-sign-out",
+          "markdownDescription": "Denies the sign_out command without any pre-configured scope."
         },
         {
           "description": "Denies the speech_abort command without any pre-configured scope.",
@@ -3133,6 +3337,18 @@
           "type": "string",
           "const": "openbot-desktop:deny-update-offer",
           "markdownDescription": "Denies the update_offer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the usage_data command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-usage-data",
+          "markdownDescription": "Denies the usage_data command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-zoom",
+          "markdownDescription": "Denies the zoom command without any pre-configured scope."
         },
         {
           "description": "Enables the open command without any pre-configured scope.",
@@ -3325,6 +3541,48 @@
           "type": "string",
           "const": "updater:deny-install",
           "markdownDescription": "Denies the install command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`",
+          "type": "string",
+          "const": "window-state:default",
+          "markdownDescription": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`"
+        },
+        {
+          "description": "Enables the filename command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-filename",
+          "markdownDescription": "Enables the filename command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-restore-state",
+          "markdownDescription": "Enables the restore_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-save-window-state",
+          "markdownDescription": "Enables the save_window_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the filename command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-filename",
+          "markdownDescription": "Denies the filename command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-restore-state",
+          "markdownDescription": "Denies the restore_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-save-window-state",
+          "markdownDescription": "Denies the save_window_state command without any pre-configured scope."
         }
       ]
     },

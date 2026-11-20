@@ -1,4 +1,12 @@
 import type { ActivityMessage, Message, ToolCall } from "@ag-ui/core";
+import {
+  DELEGATE_TOOL,
+  LINK_TOOL,
+  REACT_TOOL,
+  REACTIONS,
+  readTaskReport,
+} from "@openbot/shared/orchestration";
+import { leftOutOfTranscript } from "@openbot/shared/tool-steps";
 import { classifyAttachment } from "@/lib/channels/attachments";
 
 /**
@@ -48,6 +56,10 @@ export type SentAttachment = {
   url: string;
   filename?: string;
   modality: "image" | "document";
+  /** The file's size when the message carries it. A picture over the inline ceiling is not drawn. */
+  sizeBytes?: number;
+  /** The type the server found in the bytes, when the message carries it. */
+  mimeType?: string;
 };
 
 /**
@@ -137,12 +149,14 @@ function attachmentIdFromUrl(url: string): string {
 function readAttachmentMetadata(part: { type: string }): {
   attachmentId?: string;
   filename?: string;
+  sizeBytes?: number;
 } {
   const raw = (part as { metadata?: unknown }).metadata;
   if (typeof raw !== "object" || raw === null) return {};
-  const { attachmentId, filename } = raw as {
+  const { attachmentId, filename, sizeBytes } = raw as {
     attachmentId?: unknown;
     filename?: unknown;
+    sizeBytes?: unknown;
   };
 
   return {
@@ -150,6 +164,12 @@ function readAttachmentMetadata(part: { type: string }): {
       ? { attachmentId }
       : {}),
     ...(typeof filename === "string" && filename ? { filename } : {}),
+    // Narrowed like the two above: only a real size decides how a picture is drawn.
+    ...(typeof sizeBytes === "number" &&
+    Number.isFinite(sizeBytes) &&
+    sizeBytes >= 0
+      ? { sizeBytes }
+      : {}),
   };
 }
 
@@ -363,6 +383,11 @@ function isToolResult(
 
 export function toVisibleChatItems(
   messages: ReadonlyArray<Readonly<Message>>,
+  /**
+   * Which calls draw a component. Given, a component its step asked for beside another kind of call
+   * is left out (`leftOutOfTranscript` in `shared/tool-steps.ts`).
+   */
+  isComponent?: (name: string) => boolean,
 ): VisibleChatItem[] {
   // Gather results first so calls render with their current completion state in the same pass.
   const results = new Map<string, string | undefined>();
@@ -373,7 +398,7 @@ export function toVisibleChatItems(
     if (isToolResult(message)) results.set(message.toolCallId, message.content);
   }
 
-  return messages.flatMap((message): VisibleChatItem[] => {
+  const visible = messages.flatMap((message): VisibleChatItem[] => {
     if (!isReadableMessage(message)) return [];
     // Every row built below is keyed on `message.id`, including the one that keys on it by string
     // interpolation. See `isDrawableMessage` for why an unkeyable row is dropped rather than given
@@ -399,12 +424,28 @@ export function toVisibleChatItems(
         });
       }
       // A `toolCalls` that is not a list is not iterable, and `for...of` reports that by throwing.
-      for (const toolCall of Array.isArray(message.toolCalls)
-        ? message.toolCalls
-        : []) {
+      const calls = Array.isArray(message.toolCalls)
+        ? message.toolCalls.filter(isReadableToolCall)
+        : [];
+      for (const toolCall of calls) {
         // Read three fields deep off something nothing has validated: a hole in the array, or a
         // call with no `function`, threw before a single row could be drawn.
         if (!isReadableToolCall(toolCall)) continue;
+        /*
+         * A component asked for in the same step as another kind of call is not drawn: not while it
+         * streams, not as an empty card, and not when the conversation is opened again. The Bot
+         * draws it again from the results. See `shared/tool-steps.ts`.
+         */
+        if (
+          isComponent &&
+          leftOutOfTranscript(
+            calls,
+            toolCall,
+            results.get(toolCall.id),
+            isComponent,
+          )
+        )
+          continue;
         /*
          * The call that draws an interface is not a row of its own; the interface is.
          *
@@ -528,12 +569,16 @@ export function toVisibleChatItems(
         url,
         // Already narrowed to a non-empty string, or absent: see `readAttachmentMetadata`.
         ...(metadata.filename ? { filename: metadata.filename } : {}),
+        ...(metadata.sizeBytes !== undefined
+          ? { sizeBytes: metadata.sizeBytes }
+          : {}),
+        ...(source.mimeType ? { mimeType: source.mimeType } : {}),
         /*
-         * `source.mimeType` IS ALWAYS ABSENT HERE, AND THAT IS NO LONGER THE PROBLEM IT WAS.
+         * `source.mimeType` WAS ABSENT HERE ON EVERY MESSAGE SENT BEFORE PICTURES COULD BE 100MB.
          *
-         * A sent message's part is built by `toAttachmentPart` in `channel-chat.tsx`, which writes
-         * `source: { type: "url", value }` and carries no `mimeType` — so this call always falls
-         * through to `part.type`. What changed is what `part.type` MEANS: that function now derives
+         * A sent message's part is built by `toAttachmentPart` in `channel-chat.tsx`, which used to
+         * write `source: { type: "url", value }` with no `mimeType`, so this call fell through to
+         * `part.type`; it now writes the type the server found, so a newer message carries both. What changed is what `part.type` MEANS: that function now derives
          * it with this same `attachmentModality`, off the `mimeType` the server sniffed from the
          * bytes, instead of casting the browser's claim. The stored `type` is the corroborated
          * answer, so falling back to it is right rather than merely tolerable.
@@ -566,4 +611,96 @@ export function toVisibleChatItems(
 
     return items;
   });
+
+  return asTheBotMeantIt(visible);
+}
+
+/** A run of nothing but the reactions a Bot may leave, as a reply's whole text. */
+const REACTION_ONLY = new RegExp(
+  `^(?:\\s|${REACTIONS.map((emoji) => emoji.replace(/️/g, "")).join("|")}|\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])+$`,
+  "u",
+);
+
+/**
+ * One turn of a Bot that holds `delegate` and `react`, drawn the way it was meant to read.
+ *
+ * A REACTION IS THE WHOLE ANSWER. A Bot that reacts sometimes also writes the emoji as its reply, and
+ * the person saw 👍 under their message and 👍 again as a line of its own. In a turn that reacted, a
+ * line that is nothing but reactions is that reaction again, and is not drawn.
+ *
+ * THE LINE BEFORE THE CARD. A Bot says in a line what it will do and hands the work on, and a model
+ * that calls `delegate` first and writes its line after the result put the task card above "On it.".
+ * A turn whose first words come after its first `delegate` call has them drawn above it. What the
+ * Bot said is unchanged; only where the card sits.
+ */
+function asTheBotMeantIt(items: VisibleChatItem[]): VisibleChatItem[] {
+  const out: VisibleChatItem[] = [];
+  let turnStart = 0;
+  const closeTurn = () => {
+    const turn = out.splice(turnStart);
+    const named = (item: VisibleChatItem, name: string) =>
+      item.kind === "tool" && item.toolCall.function.name === name;
+    const reacted = turn.some((item) => named(item, REACT_TOOL));
+    const kept = reacted
+      ? turn.filter(
+          (item) =>
+            !(
+              item.kind === "text" &&
+              item.role === "assistant" &&
+              REACTION_ONLY.test(item.text)
+            ),
+        )
+      : turn;
+    /*
+     * THE CARD IS THE LINK. A Bot that started a task and then looked up its thread in the same
+     * turn drew the task twice, the card and a one-row link list under it. Asked for in a turn of
+     * its own, the list is drawn as always.
+     */
+    if (kept.some((item) => named(item, DELEGATE_TOOL)))
+      for (let at = kept.length - 1; at >= 0; at -= 1)
+        if (named(kept[at] as VisibleChatItem, LINK_TOOL)) kept.splice(at, 1);
+    const card = kept.findIndex((item) => named(item, DELEGATE_TOOL));
+    const said = kept.findIndex(
+      (item) => item.kind === "text" && item.role === "assistant",
+    );
+    if (card >= 0 && said > card) {
+      const [line] = kept.splice(said, 1);
+      if (line) kept.splice(card, 0, line);
+    }
+    /*
+     * ONE LINE, THEN THE CARD. A model told that a started task ends its reply still wrote a second
+     * line after the result came back ("The task is running. Its chart will be posted here."), which
+     * says again what the line above and the card already say. Words after the card, up to the
+     * task's own reports (which the deployment writes later, in the same turn), are not drawn.
+     */
+    const lastCard = kept.findLastIndex((item) => named(item, DELEGATE_TOOL));
+    const firstCard = kept.findIndex((item) => named(item, DELEGATE_TOOL));
+    const lineFirst = kept
+      .slice(0, Math.max(firstCard, 0))
+      .some((item) => item.kind === "text" && item.role === "assistant");
+    if (lineFirst)
+      for (let at = lastCard + 1; at < kept.length; at += 1) {
+        const item = kept[at] as VisibleChatItem;
+        if (item.kind === "text" && readTaskReport(item.id)) break;
+        if (item.kind === "text" && item.role === "assistant") {
+          kept.splice(at, 1);
+          at -= 1;
+        }
+      }
+    out.push(...kept);
+  };
+  for (const item of items) {
+    const fromPerson =
+      item.kind === "attachments" ||
+      (item.kind === "text" && item.role === "user");
+    if (fromPerson) {
+      closeTurn();
+      out.push(item);
+      turnStart = out.length;
+      continue;
+    }
+    out.push(item);
+  }
+  closeTurn();
+  return out;
 }

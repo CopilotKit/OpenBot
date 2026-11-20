@@ -3,8 +3,82 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
-import { type AgentChannel, channelKeys } from "@/lib/channels/queries";
-import { client } from "@/lib/client";
+import {
+  addConversationMember,
+  createConversation,
+  listConversationMembers,
+  listConversationMessages,
+  removeConversationMember,
+  sendConversationMessage,
+} from "@/lib/api/generated/conversations/conversations";
+import type {
+  ConversationMember,
+  ConversationMessage,
+} from "@/lib/api/generated/model";
+import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
+import {
+  type AgentChannel,
+  channelKeys,
+  channelOf,
+} from "@/lib/channels/queries";
+import type { SentFile } from "@/lib/computers/sent-file";
+
+/** A key for one write, so a retry of it is recognised as the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+/** The most the transcript shows: the newest lines, as the page always has. */
+const TRANSCRIPT_LINES = 200;
+
+/** Every page of a list, in order. A group's people and Bots are few; this reads them all. */
+async function everyMember(channelId: string): Promise<ConversationMember[]> {
+  const members: ConversationMember[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listConversationMembers(
+      organizationId(),
+      channelId,
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+      { fallback: "This group conversation could not be loaded." },
+    );
+    members.push(...page.members);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return members;
+}
+
+/** A line as the API answers it, in the names the transcript draws. */
+function groupMessageOf(
+  channelId: string,
+  message: ConversationMessage,
+): GroupMessage {
+  return {
+    id: message.id,
+    channelId,
+    ownerUserId: message.personId ?? "",
+    agentId: message.botId,
+    text: message.text,
+    status: message.status,
+    createdAt: message.createdAt ?? "",
+    ...(message.reason === undefined ? {} : { reason: message.reason }),
+    ...(message.declined ? { declined: true } : {}),
+    ...(message.answeredBy === undefined
+      ? {}
+      : { answeredBy: message.answeredBy }),
+    ...(message.consent === undefined ? {} : { consent: message.consent }),
+    ...(message.files?.length
+      ? {
+          files: message.files.map((file) => ({
+            attachmentId: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            url: storedAttachmentUrl(file.id),
+          })),
+        }
+      : {}),
+  };
+}
 
 /** One line of a group conversation: a person's message (`agentId` null) or one Bot's reply. */
 export type GroupMessage = {
@@ -14,14 +88,22 @@ export type GroupMessage = {
   ownerUserId: string;
   agentId: string | null;
   text: string;
-  status: "queued" | "running" | "waiting" | "completed" | "failed";
+  /**
+   * `queued`, `running`, `waiting`, `completed` or `failed`. The list can grow: a status this app
+   * doesn't know draws the line as a plain reply.
+   */
+  status: string;
   createdAt: string;
-  /** Why a waiting Bot is waiting, when it is. */
+  /** Why a waiting Bot is waiting, when it is, in words for the person reading. */
   reason?: string;
+  /** A failed reply its person chose not to share: a choice, drawn as a notice and not an error. */
+  declined?: true;
   /** For an answer relayed from another Bot through `message_bot`: which Bot answered. */
   answeredBy?: string;
   /** A Team Bot asking the person whose turn it was to use their own account. */
   consent?: { botId: string; serverId: string };
+  /** The files a Bot sent from its computer with this reply, each drawn as its card. */
+  files?: SentFile[];
 };
 export type GroupPerson = {
   userId: string;
@@ -49,11 +131,32 @@ export function groupQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: groupKeys.detail(channelId),
     queryFn: async (): Promise<GroupConversation> => {
-      const response = await client(
-        `/api/groups/${encodeURIComponent(channelId)}`,
-        { fallback: "This group conversation could not be loaded." },
-      );
-      return (await response.json()) as GroupConversation;
+      const [members, newestFirst] = await Promise.all([
+        everyMember(channelId),
+        listConversationMessages(
+          organizationId(),
+          channelId,
+          { limit: TRANSCRIPT_LINES },
+          { fallback: "This group conversation could not be loaded." },
+        ),
+      ]);
+      return {
+        bots: members
+          .filter((member) => member.kind === "bot")
+          .map((member) => ({ id: member.id, name: member.name ?? "" })),
+        people: members
+          .filter((member) => member.kind === "person")
+          .map((member) => ({
+            userId: member.id,
+            email: member.email ?? "",
+            name: member.name,
+            creator: member.creator ?? false,
+          })),
+        // The API answers newest first. The transcript reads oldest first.
+        messages: newestFirst.messages
+          .map((message) => groupMessageOf(channelId, message))
+          .reverse(),
+      };
     },
     refetchInterval: (query) =>
       query.state.data?.messages.some(
@@ -88,11 +191,13 @@ export function sendGroupMessageMutationOptions(
       text: string;
       agentId: string | null;
     }) => {
-      await client(`/api/groups/${encodeURIComponent(channelId)}`, {
-        method: "POST",
-        body: input,
-        fallback: "Your message could not be sent to the group.",
-      });
+      await sendConversationMessage(
+        organizationId(),
+        channelId,
+        { id: input.id, text: input.text, botId: input.agentId },
+        once(),
+        { fallback: "Your message could not be sent to the group." },
+      );
     },
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: groupKeys.detail(channelId) }),
@@ -103,12 +208,13 @@ export function sendGroupMessageMutationOptions(
 export function createGroupMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentIds: string[]): Promise<AgentChannel> => {
-      const response = await client("/api/groups", {
-        method: "POST",
-        body: { agentIds },
-        fallback: "The group could not be started.",
-      });
-      return ((await response.json()) as { channel: AgentChannel }).channel;
+      const made = await createConversation(
+        organizationId(),
+        { botIds: agentIds, group: true },
+        once(),
+        { fallback: "The group could not be started." },
+      );
+      return channelOf(made.conversation);
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: channelKeys.all }),
@@ -122,11 +228,13 @@ export function addGroupMemberMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (email: string) => {
-      await client(`/api/groups/${encodeURIComponent(channelId)}/members`, {
-        method: "POST",
-        body: { email },
-        fallback: "That person could not be added.",
-      });
+      await addConversationMember(
+        organizationId(),
+        channelId,
+        { email },
+        once(),
+        { fallback: "That person could not be added." },
+      );
     },
     // So the list of people shows them straight away.
     onSettled: () =>
@@ -141,9 +249,12 @@ export function removeGroupMemberMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (userId: string) => {
-      await client(
-        `/api/groups/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`,
-        { method: "DELETE", fallback: "That person could not be removed." },
+      await removeConversationMember(
+        organizationId(),
+        channelId,
+        userId,
+        once(),
+        { fallback: "That person could not be removed." },
       );
     },
     onSettled: () =>

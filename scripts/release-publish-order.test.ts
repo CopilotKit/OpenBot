@@ -77,7 +77,6 @@ test("the gate decides with release-ci-gate.ts, and re-runs the checks that read
     "bun run format:check",
     "bun run lint",
     "bun desktop/scripts/desktop-version.ts check",
-    "charts/openbot/Chart.yaml",
     "-e CHANGELOG.md -e release-policy.json",
   ]) {
     expect(runs).toContain(check);
@@ -189,6 +188,23 @@ test("the merge-back still follows a published final, whether or not the full ch
   expect(needs("merge-back")).toEqual(["metadata", "github-release"]);
   expect(condition("merge-back")).toBe(
     "!cancelled() && needs.metadata.outputs.final_from_candidate == 'true' && needs.github-release.result == 'success'",
+  );
+});
+
+test("a stable release from main opens the PR that runs main's images again", () => {
+  expect(needs("main-images")).toEqual(["metadata", "github-release"]);
+  expect(condition("main-images")).toBe(
+    "!cancelled() && github.ref == 'refs/heads/main' && needs.metadata.outputs.is_release == 'true' && needs.github-release.result == 'success'",
+  );
+  const run = job("main-images").steps?.[0]?.run ?? "";
+  expect(run).toContain("FILE=backend-images.env");
+  expect(run).toContain("gh pr create");
+});
+
+test("the merge-back keeps main's own image tag and CLI", () => {
+  const run = job("merge-back").steps?.[0]?.run ?? "";
+  expect(run).toContain(
+    "MAIN_KEEPS=(desktop/intelligence-cli.json backend-images.env)",
   );
 });
 

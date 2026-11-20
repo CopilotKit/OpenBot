@@ -105,11 +105,11 @@ const meBody = {
   connectionId: "c-obr_one",
 };
 const CONNECTING = new Set([
-  "POST /api/recorder/connections",
-  "GET /api/recorder/me",
-  "GET /api/recorder/learning",
-  "DELETE /api/recorder/connections/current",
-  "POST /api/recorder/activity",
+  "POST /api/v2/organizations/default/recorder-connections",
+  "GET /api/v2/organizations/default/recorder/me",
+  "GET /api/v2/organizations/default/recorder/learning",
+  "DELETE /api/v2/organizations/default/recorder-connections/current",
+  "POST /api/v2/organizations/default/recorder/activity",
 ]);
 
 function resetOpenBot() {
@@ -137,21 +137,21 @@ beforeAll(() => {
         auth && openbot.revoked.has(auth.slice(7))
           ? Response.json(
               {
-                error: "Connect this browser again.",
+                detail: "Connect this browser again.",
                 code: RECORDER_SIGNED_OUT,
                 reason: "revoked",
               },
               { status: 401 },
             )
           : null;
-      if (route === "GET /api/recorder/me") {
+      if (route === "GET /api/v2/organizations/default/recorder/me") {
         if (openbot.holds.me) await openbot.holds.me;
         return (
           signedOut() ??
           Response.json(openbot.me.body, { status: openbot.me.status })
         );
       }
-      if (route === "GET /api/recorder/learning")
+      if (route === "GET /api/v2/organizations/default/recorder/learning")
         return (
           signedOut() ??
           (openbot.learningRefusal
@@ -160,16 +160,19 @@ beforeAll(() => {
               })
             : Response.json({ learning: openbot.learning }))
         );
-      if (route === "POST /api/recorder/activity") {
+      if (route === "POST /api/v2/organizations/default/recorder/activity") {
         openbot.activity.push(await request.json());
         return signedOut() ?? new Response(null, { status: 204 });
       }
-      if (route === "DELETE /api/recorder/connections/current") {
+      if (
+        route ===
+        "DELETE /api/v2/organizations/default/recorder-connections/current"
+      ) {
         if (openbot.holds.disconnect) await openbot.holds.disconnect;
         return new Response(null, { status: 204 });
       }
       // A connect code is always Bea's here: the person who connects this browser in place of whoever it was connected as.
-      if (route === "POST /api/recorder/connections")
+      if (route === "POST /api/v2/organizations/default/recorder-connections")
         return Response.json(
           { token: "obr_bea", connection: { id: "c-obr_bea" }, user: bea },
           { status: 201 },
@@ -184,7 +187,9 @@ afterAll(() => server.stop(true));
 const requests = () => openbot.calls.map((c) => `${c.method} ${c.path}`);
 /** OpenBot's calls other than the reports of what the Recorder is doing (activity.ts), which hold nothing recorded. */
 const callsBeyondActivity = () =>
-  openbot.calls.filter((call) => call.path !== "/api/recorder/activity");
+  openbot.calls.filter(
+    (call) => call.path !== "/api/v2/organizations/default/recorder/activity",
+  );
 /** What OpenBot heard beyond connecting: nothing, ever, about a recording. */
 const recordingRequests = () =>
   requests().filter((request) => !CONNECTING.has(request));
@@ -1045,7 +1050,7 @@ test("Stop queues the outcome in the document, and the recording waits as a drai
 test("a recording the document could not send at all never reads as sent: Stop says nothing reached Intelligence", async () => {
   const id = await record();
   const NOT_SENT =
-    "Nothing of this recording reached OpenBot's back end: the Recorder could not start sending it. Try recording again.";
+    "Nothing of this recording reached OpenBot's backend: the Recorder could not start sending it. Try recording again.";
   holdStop = true;
   const stopping = page({ type: "page.stop" });
   await until(
@@ -1128,7 +1133,10 @@ test("the popup keeps the person's Learning space after Stop when Chrome stopped
   });
   // Nothing more was asked of OpenBot for it: Record still tells OpenBot nothing.
   expect(
-    requests().filter((request) => request === "GET /api/recorder/learning"),
+    requests().filter(
+      (request) =>
+        request === "GET /api/v2/organizations/default/recorder/learning",
+    ),
   ).toHaveLength(1);
 });
 
@@ -1693,7 +1701,7 @@ test("Start over on the notice records a new recording whose count starts again"
 
 // ---- Start over ------------------------------------------------------------------------------
 
-test("Start over sends the recording it leaves to OpenBot's back end with a failed outcome and records into a new trajectory", async () => {
+test("Start over sends the recording it leaves to OpenBot's backend with a failed outcome and records into a new trajectory", async () => {
   const old = await record();
   const oldTrajectory = trajectoryOf(old);
   const content = contentPort(7);
@@ -1819,7 +1827,7 @@ test("once Intelligence takes events again the popup says Streaming, and nothing
   const id = await record();
   const trajectory = trajectoryOf(id);
   const busy =
-    "OpenBot's back end is busy or unreachable. Retrying; nothing is lost.";
+    "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.";
   doc?.postMessage({
     type: "offscreen.status",
     capture: {
@@ -2618,7 +2626,9 @@ test("connecting again clears the sentence that the stopped recording waits for 
 // ---- A connection lost without a Disconnect ---------------------------------------------------
 
 const meChecks = () =>
-  openbot.calls.filter((call) => call.path === "/api/recorder/me");
+  openbot.calls.filter(
+    (call) => call.path === "/api/v2/organizations/default/recorder/me",
+  );
 
 test("while a recording runs OpenBot is asked every 30 s whether its connection stands, and a browser revoked in OpenBot ends the recording as signed out", async () => {
   const id = await record();
@@ -2672,14 +2682,18 @@ test("a connection check that cannot reach OpenBot, or gets an error page, is no
   );
   // The 30 s report of what the Recorder is doing fails the same way, and changes nothing either.
   const refusedChecks = () =>
-    refused.filter((url) => url.endsWith("/api/recorder/me"));
+    refused.filter((url) =>
+      url.endsWith("/api/v2/organizations/default/recorder/me"),
+    );
   try {
     await advance(30_000);
     await until(() => refusedChecks().length === 1, "the check that fails");
   } finally {
     globalThis.fetch = realFetch;
   }
-  expect(refusedChecks()).toEqual([`${origin}/api/recorder/me`]);
+  expect(refusedChecks()).toEqual([
+    `${origin}/api/v2/organizations/default/recorder/me`,
+  ]);
   expect((await state()).phase).toBe("recording");
   expect(storedConnection()?.token).toBe("obr_one");
 
@@ -2844,7 +2858,8 @@ test("a Connect approved as another person stops the live recording, halts the o
   const revokes = openbot.calls.filter(
     (call) =>
       call.method === "DELETE" &&
-      call.path === "/api/recorder/connections/current",
+      call.path ===
+        "/api/v2/organizations/default/recorder-connections/current",
   );
   expect(revokes.map((call) => call.auth)).toEqual(["Bearer obr_one"]);
 });
@@ -3853,8 +3868,11 @@ test("a whole recording, Start over included, asks OpenBot for nothing, and tell
   expect(await page({ type: "page.stop" })).toEqual({ ok: true });
   await settle();
   expect(
-    requests().filter((request) => request !== "POST /api/recorder/activity"),
-  ).toEqual(["GET /api/recorder/learning"]);
+    requests().filter(
+      (request) =>
+        request !== "POST /api/v2/organizations/default/recorder/activity",
+    ),
+  ).toEqual(["GET /api/v2/organizations/default/recorder/learning"]);
   // The phase, the recording's id, title and start, and a count: never a step, an address or anything typed.
   expect(openbot.activity.length).toBeGreaterThan(0);
   for (const report of openbot.activity)
@@ -3888,7 +3906,10 @@ test("page.state answers with the connection, me and the policy address, fetchin
     (answer.connection as unknown as { token?: string }).token,
   ).toBeUndefined();
   await page({ type: "page.state" });
-  const meCalls = () => requests().filter((r) => r === "GET /api/recorder/me");
+  const meCalls = () =>
+    requests().filter(
+      (r) => r === "GET /api/v2/organizations/default/recorder/me",
+    );
   expect(meCalls()).toHaveLength(1);
   now += 61_000;
   await page({ type: "page.state" });
@@ -3908,7 +3929,7 @@ test("a refusal from OpenBot reaches the popup in the Recorder's own sentence, n
     [
       {
         status: 503,
-        body: { error: hostile, code: RECORDER_AUTHORITY_UNAVAILABLE },
+        body: { detail: hostile, code: RECORDER_AUTHORITY_UNAVAILABLE },
       },
       "Your organization could not answer. Try again in a moment.",
     ],
@@ -3925,6 +3946,66 @@ test("a refusal from OpenBot reaches the popup in the Recorder's own sentence, n
   }
 });
 
+/** OpenBot's refusal of an app older than it serves, exactly as api/openapi/common.yaml's clientUpdateRequired example
+ * gives it. */
+const CLIENT_UPDATE_REQUIRED_EXAMPLE = {
+  type: "https://open.bot/errors/client-update-required",
+  title: "This app is too old for this OpenBot.",
+  status: 400,
+  detail:
+    "This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.",
+  code: "CLIENT_UPDATE_REQUIRED",
+  category: "validation",
+  retryable: false,
+  requestId: "req_example",
+  traceId: "trace_example",
+  client: "desktop",
+  minimumVersion: "1.2.0",
+};
+
+test("an OpenBot that serves only newer Recorders reaches the popup as its sentence: Update OpenBot, never a plain failure and never text the server made up", async () => {
+  for (const [body, sentence] of [
+    [CLIENT_UPDATE_REQUIRED_EXAMPLE, CLIENT_UPDATE_REQUIRED_EXAMPLE.detail],
+    [
+      {
+        ...CLIENT_UPDATE_REQUIRED_EXAMPLE,
+        detail:
+          "This OpenBot needs the OpenBot Recorder 1.2.0 or later. Update OpenBot, then try again.",
+        client: "recorder",
+        minimumVersion: "1.2.0",
+      },
+      "This OpenBot needs the OpenBot Recorder 1.2.0 or later. Update OpenBot, then try again.",
+    ],
+    [
+      {
+        ...CLIENT_UPDATE_REQUIRED_EXAMPLE,
+        detail:
+          "Your Recorder is out of date. Install the new one from https://evil.example.test.",
+        client: "evil",
+        minimumVersion: "see https://evil.example.test",
+      },
+      "This OpenBot needs a newer OpenBot Recorder. Update OpenBot, then try again.",
+    ],
+    // A minimum raised for a security problem (the spec's clientUpdateRequiredSecurity), said in the Recorder's own
+    // words for it, whatever detail came with it.
+    [
+      {
+        ...CLIENT_UPDATE_REQUIRED_EXAMPLE,
+        detail: "Install the fix from https://evil.example.test.",
+        client: "recorder",
+        minimumVersion: "1.2.0",
+        security: true,
+      },
+      "This version of OpenBot has a security problem. Update to keep using it.",
+    ],
+  ] as const) {
+    openbot.learningRefusal = { status: 400, body };
+    const answer = await page({ type: "page.learning" });
+    expect(answer).toEqual({ ok: false, error: sentence });
+    expect(JSON.stringify(answer)).not.toContain("evil");
+  }
+});
+
 test("page.learning reads the person's own Learning space", async () => {
   expect(await page({ type: "page.learning" })).toEqual({
     ok: true,
@@ -3932,7 +4013,7 @@ test("page.learning reads the person's own Learning space", async () => {
   });
   expect(openbot.calls[0]).toMatchObject({
     method: "GET",
-    path: "/api/recorder/learning",
+    path: "/api/v2/organizations/default/recorder/learning",
     auth: "Bearer obr_one",
   });
 });
@@ -3952,7 +4033,7 @@ test("a signed-out answer from me forgets the connection with its reason", async
   openbot.me = {
     status: 401,
     body: {
-      error: "Connect again.",
+      detail: "Connect again.",
       code: RECORDER_SIGNED_OUT,
       reason: "removed",
     },
@@ -4184,7 +4265,11 @@ const restartWaits: Wait[] = [
 const disconnectWaits: Wait[] = [
   {
     name: "OpenBot forgetting the connection",
-    hold: () => holdRoute("disconnect", "/api/recorder/connections/current"),
+    hold: () =>
+      holdRoute(
+        "disconnect",
+        "/api/v2/organizations/default/recorder-connections/current",
+      ),
   },
   {
     name: "forgetting the stored connection",
@@ -4222,7 +4307,7 @@ const documentSignOutWaits: Wait[] = [
 const popupSignOutWaits: Wait[] = [
   {
     name: "OpenBot's signed-out answer",
-    hold: () => holdRoute("me", "/api/recorder/me"),
+    hold: () => holdRoute("me", "/api/v2/organizations/default/recorder/me"),
   },
   {
     name: "forgetting the stored connection",

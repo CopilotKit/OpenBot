@@ -9,20 +9,27 @@ import ts from "typescript";
  * .claude/skills/openbot-copy).
  *
  * Read are the string literals, template text and JSX text of the desktop window, the app, the
- * Recorder extension and the shared modules both sides render, the string literals of the
- * desktop's native side, and the server's plugin routes and plugin store, which write every
- * sentence the plugin routes send to the browser. A template that interpolates the broker's
- * display name (`BROKERED_PROFILE[…].vendor`, `activeVendor`) counts as naming it.
+ * Recorder extension and the shared modules both sides render, and the string literals of the
+ * desktop's native side. A template that interpolates the broker's display name
+ * (`BROKERED_PROFILE[…].vendor`, `activeVendor`) counts as naming it.
  *
  * Not read: code identifiers, ids and env names (`composio-hubspot`, `COMPOSIO_API_KEY`; the check
- * is for the capitalised word), type-level strings, comments, tests, log calls, and docs/ and
- * charts/, which operators read to configure Composio by name. The broker client's own sentences
- * (server/src/plugins/composio*) are written for the operator; the routes a person calls pass them
- * through `forPerson` (server/src/plugins/route-groups/context.ts), and
- * server/tests/plugin-routes.test.ts pins that a person never reads one.
+ * is for the capitalised word), type-level strings, comments, tests, log calls, and docs/, which
+ * operators read to configure Composio by name. The server's sentences come with the published
+ * OpenBot images, not from this tree.
  */
 const REPO = join(import.meta.dir, "..");
 const WORD = /\bComposio\b/;
+
+/**
+ * The one place a person is told the name, and why. Before a sign-in through Composio, Composio's
+ * own page and then the provider's consent page ("Composio wants access to your Google Account")
+ * both name it, so OpenBot's step before them says who Composio is first. Every sentence that does
+ * lives in this one file; anything else that names it still fails here.
+ */
+const NAMES_COMPOSIO_ON_PURPOSE = new Set([
+  "app/src/lib/plugins/consent-handoff.ts",
+]);
 /** An interpolation of the broker's display name. */
 const VENDOR_NAME =
   /^(BROKERED_PROFILE\[[^\]]+\]\.vendor|activeVendor|profile\.vendor|vendor)$/;
@@ -139,15 +146,12 @@ function nativeText(path: string): string[] {
 
 function shown(): string[] {
   const found = [
-    ...[
-      "desktop/src",
-      "app/src",
-      "extension/src",
-      "shared",
-      "server/src/plugins/route-groups",
-      "server/src/plugins/plugin-store",
-    ].flatMap((root) => [...files(join(REPO, root), /\.tsx?$/)]),
-  ].flatMap(scriptText);
+    ...["desktop/src", "app/src", "extension/src", "shared"].flatMap((root) => [
+      ...files(join(REPO, root), /\.tsx?$/),
+    ]),
+  ]
+    .filter((path) => !NAMES_COMPOSIO_ON_PURPOSE.has(relative(REPO, path)))
+    .flatMap(scriptText);
   found.push(
     ...[...files(join(REPO, "desktop/src-tauri/src"), /\.rs$/)].flatMap(
       nativeText,
@@ -156,7 +160,7 @@ function shown(): string[] {
   return found;
 }
 
-test("no text a person reads in the desktop app, the app or the plugin routes says Composio", () => {
+test("no text a person reads in the desktop app, the app or the Recorder says Composio", () => {
   expect(shown()).toEqual([]);
 });
 

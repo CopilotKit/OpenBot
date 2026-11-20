@@ -20,9 +20,9 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * The approval step's one setting, offered on the step rather than described: Always ask before
- * making changes, the same switch and the same preference as Settings → Approvals, in the same
- * words (ask-first-copy.ts). It takes effect when switched, and a change that fails is said under it.
+ * The approval step's one setting, offered on the step rather than described: Extra vigilant, the
+ * same switch and the same preference as Settings → Approvals, in the same words
+ * (ask-first-copy.ts). It takes effect when switched, and a change that fails is said under it.
  *
  * The step is still a picture of what a Bot asks; the switch sits with the words, outside the
  * picture's frame, because it is the one real control here.

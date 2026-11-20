@@ -256,13 +256,17 @@ def test_a_thread_over_the_budget_replays_its_newest_messages(sdk):
             prompt = sdk[-1].prompts[-1]
             assert "LATEST_QUESTION" in prompt
             assert "ANSWER_399" in prompt
-            assert "QUESTION_000" not in prompt
+            # The person's first message stays; what follows it is what is left out.
+            assert "QUESTION_000" in prompt
+            assert "QUESTION_001" not in prompt
+            assert "ANSWER_000" not in prompt
             # Well inside the smallest window Claude Code runs at, 200K tokens, at the documented
             # 2.5 characters per token of the current tokenizer.
             assert len(prompt) < 200_000 * 2.5
             # And the Bot is told, before the history starts, that it is not the whole thread.
             assert "not shown" in prompt
-            assert prompt.index("not shown") < prompt.index("QUESTION_")
+            assert prompt.index("QUESTION_000") < prompt.index("not shown")
+            assert prompt.index("not shown") < prompt.index("QUESTION_399")
         finally:
             await adapter.shutdown()
 
@@ -276,7 +280,7 @@ def test_the_bound_never_separates_a_tool_call_from_its_result(sdk):
     call = {
         "id": "call-big",
         "type": "function",
-        "function": {"name": "lookup", "arguments": json.dumps({"q": "x" * int(budget * 0.3)})},
+        "function": {"name": "lookup", "arguments": json.dumps({"q": "x" * int(budget * 1.1)})},
     }
     request = run_input(
         say("user", "OLD_QUESTION"),
@@ -284,7 +288,7 @@ def test_the_bound_never_separates_a_tool_call_from_its_result(sdk):
         # Newest first, the result fits the budget and its call does not: keeping the newest
         # messages that fit would keep a result whose call is gone.
         say("assistant", "", id="assistant-call", toolCalls=[call]),
-        say("tool", "RESULT_BIG " + "r" * int(budget * 0.8), id="tool-big", toolCallId="call-big"),
+        say("tool", "RESULT_BIG " + "r" * 3_000, id="tool-big", toolCallId="call-big"),
         say("assistant", "AFTER_TOOL"),
         say("user", "LATEST_QUESTION"),
     )
@@ -298,7 +302,8 @@ def test_the_bound_never_separates_a_tool_call_from_its_result(sdk):
             assert "AFTER_TOOL" in prompt
             assert "RESULT_BIG" not in prompt
             assert "call-big" not in prompt
-            assert "OLD_QUESTION" not in prompt
+            assert "TOOL_QUESTION" not in prompt
+            assert "OLD_QUESTION" in prompt, "the person's first message is always replayed"
             assert "not shown" in prompt
         finally:
             await adapter.shutdown()
@@ -333,9 +338,72 @@ def test_the_bound_keeps_everything_from_the_latest_user_message_on(sdk):
             prompt = sdk[-1].prompts[-1]
             for kept in ("LATEST_QUESTION", "call-tail", "TAIL_RESULT", "TAIL_ANSWER"):
                 assert kept in prompt
-            assert "OLD_QUESTION" not in prompt
+            assert "OLD_QUESTION" in prompt, "the person's first message is always replayed"
             assert "OLD_ANSWER" not in prompt
             assert "not shown" in prompt
+        finally:
+            await adapter.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_a_long_task_keeps_its_request_and_its_latest_results(sdk):
+    """The P1, as it arrived: a long, detailed request, a few steps each with a large tool result,
+    then short replies from the person. The Bot said it could no longer see the task, because the
+    replay left out the oldest messages to fit, and the oldest was the request itself.
+
+    At the turn the Bot answers, the request is still there in full, the newest result is whole,
+    and the replay still fits.
+    """
+    from src.replay import CHARS_PER_TOKEN, REPLAY_BUDGET_TOKENS
+
+    request_text = (
+        "ORIGINAL_REQUEST: connect these eight apps one at a time, and test each with one "
+        "read-only call: Gmail, Google Calendar, Slack, Notion, HubSpot, Linear, GitHub, Drive. "
+        "Never send, create or delete anything."
+    )
+    messages = [say("user", request_text, id="request")]
+    apps = ["gmail", "calendar", "slack", "notion", "hubspot"]
+    for step, app in enumerate(apps):
+        call = {
+            "id": f"call-{app}",
+            "type": "function",
+            "function": {"name": f"{app}_list", "arguments": "{}"},
+        }
+        # A page of email, an app's tool list: around 80,000 characters each.
+        result = f"RESULT_{app.upper()}_HEAD " + json.dumps(
+            [{"id": f"{app}-{row}", "body": "x" * 400} for row in range(180)]
+        ) + f" RESULT_{app.upper()}_TAIL"
+        messages += [
+            say("assistant", "", id=f"assistant-{app}", toolCalls=[call]),
+            say("tool", result, id=f"tool-{app}", toolCallId=f"call-{app}"),
+            say("assistant", f"{app} works. Shall I go on?", id=f"answer-{app}"),
+        ]
+        if step < len(apps) - 1:
+            messages.append(say("user", "yes, next", id=f"next-{step}"))
+    messages.append(say("user", "skip google calendar, email... go to the next ones", id="latest"))
+    # Over the budget, or the test would prove nothing.
+    assert sum(len(json.dumps(message)) for message in messages) > (
+        REPLAY_BUDGET_TOKENS * CHARS_PER_TOKEN
+    )
+
+    async def scenario():
+        adapter = OpenBotClaudeAgentAdapter(name="test")
+        try:
+            finished = await events(adapter, run_input(*messages))
+            assert finished[-1].type == "RUN_FINISHED"
+            prompt = sdk[-1].prompts[-1]
+            assert request_text in prompt
+            assert "skip google calendar" in prompt
+            # The newest step's result reaches the Bot whole; older ones keep their start.
+            assert "RESULT_HUBSPOT_HEAD" in prompt
+            assert "RESULT_HUBSPOT_TAIL" in prompt
+            for app in apps:
+                assert f"RESULT_{app.upper()}_HEAD" in prompt
+                assert f"{app} works" in prompt
+            assert "more characters of this result were left out" in prompt
+            assert "no longer see" not in prompt, "nothing had to be left out whole"
+            assert len(prompt) <= REPLAY_BUDGET_TOKENS * CHARS_PER_TOKEN
         finally:
             await adapter.shutdown()
 

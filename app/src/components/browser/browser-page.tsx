@@ -22,14 +22,14 @@ const DESCRIPTION =
   "Show your Bots how to do a task. Press Record, name the task, and do it once in the browser.";
 
 /**
- * The way from what was taught to what it became: the skills a Bot learned from recordings are in Settings, Learning,
+ * The way from what was taught to what it became: the skills a Bot learned from recordings are on Skills,
  * with automatic learning and sharing. A link there, so this page stays the place to teach and the settings stay there.
  */
 function LearnedLink() {
   return (
     <Link
       className="text-muted-foreground text-sm underline-offset-4 hover:text-foreground hover:underline"
-      to="/settings/learning"
+      to="/skills"
     >
       See what your Bots learned
     </Link>
@@ -84,7 +84,7 @@ export function BrowserPage() {
     return (
       <PageShell title={TITLE}>
         <p className="mt-6 text-destructive text-sm" role="alert">
-          Couldn't load your browser. Reload the page.
+          Couldn't load your browser. Try again in a moment.
         </p>
         <YourRecordings action={<LearnedLink />} />
       </PageShell>

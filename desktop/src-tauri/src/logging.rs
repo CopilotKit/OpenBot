@@ -94,6 +94,67 @@ pub fn builder(
     })
 }
 
+/**
+The same log for a run with no app around it (the Windows uninstaller's stop, `uninstall`): its
+lines are written as the plugin writes the app's, with the same levels and scrubbing, at the end of
+the current file in `folder`. Nothing rotates it here; the app does when it next starts. Answers
+whether this process now logs there.
+*/
+pub fn append_without_app(folder: &Path) -> bool {
+    struct Appending {
+        file: std::sync::Mutex<std::fs::File>,
+        home: Option<String>,
+    }
+    impl log::Log for Appending {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            let own = OWN_CRATES.iter().any(|own| {
+                metadata.target() == *own || metadata.target().starts_with(&format!("{own}::"))
+            });
+            metadata.level()
+                <= if own {
+                    log::Level::Info
+                } else {
+                    log::Level::Warn
+                }
+        }
+        fn log(&self, record: &log::Record) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let entry = line(
+                &timestamp(),
+                record.level(),
+                record.target(),
+                &record.args().to_string(),
+                self.home.as_deref(),
+            );
+            if let Ok(mut file) = self.file.lock() {
+                use std::io::Write;
+                let _ = writeln!(file, "{entry}");
+            }
+        }
+        fn flush(&self) {}
+    }
+    let opened = std::fs::create_dir_all(folder).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(folder.join(format!("{FILE_NAME}.log")))
+    });
+    let Ok(file) = opened else {
+        return false;
+    };
+    let logger = Appending {
+        file: std::sync::Mutex::new(file),
+        home: home_folder(),
+    };
+    if log::set_boxed_logger(Box::new(logger)).is_err() {
+        return false;
+    }
+    log::set_max_level(log::LevelFilter::Info);
+    true
+}
+
 /// The folder the log file is written to, as the plugin resolves it.
 pub fn folder<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<PathBuf> {
     use tauri::Manager;
@@ -151,6 +212,93 @@ pub fn timed<T, E: Failure>(what: &str, run: impl FnOnce() -> Result<T, E>) -> R
     result
 }
 
+/**
+What a Start phase waits on, as the log says it: the first answer and every change of it, the same
+answer again once a minute, and why the wait ended, with how long it ran and the last answer.
+
+A Start on Windows waited five minutes for OpenBot's services and then said "OpenBot didn't get
+ready in time", and the log had nothing in between: not what was asked, not what it answered, not
+why it stopped. Support had nothing to go on. Every wait writes these lines now.
+
+Pure, so the rule is tested with the answers the real waits give; the waits pass its lines to
+`log::info!`.
+*/
+pub struct WaitLog {
+    what: String,
+    started: std::time::Instant,
+    checks: u32,
+    last: Option<String>,
+    logged: Option<std::time::Instant>,
+    checked: std::time::Instant,
+}
+
+/// How often an answer that has not changed is said again, so a long wait is never silent.
+pub const SAID_AGAIN_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl WaitLog {
+    /// A wait on `what`: the thing asked and where, such as "GET /health on port 64770".
+    pub fn new(what: impl Into<String>, now: std::time::Instant) -> Self {
+        Self {
+            what: what.into(),
+            started: now,
+            checks: 0,
+            last: None,
+            logged: None,
+            checked: now,
+        }
+    }
+
+    /// How long since the last answer, so a wait nobody ended (a Start that was stopped) is not
+    /// carried on by the next one.
+    pub fn quiet_for(&self, now: std::time::Instant) -> std::time::Duration {
+        now.duration_since(self.checked)
+    }
+
+    /// The line for one answer, when there is one to write: a new answer always, the same one once
+    /// `SAID_AGAIN_EVERY` has passed since it was last written.
+    pub fn answered(&mut self, now: std::time::Instant, answer: &str) -> Option<String> {
+        self.checks += 1;
+        self.checked = now;
+        let changed = self.last.as_deref() != Some(answer);
+        let due = self
+            .logged
+            .is_none_or(|at| now.duration_since(at) >= SAID_AGAIN_EVERY);
+        if !changed && !due {
+            return None;
+        }
+        self.last = Some(answer.to_string());
+        self.logged = Some(now);
+        Some(format!(
+            "[wait] {}: {}{answer} ({} in, check {})",
+            self.what,
+            if changed { "" } else { "still " },
+            took(now.duration_since(self.started)),
+            self.checks
+        ))
+    }
+
+    /// Why the wait ended, after how long and how many checks, and what the last one answered.
+    pub fn ended(&self, now: std::time::Instant, why: &str) -> String {
+        format!(
+            "[wait] {}: {why} after {} and {} checks; last answer: {}",
+            self.what,
+            took(now.duration_since(self.started)),
+            self.checks,
+            self.last.as_deref().unwrap_or("none")
+        )
+    }
+}
+
+/// `4.2s`, or `5m 02s` from a minute on.
+fn took(elapsed: std::time::Duration) -> String {
+    let seconds = elapsed.as_secs();
+    if seconds < 60 {
+        format!("{:.1}s", elapsed.as_secs_f32())
+    } else {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    }
+}
+
 /// `2026-11-07T14:03:12.345Z`. UTC, so a line means the same moment wherever it is read; the
 /// first line of each launch says the local offset.
 fn timestamp() -> String {
@@ -186,7 +334,7 @@ pub fn line(
 }
 
 /// The person's home folder, written as `~` in the log: it names them.
-fn home_folder() -> Option<String> {
+pub fn home_folder() -> Option<String> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
     let home = home
         .to_string_lossy()
@@ -203,6 +351,72 @@ pub fn scrub<'a>(text: &'a str, home: Option<&str>) -> Cow<'a, str> {
         Some(home) if redacted.contains(home) => Cow::Owned(redacted.replace(home, "~")),
         _ => redacted,
     }
+}
+
+/**
+Every name the home folder goes by: itself, and on Windows its 8.3 short form and long form. Windows writes temporary paths with the short one (`C:\Users\RUNNER~1\AppData\Local\Temp`,
+for `C:\Users\runneradmin`), and that names the person as much as the long one does.
+*/
+pub fn home_forms(home: &str) -> Vec<String> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut forms = vec![home.to_owned()];
+    #[cfg(windows)]
+    for other in [windows_path(home, true), windows_path(home, false)]
+        .into_iter()
+        .flatten()
+    {
+        let other = other.trim_end_matches(['/', '\\']).to_owned();
+        if other.len() > 3 && !forms.contains(&other) {
+            forms.push(other);
+        }
+    }
+    forms
+}
+
+/// `redact`, then each of `homes` as `~`, longest first so one never leaves part of another.
+pub fn scrub_homes<'a>(text: &'a str, homes: &[String]) -> Cow<'a, str> {
+    let mut text = redact(text);
+    let mut homes: Vec<&String> = homes.iter().filter(|home| home.len() > 3).collect();
+    homes.sort_by_key(|home| std::cmp::Reverse(home.len()));
+    for home in homes {
+        if text.contains(home.as_str()) {
+            text = Cow::Owned(text.replace(home.as_str(), "~"));
+        }
+    }
+    text
+}
+
+/// `path` in its 8.3 short form (`short`) or its long form, as Windows resolves it. None when the
+/// volume keeps no short names or the path does not exist.
+#[cfg(windows)]
+fn windows_path(path: &str, short: bool) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{GetLongPathNameW, GetShortPathNameW};
+    let wide: Vec<u16> = std::ffi::OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let resolve = |buffer: Option<&mut [u16]>| {
+        let at = windows::core::PCWSTR(wide.as_ptr());
+        // SAFETY: `wide` is a NUL-terminated path that outlives the call, and the buffer, when
+        // given, is one the call may fill up to its length.
+        unsafe {
+            if short {
+                GetShortPathNameW(at, buffer)
+            } else {
+                GetLongPathNameW(at, buffer)
+            }
+        }
+    };
+    // Asked with no buffer, each answers the length it needs, NUL included.
+    let needed = resolve(None) as usize;
+    if needed == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; needed];
+    // Filled, it answers the length it wrote, NUL not included.
+    let written = resolve(Some(&mut buffer)) as usize;
+    (written > 0 && written < buffer.len()).then(|| String::from_utf16_lossy(&buffer[..written]))
 }
 
 /// One way a key or a token shows itself, and what is kept of the match.
@@ -237,6 +451,9 @@ fn opaque(candidate: &str) -> bool {
         && candidate.chars().any(|c| c.is_ascii_digit())
 }
 
+/// The name of anything that holds a credential: `OPENAI_API_KEY`, `refresh_token`, `x-api-key`.
+const CREDENTIAL_NAME: &str = r"[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|[_\-]key\b|secret|token|password|passwd|pwd|cookie|authorization|credential|private[_\-]?key|access[_\-]?key|session[_\-]?id)[A-Za-z0-9_.\-]*";
+
 /// In order: a rule after another sees what the earlier one left.
 static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     let rule = |pattern: &str, keep: &'static str| Rule {
@@ -255,15 +472,29 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             r"(?i)\b(?P<name>set-cookie|cookie)(?P<sep>\s*[:=]\s*)[^\r\n]+",
             "${name}${sep}[redacted]",
         ),
+        // The secret the window carries to the relay for an OpenBot that runs elsewhere
+        // (`connected::relay`), wherever it is written without the word Cookie in front.
+        rule(
+            r"(?i)\b(?P<name>openbot-relay=)[^\s;,\x22']+",
+            "${name}[redacted]",
+        ),
         // `Authorization: Bearer <token>`, `Basic <base64>`.
         rule(r"(?i)\b(?P<scheme>bearer)\s+[^\s\x22',;]+", "${scheme} [redacted]"),
         rule(r"\b(?P<scheme>Basic)\s+[A-Za-z0-9+/]{12,}={0,2}", "${scheme} [redacted]"),
+        // A credential's quoted value in an `.env` file, spaces and all:
+        // `BETTER_AUTH_SECRET="correct horse battery staple"`. The rule after stops at a space.
+        rule(
+            &format!(
+                r#"(?i)(?P<name>{CREDENTIAL_NAME})(?P<sep>\s*=\s*)(?:"[^"\r\n]*"|'[^'\r\n]*')"#
+            ),
+            "${name}${sep}[redacted]",
+        ),
         // Anything named as a credential, with its value: `OPENAI_API_KEY=…`, `"refresh_token": "…"`,
         // `x-api-key: …`, `password=…`. The name stays, so the line still says what was there.
         Rule {
-            pattern: Regex::new(
-                r#"(?i)(?P<name>[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|[_\-]key\b|secret|token|password|passwd|pwd|cookie|authorization|credential|private[_\-]?key|access[_\-]?key|session[_\-]?id)[A-Za-z0-9_.\-]*)(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}\]\[][^\s"'&,;}\]]*"#,
-            )
+            pattern: Regex::new(&format!(
+                r#"(?i)(?P<name>{CREDENTIAL_NAME})(?P<sep>["']?\s*[:=]\s*["']?)[^\s"'&,;}}\]\[][^\s"'&,;}}\]]*"#
+            ))
             .expect("a redaction pattern compiles"),
             keep: "${name}${sep}[redacted]",
             secret: named_value,
@@ -289,6 +520,8 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
                 r"|ya29\.[0-9A-Za-z_\-]+",
                 r"|npm_[A-Za-z0-9]{36}",
                 r"|hf_[A-Za-z0-9]{30,}",
+                // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`).
+                r"|ob[ar]_[A-Za-z0-9_\-]{8,}",
                 r"|eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*",
                 r")",
             ),
@@ -339,6 +572,46 @@ pub fn redact(text: &str) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
+    /// A five-minute wait, as Start's for OpenBot's services ran on Windows: the first answer,
+    /// nothing for the same one a second later, the same one again after a minute, a change, and
+    /// why it gave up, with how long and the last answer.
+    #[test]
+    fn a_wait_says_each_answer_once_again_each_minute_and_why_it_ended() {
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + std::time::Duration::from_secs(seconds);
+        let mut wait = WaitLog::new(
+            "OpenBot's services, GET /health on port 64770 (API) and port 64771 (app)",
+            start,
+        );
+        let refused = "API not answering (http://127.0.0.1:64770/health: Connection refused (os \
+                       error 61), http://[::1]:64770/health: Connection refused (os error 61)); app \
+                       not asked until the API answers";
+        assert_eq!(
+            wait.answered(at(1), refused).unwrap(),
+            format!(
+                "[wait] OpenBot's services, GET /health on port 64770 (API) and port 64771 \
+                 (app): {refused} (1.0s in, check 1)"
+            )
+        );
+        assert_eq!(wait.answered(at(2), refused), None);
+        assert!(wait
+            .answered(at(62), refused)
+            .unwrap()
+            .ends_with(&format!("still {refused} (1m 02s in, check 3)")));
+        let unavailable = "API not answering (http://127.0.0.1:64770/health answered 503 Service \
+                           Unavailable); app not asked until the API answers";
+        assert!(wait.answered(at(70), unavailable).is_some());
+        assert_eq!(
+            wait.ended(at(302), "gave up: the API is not answering on port 64770."),
+            format!(
+                "[wait] OpenBot's services, GET /health on port 64770 (API) and port 64771 \
+                 (app): gave up: the API is not answering on port 64770. after 5m 02s and 4 \
+                 checks; last answer: {unavailable}"
+            )
+        );
+        assert_eq!(wait.quiet_for(at(80)), std::time::Duration::from_secs(10));
+    }
+
     use super::*;
     use crate::test_support::temp_root;
 

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { connectionRows } from "@/lib/connections/rows";
 import type { LinkedAccount } from "@/lib/identity/queries";
-import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
+import type { CatalogueItem } from "@/lib/plugins/queries";
+import { appBody, type TodayServer } from "./apps-api";
 
 /**
  * The one list on Connections: apps, apps on the organisation's account, and the GitHub and Slack
@@ -15,14 +16,12 @@ const drive = {
   auth: "user-oauth",
 } as CatalogueItem;
 
-const app = (id: string, title: string, provenance = "composio") =>
-  ({
-    id,
-    title,
-    summary: "",
-    logo: null,
-    provenance,
-  }) as unknown as PluginServer;
+const app = (
+  id: string,
+  title: string,
+  provenance = "composio",
+  more: Partial<TodayServer> = {},
+) => appBody({ id, title, summary: "", logo: null, provenance, ...more });
 
 const link = (
   provider: "github" | "slack",
@@ -65,6 +64,37 @@ test("apps, team apps and account links are one list, in use first", () => {
 test("a link this deployment cannot make is not offered", () => {
   const rows = connectionRows({ ...none });
   expect(rows).toEqual([]);
+});
+
+test("a server added by its address is its own tile, named by where it lives", () => {
+  const server = (id: string, signIn: boolean, url: string) =>
+    app(id, id, "custom", { url, signIn });
+  const rows = connectionRows({
+    ...none,
+    byUrl: [
+      server("deepwiki", false, "https://mcp.deepwiki.com/mcp"),
+      server("fireflies", true, "https://api.fireflies.ai/mcp"),
+      server("notes", true, "https://notes.example.com/mcp"),
+    ],
+    connected: new Set(["notes"]),
+  });
+  expect(
+    rows.map((row) => [
+      row.key,
+      row.state,
+      row.summary,
+      row.noAccount ?? false,
+      row.notConnected ?? false,
+      row.action ?? null,
+    ]),
+  ).toEqual([
+    // Needs no account: on as soon as it is added.
+    ["deepwiki", "connected", "mcp.deepwiki.com", true, false, null],
+    ["notes", "connected", "notes.example.com", false, false, null],
+    // Signs each person in, and this person hasn't: the tile opens its page, which offers Connect
+    // beside the switch that removes it. No press-to-connect, or that switch could not be reached.
+    ["fireflies", "available", "api.fireflies.ai", false, true, null],
+  ]);
 });
 
 test("a link already made is listed even where it can no longer be made, by its handle", () => {
@@ -125,7 +155,7 @@ test("and the same for Arcade's GitHub app, which is the same vendor through the
  */
 test("a key app nobody has connected says it needs a key; a sign-in app does not", () => {
   const keyed = (id: string, title: string, authScheme: string) =>
-    ({ ...app(id, title), authScheme }) as PluginServer;
+    app(id, title, "composio", { authScheme });
   const rows = connectionRows({
     ...none,
     brokered: [

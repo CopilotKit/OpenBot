@@ -124,7 +124,7 @@ describe("serving port configuration", () => {
 describe("what answers a request", () => {
   test("the server answers its own prefix, and nothing near it", () => {
     expect(isApiCall("/api")).toBe(true);
-    expect(isApiCall("/api/channels")).toBe(true);
+    expect(isApiCall("/api/v2/organizations/default/conversations")).toBe(true);
     // Not the app's own routes, and not a path that merely starts with the same letters.
     expect(isApiCall("/apixyz")).toBe(false);
     expect(isApiCall("/channel/api")).toBe(false);
@@ -325,12 +325,16 @@ async function startProxy(
   };
 }
 
+// The addresses the app sends dictation and a voice call to, each a write carrying its key.
 test.each([
-  ["dictation", "/api/audio/transcriptions", "x-openbot-dictation"],
-  ["voice", "/api/voice/calls", "x-openbot-voice"],
+  ["dictation", "/api/v2/organizations/default/transcriptions"],
+  [
+    "voice",
+    "/api/v2/organizations/default/conversations/channel-1/voice-calls",
+  ],
 ])(
   "%s can wait for a provider past Bun's default idle timeout",
-  async (_name, path, header) => {
+  async (_name, path) => {
     const upstream = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -348,7 +352,7 @@ test.each([
     try {
       const response = await fetch(`http://127.0.0.1:${proxy.port}${path}`, {
         method: "POST",
-        headers: { [header]: "1" },
+        headers: { "Idempotency-Key": "0123456789abcdef0123456789abcdef" },
         signal: AbortSignal.timeout(18_000),
       });
       expect(response.status).toBe(200);

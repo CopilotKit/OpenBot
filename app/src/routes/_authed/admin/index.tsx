@@ -1,25 +1,7 @@
-import {
-  IconBrain,
-  IconBuildingBank,
-  IconChecks,
-  IconChevronRight,
-  IconCode,
-  IconDeviceDesktop,
-  IconFileText,
-  IconKey,
-  IconLayoutGrid,
-  IconListDetails,
-  IconLockAccess,
-  IconPuzzle,
-  IconRadar,
-  IconShieldCheck,
-  IconUsers,
-} from "@tabler/icons-react";
-import {
-  createFileRoute,
-  Link,
-  type LinkOptions,
-} from "@tanstack/react-router";
+import { IconChevronRight } from "@tabler/icons-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ADMIN_SECTIONS } from "@/components/admin/admin-sections";
+import { SharedComputersNotice } from "@/components/admin/shared-computers-notice";
 import {
   PageRows,
   PageSection,
@@ -40,159 +22,19 @@ export const Route = createFileRoute("/_authed/admin/")({
 });
 
 /**
- * Grouped by what the decision is about rather than by how the code is organised.
- *
- * "What Bots can reach" is the group an administrator arrives worrying about, so it goes first.
- * Everything in it either grants a capability or fences one in.
+ * Admin's overview: every Admin page, grouped by the thing a Bot has that it sets for everybody, in
+ * the order the sidebar lists them (`ADMIN_SECTIONS`). Above them, on an OpenBot whose Bots share one
+ * computer, the notice that says so: the first page an admin opens is where they learn it.
  */
-const SECTIONS: {
-  title: string;
-  description: string;
-  items: {
-    description: string;
-    icon: React.ComponentType<{ className?: string }>;
-    linkOptions: LinkOptions;
-    title: string;
-  }[];
-}[] = [
-  {
-    title: "What Bots can reach",
-    description: "Control what Bots can access outside OpenBot.",
-    items: [
-      {
-        title: "Credentials",
-        description: "Manage this deployment’s keys and tokens.",
-        icon: IconKey,
-        linkOptions: { to: "/admin/credentials" },
-      },
-      {
-        title: "Boundaries",
-        description: "Define actions that no Bot may take.",
-        icon: IconShieldCheck,
-        linkOptions: { to: "/admin/boundaries" },
-      },
-      {
-        title: "Approvals",
-        description: "Choose which actions require approval for members’ Bots.",
-        icon: IconChecks,
-        linkOptions: { to: "/admin/approvals" },
-      },
-      {
-        title: "Computers",
-        description:
-          "Manage the computers that run Bot tools, when idle ones stop, and where they can connect.",
-        icon: IconDeviceDesktop,
-        linkOptions: { to: "/admin/computers" },
-      },
-    ],
-  },
-  {
-    title: "What Bots can do",
-    description:
-      "Configure the models, apps, skills, and UI components available to Bots.",
-    items: [
-      {
-        title: "Plugins",
-        description:
-          "Connect services, choose which Bots can use them, and approve MCP servers.",
-        icon: IconPuzzle,
-        linkOptions: { to: "/admin/plugins" },
-      },
-      {
-        title: "Providers",
-        description:
-          "See which provider serves your Bots' models, and choose which models they may use.",
-        icon: IconBrain,
-        linkOptions: { to: "/admin/providers" },
-      },
-      {
-        title: "Skills",
-        description: "Create reusable instructions people can run with /.",
-        icon: IconFileText,
-        linkOptions: { to: "/admin/skills" },
-      },
-      {
-        title: "Automatic learning",
-        description:
-          "Learn from finished conversations, review the skills it proposes, and choose whether people may share theirs.",
-        icon: IconFileText,
-        linkOptions: { to: "/admin/learning" },
-      },
-      {
-        title: "Check-ins",
-        description:
-          "Turn check-ins on or off, limit them, and see how often people start what Bots raise.",
-        icon: IconRadar,
-        linkOptions: { to: "/admin/proactive" },
-      },
-      {
-        title: "UI components",
-        description:
-          "Manage custom components that Bots can display in conversations.",
-        icon: IconLayoutGrid,
-        linkOptions: { to: "/admin/components" },
-      },
-      {
-        title: "Playground",
-        description: "Write a component and watch it render as you type.",
-        icon: IconCode,
-        linkOptions: { to: "/admin/playground" },
-      },
-    ],
-  },
-  {
-    title: "Who can get in",
-    description: "",
-    items: [
-      {
-        title: "People",
-        description: "Review members, manage admin roles, and remove access.",
-        icon: IconUsers,
-        linkOptions: { to: "/admin/people" },
-      },
-      {
-        title: "Permissions",
-        description:
-          "Choose what people may do with Bots, for everybody and per role or group.",
-        icon: IconLockAccess,
-        linkOptions: { to: "/admin/permissions" },
-      },
-      {
-        title: "Identity providers",
-        description:
-          "Configure your company’s sign-in provider for each email domain, and require SSO.",
-        icon: IconBuildingBank,
-        linkOptions: { to: "/admin/identity-providers" },
-      },
-    ],
-  },
-  {
-    title: "What happened",
-    description: "",
-    items: [
-      {
-        title: "Audit",
-        description:
-          "Review actions taken in OpenBot and who took them, and record Bots' commands.",
-        icon: IconListDetails,
-        linkOptions: { to: "/admin/audit" },
-      },
-    ],
-  },
-];
-
 function RouteComponent() {
   return (
     <PageShell
-      description="Manage settings that apply to everyone and every Bot in this deployment."
+      description="Manage settings that apply to everyone and every Bot in this organization."
       title="Admin"
     >
-      {SECTIONS.map((section) => (
-        <PageSection
-          description={section.description || undefined}
-          key={section.title}
-          title={section.title}
-        >
+      <SharedComputersNotice />
+      {ADMIN_SECTIONS.map((section) => (
+        <PageSection key={section.title} title={section.title}>
           <PageRows>
             {section.items.map((item, index) => (
               <StaggerItem index={index} key={item.title}>

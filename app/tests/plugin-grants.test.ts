@@ -2,8 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   grantPlugin,
+  revokePlugin,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
+import { botGrantPath } from "./bot-grants-api";
 
 /**
  * Granting a batch of tools, and what a batch is allowed to cost.
@@ -56,19 +58,42 @@ function mutationContext(queryClient: QueryClient) {
   return { client: queryClient, meta: undefined };
 }
 
-test("one grant is one POST of the three things it joins", async () => {
+test("one grant is one PUT at the grant's address under the Bot", async () => {
   const seen = capturingFetch(200, {});
 
   await grantPlugin({ agentId: "agent-1", kind: "mcp", ref: "notion/search" });
 
   expect(seen).toHaveLength(1);
-  expect(seen[0]?.url).toBe("/api/plugins/grants");
-  expect(seen[0]?.init?.method).toBe("POST");
-  expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
-    agentId: "agent-1",
-    kind: "mcp",
-    ref: "notion/search",
+  expect(seen[0]?.url).toBe(botGrantPath("agent-1", "action:notion:search"));
+  expect(seen[0]?.init?.method).toBe("PUT");
+  // A grant with no approval carries nothing else.
+  expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({});
+});
+
+test("a skill and another Bot are addressed by their own kind", async () => {
+  const seen = capturingFetch(200, {});
+
+  await grantPlugin({ agentId: "agent-1", kind: "skill", ref: "triage" });
+  await grantPlugin({ agentId: "agent-1", kind: "bot", ref: "knowledge" });
+
+  expect(seen.map((request) => request.url)).toEqual([
+    botGrantPath("agent-1", "skill:triage"),
+    botGrantPath("agent-1", "bot:knowledge"),
+  ]);
+});
+
+test("taking away what the Bot doesn't have is done, not refused", async () => {
+  capturingFetch(404, {
+    type: "https://open.bot/errors/bot-grant-not-found",
+    title: "Grant not found.",
+    status: 404,
+    detail: "This Bot doesn't have that.",
+    code: "BOT_GRANT_NOT_FOUND",
   });
+
+  await expect(
+    revokePlugin({ agentId: "agent-1", kind: "skill", ref: "triage" }),
+  ).resolves.toBeUndefined();
 });
 
 test("a batch of grants is N grant requests and nothing else", async () => {
@@ -80,9 +105,9 @@ test("a batch of grants is N grant requests and nothing else", async () => {
 
   // Three writes, and no read in between: the refetch belongs to the caller, once, at the end.
   expect(seen.map((request) => request.init?.method)).toEqual([
-    "POST",
-    "POST",
-    "POST",
+    "PUT",
+    "PUT",
+    "PUT",
   ]);
 });
 
@@ -110,7 +135,7 @@ test("granting one on its own still carries its refetch", async () => {
   );
   /*
    * ON SETTLE RATHER THAN ON SUCCESS, which is where this refetch lives now and why this call
-   * changed. `POST /api/plugins/grants` upserts the grant and then files the trail row, with no
+   * changed. A grant (replaceBotGrant) upserts the grant and then files the trail row, with no
    * catch over either, so a refusal from it is not evidence that the grant did not land — see
    * `invalidatePlugins`, which makes the argument for the whole surface. `onSettled` is the one slot
    * that runs on both outcomes; `plugin-mutation-refresh.test.ts` is where the refused half is

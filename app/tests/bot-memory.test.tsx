@@ -1,11 +1,30 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemorySources } from "@/components/memory/sources";
+import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
+import { answerBotsList } from "./bots-api";
+import { CONVERSATIONS_PATH } from "./conversations-api";
+import {
+  MEMORY,
+  memoryContract,
+  memorySourceBody,
+  page,
+  problem,
+  requestOf,
+} from "./learning-api";
+import { CHECK_INS_PATH, pathOf } from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /** A Bot's Memory page: the apps that feed it facts, and its background research. */
@@ -22,21 +41,13 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const source = (id: string, agentId: string, title: string) => ({
-  id,
-  title,
-  agentId,
-  toolRef: "mcp/drive/search",
-  enabled: true,
-  syncStatus: "succeeded",
-  syncError: null,
-  lastSyncAt: null,
-});
+const source = (id: string, botId: string, title: string) =>
+  memorySourceBody({ id, title, botId, toolRef: "mcp/drive/search" });
 
 const research = (id: string, agentId: string, focus: string) => ({
   id,
-  agentId,
-  channelId: `channel-${agentId}`,
+  botId: agentId,
+  conversationId: `channel-${agentId}`,
   focus,
   enabled: true,
   intervalMinutes: 240,
@@ -57,62 +68,76 @@ function serving() {
   searchSettings = {};
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    requested.push(url);
-    if (init?.method && init.method !== "GET") {
+    const request = requestOf(input, init);
+    requested.push(request.path);
+    if (request.method !== "GET") {
       if (refuseWrite) {
-        const error = refuseWrite;
+        const detail = refuseWrite;
         refuseWrite = null;
-        return Response.json({ error }, { status: 400 });
+        return problem(400, detail, "VALIDATION_ERROR");
       }
       return Response.json({ ok: true });
     }
-    if (url === "/api/memory/sources") {
-      return Response.json({
-        sources: [
-          source("s1", "expenses", "Receipts folder"),
-          source("s2", "knowledge", "Wiki pages"),
-        ],
-      });
+    if (request.path === MEMORY.sources) {
+      return page(memoryContract.ListMemorySourcesResponse, "sources", [
+        source("s1", "expenses", "Receipts folder"),
+        source("s2", "knowledge", "Wiki pages"),
+      ]);
     }
-    if (url.startsWith("/api/memory/sources/available/")) {
-      return Response.json({
-        tools: [
-          {
-            ref: "mcp/drive/search",
-            title: "Search Drive",
-            description: "",
-            inputSchema: { properties: searchSettings },
-          },
-        ],
-      });
+    if (request.path.endsWith("/memory-source-tools")) {
+      return page(memoryContract.ListMemorySourceToolsResponse, "tools", [
+        {
+          ref: "mcp/drive/search",
+          title: "Search Drive",
+          description: "",
+          inputSchema: { properties: searchSettings },
+        },
+      ]);
     }
-    if (url === "/api/proactive/settings") {
+    if (pathOf(url) === CHECK_INS_PATH) {
       return Response.json({
-        settings: [
+        nextCursor: null,
+        checkIns: [
           research("p1", "expenses", "Unpaid invoices"),
           research("p2", "knowledge", "Stale pages"),
         ],
         allowed: true,
       });
     }
-    if (url.startsWith("/api/channels")) {
-      return Response.json({ channels: [], nextCursor: null });
+    if (url.split("?")[0] === CONVERSATIONS_PATH) {
+      return Response.json({ conversations: [], nextCursor: null });
     }
-    return Response.json({
-      agents: [
-        { id: "expenses", name: "Expenses" },
-        { id: "knowledge", name: "Knowledge" },
-      ],
-    });
+    return (
+      answerBotsList(input, init, {
+        visible: [
+          { id: "expenses", name: "Expenses" },
+          { id: "knowledge", name: "Knowledge" },
+        ],
+      }) ?? Response.json({})
+    );
   }) as unknown as typeof fetch;
 }
 
+/** Drawn under a router: a check-in's row is a link to its page. */
 function draw(node: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  const root = createRootRoute();
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: "/",
+        component: () => node,
+      }),
+    ]),
+  });
   return render(
-    <QueryClientProvider client={client}>{node}</QueryClientProvider>,
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
   );
 }
 
@@ -122,9 +147,7 @@ test("only this Bot's sources are listed, and its app actions load without picki
   expect(await view.findByText("Receipts folder")).toBeTruthy();
   expect(view.queryByText("Wiki pages")).toBeNull();
   expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
-  await waitFor(() =>
-    expect(requested).toContain("/api/memory/sources/available/expenses"),
-  );
+  await waitFor(() => expect(requested).toContain(MEMORY.tools("expenses")));
 });
 
 test("only this Bot's background research is listed, with no Bot to pick", async () => {
@@ -172,19 +195,13 @@ test("reopening Add source after a failure keeps the draft but not the failure",
   expect(view.queryByRole("alert")).toBeNull();
 });
 
-test("reopening a research row after a failure starts without it", async () => {
+test("a refused Run now says why on the check-in's page", async () => {
   serving();
-  const view = draw(<ProactiveResearchSettings agentId="expenses" />);
+  const view = draw(<CheckInRoutePage checkInId="p1" />);
   const user = userEvent.setup({ document });
-  await user.click(await view.findByRole("button", { name: /Expenses/ }));
   refuseWrite = "Research is paused.";
-  await user.click(await view.findByRole("button", { name: "Run now" }));
+  await user.click(await view.findByRole("button", { name: /^Run now/ }));
   expect((await view.findByRole("alert")).textContent).toBe(
     "Research is paused.",
   );
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
-  await user.click(view.getByRole("button", { name: /Expenses/ }));
-  await view.findByRole("button", { name: "Run now" });
-  expect(view.queryByRole("alert")).toBeNull();
 });

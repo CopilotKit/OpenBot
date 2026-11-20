@@ -19,10 +19,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { grantSummary } from "@/lib/agents/grant-summary";
+import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { skillListQueryOptions } from "@/lib/skills/queries";
 
 /**
  * The deployment's skills: named instructions a person invokes with `/` and a Bot follows.
@@ -39,14 +39,13 @@ import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
  */
 export function SkillsPage() {
   const paths = useManagePaths();
-  const plugins = useQuery(pluginsPageQueryOptions());
-  const { data: agents } = useQuery(agentListQueryOptions());
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
-  // In the personal edition this sits under Settings, beside the person's own skills on Capabilities.
-  const personal =
-    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  const skillList = useQuery(skillListQueryOptions());
+  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  const scope = useBotListScope();
+  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
 
-  const skills = plugins.data?.skills ?? [];
+  const skills = skillList.data ?? [];
   const newSkill = (size: "lg" | "sm") => (
     <Button
       render={(props) => <Link {...props} {...paths.newSkill()} />}
@@ -61,19 +60,15 @@ export function SkillsPage() {
   return (
     <PageShell
       action={newSkill("lg")}
-      description={
-        personal
-          ? "Write instructions your Bots follow when you pick a skill from the / menu. A skill only uses what a Bot can already do."
-          : "Write instructions a Bot follows when someone picks a skill from the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer it."
-      }
+      description="Write instructions a Bot follows when someone picks a skill from the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer it."
       title="Skills"
     >
       {/* One section, so no title: the page title already names it. */}
       <PageSection>
         {/* A read that failed says so; `isPending` goes false on it too, and it is not "none". */}
-        {plugins.isPending ? null : !plugins.data ? (
+        {skillList.isPending ? null : !skillList.data ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load skills. Reload the page.
+            Couldn't load skills. Try again in a moment.
           </p>
         ) : skills.length === 0 ? (
           <PageEmpty
@@ -81,9 +76,7 @@ export function SkillsPage() {
             icon={IconFileText}
             title="No skills yet"
           >
-            {personal
-              ? "Write one. Your Bots offer it as soon as you save."
-              : "Write one, then choose which Bots offer it."}
+            Write one, then choose which Bots offer it.
           </PageEmpty>
         ) : (
           <PageRows>

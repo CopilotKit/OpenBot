@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildResponsibilityTurn,
+  NO_OUTCOME,
   readResponsibilityTurn,
 } from "./responsibility-turn";
 
@@ -19,6 +20,12 @@ describe("buildResponsibilityTurn", () => {
     expect(buildResponsibilityTurn(PARTS)).toBe(
       `${PARTS.instruction}\n\nSuccess criteria: ${PARTS.successCriteria}\nProgress so far: No progress recorded yet.\nTrigger: manual/requested\nEvent data:\n${PARTS.eventData}\n\nRecord meaningful progress with report_goal_progress for goal ${PARTS.responsibilityId}.`,
     );
+  });
+
+  test("a goal with no outcome is told when it is done", () => {
+    const turn = buildResponsibilityTurn({ ...PARTS, successCriteria: "" });
+    expect(turn).toContain(NO_OUTCOME);
+    expect(readResponsibilityTurn(turn)?.instruction).toBe(PARTS.instruction);
   });
 
   test("tells the run of a goal that repeats that it is one of many, and reads back the same", () => {

@@ -1,6 +1,6 @@
 import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
-import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
-import { brokeredProvenance } from "@/lib/plugins/provider-vocabulary";
+import { directorySlug } from "@/lib/apps/queries";
+import { appNeedsKey } from "@/lib/plugins/enablement-notes";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
 
 /**
@@ -37,6 +37,11 @@ export type ConnectionRow = {
   action?: "connect" | "add" | "setup";
   /** An app with no account behind it, which reads "On" rather than "Connected" once added. */
   noAccount?: boolean;
+  /**
+   * Added, and the person's own account isn't connected yet. The tile says "Not connected" beside
+   * Connect, so an app that is on never reads as ready before anybody has signed in to it.
+   */
+  notConnected?: boolean;
   /** What draws the row's mark: a catalogue icon, an app's logo, or an identity provider's icon. */
   mark:
     | { kind: "catalogue"; key: string }
@@ -45,19 +50,14 @@ export type ConnectionRow = {
 };
 
 /**
- * Whether a server is a broker's GitHub app, whichever broker enabled it: the app GitHub's own page
- * links to instead of listing it twice.
- *
- * A brokered row's id is its broker's prefix and the app's slug, and the prefix is the provenance it
- * was minted under (`composio-github`, `arcade-github`), so this asks the row and names no vendor.
+ * Whether an app is the directory's GitHub app, whichever service the directory comes from: the app
+ * GitHub's own page links to instead of listing it twice. Asked of the directory entry the app was
+ * added from, so it names no service.
  */
 export function isBrokeredGithub(
-  server: Pick<PluginServer, "id" | "provenance">,
+  server: Pick<PluginServer, "directoryEntryId">,
 ): boolean {
-  return (
-    brokeredProvenance(server.provenance) &&
-    server.id === `${server.provenance}-github`
-  );
+  return directorySlug(server.directoryEntryId) === "github";
 }
 
 export const IDENTITY_SUMMARIES = {
@@ -84,6 +84,8 @@ export function connectionRows(input: {
   brokered: PluginServer[];
   /** Brokered apps that run on the organisation's account. */
   shared: PluginServer[];
+  /** MCP servers somebody added by their address. Absent reads as none. */
+  byUrl?: PluginServer[];
   /** Server ids the person holds a connection for. */
   connected: ReadonlySet<string>;
   links: LinkedAccount[];
@@ -115,6 +117,20 @@ export function connectionRows(input: {
    * same name; GitHub's page links to it instead, so the list names the vendor once.
    */
   const githubListed = identity.some((row) => row.key === "github");
+  /*
+   * AND THAT ONE ROW SPEAKS FOR THE TOOLS TOO. The GitHub link only recognises a person; a Bot uses
+   * GitHub through the added app, which is connected separately. With the app added and not
+   * connected, the tile says "Not connected" beside Connect, as the Bot does, never "Connected" off
+   * the link alone.
+   */
+  const githubTools = input.brokered.find(isBrokeredGithub);
+  if (githubListed && githubTools && !input.connected.has(githubTools.id)) {
+    const github = identity.find((row) => row.key === "github");
+    if (github && github.state !== "needs_reconnect") {
+      github.state = "available";
+      github.notConnected = true;
+    }
+  }
   const rows: ConnectionRow[] = [
     ...input.catalogue.map(
       (entry): ConnectionRow => ({
@@ -122,6 +138,7 @@ export function connectionRows(input: {
         title: entry.title,
         summary: entry.summary,
         state: input.connected.has(entry.key) ? "connected" : "available",
+        notConnected: !input.connected.has(entry.key),
         mark: { kind: "catalogue", key: entry.key },
       }),
     ),
@@ -135,10 +152,11 @@ export function connectionRows(input: {
           // Connect button. A key app not yet connected says it needs a key, so nobody who
           // expected a sign-in is surprised when the page asks for one.
           summary:
-            !input.connected.has(server.id) && schemeNeedsKey(server.authScheme)
+            !input.connected.has(server.id) && appNeedsKey(server)
               ? `Needs a key from ${server.title}`
               : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
+          notConnected: !input.connected.has(server.id),
           mark: { kind: "logo", logo: server.logo },
         }),
       ),
@@ -146,11 +164,12 @@ export function connectionRows(input: {
       (server): ConnectionRow => ({
         key: server.id,
         title: server.title,
-        summary: "Your organisation's account. Bots act as the team here.",
+        summary: "Your organization's shared account. Bots act as it here.",
         state: "team",
         mark: { kind: "logo", logo: server.logo },
       }),
     ),
+    ...(input.byUrl ?? []).map((server) => byUrlRow(server, input.connected)),
     ...identity,
   ];
   /*
@@ -173,33 +192,29 @@ export const ALWAYS_ON_APP = "routines";
  *
  * One person adds an app and connects their account, so the two are one press: a tile says what
  * that press does. An app reached as you is Connect. An app with no account at all (a free search
- * provider, Routines) is Add, and On once added. An app that needs a key typed first is Set up,
- * and is On once added with it.
+ * provider) is Add, and On once added. An app that needs a key typed first is Set up, and is On
+ * once added with it.
  *
- * ONE PRESS OR NOT AT ALL, UNLESS ASKED. An app that needs a key or an OAuth client typed before it
- * connects is where a person gets stuck, so it is left out unless `everything` is set or it is
- * already in use. Slack is left out too: the personal edition has no Slack.
+ * Routines is left out: it is on for every Bot and has its own page in the main menu, so there is
+ * nothing to add or connect. Slack is left out too: the personal edition has no Slack.
  */
 export function personalConnectionRows(input: {
-  /** Also the apps that need something typed before they connect. */
-  everything?: boolean;
   catalogue: CatalogueItem[];
   added: ReadonlySet<string>;
   brokered: PluginServer[];
+  byUrl?: PluginServer[];
   connected: ReadonlySet<string>;
   links: LinkedAccount[];
   providers: IdentityProviders | undefined;
 }): ConnectionRow[] {
-  const apps = input.catalogue.flatMap((entry): ConnectionRow[] => {
-    const row = personalAppRow(entry, input);
-    return input.everything || entry.oneStep || row.state !== "available"
-      ? [row]
-      : [];
-  });
+  const apps = input.catalogue
+    .filter((entry) => entry.key !== ALWAYS_ON_APP)
+    .map((entry) => personalAppRow(entry, input));
   const rest = connectionRows({
     catalogue: [],
     brokered: input.brokered,
     shared: [],
+    byUrl: input.byUrl,
     connected: input.connected,
     links: input.links,
     providers: input.providers,
@@ -207,18 +222,6 @@ export function personalConnectionRows(input: {
   const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
   return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
-}
-
-/** How many apps the personal Connections leaves out until asked: see {@link personalConnectionRows}. */
-export function personalAppsNeedingSetup(input: {
-  catalogue: CatalogueItem[];
-  added: ReadonlySet<string>;
-  connected: ReadonlySet<string>;
-}): number {
-  return input.catalogue.filter(
-    (entry) =>
-      !entry.oneStep && personalAppRow(entry, input).state === "available",
-  ).length;
 }
 
 function personalAppRow(
@@ -236,6 +239,8 @@ function personalAppRow(
       ...base,
       state: input.connected.has(entry.key) ? "connected" : "available",
       action: "connect",
+      notConnected:
+        input.added.has(entry.key) && !input.connected.has(entry.key),
     };
   return {
     ...base,
@@ -243,4 +248,44 @@ function personalAppRow(
     action: entry.auth === "deployment-bearer" ? "setup" : "add",
     noAccount: true,
   };
+}
+
+/**
+ * A server somebody added by its address. Its line is where it lives, which is how a person tells two
+ * servers apart when nobody gave them a logo. One that signs each person in reads like any app you
+ * connect: Connect until you have, then Connected. One that needs no account is On.
+ */
+function byUrlRow(
+  server: PluginServer,
+  connected: ReadonlySet<string>,
+): ConnectionRow {
+  const host = hostOf(server.address ?? "");
+  const base = {
+    key: server.id,
+    title: server.title,
+    mark: { kind: "logo", logo: server.logo } as const,
+  };
+  if (server.signIn) {
+    const yours = connected.has(server.id);
+    return {
+      ...base,
+      summary: host,
+      state: yours ? "connected" : "available",
+      /*
+       * No press-to-connect here, unlike a catalogue app: the tile opens the server's own page,
+       * which offers Connect beside the switch that takes the server away again. A server added by
+       * its address has no other way back to that switch.
+       */
+      notConnected: !yours,
+    };
+  }
+  return { ...base, summary: host, state: "connected", noAccount: true };
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }

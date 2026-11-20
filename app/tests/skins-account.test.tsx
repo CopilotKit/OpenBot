@@ -37,6 +37,9 @@ import {
   setSkin,
   useSkinId,
 } from "@/skins/store";
+import { PREFERENCES_PATH, preferencesResponse } from "./accounts-api";
+import { BOT_ATTENTION_PATH, BOTS_PATH } from "./bots-api";
+import { CONVERSATIONS_PATH } from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -74,6 +77,7 @@ function preferences(skin: UserPreferences["skin"]): UserPreferences {
   return {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin,
     proactive: "on",
@@ -153,11 +157,9 @@ function renderSettings() {
 
 test("picking a skin draws it at once and saves it on the account", async () => {
   signedIn();
-  serve("GET /api/settings/preferences", {
-    preferences: preferences("openbot"),
-  });
+  serve(`GET ${PREFERENCES_PATH}`, preferences("openbot"));
   const save = Promise.withResolvers<Response>();
-  answers.set("PATCH /api/settings/preferences", () => save.promise);
+  answers.set(`PATCH ${PREFERENCES_PATH}`, () => save.promise);
   const { view, user } = renderSettings();
 
   const picker = view.getByRole("combobox", { name: "Skin" });
@@ -180,13 +182,13 @@ test("picking a skin draws it at once and saves it on the account", async () => 
   expect(sent).toEqual([
     {
       method: "PATCH",
-      path: "/api/settings/preferences",
+      path: PREFERENCES_PATH,
       body: { skin: "opendots" },
     },
   ]);
 
   await act(async () => {
-    save.resolve(Response.json({ preferences: preferences("opendots") }));
+    save.resolve(preferencesResponse({ preferences: preferences("opendots") }));
   });
   await waitFor(() =>
     expect(
@@ -199,21 +201,54 @@ test("picking a skin draws it at once and saves it on the account", async () => 
   expect(view.queryByRole("alert")).toBeNull();
 });
 
-test("a skin the account could not save is put back, and the picker says so", async () => {
+test("the picker lists OpenFuse, and never OpenMuse", async () => {
   signedIn();
-  setSkin("openduet");
-  serve("GET /api/settings/preferences", {
-    preferences: preferences("openduet"),
-  });
-  const save = Promise.withResolvers<Response>();
-  answers.set("PATCH /api/settings/preferences", () => save.promise);
+  serve(`GET ${PREFERENCES_PATH}`, preferences("openbot"));
   const { view, user } = renderSettings();
 
   const picker = view.getByRole("combobox", { name: "Skin" });
   await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
   await user.click(picker);
-  await user.click(await view.findByRole("option", { name: /^OpenMuse/ }));
-  await waitFor(() => expect(getSkinId()).toBe("openmuse"));
+  const options = await view.findAllByRole("option");
+  const names = options.map((option) => option.textContent ?? "");
+  expect(names.some((name) => name.startsWith("OpenFuse"))).toBe(true);
+  expect(names.join("\n")).not.toMatch(/openmuse/i);
+});
+
+test("an account still holding OpenMuse's id draws OpenFuse, and saves nothing", async () => {
+  signedIn();
+  // The id the skin had before it was renamed. The server answers with the new id, and the app reads
+  // the old one the same way, so an account is never dropped to the default by the rename.
+  serve(
+    `GET ${PREFERENCES_PATH}`,
+    preferences("openmuse" as UserPreferences["skin"]),
+  );
+  const { view } = renderSettings();
+
+  const picker = view.getByRole("combobox", { name: "Skin" });
+  await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
+  await waitFor(() =>
+    expect(view.getByLabelText("Drawn skin").textContent).toBe("openfuse"),
+  );
+  expect(document.documentElement.dataset.skin).toBe("openfuse");
+  expect(picker.textContent).toContain("OpenFuse");
+  expect(picker.textContent).not.toMatch(/openmuse/i);
+  expect(sent).toEqual([]);
+});
+
+test("a skin the account could not save is put back, and the picker says so", async () => {
+  signedIn();
+  setSkin("openduet");
+  serve(`GET ${PREFERENCES_PATH}`, preferences("openduet"));
+  const save = Promise.withResolvers<Response>();
+  answers.set(`PATCH ${PREFERENCES_PATH}`, () => save.promise);
+  const { view, user } = renderSettings();
+
+  const picker = view.getByRole("combobox", { name: "Skin" });
+  await waitFor(() => expect(picker.getAttribute("data-disabled")).toBeNull());
+  await user.click(picker);
+  await user.click(await view.findByRole("option", { name: /^OpenFuse/ }));
+  await waitFor(() => expect(getSkinId()).toBe("openfuse"));
 
   await act(async () => {
     save.resolve(Response.json({ error: "Storage down" }, { status: 503 }));
@@ -234,14 +269,14 @@ test("a skin the account could not save is put back, and the picker says so", as
 test("the account's skin wins over a different one this browser cached", async () => {
   signedIn();
   // What a reload paints first: the cached skin, before the preferences have answered.
-  setSkin("openmuse");
+  setSkin("openfuse");
   const read = Promise.withResolvers<Response>();
-  answers.set("GET /api/settings/preferences", () => read.promise);
+  answers.set(`GET ${PREFERENCES_PATH}`, () => read.promise);
   const { view } = renderSettings();
-  expect(view.getByLabelText("Drawn skin").textContent).toBe("openmuse");
+  expect(view.getByLabelText("Drawn skin").textContent).toBe("openfuse");
 
   await act(async () => {
-    read.resolve(Response.json({ preferences: preferences("opendots") }));
+    read.resolve(preferencesResponse({ preferences: preferences("opendots") }));
   });
   await waitFor(() =>
     expect(view.getByLabelText("Drawn skin").textContent).toBe("opendots"),
@@ -351,9 +386,13 @@ test("a skin switched while on a screen only the old skin has lands on home, dra
     userPreferencesQueryOptions("alice").queryKey,
     preferences("openduet"),
   );
-  serve("GET /api/agents", { agents: [] });
-  serve("GET /api/channels", { channels: [], nextCursor: null });
-  serve("GET /api/bots/attention", { bots: [], lastPingId: null });
+  serve(`GET ${BOTS_PATH}`, { bots: [], nextCursor: null });
+  serve(`GET ${CONVERSATIONS_PATH}`, { conversations: [], nextCursor: null });
+  serve(`GET ${BOT_ATTENTION_PATH}`, {
+    attention: [],
+    lastPingId: null,
+    nextCursor: null,
+  });
   const { view, router } = renderApp(`/s/${key}`);
   await waitFor(() =>
     expect(document.querySelector("[data-openduet-frame]")).not.toBeNull(),

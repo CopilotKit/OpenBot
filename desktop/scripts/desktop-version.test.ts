@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   copyFileSync,
   mkdirSync,
@@ -9,6 +9,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+// Each test builds a real git repository and runs desktop-version.ts in a new Bun process, and the
+// hash-ordering test makes commits until one sorts lower, so a test starts tens of git and Bun
+// processes. On the Windows runner, where every process start is slow, that passed the 5-second
+// default and failed "a later internal build orders after an earlier one" with git's exit code
+// null. Nothing here waits on a timer or a network.
+setDefaultTimeout(30_000);
 
 const directories: string[] = [];
 const cargo =
@@ -133,6 +140,17 @@ test("macOS signing uses the audio-input entitlement for microphone capture", ()
   );
   expect(plist).toMatch(
     /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/,
+  );
+});
+
+test("macOS can ask Docker Desktop to quit while OpenBot updates it", () => {
+  // Without both, macOS refuses the Apple event without asking (docker_desktop_update::quit).
+  const native = resolve(import.meta.dir, "../src-tauri");
+  expect(readFileSync(join(native, "Info.plist"), "utf8")).toMatch(
+    /<key>NSAppleEventsUsageDescription<\/key>\s*<string>\s*[^<\s][^<]*<\/string>/,
+  );
+  expect(readFileSync(join(native, "Entitlements.plist"), "utf8")).toMatch(
+    /<key>com\.apple\.security\.automation\.apple-events<\/key>\s*<true\s*\/>/,
   );
 });
 

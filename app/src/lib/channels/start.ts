@@ -1,9 +1,11 @@
+import type { Attachment } from "@copilotkit/react-core/v2";
 import {
   MutationObserver,
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
+import { uploadHeldFiles } from "@/components/channels/composer/attachments";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
 import {
   createGroupMutationOptions,
@@ -75,32 +77,35 @@ export async function startGroupWith(input: {
 }
 
 /**
- * Create a conversation, save the model and thinking effort picked for it, then open it with its
- * first message.
+ * Create a conversation, save the model and thinking effort picked for it, upload the files the
+ * first message carries, then open it with that message.
  *
- * The pick is saved before the conversation opens, because opening it is what sends the first
- * message, and that message must not run on a model or effort other than the one picked. A pick
- * that cannot be saved discards the conversation, which exists only to hold that message, and the
- * save's own error is what the caller sees, so the composer keeps the draft. Pure so the order can
- * be tested.
+ * The pick is saved and the files are uploaded before the conversation opens, because opening it
+ * is what sends the first message, and that message must not run on a model or effort other than
+ * the one picked, nor without its files. Either one failing discards the conversation, which
+ * exists only to hold that message, and that step's own error is what the caller sees, so the
+ * composer keeps the draft. Pure so the order can be tested.
  */
 export async function startWithModel(input: {
   /** Null, or both halves null, when everything is the default and nothing needs saving. */
   pick: ConversationModel | null;
   create: () => Promise<{ id: string }>;
   save: (channelId: string, pick: ConversationModel) => Promise<unknown>;
+  /** Sends the files held for the first message to the new channel. Absent when there are none. */
+  upload?: (channelId: string) => Promise<void>;
   discard: (channelId: string) => Promise<void>;
   open: (channelId: string) => Promise<void>;
 }): Promise<void> {
   const channel = await input.create();
   const { pick } = input;
-  if (pick && (pick.model !== null || pick.effort !== null)) {
-    try {
+  try {
+    if (pick && (pick.model !== null || pick.effort !== null)) {
       await input.save(channel.id, pick);
-    } catch (error) {
-      await input.discard(channel.id).catch(() => undefined);
-      throw error;
     }
+    await input.upload?.(channel.id);
+  } catch (error) {
+    await input.discard(channel.id).catch(() => undefined);
+    throw error;
   }
   await input.open(channel.id);
 }
@@ -135,8 +140,11 @@ export function useStartChannel() {
     pick?: ConversationModel | null,
     /** The placeholder this was started behind, if any; see the hook's own comment. */
     pendingId?: string,
-  ) =>
-    startWithModel({
+    /** Files a held composer kept for the first message (`holdsFilesUntilSent`), not yet uploaded. */
+    files: readonly Attachment[] = [],
+  ) => {
+    let attachments: readonly Attachment[] = [];
+    return startWithModel({
       pick: pick ?? null,
       create: async () => {
         const channel = await createChannel.mutateAsync([agentId]);
@@ -144,11 +152,18 @@ export function useStartChannel() {
         return channel;
       },
       save: saveConversationModel,
+      ...(files.length > 0
+        ? {
+            upload: async (channelId: string) => {
+              attachments = await uploadHeldFiles(channelId, files);
+            },
+          }
+        : {}),
       discard: async (channelId) => {
         await discardFailedStart.mutateAsync(channelId);
       },
       open: async (channelId) => {
-        stashFirstMessage(channelId, text);
+        stashFirstMessage(channelId, text, attachments);
         if (pendingId !== undefined) {
           // Remembered whether or not they are looking, so coming back to the placeholder opens it.
           settlePendingStart(pendingId, channelId);
@@ -162,6 +177,7 @@ export function useStartChannel() {
         });
       },
     });
+  };
 
   const startGroup = (
     agentIds: string[],
@@ -206,12 +222,13 @@ export function useStartChannel() {
       text: string,
       pick?: ConversationModel | null,
       pendingId?: string,
+      files?: readonly Attachment[],
     ) =>
       startWithChosen({
         agentId,
         text,
         record: routeMessage,
-        start: (id, message) => start(id, message, pick, pendingId),
+        start: (id, message) => start(id, message, pick, pendingId, files),
       }),
   };
 }

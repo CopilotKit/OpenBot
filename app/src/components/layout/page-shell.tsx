@@ -41,6 +41,8 @@ export function PageShell({
   backButton?: {
     linkProps: LinkProps;
     label: string;
+    /** Drawn, but not a link: leaving now would lose what the page is waiting on. */
+    disabled?: boolean;
   };
 }) {
   /*
@@ -68,7 +70,12 @@ export function PageShell({
   const barRow = bar ? (
     <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
       {showToggle ? <SidebarToggle /> : null}
-      {!!backButton && (
+      {!backButton ? null : backButton.disabled ? (
+        <Button disabled variant="ghost">
+          <IconChevronLeft />
+          {backButton.label}
+        </Button>
+      ) : (
         <Button
           variant="ghost"
           render={(props) => <Link {...backButton.linkProps} {...props} />}

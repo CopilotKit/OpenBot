@@ -20,7 +20,7 @@ export const RECORDER_DISCLOSURE_TITLE = "What the Recorder collects";
  * steps). "Through OpenBot" would say the recording passes through it, which it never does.
  */
 export const RECORDER_DESTINATION =
-  "What you record goes straight from your browser to the learning part of your organization's OpenBot back end, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
+  "What you record goes straight from your browser to the learning part of your organization's OpenBot backend, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
 
 /**
  * {@link RECORDER_DESTINATION} in the personal edition, where OpenBot is one person's and there is no organization:
@@ -29,7 +29,7 @@ export const RECORDER_DESTINATION =
  * started with scripts/start.sh may use one that runs somewhere else.
  */
 export const RECORDER_DESTINATION_PERSONAL =
-  "What you record goes straight from your browser to your own Learning space in OpenBot's back end, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
+  "What you record goes straight from your browser to your own Learning space in OpenBot's backend, with a pass from the part of OpenBot that runs your Bots. That part is told that you are recording, the task's name, when it started and how many steps it has, and when you record in a browser shown inside OpenBot, your narration passes through it to the Recorder without being stored.";
 
 /** The disclosure's lead, from where a recording goes and what it is used for. */
 function disclosure(destination: string, use: string): string {
