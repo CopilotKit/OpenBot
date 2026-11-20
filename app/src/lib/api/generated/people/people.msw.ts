@@ -6,6 +6,7 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
   AdvanceOnboardingRequest,
+  CompanySignIn,
   GetPersonResponse,
   OnboardingResponse,
   PersonPage,
@@ -151,6 +152,15 @@ export const getUpdatePreferencesResponseMock = (): Preferences => ({
   narration: null,
   skin: "openbot",
   proactive: "on",
+});
+
+export const getGetCompanySignInResponseMock = (): CompanySignIn => ({
+  required: true,
+  met: false,
+  providers: [
+    { id: "acme-okta", domain: "acme.com" },
+    { id: "example-entra", domain: "example.com" },
+  ],
 });
 
 export const getListPeopleMockHandler = (
@@ -514,6 +524,36 @@ export const getUpdatePreferencesMockHandler = (
     options,
   );
 };
+
+export const getGetCompanySignInMockHandler = (
+  overrideResponse?:
+    | CompanySignIn
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<CompanySignIn> | CompanySignIn),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/company-sign-in",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetCompanySignInResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getPeopleMock = () => [
   getListPeopleMockHandler(),
   getGetPersonMockHandler(),
@@ -526,4 +566,5 @@ export const getPeopleMock = () => [
   getUpdateStandingInstructionsMockHandler(),
   getGetPreferencesMockHandler(),
   getUpdatePreferencesMockHandler(),
+  getGetCompanySignInMockHandler(),
 ];

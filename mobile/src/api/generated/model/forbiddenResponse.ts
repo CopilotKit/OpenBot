@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller holds no role in this organization.
+ * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
  */
 export type ForbiddenResponse = Problem;

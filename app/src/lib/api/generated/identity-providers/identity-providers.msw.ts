@@ -19,6 +19,16 @@ export const getListIdentityProvidersResponseMock =
         domain: "acme.com",
         protocol: "saml",
         registeredBy: "8kq2m4x7p1rvz3a9c5d0",
+        deployment: false,
+      },
+      {
+        id: "example-entra",
+        issuer:
+          "https://login.microsoftonline.com/0d1c2b3a-4f5e-6d7c-8b9a-0f1e2d3c4b5a/v2.0",
+        domain: "example.com",
+        protocol: "oidc",
+        registeredBy: null,
+        deployment: true,
       },
     ],
     nextCursor: null,
