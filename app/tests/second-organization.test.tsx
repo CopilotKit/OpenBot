@@ -173,7 +173,7 @@ test("Harbor's admin registers Harbor's own identity providers, which sign in Ha
   );
 });
 
-test("in Harbor, the providers set up for all of OpenBot are listed as counting there too, with nothing to remove them", async () => {
+test("in Harbor, the providers set up for all of OpenBot are listed read-only, and while Harbor has its own each says it isn't used for Harbor's rule", async () => {
   setCurrentOrganization(HARBOR.id);
   answer = (path) =>
     path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
@@ -209,13 +209,50 @@ test("in Harbor, the providers set up for all of OpenBot are listed as counting 
     .getByRole("heading", { name: "For all of OpenBot" })
     .closest("section") as HTMLElement;
   expect(within(everybody).getByText("company-entra")).toBeTruthy();
+  // Harbor has its own, so only those count for its Require SSO: each of the deployment's says so.
   expect(
     within(everybody).getByText(
-      "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one.",
+      "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these.",
     ),
+  ).toBeTruthy();
+  const entra = within(everybody)
+    .getByText("company-entra")
+    .closest("[data-slot=item]") as HTMLElement;
+  expect(
+    within(entra).getByText("Not used for this organization's rule"),
   ).toBeTruthy();
   expect(within(everybody).queryByRole("button")).toBeNull();
   expect(view.getAllByRole("button", { name: "Remove" })).toHaveLength(1);
+});
+
+test("in Harbor with none of its own, the deployment's providers count for it and say nothing more", async () => {
+  setCurrentOrganization(HARBOR.id);
+  answer = (path) =>
+    path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
+      ? Response.json(
+          ListIdentityProvidersResponse.parse({
+            identityProviders: [
+              {
+                id: "company-entra",
+                issuer: "https://login.microsoftonline.com/tenant/v2.0",
+                domain: "example.com",
+                protocol: "oidc",
+                registeredBy: null,
+                deployment: true,
+              },
+            ],
+            nextCursor: null,
+          }),
+        )
+      : problem(NOT_FOUND);
+  const view = identityProviders();
+  await view.findByText("company-entra");
+  expect(
+    view.getByText(
+      "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Not used for this organization's rule")).toBeNull();
 });
 
 test("an admin of `default` who doesn't run OpenBot reads that its identity providers are set up for all of OpenBot, with no error and nothing to press", async () => {

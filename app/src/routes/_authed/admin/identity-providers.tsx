@@ -207,7 +207,12 @@ function IdentityProvidersPage() {
        */}
       {deploymentWide.length > 0 ? (
         <PageSection
-          description="Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
+          description={
+            // Only while the organization has none of its own: once it has, only those count for its Require SSO.
+            registered.length > 0
+              ? "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these."
+              : "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
+          }
           title="For all of OpenBot"
         >
           <PageRows>
@@ -224,6 +229,14 @@ function IdentityProvidersPage() {
                       {provider.issuer}
                     </ItemDescription>
                   </ItemContent>
+                  {registered.length > 0 ? (
+                    // Read-only: a value, not a control.
+                    <ItemActions>
+                      <span className="text-right text-muted-foreground text-xs">
+                        Not used for this organization's rule
+                      </span>
+                    </ItemActions>
+                  ) : null}
                 </Item>
                 {index !== deploymentWide.length - 1 && <Separator />}
               </StaggerItem>
