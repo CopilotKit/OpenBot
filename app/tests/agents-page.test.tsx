@@ -15,6 +15,7 @@ import type {
 } from "@/lib/api/generated/model";
 import { queryClient } from "@/query-client";
 import { Route as AgentsRoute } from "@/routes/_authed/_app/agents/index";
+import { Route as BotAgentsRoute } from "@/routes/_authed/_app/bots.$agentId.agents";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -169,6 +170,24 @@ test("/agents on its own goes home while the page is hidden, and the old links s
       expect(isRedirect(thrown)).toBe(true);
       expect((thrown as { options: { to: string } }).options.to).toBe(to);
     }
+  }
+});
+
+/* A Bot's own Agents page is hidden too: its address leads to the Bot's page. */
+test("a Bot's Agents address goes to the Bot's page while Agents are hidden", () => {
+  const beforeLoad = BotAgentsRoute.options.beforeLoad as unknown as (match: {
+    params: { agentId: string };
+  }) => void;
+  try {
+    beforeLoad({ params: { agentId: "agent_1" } });
+    throw new Error("No redirect");
+  } catch (thrown) {
+    expect(isRedirect(thrown)).toBe(true);
+    const { options } = thrown as {
+      options: { to: string; params: { agentId: string } };
+    };
+    expect(options.to).toBe("/bots/$agentId");
+    expect(options.params.agentId).toBe("agent_1");
   }
 });
 
