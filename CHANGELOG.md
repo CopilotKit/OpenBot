@@ -12,7 +12,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 unless you rely on task threads.
 
 - **One migration, expand only.** `0138_management_enrollment` adds one table for connecting to
-  CopilotKit management (below), which 1.1.1 never reads, so 1.1.1 upgrades to 1.1.2 with its
+  managed updates (below), which 1.1.1 never reads, so 1.1.1 upgrades to 1.1.2 with its
   servers rolling one by one, with no downtime, and goes back to 1.1.1 the same way. Upgrading from
   1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before upgrading first.
 - **Task threads are off unless you turn them on.** No Bot hands a person's request to a task
@@ -104,9 +104,9 @@ unless you rely on task threads.
     cluster, and nothing secret is logged. Until you choose how the database is backed up
     (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
     anything.
-- **An admin can connect OpenBot to CopilotKit management from Admin.** Admin, CopilotKit
-  management, Connect shows a code to approve at CopilotKit's page, signed in to CopilotKit as an
-  admin of the organization your licence names. Once it's approved, it shows one `helm install` of
+- **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
+  code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
+  organization your licence names. Once it's approved, it shows one `helm install` of
   the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
   OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
   organization `default` see it, and only on a team install you run yourself.
