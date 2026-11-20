@@ -32,7 +32,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use crate::quiet::command;
 
@@ -545,6 +545,66 @@ fn tools_dir() -> Option<&'static PathBuf> {
     TOOLS.get()
 }
 
+/// The folder that holds OpenBot's Podman machine disk on Windows: `<install>\engine`.
+///
+/// A Mutex and not a OnceLock, because Install can set it again. Unset in tests and wherever no
+/// install folder is known, so Podman then uses its default place.
+static MACHINE_HOME: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Tell this module where OpenBot's Podman machine keeps its disk.
+pub fn machine_home_is(home: Option<PathBuf>) {
+    *MACHINE_HOME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = home;
+}
+
+/// Where OpenBot's Podman machine keeps its disk, if it is known.
+pub fn machine_home() -> Option<PathBuf> {
+    MACHINE_HOME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+/**
+The environment variable that puts the disk of a new Podman machine in `home`, for the `podman`
+command `args` on `os`. Only `podman machine init` on Windows gets it.
+
+On Windows, Podman puts a new machine's WSL disk under `XDG_DATA_HOME`, else under
+`%USERPROFILE%\.local\share` (`env.DataDirPrefix` and `provisionWSLDist` in Podman 6.1.1). No flag
+or containers.conf key changes this. Init is the only command that places the disk: every later
+command finds it through WSL's registration and the absolute paths in the machine's config, which
+stays in `%USERPROFILE%\.config`.
+
+Every other command keeps Podman's default data folder, because Podman keeps state there that is
+shared with the person's own Podman and with uninstall, which runs without this variable:
+- the API proxy's record, `wsl\win-sshproxy.tid` (`pkg/machine/machine_windows.go`). Start writes
+  it and stop reads it to end the proxy that holds `\\.\pipe\podman-openbot`. A stop that looks in
+  another folder than the start leaves the proxy running, and a reinstall then fails on Compose;
+- the user-mode networking distribution's count of machines and its lock,
+  `wsl\podman-net-usermode\entries` (`pkg/machine/wsl/usermodenet.go`). Two folders mean two
+  counts, and stopping one machine can stop the networking under the other;
+- the lock that keeps two machines from starting at once, and the machines' port allocations.
+*/
+fn data_home_env(os: &str, args: &[&str], home: Option<&Path>) -> Option<(&'static str, PathBuf)> {
+    if os != "windows" || !matches!(args, ["machine", "init", ..]) {
+        return None;
+    }
+    home.map(|home| ("XDG_DATA_HOME", home.to_path_buf()))
+}
+
+/// `podman` with `args`, wherever Podman is. `podman machine init` on Windows also puts the new
+/// machine's disk in the machine home (`data_home_env`).
+pub fn podman_command(args: &[&str]) -> Command {
+    let mut built = tool(Engine::Podman);
+    built.args(args);
+    if let Some((name, home)) = data_home_env(std::env::consts::OS, args, machine_home().as_deref())
+    {
+        built.env(name, home);
+    }
+    built
+}
+
 /// A command that runs this engine's binary, wherever it actually is.
 pub fn tool(engine: Engine) -> Command {
     command_at(
@@ -1030,6 +1090,91 @@ fn main() {
         );
         assert!(owned.join("contexts/meta").is_dir());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn podman_machine_init_on_windows_puts_the_disk_in_the_machine_home() {
+        let home = PathBuf::from(r"D:\OpenBot\engine");
+        assert_eq!(
+            data_home_env(
+                "windows",
+                &["machine", "init", "openbot", "--rootful"],
+                Some(&home)
+            ),
+            Some(("XDG_DATA_HOME", PathBuf::from(r"D:\OpenBot\engine")))
+        );
+    }
+
+    /// Podman keeps the API proxy's record, the user-mode networking count and lock, the start lock
+    /// and the port allocations in its data folder. The person's own Podman and uninstall look for
+    /// them in the default one, so only init may move it. With every command moved, a stop missed
+    /// the record its start wrote in the default folder and left the proxy holding the pipe.
+    #[test]
+    fn every_podman_command_but_init_keeps_podmans_default_data_folder() {
+        let home = PathBuf::from(r"D:\OpenBot\engine");
+        for args in [
+            &["machine", "start", "openbot"][..],
+            &["machine", "stop", "openbot"],
+            &["machine", "rm", "-f", "openbot"],
+            &["machine", "set", "--user-mode-networking", "openbot"],
+            &["machine", "inspect", "openbot"],
+            &["machine", "list", "--format", "json"],
+            &["machine", "ssh", "openbot", "true"],
+            &["system", "connection", "list", "--format", "json"],
+            &["--version"],
+        ] {
+            assert_eq!(
+                data_home_env("windows", args, Some(&home)),
+                None,
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn podman_outside_windows_gets_no_data_home() {
+        let home = PathBuf::from("/opt/openbot/engine");
+        assert_eq!(
+            data_home_env("macos", &["machine", "init", "openbot"], Some(&home)),
+            None
+        );
+    }
+
+    #[test]
+    fn podman_without_a_machine_home_gets_no_data_home() {
+        assert_eq!(
+            data_home_env("windows", &["machine", "init", "openbot"], None),
+            None
+        );
+    }
+
+    /// The command OpenBot runs: init carries `XDG_DATA_HOME`, a stop does not, and neither does
+    /// the plain `tool`.
+    #[cfg(windows)]
+    #[test]
+    fn only_podman_machine_init_on_windows_carries_the_machine_home() {
+        if crate::test_support::isolated_process(
+            "engine::tests::only_podman_machine_init_on_windows_carries_the_machine_home",
+        ) {
+            return;
+        }
+        machine_home_is(Some(PathBuf::from(r"D:\OpenBot\engine")));
+        let data_home = |command: &Command| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == "XDG_DATA_HOME")
+                .and_then(|(_, value)| value.map(std::ffi::OsStr::to_os_string))
+        };
+
+        assert_eq!(
+            data_home(&podman_command(&["machine", "init", "openbot"])),
+            Some(OsString::from(r"D:\OpenBot\engine"))
+        );
+        assert_eq!(
+            data_home(&podman_command(&["machine", "stop", "openbot"])),
+            None
+        );
+        assert_eq!(data_home(&tool(Engine::Podman)), None);
     }
 
     #[cfg(unix)]

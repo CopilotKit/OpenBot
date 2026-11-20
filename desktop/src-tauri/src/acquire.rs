@@ -240,9 +240,151 @@ pub(crate) fn podman(args: &[&str]) -> Result<String, String> {
 /// A `podman` command as it is. Only `podman_default` runs these: everything else goes through
 /// `podman`.
 pub(crate) fn podman_as_is(args: &[&str]) -> Result<String, String> {
-    podman_with(args, || {
-        crate::engine::tool(Engine::Podman).args(args).output()
-    })
+    podman_as_is_with(
+        args,
+        |limit| crate::quiet::output_within(&mut crate::engine::podman_command(args), limit),
+        || crate::engine::podman_command(args).output(),
+        key_shared,
+    )
+}
+
+/// `podman_as_is` with how it runs podman passed in: `within` for a `machine ssh`, which gets
+/// `MACHINE_SSH_LIMIT`, and `unlimited` for everything else.
+fn podman_as_is_with(
+    args: &[&str],
+    within: impl FnOnce(Duration) -> std::io::Result<std::process::Output>,
+    unlimited: impl FnOnce() -> std::io::Result<std::process::Output>,
+    shared: impl FnOnce(&str) -> Option<String>,
+) -> Result<String, String> {
+    if let ["machine", "ssh", machine, ..] = args {
+        return machine_ssh_with(args, || within(MACHINE_SSH_LIMIT), || shared(machine));
+    }
+    podman_with(args, unlimited)
+}
+
+/// How long one `podman machine ssh` may run. Every script OpenBot runs in its machine answers in
+/// seconds; the longest, `machine_size`'s registry check, stops itself at 10 s.
+///
+/// Without a limit, an ssh that asks for a password waits for ever, because nobody can type one.
+/// Windows' ssh asks when it refuses the machine's key (see `key_shared`): setup waited two hours on
+/// "Checking what OpenBot needs to download", and its `timeout 3` limited only the lookup inside
+/// the machine, which never ran.
+const MACHINE_SSH_LIMIT: Duration = Duration::from_secs(60);
+
+/// Said when a `machine ssh` timed out and the machine's key can be read by other accounts.
+/// `explain_machine_error` reads it.
+const KEY_SHARED: &str =
+    "Windows' ssh will not use the machine's key, because other accounts can read it";
+
+/// `podman machine ssh`, failing at `MACHINE_SSH_LIMIT`. Only then is `shared` asked why, so a
+/// machine that answers pays nothing for the check.
+fn machine_ssh_with(
+    args: &[&str],
+    run: impl FnOnce() -> std::io::Result<std::process::Output>,
+    shared: impl FnOnce() -> Option<String>,
+) -> Result<String, String> {
+    match run() {
+        // An ssh that exited answered, even if something it started held its output open: the
+        // key is not why.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::TimedOut
+                && !crate::quiet::stayed_open(&error) =>
+        {
+            let timed_out = format!(
+                "podman {} did not answer within {}s",
+                args.join(" "),
+                MACHINE_SSH_LIMIT.as_secs()
+            );
+            Err(match shared() {
+                Some(why) => format!("{KEY_SHARED}: {why}\n{timed_out}"),
+                None => timed_out,
+            })
+        }
+        answered => podman_with(args, || answered),
+    }
+}
+
+/// Which other accounts can read the key `podman machine ssh` gives Windows' ssh, said with the
+/// key's path, or `None` when only this account, SYSTEM and Administrators can.
+///
+/// Windows' ssh refuses a private key that any other account may open, as OpenSSH's
+/// `check_secure_file_permission` does, and falls back to asking for a password. The key inherits
+/// its permissions from `%USERPROFILE%\.local`: one Windows computer had given a sandbox's group
+/// read access there.
+#[cfg(windows)]
+fn key_shared(machine: &str) -> Option<String> {
+    let key = identity_path(&podman_as_is(&["machine", "inspect", machine]).ok()?)?;
+    let output = crate::quiet::output_within(
+        crate::quiet::command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", KEY_READERS])
+            .env("OPENBOT_KEY", &key),
+        Duration::from_secs(20),
+    )
+    .ok()?;
+    let others = other_readers(&String::from_utf8_lossy(&output.stdout));
+    (!others.is_empty()).then(|| format!("{key} can be read by {}", others.join(", ")))
+}
+
+#[cfg(not(windows))]
+fn key_shared(_machine: &str) -> Option<String> {
+    None
+}
+
+/// The accounts allowed on `OPENBOT_KEY`, one `<SID> <name>` a line, after `me <SID>` and
+/// `owner <SID>`. `other_readers` reads it.
+#[cfg_attr(not(windows), allow(dead_code))]
+const KEY_READERS: &str = r#"$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $env:OPENBOT_KEY
+$sid = [Security.Principal.SecurityIdentifier]
+'me ' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+'owner ' + $acl.GetOwner($sid).Value
+foreach ($rule in $acl.GetAccessRules($true, $true, $sid)) {
+  if ($rule.AccessControlType -eq 'Allow') {
+    $name = try { $rule.IdentityReference.Translate([Security.Principal.NTAccount]).Value } catch { $rule.IdentityReference.Value }
+    $rule.IdentityReference.Value + ' ' + $name
+  }
+}"#;
+
+/// The accounts in `KEY_READERS`' answer that Windows' ssh does not accept on a private key: any
+/// but this account, the key's owner, SYSTEM, Administrators and TrustedInstaller.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn other_readers(said: &str) -> Vec<String> {
+    let mut accepted = vec![
+        "S-1-5-18".to_string(),
+        "S-1-5-32-544".to_string(),
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464".to_string(),
+    ];
+    let mut allowed = Vec::new();
+    for line in said.lines().map(str::trim) {
+        if let Some(sid) = line
+            .strip_prefix("me ")
+            .or_else(|| line.strip_prefix("owner "))
+        {
+            accepted.push(sid.to_string());
+        } else if let Some((sid, name)) = line.split_once(' ') {
+            allowed.push((sid, name));
+        }
+    }
+    // An account allowed both on the key and on a folder above it is listed once for each.
+    let mut others: Vec<String> = Vec::new();
+    for (sid, name) in allowed {
+        if !accepted.iter().any(|accepted| accepted == sid) && !others.iter().any(|n| n == name) {
+            others.push(name.to_string());
+        }
+    }
+    others
+}
+
+/// The private key `podman machine inspect` says ssh is given.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn identity_path(listing: &str) -> Option<String> {
+    let machines: Vec<Value> = serde_json::from_str(listing).ok()?;
+    machines
+        .first()?
+        .pointer("/SSHConfig/IdentityPath")?
+        .as_str()
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
 }
 
 fn podman_with(
@@ -326,6 +468,15 @@ pub fn machine_exists() -> Result<bool, String> {
 /// On Windows, `machine init` registers a WSL distribution, and the first one a person registers
 /// opens WSL's own welcome window. `before_init` turns that window off first: see
 /// `windows::skip_wsl_welcome`.
+///
+/// On Windows, user-mode networking is turned on by `machine set` right after init, not by init's
+/// own flag. Init runs with the machine home as Podman's data folder (`engine::podman_command`), so
+/// the new machine's disk lands in the install folder. Init with the flag would also make Podman's
+/// user-mode networking distribution, `podman-net-usermode`, there when it does not exist yet
+/// (`installUserModeDist` in Podman 6.1.1's `pkg/machine/wsl/usermodenet.go`). That distribution is
+/// shared with every user-mode machine of the person's own, so it belongs in Podman's default data
+/// folder, where `machine set` makes it. A `set` that fails leaves the machine without user-mode
+/// networking, and the next start turns it on (`prepare_user_mode_networking_before_start`).
 pub fn create_machine(
     cpus: u32,
     memory_mib: u32,
@@ -350,6 +501,30 @@ pub(crate) fn create_machine_with(
     image: Option<&Path>,
     exists: impl FnOnce() -> Result<bool, String>,
     before_init: impl FnOnce(),
+    run: impl FnMut(&[&str]) -> Result<String, String>,
+) -> StepOutcome {
+    create_machine_on(
+        cfg!(target_os = "windows"),
+        cpus,
+        memory_mib,
+        disk_gib,
+        image,
+        exists,
+        before_init,
+        run,
+    )
+}
+
+/// `create_machine_with` for a target that is Windows or not.
+#[allow(clippy::too_many_arguments)]
+fn create_machine_on(
+    target_is_windows: bool,
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    image: Option<&Path>,
+    exists: impl FnOnce() -> Result<bool, String>,
+    before_init: impl FnOnce(),
     mut run: impl FnMut(&[&str]) -> Result<String, String>,
 ) -> StepOutcome {
     match exists() {
@@ -359,25 +534,28 @@ pub(crate) fn create_machine_with(
         Ok(false) => {}
         Err(error) => return StepOutcome::stopped(Step::CreateMachine, &error),
     }
-    let mut args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    let mut args = create_machine_args(cpus, memory_mib, disk_gib);
     if let Some(image) = image {
         args.extend(["--image".to_string(), image.to_string_lossy().into_owned()]);
     }
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     before_init();
-    match run(&refs) {
-        Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
-        Err(error) => StepOutcome::stopped(Step::CreateMachine, &error),
+    if let Err(error) = run(&refs) {
+        return StepOutcome::stopped(Step::CreateMachine, &error);
     }
+    if target_is_windows {
+        if let Err(error) = run(&USER_MODE_NETWORKING_ON) {
+            return StepOutcome::stopped(Step::CreateMachine, &error);
+        }
+    }
+    StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created."))
 }
 
-fn create_machine_args(
-    cpus: u32,
-    memory_mib: u32,
-    disk_gib: u32,
-    target_is_windows: bool,
-) -> Vec<String> {
-    let mut args = vec![
+/// Turns user-mode networking on for the stopped machine, on Windows.
+const USER_MODE_NETWORKING_ON: [&str; 4] = ["machine", "set", USER_MODE_NETWORKING_FLAG, MACHINE];
+
+fn create_machine_args(cpus: u32, memory_mib: u32, disk_gib: u32) -> Vec<String> {
+    vec![
         "machine".to_string(),
         "init".to_string(),
         MACHINE.to_string(),
@@ -388,11 +566,7 @@ fn create_machine_args(
         "--disk-size".to_string(),
         disk_gib.to_string(),
         ROOTFUL_FLAG.to_string(),
-    ];
-    if target_is_windows {
-        args.push(USER_MODE_NETWORKING_FLAG.to_string());
-    }
-    args
+    ]
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -422,7 +596,7 @@ fn prepare_user_mode_networking_before_start(
         ));
     }
     if networking.state.eq_ignore_ascii_case("stopped") && !networking.user_mode {
-        run(&["machine", "set", USER_MODE_NETWORKING_FLAG, MACHINE])?;
+        run(&USER_MODE_NETWORKING_ON)?;
     }
     Ok(Some(networking))
 }
@@ -1146,6 +1320,12 @@ fn explain_machine_error(error: &str) -> String {
                 OpenBot, restart your computer, then open OpenBot again."
             .into();
     }
+    if error.contains(KEY_SHARED) {
+        return "Windows won't use a file OpenBot needs, because other accounts on this computer \
+                can open it. Open Technical details to see the file and the account. Remove that \
+                account's access, then Retry."
+            .into();
+    }
     if error.contains("not enough space") || error.contains("no space left") {
         return "There isn't enough disk space to prepare this computer for OpenBot. Free up \
                 some space, then try again."
@@ -1749,6 +1929,165 @@ mod tests {
         assert!(failure.contains("stderr: stderr diagnostic"), "{failure}");
     }
 
+    fn timed_out() -> std::io::Result<std::process::Output> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "still running after 60s, so it was stopped",
+        ))
+    }
+
+    /// A `machine ssh` that never answers fails, and says it did not answer. Setup waited two
+    /// hours on one before.
+    #[test]
+    fn a_machine_ssh_that_never_answers_fails() {
+        let failure = machine_ssh_with(&HOST_GATEWAY_LOOKUP, timed_out, || None)
+            .expect_err("a machine ssh past its limit must fail");
+        assert_eq!(
+            failure,
+            "podman machine ssh openbot timeout 3 getent ahostsv4 host.containers.internal \
+             did not answer within 60s"
+        );
+        // Not a lookup to wait out: the wait for the machine's network gives up at once.
+        assert!(!getent_not_answered_yet(&failure), "{failure}");
+    }
+
+    /// When the key is why, the person is told so, and the details name the file and the account.
+    #[test]
+    fn a_machine_ssh_refused_its_key_says_so() {
+        let why = r"C:\Users\me\machine can be read by PC\Sandbox";
+        let failure = machine_ssh_with(&HOST_GATEWAY_LOOKUP, timed_out, || Some(why.into()))
+            .expect_err("a machine ssh past its limit must fail");
+        let problem = machine_problem(&failure);
+        assert_eq!(
+            problem.said,
+            "Windows won't use a file OpenBot needs, because other accounts on this computer can \
+             open it. Open Technical details to see the file and the account. Remove that account's \
+             access, then Retry."
+        );
+        assert!(
+            problem.detail.unwrap_or_default().contains(why),
+            "{failure}"
+        );
+    }
+
+    /// Only a `machine ssh` runs under `MACHINE_SSH_LIMIT`, and gets the key check when it runs
+    /// out. Every other podman command, image pulls included, runs as it always did.
+    #[test]
+    fn only_a_machine_ssh_runs_under_the_limit() {
+        let failure = podman_as_is_with(
+            &HOST_GATEWAY_LOOKUP,
+            |limit| {
+                assert_eq!(limit, MACHINE_SSH_LIMIT);
+                timed_out()
+            },
+            || panic!("a machine ssh ran without a limit"),
+            |machine| Some(format!("{machine} key can be read by PC\\Sandbox")),
+        )
+        .expect_err("a machine ssh past its limit must fail");
+        assert!(failure.contains(KEY_SHARED), "{failure}");
+        assert!(failure.contains("openbot key"), "{failure}");
+
+        for args in [
+            &["machine", "inspect", "openbot"][..],
+            &["machine", "start", "openbot"][..],
+            &["pull", "docker.io/library/alpine"][..],
+        ] {
+            let failure = podman_as_is_with(
+                args,
+                |_| panic!("podman {} ran under the machine ssh limit", args.join(" ")),
+                || {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "ran unlimited",
+                    ))
+                },
+                |_| panic!("the key was checked for podman {}", args.join(" ")),
+            )
+            .expect_err("the stand-in podman fails");
+            assert_eq!(failure, "could not run podman: ran unlimited");
+        }
+    }
+
+    /// An ssh that exited answered, even when something it started held its output open past
+    /// `quiet`'s wait for it. That is not the key, so the key is not checked.
+    #[test]
+    fn a_machine_ssh_that_exited_with_its_output_held_open_does_not_check_the_key() {
+        let cli = crate::test_support::probe_cli("machine-ssh-held-open");
+        let failure = machine_ssh_with(
+            &HOST_GATEWAY_LOOKUP,
+            || {
+                crate::quiet::output_within(
+                    crate::quiet::command(&cli).arg("linger"),
+                    Duration::from_secs(30),
+                )
+            },
+            || panic!("the key was checked after ssh exited"),
+        )
+        .expect_err("an answer held open is no answer");
+        assert!(failure.contains("output stayed open"), "{failure}");
+        assert!(!failure.contains("did not answer within"), "{failure}");
+        // The child holding the output open ends three seconds later.
+        std::thread::sleep(Duration::from_secs(4));
+        let _ = std::fs::remove_dir_all(cli.parent().unwrap());
+    }
+
+    /// The key is asked about only when ssh did not answer: an answer pays nothing.
+    #[test]
+    #[cfg(unix)]
+    fn a_machine_ssh_that_answers_does_not_check_the_key() {
+        let said = machine_ssh_with(
+            &HOST_GATEWAY_LOOKUP,
+            || {
+                Ok(output(
+                    0,
+                    "192.168.127.254 STREAM host.containers.internal",
+                    "",
+                ))
+            },
+            || panic!("the key was checked after an answer"),
+        );
+        assert_eq!(
+            said.unwrap(),
+            "192.168.127.254 STREAM host.containers.internal"
+        );
+    }
+
+    /// Windows' ssh accepts this account, the owner, SYSTEM, Administrators and TrustedInstaller
+    /// on a private key, and refuses it for anybody else.
+    #[test]
+    fn other_readers_are_the_accounts_ssh_refuses_a_key_for() {
+        let said = "me S-1-5-21-1-2-3-1001\r\n\
+                    owner S-1-5-21-1-2-3-1001\r\n\
+                    S-1-5-21-1-2-3-1003 ALEMPC\\CodexSandboxUsers\r\n\
+                    S-1-5-21-1-2-3-1003 ALEMPC\\CodexSandboxUsers\r\n\
+                    S-1-5-18 NT AUTHORITY\\SYSTEM\r\n\
+                    S-1-5-32-544 BUILTIN\\Administrators\r\n\
+                    S-1-5-21-1-2-3-1001 ALEMPC\\me\r\n\
+                    S-1-1-0 Everyone\r\n";
+        assert_eq!(
+            other_readers(said),
+            vec![
+                r"ALEMPC\CodexSandboxUsers".to_string(),
+                "Everyone".to_string()
+            ]
+        );
+        assert!(other_readers("me S-1-5-21-1\nowner S-1-5-21-1\nS-1-5-21-1 PC\\me\n").is_empty());
+    }
+
+    #[test]
+    fn identity_path_is_the_key_inspect_names() {
+        let listing = r#"[{"Name":"openbot","SSHConfig":{"IdentityPath":"C:\\Users\\me\\machine","Port":1}}]"#;
+        assert_eq!(
+            identity_path(listing).as_deref(),
+            Some(r"C:\Users\me\machine")
+        );
+        assert_eq!(
+            identity_path(r#"[{"SSHConfig":{"IdentityPath":""}}]"#),
+            None
+        );
+        assert_eq!(identity_path("not json"), None);
+    }
+
     #[test]
     fn machine_existence_uses_exact_json_names() {
         for (listing, expected) in [
@@ -1881,16 +2220,17 @@ mod tests {
             || Ok(false),
             || {},
             |args| {
-                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                captured.push(
+                    args.iter()
+                        .map(|arg| (*arg).to_string())
+                        .collect::<Vec<_>>(),
+                );
                 Ok(String::new())
             },
         );
 
         assert!(result.ok, "{result:?}");
-        assert_eq!(
-            captured,
-            create_machine_args(4, 8192, 64, cfg!(target_os = "windows"))
-        );
+        assert_eq!(captured[0], create_machine_args(4, 8192, 64));
     }
 
     /// The machine image the first screen downloaded is what the machine is built from: Podman is
@@ -1907,7 +2247,9 @@ mod tests {
             || Ok(false),
             || {},
             |args| {
-                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                if captured.is_empty() {
+                    captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                }
                 Ok(String::new())
             },
         );
@@ -1925,7 +2267,8 @@ mod tests {
     #[test]
     fn wsl_welcome_window_is_turned_off_before_the_machine_is_made() {
         let calls = std::cell::RefCell::new(Vec::<String>::new());
-        let result = create_machine_with(
+        let result = create_machine_on(
+            true,
             4,
             6144,
             60,
@@ -1938,10 +2281,14 @@ mod tests {
             },
         );
         assert!(result.ok, "{result:?}");
-        assert_eq!(*calls.borrow(), ["wsl welcome off", "machine init"]);
+        assert_eq!(
+            *calls.borrow(),
+            ["wsl welcome off", "machine init", "machine set"]
+        );
 
         calls.borrow_mut().clear();
-        let existing = create_machine_with(
+        let existing = create_machine_on(
+            true,
             4,
             6144,
             60,
@@ -1954,36 +2301,102 @@ mod tests {
         assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
     }
 
+    /// The machine's commands on Windows, in order, when `set` answers `set_answers`.
+    fn windows_create(set_answers: Result<String, String>) -> (StepOutcome, Vec<Vec<String>>) {
+        let mut ran = Vec::new();
+        let mut set_answers = Some(set_answers);
+        let result = create_machine_on(
+            true,
+            4,
+            8192,
+            64,
+            None,
+            || Ok(false),
+            || {},
+            |args| {
+                ran.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "set", ..] => set_answers.take().unwrap(),
+                    _ => Ok(String::new()),
+                }
+            },
+        );
+        (result, ran)
+    }
+
+    /// Init runs with the machine home as Podman's data folder, and with user-mode networking on
+    /// it would make Podman's shared `podman-net-usermode` distribution there, inside OpenBot's
+    /// install folder. So init runs without it, and `machine set` turns it on after, in Podman's
+    /// default data folder.
     #[test]
-    fn windows_machine_init_enables_user_mode_networking() {
+    fn windows_turns_user_mode_networking_on_after_init_not_during_it() {
+        let (result, ran) = windows_create(Ok(String::new()));
+        assert!(result.ok, "{result:?}");
         assert_eq!(
-            create_machine_args(4, 8192, 64, true),
+            ran,
             [
-                "machine",
-                "init",
-                "openbot",
-                "--cpus",
-                "4",
-                "--memory",
-                "8192",
-                "--disk-size",
-                "64",
-                "--rootful",
-                "--user-mode-networking=true"
+                vec![
+                    "machine",
+                    "init",
+                    "openbot",
+                    "--cpus",
+                    "4",
+                    "--memory",
+                    "8192",
+                    "--disk-size",
+                    "64",
+                    "--rootful"
+                ],
+                vec!["machine", "set", "--user-mode-networking=true", "openbot"]
             ]
         );
+    }
+
+    /// A `set` that fails stops the step with Podman's answer. The machine is there, so the retry
+    /// skips init, and the start turns user-mode networking on.
+    #[test]
+    fn windows_create_stops_when_user_mode_networking_cannot_be_turned_on() {
+        let (result, _) = windows_create(Err("podman machine set exited with status 125".into()));
+        assert!(!result.ok, "{result:?}");
+        assert_eq!(result.step, Step::CreateMachine);
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("podman machine set exited with status 125")),
+            "{result:?}"
+        );
+    }
+
+    /// Off Windows, init is the only command.
+    #[test]
+    fn other_systems_create_the_machine_with_init_alone() {
+        let mut ran = Vec::new();
+        let result = create_machine_on(
+            false,
+            4,
+            8192,
+            64,
+            None,
+            || Ok(false),
+            || {},
+            |args| {
+                ran.push(args[..2].join(" "));
+                Ok(String::new())
+            },
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(ran, ["machine init"]);
     }
 
     /// Local Intelligence's k3d needs a rootful engine, on macOS as on Windows.
     #[test]
     fn the_machine_is_created_rootful_on_every_platform() {
-        for windows in [false, true] {
-            let args = create_machine_args(4, 6144, 60, windows);
-            assert!(args.iter().any(|arg| arg == "--rootful"), "{args:?}");
-            assert_eq!(&args[..3], ["machine", "init", "openbot"]);
-        }
+        let args = create_machine_args(4, 6144, 60);
+        assert!(args.iter().any(|arg| arg == "--rootful"), "{args:?}");
+        assert_eq!(&args[..3], ["machine", "init", "openbot"]);
         assert_eq!(
-            create_machine_args(4, 6144, 60, false),
+            create_machine_args(4, 6144, 60),
             [
                 "machine",
                 "init",

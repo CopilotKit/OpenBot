@@ -1,10 +1,25 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  AgentEnrollmentToken,
+  CertificateIssued,
+  CertificateRequest,
   CommandResult,
   canonicalCommand,
+  EnrollmentGranted,
+  EnrollmentPending,
+  EnrollmentProblem,
+  EnrollmentStart,
+  EnrollmentStarted,
+  enrollmentTokenPath,
   Heartbeat,
   HeartbeatReply,
   HeartbeatReplyWire,
+  InstallStatus,
+  installCertificateSubject,
   readCommands,
   releaseManifestDigest,
   signCommand,
@@ -178,5 +193,190 @@ describe("management contract", () => {
     expect(await releaseManifestDigest("{}\n")).toBe(
       "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
     );
+  });
+});
+
+/** A real key, request and self-signed certificate from openssl, as an agent and a CA make them. */
+function opensslPems() {
+  const directory = mkdtempSync(join(tmpdir(), "enroll-contract-"));
+  const run = (...args: string[]) =>
+    execFileSync("openssl", args, { cwd: directory, stdio: "pipe" });
+  try {
+    run(
+      "req",
+      "-new",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:P-256",
+      "-nodes",
+      "-keyout",
+      "agent.key",
+      "-subj",
+      "/O=CopilotKit/OU=install/CN=6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11",
+      "-out",
+      "agent.csr",
+    );
+    run(
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:P-256",
+      "-nodes",
+      "-keyout",
+      "ca.key",
+      "-subj",
+      "/CN=test CA",
+      "-days",
+      "1",
+      "-out",
+      "ca.crt",
+    );
+    const read = (file: string) => readFileSync(join(directory, file), "utf8");
+    return {
+      csr: read("agent.csr"),
+      cert: read("ca.crt"),
+      key: read("agent.key"),
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+describe("enrollment contract", () => {
+  const installId = "6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11";
+  const token = "e1_Q2hhbmdlIG1lIGlzIG5vdCBhIHRva2VuIGJ1dCBpdCBpcyBsb25n";
+  const pems = opensslPems();
+
+  test("an enrollment start and its answer parse, and nothing else rides along", () => {
+    const start = {
+      licenseToken: "eyJhbGciOiJFZERTQSJ9.e30.sig",
+      installName: "Production (us-east-2)",
+      serverUrl: "https://openbot.example.com",
+    };
+    expect(EnrollmentStart.parse(start)).toEqual(start);
+    expect(
+      EnrollmentStart.safeParse({ ...start, orgId: "org_123" }).success,
+    ).toBe(false);
+    expect(
+      EnrollmentStart.safeParse({ ...start, serverUrl: "file:///etc/passwd" })
+        .success,
+    ).toBe(false);
+    const started = {
+      requestId: "0b7f4f2e-3a49-4f61-9d2c-6c1d5a7e8f90",
+      userCode: "BDFH-KLMN",
+      verificationUri: "https://enroll.bot.copilotkit.ai/connect",
+      verificationUriComplete:
+        "https://enroll.bot.copilotkit.ai/connect?code=BDFH-KLMN",
+      interval: 5,
+      expiresIn: 900,
+    };
+    expect(EnrollmentStarted.parse(started)).toEqual(started);
+    expect(
+      EnrollmentStarted.safeParse({ ...started, userCode: "bdfhklmn" }).success,
+    ).toBe(false);
+  });
+
+  test("the token poll answers either an RFC 8628 error or the token, once", () => {
+    for (const error of [
+      "authorization_pending",
+      "slow_down",
+      "access_denied",
+      "expired_token",
+    ])
+      expect(EnrollmentPending.safeParse({ error }).success).toBe(true);
+    expect(
+      EnrollmentPending.safeParse({ error: "invalid_grant" }).success,
+    ).toBe(false);
+    const granted = {
+      installId,
+      enrollmentToken: token,
+      statusToken: `s1_${token}`,
+      expiresIn: 3600,
+    };
+    expect(EnrollmentGranted.parse(granted)).toEqual(granted);
+    expect(
+      EnrollmentGranted.safeParse({ ...granted, enrollmentToken: "short" })
+        .success,
+    ).toBe(false);
+    expect(
+      EnrollmentGranted.safeParse({
+        ...granted,
+        enrollmentToken: `${token} ; rm -rf /`,
+      }).success,
+    ).toBe(false);
+    expect(enrollmentTokenPath("a/b")).toBe("/enroll/v1/requests/a%2Fb/token");
+  });
+
+  test("a certificate request carries a real PKCS#10 request and never a private key", () => {
+    expect(
+      CertificateRequest.parse({ enrollmentToken: token, csrPem: pems.csr }),
+    ).toEqual({ enrollmentToken: token, csrPem: pems.csr });
+    expect(
+      CertificateRequest.safeParse({ enrollmentToken: token, csrPem: pems.key })
+        .success,
+    ).toBe(false);
+    expect(
+      CertificateRequest.safeParse({
+        enrollmentToken: token,
+        csrPem: pems.csr,
+        privateKeyPem: pems.key,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("an issued certificate is one certificate and a chain of one or more", () => {
+    const issued = {
+      installId,
+      certificatePem: pems.cert,
+      caChainPem: `${pems.cert}${pems.cert}`,
+    };
+    expect(CertificateIssued.parse(issued)).toEqual(issued);
+    expect(
+      CertificateIssued.safeParse({ ...issued, certificatePem: pems.csr })
+        .success,
+    ).toBe(false);
+    expect(
+      CertificateIssued.safeParse({ ...issued, privateKeyPem: pems.key })
+        .success,
+    ).toBe(false);
+  });
+
+  test("the install's subject is the one the service's identity check reads", () => {
+    expect(installCertificateSubject(installId)).toBe(
+      `CN=${installId}, OU=install, O=CopilotKit`,
+    );
+  });
+
+  test("status, the agent's pickup and problems parse", () => {
+    expect(
+      InstallStatus.parse({
+        enrolled: true,
+        agentConnected: false,
+        lastHeartbeatAt: null,
+        agentVersion: null,
+      }).enrolled,
+    ).toBe(true);
+    expect(
+      AgentEnrollmentToken.safeParse({ installId, enrollmentToken: token })
+        .success,
+    ).toBe(true);
+    expect(
+      AgentEnrollmentToken.safeParse({
+        installId,
+        enrollmentToken: token,
+        statusToken: token,
+      }).success,
+    ).toBe(false);
+    expect(
+      EnrollmentProblem.safeParse({
+        type: "about:blank",
+        title: "Licence not valid",
+        status: 401,
+        requestId: "x",
+      }).success,
+    ).toBe(true);
   });
 });
