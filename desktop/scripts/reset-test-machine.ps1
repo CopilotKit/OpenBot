@@ -149,6 +149,19 @@ if (Has-Command podman) {
   }
 }
 
+# On Windows the machine's disk is in $Root\engine, and $Root goes below. `podman machine rm`
+# deletes the disk, but can leave the folders around it. A machine that is still there would lose
+# its disk and could not start again, so the reset stops here instead.
+$EngineDir = Join-Path $Root 'engine'
+if (-not $DryRun -and (Has-Command podman)) {
+  podman machine inspect $Machine *> $null
+  if ($LASTEXITCODE -eq 0) {
+    throw "The Podman machine $Machine is still there. Remove it with 'podman machine rm -f $Machine', then run this script again."
+  }
+}
+Say "Removing the folder of OpenBot's machine disk ($EngineDir)"
+if (Test-Path -LiteralPath $EngineDir) { Gone @($EngineDir) } else { Note 'not there' }
+
 Say "Removing OpenBot's files and registry entries"
 Gone @(
   $Root,
