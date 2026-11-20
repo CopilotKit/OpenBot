@@ -645,6 +645,52 @@ paths:
           $ref: '#/components/responses/ModelNotConfigured'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/deployment/audit-events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Audit events
+      operationId: listDeploymentAuditEvents
+      summary: List this OpenBot's own audit events
+      description: 'Return one page of this OpenBot''s own trail, newest first: what happened to the installation and to no organization. That includes what the server found when it started, a Recorder connect code nobody knows, identity providers registered or removed, and the configuration making somebody the admin who runs this OpenBot. Where this OpenBot keeps one organization, those events are on that organization''s trail, and this list is empty. Only the admin who runs this OpenBot may read it. Where it keeps one organization, that is the organization''s admins. Where it may hold several, it is the people its configuration names (INITIAL_ADMIN_EMAILS), asking in an organization they administer, and any other admin is refused. eventType, from and to narrow the events as they do on an organization''s trail. A missing cursor starts at the newest event, and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Events older than the audit retention window are removed, as they are from every organization''s trail.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - audit-events:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/AuditEventTypes'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+      responses:
+        '200':
+          description: One page of this OpenBot's own audit events.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+              examples:
+                firstPage:
+                  $ref: '#/components/examples/AuditEventPageFirst'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -1758,7 +1804,7 @@ paths:
         - Organization settings
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
-      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
+      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
       security:
         - webSession: []
         - appOAuth:
@@ -22461,7 +22507,7 @@ components:
           description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.
         ssoRequired:
           type: boolean
-          description: Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in.
+          description: Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false.
         builtInBots:
           type: boolean
           description: Whether a Bot can run inside OpenBot, with no address of its own.
@@ -22508,7 +22554,7 @@ components:
           readOnly: true
         ssoRequired:
           type: boolean
-          description: Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.
+          description: Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.
         actionRecording:
           type: boolean
           description: Whether what Bots do on their computers is recorded, to read in computer actions.
@@ -37309,7 +37355,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     SettingsConflict:
-      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than `default`, or the Idempotency-Key was used for a different request.
+      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
