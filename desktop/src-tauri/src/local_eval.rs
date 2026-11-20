@@ -5387,8 +5387,11 @@ fn clear_leftovers_of_gone(stack: &StackId) {
     for name in leftovers_in(&listed, stack) {
         let mut command = engine_command(Some(&CliEngine::of(&address)));
         command.args(["rm", "--force", "--volumes", &name]);
-        match crate::local_images::run_within(command, std::time::Duration::from_secs(60), 64 * 1024)
-        {
+        match crate::local_images::run_within(
+            command,
+            std::time::Duration::from_secs(60),
+            64 * 1024,
+        ) {
             Some((true, _)) => log::warn!(
                 "[local setup] removed {name}, which k3d left after {}'s node was gone",
                 stack.as_str()
