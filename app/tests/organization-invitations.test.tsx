@@ -1074,6 +1074,11 @@ describe("organization settings, for its owner", () => {
     const dialog = await app.view.findByRole("dialog", {
       name: "Remove sam@example.com from Acme?",
     });
+    expect(
+      within(dialog).getByText(
+        "They keep their account and their other organizations. What they made here stays here.",
+      ),
+    ).toBeTruthy();
     // Asked first: nothing is sent until the answer.
     expect(sentWrites()).toEqual([]);
     await app.person.click(
@@ -1162,6 +1167,13 @@ describe("organization settings, for its owner", () => {
     const dialog = await app.view.findByRole("dialog", {
       name: "Remove Cara Invitee from Acme?",
     });
+    // They never made anything here, so the dialog says only what removing them does.
+    expect(
+      within(dialog).getByText(
+        "This takes them out of Acme. They haven't opened OpenBot yet.",
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/made here/)).toBeNull();
     await app.person.click(
       within(dialog).getByRole("button", { name: "Remove" }),
     );
