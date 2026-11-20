@@ -19,7 +19,7 @@ test("a stored width is used only when it is a number of pixels within bounds", 
   );
 });
 
-test("a dragged width stays between what the footer needs and the maximum", () => {
+test("a dragged width stays between the floor it is given and the maximum", () => {
   expect(clampSidebarWidth(100, 260)).toBe(260);
   expect(clampSidebarWidth(100, 0)).toBe(SIDEBAR_MIN_WIDTH);
   expect(clampSidebarWidth(9999, 260)).toBe(SIDEBAR_MAX_WIDTH);

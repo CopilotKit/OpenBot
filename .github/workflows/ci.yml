@@ -382,7 +382,9 @@ jobs:
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
   # next language the recognizer has, or says which language to add and where. The page's
-  # language and its names for languages are the engine's own. In the image, as above: WebKit's
+  # language and its names for languages are the engine's own. And the sidebar's edge, dragged in a
+  # window zoomed in, narrowing the sidebar, which never takes more than two-fifths of the window.
+  # In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   app-browser-webkit:
     name: app (real browser, WebKit)
@@ -406,7 +408,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/composer-dictation-language.test.tsx
+            bun test app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
