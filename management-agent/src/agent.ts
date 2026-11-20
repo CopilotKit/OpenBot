@@ -38,7 +38,7 @@ import {
 } from "../../shared/release-manifest";
 import { BackupTargetRefused, confirmBackupTarget } from "./backup-target";
 import type { ManagementClient } from "./client";
-import { heartbeatIntervalMs, type ReadyAgent } from "./config";
+import { heartbeatIntervalMs, type ReadyAgent, upgradesOn } from "./config";
 import { Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
 import { CommandFailed, type Kube, run } from "./kube";
@@ -67,6 +67,10 @@ const PROMOTION_TIMEOUT_SECONDS = 900;
  * tried again, so the product is not quiesced every minute. */
 export const RETRY_AFTER_FAILURE_MS = 30 * 60_000;
 const WORKLOAD = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
+
+/** What a person does to let the agent run upgrades, where the agent was installed without them. */
+export const UPGRADES_NOT_SET_UP =
+  "set them up as https://github.com/CopilotKit/OpenBot/blob/main/docs/managed-upgrades.md says";
 
 export type Log = (message: string, fields?: Record<string, unknown>) => void;
 
@@ -168,6 +172,7 @@ export class ManagementAgent {
 
   /** A person suspended the product's HelmRelease (off level 1): the agent leaves it alone. */
   private async suspendedByPerson(state: AgentState) {
+    if (!upgradesOn(this.config)) return false;
     const release = await this.flux.helmRelease().catch(() => null);
     return (
       release?.spec.suspend === true &&
@@ -178,15 +183,17 @@ export class ManagementAgent {
 
   /** The product's Flux objects, then one heartbeat, then commands, then the desired version. */
   async tick() {
-    try {
-      const created = await this.flux.ensure();
-      if (created.length > 0)
-        this.log("created the product's Flux objects", { created });
-    } catch (error) {
-      this.log("could not create or update the product's Flux objects", {
-        error: String(error),
-      });
-    }
+    // Without upgrades set up there is no Flux beside the agent, and nothing of Flux's to create.
+    if (upgradesOn(this.config))
+      try {
+        const created = await this.flux.ensure();
+        if (created.length > 0)
+          this.log("created the product's Flux objects", { created });
+      } catch (error) {
+        this.log("could not create or update the product's Flux objects", {
+          error: String(error),
+        });
+      }
     const { state, journal } = await this.store.read();
     const heartbeat = await collectHeartbeat({
       config: this.config,
@@ -253,6 +260,13 @@ export class ManagementAgent {
   ) {
     this.waitingWindow = false;
     if (this.operation) return;
+    // Upgrades are not set up: a desired version waits for a person to set them up.
+    if (!upgradesOn(this.config)) {
+      this.message = reply.desired
+        ? `upgrades are not set up, so ${reply.desired.version} waits: ${UPGRADES_NOT_SET_UP}`
+        : null;
+      return;
+    }
     const { state, journal } = await this.store.read();
     if (journalBlocks(journal) || state.paused || reply.paused) return;
     if (await this.suspendedByPerson(state)) return;
@@ -865,6 +879,19 @@ export class ManagementAgent {
   }
 
   private async execute(command: Command) {
+    if (
+      !upgradesOn(this.config) &&
+      (command.kind === "pause" ||
+        command.kind === "resume" ||
+        command.kind === "rollback")
+    ) {
+      await this.report(
+        command.id,
+        false,
+        `upgrades are not set up: ${UPGRADES_NOT_SET_UP}`,
+      );
+      return;
+    }
     switch (command.kind) {
       case "pause": {
         const release = await this.flux.helmRelease();
