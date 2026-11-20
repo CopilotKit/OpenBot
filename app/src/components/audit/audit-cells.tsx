@@ -867,6 +867,8 @@ export function decisionDetails(
     lines.push(payload.reason);
   if (event.eventType === "bot.declined" && typeof payload.reason === "string")
     lines.push(`${payload.reason}, reported by the Bot itself`);
+  if (event.eventType === "computer.limit_reached")
+    lines.push(...computerLimitLines(payload));
   const notConnected = connectPromptOf(event);
   if (failed && notConnected)
     lines.push(notConnectedLine(notConnected, storedNames));
@@ -909,6 +911,39 @@ export function decisionDetails(
   )
     lines.push("dry-run: recorded, not enforced");
   return lines;
+}
+
+/** A count of computers in words: "1 computer", "2 computers". */
+function computersCount(count: number): string {
+  return count === 1 ? "1 computer" : `${count} computers`;
+}
+
+/**
+ * Which limit refused a new computer, and for whose. The row's Started by names the person and the page is the
+ * organization's own, so this says which of the three limits it was and how many it allows.
+ */
+export function computerLimitLines(payload: Record<string, unknown>): string[] {
+  const cap = typeof payload.cap === "number" ? payload.cap : undefined;
+  const limit =
+    payload.limit === "organization"
+      ? cap === undefined
+        ? "This organization is at its limit of computers."
+        : `This organization is at its limit of ${computersCount(cap)}.`
+      : payload.limit === "person"
+        ? cap === undefined
+          ? "This person is at their limit of computers in this organization."
+          : `This person is at their limit of ${computersCount(cap)} in this organization.`
+        : payload.limit === "deployment"
+          ? cap === undefined
+            ? "OpenBot is at its limit of computers."
+            : `OpenBot is at its limit of ${computersCount(cap)}.`
+          : undefined;
+  return [
+    ...(limit ? [limit] : []),
+    ...(payload.browser === true
+      ? ["The computer was for their own browser."]
+      : []),
+  ];
 }
 
 /** Everything on a row as one lower-cased string, for the search box. */
