@@ -925,6 +925,22 @@ export async function followUp(ctx: Context, plan: Plan): Promise<void> {
     throw new Error("SERVER_WRITE_TOKEN is needed to move the server images.");
   const versionPull = await openPull(writer, `release/${tag}`);
   if (versionPull) {
+    // Opened by their release run with its own token, which starts no checks. Closed and
+    // reopened by the App, they start.
+    const { check_runs } = await writer.get<{ check_runs: CheckRun[] }>(
+      `commits/${versionPull.head.sha}/check-runs?per_page=100`,
+    );
+    if (check_runs.length === 0) {
+      await writer.json("PATCH", `pulls/${versionPull.number}`, {
+        state: "closed",
+      });
+      await writer.json("PATCH", `pulls/${versionPull.number}`, {
+        state: "open",
+      });
+      ctx.log(
+        `Reopened the server images' version change #${versionPull.number} so its checks run.`,
+      );
+    }
     await waitForChecks(
       ctx,
       writer,
