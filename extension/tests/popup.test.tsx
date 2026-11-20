@@ -24,6 +24,7 @@ import {
   type PageToBackground,
   type RecorderState,
 } from "../src/protocol/messages";
+import { COMPANY_SIGN_IN_REQUIRED } from "../src/shared/openbot-client";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 import { fakeSpeech, onDeviceModel } from "./support/fake-speech";
 
@@ -1631,6 +1632,40 @@ test("signed out, a Start-over drain that is not kept shows only the kept row: n
   expect(queryByText(SENDING)).toBeNull();
   expect(queryByText("Learning capture")).toBeNull();
   expect(queryByText("Sending to OpenBot's backend")).toBeNull();
+});
+
+test("held out until they sign in through their company, the popup says so in the Recorder's words and opens OpenBot, where they link it", async () => {
+  // The re-check: while the organization held the person out (SSO_REQUIRED), the popup never said company sign-in.
+  const view = setup(stateResponse(), {
+    answers: {
+      "page.learning": { ok: false, error: COMPANY_SIGN_IN_REQUIRED },
+    },
+  });
+  expect(await view.findByText(COMPANY_SIGN_IN_REQUIRED)).toBeTruthy();
+  fireEvent.click(
+    view.getByRole("button", { name: "Sign in with your company" }),
+  );
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({
+      type: "page.openbot.open",
+      url: "https://openbot.example.test/",
+    }),
+  );
+});
+
+test("any other refusal offers no company sign-in", async () => {
+  const view = setup(stateResponse(), {
+    answers: {
+      "page.learning": {
+        ok: false,
+        error: "OpenBot did not answer. Try again.",
+      },
+    },
+  });
+  await view.findByText("OpenBot did not answer. Try again.");
+  expect(
+    view.queryByRole("button", { name: "Sign in with your company" }),
+  ).toBeNull();
 });
 
 test("connected, the popup says which organization it records into, and only the OpenBot's address when none is named", async () => {

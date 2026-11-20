@@ -47,6 +47,7 @@ import {
   RECORDER_ACTION_NOTICE_AT,
 } from "../shared/limits";
 import {
+  COMPANY_SIGN_IN_REQUIRED,
   OpenBotError,
   organizationOf,
   updateRequiredSentence,
@@ -275,6 +276,8 @@ const SENTENCES = {
   keptReplaced: "This browser was connected to another OpenBot or person.",
   authorityUnavailable: TRAJECTORY_GATE_REFUSALS.authorityUnavailable.message,
   forbidden: "OpenBot does not let you record. Ask whoever runs it.",
+  // The Recorder's own words for SSO_REQUIRED, never the answer's: the popup offers the way in beside it.
+  companySignIn: COMPANY_SIGN_IN_REQUIRED,
 } as const;
 
 type SignedOutReason = "revoked" | "removed" | "organization";
@@ -581,6 +584,7 @@ const sentenceFor = (error: unknown, fallback: string): string => {
   if (!(error instanceof OpenBotError)) return fallback;
   const update = updateRequiredSentence(error);
   if (update) return update;
+  if (error.companySignInRequired) return SENTENCES.companySignIn;
   if (error.body?.code === RECORDER_AUTHORITY_UNAVAILABLE)
     return SENTENCES.authorityUnavailable;
   return error.status === 403 ? SENTENCES.forbidden : fallback;

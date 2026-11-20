@@ -28,6 +28,14 @@ export class OpenBotError extends Error {
     return this.status === 401 && this.body?.code === RECORDER_SIGNED_OUT;
   }
 
+  /**
+   * True when the organization this browser records into holds the person out until they sign in through their company
+   * (Require SSO, `SSO_REQUIRED`). Every request there is refused until they link their company account in OpenBot.
+   */
+  get companySignInRequired(): boolean {
+    return this.body?.code === SSO_REQUIRED;
+  }
+
   /** True when OpenBot refused this Recorder as older than it serves (CLIENT_UPDATE_REQUIRED). */
   get updateRequired(): boolean {
     return this.body?.code === CLIENT_UPDATE_REQUIRED;
@@ -41,6 +49,17 @@ export class OpenBotError extends Error {
     );
   }
 }
+
+/** The code of an organization's refusal of somebody it holds out until they sign in through their company. */
+export const SSO_REQUIRED = "SSO_REQUIRED";
+
+/**
+ * What the Recorder says when the organization it records into holds the person out until they sign in through their
+ * company. Its own sentence, never the answer's; the popup offers to open OpenBot beside it, where they link their
+ * company account.
+ */
+export const COMPANY_SIGN_IN_REQUIRED =
+  "Your organization requires signing in through your company. Sign in with your company in OpenBot, then try again.";
 
 /** What the person reads when OpenBot serves only newer Recorders and its answer names no release we can use. */
 export const RECORDER_UPDATE_REQUIRED =

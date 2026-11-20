@@ -8,6 +8,7 @@ import type {
   PageStateResponse,
   PageToBackground,
 } from "../../protocol/messages";
+import { COMPANY_SIGN_IN_REQUIRED } from "../../shared/openbot-client";
 import { narrationLanguage } from "../../shared/speech-language";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
@@ -319,6 +320,19 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}
+      {/* Held out until they sign in through their company: the way in is in OpenBot, which shows it on any page. */}
+      {shownError === COMPANY_SIGN_IN_REQUIRED ? (
+        <div className="mt-3">
+          <Button
+            onClick={() =>
+              void openOpenBot(`${new URL(connection.openbotUrl).origin}/`)
+            }
+            size="lg"
+          >
+            Sign in with your company
+          </Button>
+        </div>
+      ) : null}
     </Page>
   );
 }
