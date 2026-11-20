@@ -405,6 +405,12 @@ export const ExchangeRecorderConnectCodeResponse = zod.object({
     .describe(
       "The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`.",
     ),
+  organizationName: zod
+    .string()
+    .optional()
+    .describe(
+      "What people call that organization, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.",
+    ),
 });
 
 /**
@@ -458,6 +464,15 @@ export const GetRecorderIdentityResponse = zod.object({
     email: zod.string(),
   }),
   connectionId: zod.string(),
+  organization: zod
+    .object({
+      id: zod.string().describe("The organization's id. Opaque."),
+      name: zod.string().describe("What people call it."),
+    })
+    .optional()
+    .describe(
+      "The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.",
+    ),
 });
 
 /**
