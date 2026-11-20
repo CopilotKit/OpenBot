@@ -16,8 +16,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
+import { cn } from "@/lib/utils";
 import { ChannelItemContent } from "./channel-item-content";
 
 /**
@@ -40,6 +42,8 @@ export const Channel = memo(function Channel({
   unread,
   busy,
   emphasis,
+  view = "detailed",
+  avatar = true,
 }: {
   channelId: string;
   participantIds: string[];
@@ -55,6 +59,10 @@ export const Channel = memo(function Channel({
   unread: boolean;
   busy: boolean;
   emphasis: MessageListEmphasis;
+  /** One line or two: see `ChannelItemContent`. */
+  view?: ConversationView;
+  /** False under its Bot in the Bots panel: see `ChannelItemContent`. */
+  avatar?: boolean;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -94,7 +102,12 @@ export const Channel = memo(function Channel({
             }
             params={{ channelId }}
             type="button"
-            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
+            className={cn(
+              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [content-visibility:auto]",
+              view === "compact"
+                ? "py-1.5 [contain-intrinsic-size:auto_2rem]"
+                : "py-2 [contain-intrinsic-size:auto_3.25rem]",
+            )}
             activeProps={{
               className: "bg-foreground/5",
             }}
@@ -110,6 +123,8 @@ export const Channel = memo(function Channel({
               unread={unread}
               pinned={pinned}
               revealing={revealed.typing}
+              view={view}
+              avatar={avatar}
             />
           </Link>
         </ContextMenuTrigger>

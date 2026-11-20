@@ -77,7 +77,7 @@ export const getListConversationsUrl = (
 };
 
 /**
- * Return one page of the caller's conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the caller's conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. With botId it holds only the conversations that Bot takes part in, in the same order. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List conversations
  */
 export const listConversations = async (

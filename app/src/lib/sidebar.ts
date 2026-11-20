@@ -75,9 +75,45 @@ export function storedSidebarWidth(
   );
 }
 
+/**
+ * The narrowest a dragged sidebar may be: the panel's own floor (`SIDEBAR_MIN_WIDTH`) plus the
+ * strip beside it, or what the footer needs to show whole (`footerNeeds`), whichever is more.
+ */
+export function sidebarFloor(
+  stripWidth: number,
+  footerNeeds: number | null,
+): number {
+  return Math.max(SIDEBAR_MIN_WIDTH + stripWidth, footerNeeds ?? 0);
+}
+
 /** A dragged width, held between `min` (at least `SIDEBAR_MIN_WIDTH`) and `SIDEBAR_MAX_WIDTH`. */
 export function clampSidebarWidth(pixels: number, min: number): number {
   return Math.round(
     Math.min(SIDEBAR_MAX_WIDTH, Math.max(min, SIDEBAR_MIN_WIDTH, pixels)),
   );
+}
+
+/**
+ * Whether a page draws its "Show sidebar" button: the way back to a panel that is hidden. Not while
+ * the panel is showing, and not on a section with no panel, where the strip beside the page is the
+ * way to Conversations. Always in a narrow window, whose sheet starts closed.
+ */
+export function sidebarToggleShown({
+  isMobile,
+  open,
+  panelAvailable,
+}: {
+  isMobile: boolean;
+  open: boolean;
+  panelAvailable: boolean;
+}): boolean {
+  return isMobile || (!open && panelAvailable);
+}
+
+/**
+ * The shared width as a sidebar with a strip draws it: never under the panel's floor plus the strip,
+ * since Admin and Settings, which have no strip, may be dragged down to the floor alone.
+ */
+export function widthBesideStrip(width: string): string {
+  return `max(${width}, calc(${SIDEBAR_MIN_WIDTH}px + var(--sidebar-width-icon)))`;
 }

@@ -31,6 +31,7 @@ import { browserKeys } from "@/lib/browser/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import { organizationKeys } from "@/lib/organizations/queries";
+import { CONVERSATION_VIEW_STORAGE_KEY } from "@/lib/settings/conversation-view";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import {
   CONVERSATIONS_PATH,
@@ -135,6 +136,8 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  // These rows are found by the Bot's name, which only the Detailed view shows.
+  window.localStorage.setItem(CONVERSATION_VIEW_STORAGE_KEY, "detailed");
   requests.length = 0;
   signals.length = 0;
   respond = async () => {

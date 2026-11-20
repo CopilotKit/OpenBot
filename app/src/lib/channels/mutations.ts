@@ -3,7 +3,6 @@ import {
   mutationOptions,
   type QueryClient,
 } from "@tanstack/react-query";
-import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import {
   createConversation,
   deleteConversation,
@@ -13,6 +12,7 @@ import {
   updateConversation,
 } from "@/lib/api/generated/conversations/conversations";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
+import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { settingsKeys } from "@/lib/settings/queries";
 import {
   type AgentChannel,
@@ -142,6 +142,7 @@ export function renameChannelMutationOptions(queryClient: QueryClient) {
         queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
         // A search found it by its old name, or would find it by its new one.
         queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
+        queryClient.invalidateQueries({ queryKey: channelKeys.byBots() }),
       ]),
   });
 }
@@ -196,6 +197,8 @@ export function markChannelReadMutationOptions(queryClient: QueryClient) {
         { queryKey: channelKeys.searches() },
         markRead,
       );
+      // And under each of its Bots in the Bots panel.
+      queryClient.setQueriesData({ queryKey: channelKeys.byBots() }, markRead);
     },
   });
 }
@@ -215,13 +218,14 @@ export function deleteChannelMutationOptions(
         { fallback: "Couldn't delete this conversation." },
       );
     },
-    // The roster and its searches only. The open channel's detail query would refetch into the
+    // The roster, its searches and the Bots panel's lists only. The open channel's detail query would refetch into the
     // fresh 404 and flash an error before the navigate-home lands; left alone, it keeps its cache
     // and the navigation happens with nothing to complain about.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
         queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
+        queryClient.invalidateQueries({ queryKey: channelKeys.byBots() }),
       ]),
   });
 }
