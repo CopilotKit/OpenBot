@@ -54,7 +54,7 @@ export const GetManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The id CopilotKit's management service gave this OpenBot, once the code is approved.",
+        "The id the managed updates service gave this OpenBot, once the code is approved.",
       ),
     helmCommand: zod
       .string()
@@ -83,7 +83,7 @@ export const GetManagementEnrollmentResponse = zod
       ),
   })
   .describe(
-    "Where connecting this OpenBot to CopilotKit's management service stands. Which fields are present depends on state.",
+    "Where connecting this OpenBot to managed updates stands. Which fields are present depends on state.",
   );
 
 /**
@@ -149,7 +149,7 @@ export const StartManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The id CopilotKit's management service gave this OpenBot, once the code is approved.",
+        "The id the managed updates service gave this OpenBot, once the code is approved.",
       ),
     helmCommand: zod
       .string()
@@ -178,7 +178,7 @@ export const StartManagementEnrollmentResponse = zod
       ),
   })
   .describe(
-    "Where connecting this OpenBot to CopilotKit's management service stands. Which fields are present depends on state.",
+    "Where connecting this OpenBot to managed updates stands. Which fields are present depends on state.",
   );
 
 /**

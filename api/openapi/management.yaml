@@ -150,8 +150,8 @@ components:
     ManagementEnrollment:
       type: object
       description: >-
-        Where connecting this OpenBot to CopilotKit's management service
-        stands. Which fields are present depends on state.
+        Where connecting this OpenBot to managed updates stands. Which fields
+        are present depends on state.
       required:
         - state
       properties:
@@ -191,8 +191,8 @@ components:
           type: string
           minLength: 1
           description: >-
-            The id CopilotKit's management service gave this OpenBot, once
-            the code is approved.
+            The id the managed updates service gave this OpenBot, once the
+            code is approved.
         helmCommand:
           type: string
           minLength: 1
@@ -229,9 +229,9 @@ components:
             unavailable:
               value:
                 type: https://open.bot/errors/management-unavailable
-                title: CopilotKit management isn't available here.
+                title: Managed updates aren't available here.
                 status: 404
-                detail: CopilotKit management isn't available for this OpenBot.
+                detail: Managed updates aren't available for this OpenBot.
                 code: MANAGEMENT_UNAVAILABLE
                 category: not_found
                 retryable: false
@@ -252,7 +252,7 @@ components:
                 type: https://open.bot/errors/conflict
                 title: The request conflicts with the current state.
                 status: 409
-                detail: OpenBot is already connected to CopilotKit management. To disconnect it, uninstall the management agent with Helm.
+                detail: OpenBot already gets managed updates. To stop them, uninstall the management agent with Helm.
                 code: CONFLICT
                 category: conflict
                 retryable: false
@@ -261,9 +261,9 @@ components:
             refused:
               value:
                 type: https://open.bot/errors/management-refused
-                title: CopilotKit management refused this OpenBot.
+                title: The managed updates service refused this OpenBot.
                 status: 409
-                detail: CopilotKit didn't accept this OpenBot's licence. Check the licence key, or contact CopilotKit.
+                detail: The licence in COPILOTKIT_LICENSE_TOKEN wasn't accepted. Check it, or contact OpenBot by CopilotKit.
                 code: MANAGEMENT_REFUSED
                 category: conflict
                 retryable: false
@@ -279,9 +279,9 @@ components:
             unreachable:
               value:
                 type: https://open.bot/errors/management-service-failed
-                title: CopilotKit management didn't answer.
+                title: The managed updates service didn't answer.
                 status: 502
-                detail: Couldn't reach CopilotKit management. Check that OpenBot can reach enroll.bot.copilotkit.ai, then try again.
+                detail: Couldn't reach the managed updates service at enroll.bot.copilotkit.ai. Check that OpenBot can reach it, then try again.
                 code: MANAGEMENT_SERVICE_FAILED
                 category: dependency
                 retryable: true

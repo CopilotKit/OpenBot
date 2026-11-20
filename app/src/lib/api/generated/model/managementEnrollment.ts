@@ -3,7 +3,7 @@
  */
 
 /**
- * Where connecting this OpenBot to CopilotKit's management service stands. Which fields are present depends on state.
+ * Where connecting this OpenBot to managed updates stands. Which fields are present depends on state.
  */
 export interface ManagementEnrollment {
   /** not-connected: nothing is under way. waiting-for-approval: the code is waiting for somebody to approve it at verificationUri. waiting-for-agent: approved, and waiting for the management agent to be installed with helmCommand and to report in. connected: the agent reports in. A later OpenBot may add a state; read one you don't know as not connected. */
@@ -20,7 +20,7 @@ export interface ManagementEnrollment {
   /** When the code stops working, while waiting for approval. */
   expiresAt?: string;
   /**
-   * The id CopilotKit's management service gave this OpenBot, once the code is approved.
+   * The id the managed updates service gave this OpenBot, once the code is approved.
    * @minLength 1
    */
   installId?: string;
