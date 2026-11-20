@@ -187,6 +187,7 @@ jobs:
         working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && '-' || '' }}
+          OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID }}
           BUNDLED_CLI: ${{ steps.cli.outputs.bundled }}
           PINNED_MANIFEST: ${{ steps.pinned.outputs.path }}
         run: |

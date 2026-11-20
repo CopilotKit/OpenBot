@@ -2130,20 +2130,23 @@ components:
       type: string
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
-        Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
-        trustedrouter: TrustedRouter. openai-compatible: any server that
+        Anthropic. google: Google Gemini. xai: xAI. cloudflare: Cloudflare AI
+        Gateway, billed to the person's Cloudflare credits. unbiased: Unbiased
+        AI. trustedrouter: TrustedRouter. openai-compatible: any server that
         speaks OpenAI's API, at an address given.
-      enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+      enum: [openai, anthropic, google, xai, cloudflare, unbiased, trustedrouter, openai-compatible]
     AiConnectionProviderAnswer:
       type: string
-      x-extensible-enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+      x-extensible-enum: [openai, anthropic, google, xai, cloudflare, unbiased, trustedrouter, openai-compatible]
       description: >-
         The AI provider OpenBot's Bots run on, as the server answers it.
         openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai:
-        xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter.
-        openai-compatible: any server that speaks OpenAI's API, at an address
-        given. The list can grow: a client shows a provider it doesn't know
-        by its id. A request still names one of AiConnectionProvider.
+        xAI. cloudflare: Cloudflare AI Gateway, billed to the person's
+        Cloudflare credits. unbiased: Unbiased AI. trustedrouter:
+        TrustedRouter. openai-compatible: any server that speaks OpenAI's API,
+        at an address given. The list can grow: a client shows a provider it
+        doesn't know by its id. A request still names one of
+        AiConnectionProvider.
     AiConnectionLogin:
       type: string
       description: >-
@@ -2151,9 +2154,10 @@ components:
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
         a key (google, xai, unbiased, trustedrouter, openai-compatible).
-        oauth: the person's xAI sign-in (xai). A Google sign-in (google,
-        oauth) saved before Gemini took an API key only is still listed,
-        with the problem sign-in-retired, and is never accepted again.
+        oauth: the person's xAI or Cloudflare sign-in (xai, cloudflare). A
+        Google sign-in (google, oauth) saved before Gemini took an API key
+        only is still listed, with the problem sign-in-retired, and is never
+        accepted again.
       enum: [plan, api-key, endpoint, oauth]
     AiConnectionSaved:
       type: object
@@ -2267,10 +2271,10 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; xai takes endpoint or oauth; google, unbiased,
-        trustedrouter and openai-compatible take endpoint. Any other pair is
-        refused: google with oauth is refused with the words of the problem
-        sign-in-retired.
+        api-key; xai takes endpoint or oauth; cloudflare takes oauth; google,
+        unbiased, trustedrouter and openai-compatible take endpoint. Any other
+        pair is refused: google with oauth is refused with the words of the
+        problem sign-in-retired.
       required: [provider, login]
       properties:
         provider:

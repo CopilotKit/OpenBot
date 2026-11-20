@@ -106,6 +106,7 @@ export type DesktopAiConnection = {
     | "compatible-endpoint"
     | "google-oauth"
     | "xai-oauth"
+    | "cloudflare-oauth"
     | null;
   /** The model named in setup. Only an address or a provider sign-in names one. */
   model: string | null;

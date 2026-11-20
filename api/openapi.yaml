@@ -29398,10 +29398,13 @@ components:
     AiConnectionProviderAnswer:
       type: string
       x-extensible-enum:
+      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. cloudflare: Cloudflare AI Gateway, billed to the person''s Cloudflare credits. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
+      enum:
         - openai
         - anthropic
         - google
         - xai
+        - cloudflare
         - unbiased
         - trustedrouter
         - openai-compatible
@@ -29409,6 +29412,8 @@ components:
     AiConnectionLogin:
       type: string
       description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s xAI sign-in (xai). A Google sign-in (google, oauth) saved before Gemini took an API key only is still listed, with the problem sign-in-retired, and is never accepted again.'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person''s Google, xAI or Cloudflare sign-in (google, xai, cloudflare).'
       enum:
         - plan
         - api-key
@@ -29642,6 +29647,8 @@ components:
       type: object
       additionalProperties: false
       description: 'The connection to switch to. openai and anthropic take plan or api-key; xai takes endpoint or oauth; google, unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused: google with oauth is refused with the words of the problem sign-in-retired.'
+      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
+      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; cloudflare takes oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.
       required:
         - provider
         - login

@@ -22,6 +22,9 @@ The clouds on Desktop's OpenBot for Business choice come from that set too, as i
 cloud OpenBot for Business can run on, beside the words "Your own cloud or on-prem", and nothing
 more: no badge, no claim of partnership.
 
+`cloudflare.svg` is that set's single-colour Cloudflare mark (`cloudflare.svg`, same version),
+verbatim. It marks the Cloudflare row and its "Sign in with" button.
+
 Google has two from that set. `google.svg` is the single-colour G the model rows use.
 `google-color.svg` is the standard colour G, and it is the one that goes beside a sign-in: Google's
 sign-in guidelines allow no other G on a "Sign in with" button, so the desktop's Google row uses it.

@@ -100,9 +100,9 @@ export type ProviderSignIn = {
   userCode?: string | null;
 };
 
-/** Start an xAI or Unbiased AI sign-in in the browser. */
+/** Start an xAI, Cloudflare or Unbiased AI sign-in in the browser. */
 export function beginProviderSignIn(
-  provider: "xai" | "unbiased",
+  provider: "xai" | "cloudflare" | "unbiased",
 ): Promise<ProviderSignIn> {
   return desktop(
     "begin_provider_sign_in",

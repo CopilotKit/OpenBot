@@ -102,6 +102,8 @@ const AI_CALLS = new Set([
   "begin_plan_sign_in",
   "finish_plan_sign_in",
   "cancel_plan_sign_in",
+  "begin_provider_sign_in",
+  "finish_provider_sign_in",
   "prepare_ai_connection",
   "replaceAiConnection",
   "settle_ai_connection",
@@ -117,6 +119,15 @@ async function shellInvoke(command: string, args?: Record<string, unknown>) {
       return [];
     case "begin_plan_sign_in":
       return { url: claudeUrl };
+    case "begin_provider_sign_in":
+      return {
+        attemptId: "cloudflare-attempt",
+        url: "https://dash.cloudflare.com/oauth2/auth?synthetic=1",
+        userCode: null,
+      };
+    // Nothing handed back: the session stays in the file Desktop wrote for the server.
+    case "finish_provider_sign_in":
+    case "cancel_provider_sign_in":
     case "finish_plan_sign_in":
     case "cancel_plan_sign_in":
     case "settle_ai_connection":
@@ -280,6 +291,59 @@ test("a Claude sign-in finishes in Desktop only when its redirect comes back to 
     finishesInDesktop(claudeAuthorize("https://localhost.example/callback")),
   ).toBe(false);
   expect(finishesInDesktop("not an address")).toBe(false);
+});
+
+/*
+ * Cloudflare's row has one way in, the sign-in, which Desktop runs. The model goes to the server
+ * under the name AI Gateway knows it by, and no key ever passes through the page.
+ */
+test("a Cloudflare sign-in: signed in through Desktop, and the server switched to its gateway model", async () => {
+  const view = renderGeneral();
+  await userEvent.click(
+    await view.findByRole("button", { name: /Uses your OpenAI API key/ }),
+  );
+  const dialog = await view.findByRole("dialog");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Change" }));
+  await userEvent.click(
+    await within(dialog).findByRole("button", { name: /^Cloudflare/ }),
+  );
+  // One way in, so no tabs to choose between.
+  expect(within(dialog).queryByRole("tablist")).toBeNull();
+  await userEvent.click(
+    await within(dialog).findByRole("button", {
+      name: "Sign in with Cloudflare",
+    }),
+  );
+  await within(dialog).findByText("Signed in to Cloudflare.");
+  expect(within(dialog).getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "openai/gpt-5.5",
+  );
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Connect" }),
+  );
+  await within(dialog).findByText("Connected to Cloudflare");
+
+  const asked = aiCalls();
+  expect(asked.map((call) => call.what)).toEqual([
+    "ai_providers",
+    "begin_provider_sign_in",
+    "finish_provider_sign_in",
+    // No engine to start first: that is a plan's, and this session is served by the server itself.
+    "replaceAiConnection",
+    "settle_ai_connection",
+  ]);
+  expect(asked[1]?.args).toEqual({ provider: "cloudflare" });
+  expect(asked[2]?.args).toEqual({ attemptId: "cloudflare-attempt" });
+  expect(asked[3]?.args).toEqual({
+    provider: "cloudflare",
+    login: "oauth",
+    model: "openai/gpt-5.5",
+  });
+  expect(asked[4]?.args).toMatchObject({
+    provider: "cloudflare",
+    login: "oauth",
+  });
 });
 
 test("a refused switch says why in one sentence, and Desktop settles back to the connection still in use", async () => {

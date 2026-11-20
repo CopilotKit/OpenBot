@@ -50,6 +50,7 @@ export type SavedConfiguration = {
     | "compatible-endpoint"
     | "google-oauth"
     | "xai-oauth"
+    | "cloudflare-oauth"
     | null;
   intelligenceApiKey?: boolean | null;
   modelApiKeys?: Partial<
@@ -58,7 +59,10 @@ export type SavedConfiguration = {
   /** A ChatGPT sign-in an earlier version saved, which has to be done again. */
   chatgptSignInChanged?: boolean;
   modelSessions?: Partial<
-    Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
+    Record<
+      "openai" | "anthropic" | "google" | "xai" | "cloudflare",
+      boolean | null
+    >
   >;
 };
 
@@ -116,6 +120,8 @@ const endpointPresets: Record<
 /** What approving in the browser does, for each provider that signs in that way. */
 const oauthExplanation: Record<string, string> = {
   xai: "Authorize OpenBot to use models available to your xAI account.",
+  cloudflare:
+    "Choose one Cloudflare account in your browser and approve the request. Model calls go through that account's AI Gateway and are billed to its credits.",
   unbiased:
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
@@ -131,6 +137,15 @@ function cancelPlanSignIn(provider: string) {
     },
   );
 }
+
+/**
+ * The model a sign-in row starts with where the provider has no endpoint preset to take it from.
+ * Cloudflare's AI Gateway names a model by who serves it (`provider/model`), and this is the one
+ * new Bots run on (shared/model-providers.json).
+ */
+const signInModels: Record<string, string> = {
+  cloudflare: "openai/gpt-5.5",
+};
 
 function endpointIdentity(baseUrl: string | undefined): string {
   if (!baseUrl) return "";
@@ -165,8 +180,9 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
         saved: held.saved.chatgptSignInChanged !== true,
       };
     case "xai-oauth":
+    case "cloudflare-oauth":
       return {
-        provider: "xai",
+        provider: held.saved.model.replace(/-oauth$/, ""),
         login: "oauth",
         saved: true,
         model: held.BOT_MODEL,
@@ -713,7 +729,7 @@ export function ProviderPicker({
     } else {
       setBaseUrl(nextPreset?.baseUrl ?? "");
       setContainerBaseUrl("");
-      setModel(nextPreset?.model ?? "");
+      setModel(nextPreset?.model ?? signInModels[r.id] ?? "");
     }
   }
 

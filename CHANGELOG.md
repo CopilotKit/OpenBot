@@ -2189,6 +2189,14 @@ or a script has to say.
   A provider never checked, such as xAI, and a gateway, list everything as before.
 - **New Bots on LangGraph (TypeScript).** See Before upgrading. A Bot's Setup > Connection says
   what it runs on.
+- **Sign in with Cloudflare.** OpenBot Desktop's AI screen, and Settings inside Desktop, have a
+  Cloudflare row. Signing in connects the Cloudflare account you choose, and Bots' model calls go
+  through that account's AI Gateway and are billed to its AI Gateway credits, so one sign-in reaches
+  OpenAI's, Anthropic's, Google's and Workers AI's models with no provider key. A model is named as
+  the gateway names it (`openai/gpt-5.5`). An account with no credits loaded cannot answer. The row
+  needs a desktop build with a registered Cloudflare OAuth client
+  (`OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID`, see `desktop/PROVIDER_OAUTH.md`); a plain browser
+  does not list it. The API's `AiConnectionProvider` gains `cloudflare`, which takes `oauth`.
 - **Claude plan errors say what happened.** A usage limit, running out of credit, a dropped
   connection, no answer, a client too old for the model and a refusal each get their own sentence,
   and a task tries again after a dropped connection but not after a limit. A call to a tool the

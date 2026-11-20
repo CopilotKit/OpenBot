@@ -1174,7 +1174,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     if (!choice.saved) return true;
     // A saved Google sign-in can't start: Gemini takes an API key only.
     if (choice.provider === "google") return false;
-    if (choice.provider === "xai") {
+    if (choice.provider === "xai" || choice.provider === "cloudflare") {
       return choice.login === "oauth" && Boolean(choice.model?.trim());
     }
     if (choice.provider === "openai-compatible") {

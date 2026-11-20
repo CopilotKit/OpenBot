@@ -21,6 +21,7 @@ pub enum Category {
     CompatibleEndpointApiKey,
     GoogleOauth,
     XaiOauth,
+    CloudflareOauth,
 }
 
 // A closed enum intentionally cannot contain fields from the secret-bearing ChosenModel request.
@@ -34,6 +35,7 @@ pub enum ModelIntent {
     CompatibleEndpoint,
     GoogleOauth,
     XaiOauth,
+    CloudflareOauth,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -108,6 +110,7 @@ impl SavedIntent {
         self.categories.remove(&Category::ChatGptPlan);
         self.categories.remove(&Category::GoogleOauth);
         self.categories.remove(&Category::XaiOauth);
+        self.categories.remove(&Category::CloudflareOauth);
         if matches!(credential, ModelCredential::ProviderOAuth { .. }) {
             self.categories.remove(&Category::OpenAiApiKey);
         }
@@ -131,6 +134,9 @@ impl SavedIntent {
                 if provider == "google" {
                     self.categories.insert(Category::GoogleOauth);
                     ModelIntent::GoogleOauth
+                } else if provider == "cloudflare" {
+                    self.categories.insert(Category::CloudflareOauth);
+                    ModelIntent::CloudflareOauth
                 } else {
                     self.categories.insert(Category::XaiOauth);
                     ModelIntent::XaiOauth
@@ -168,6 +174,9 @@ pub fn record_settled(root: &Path, intent: ModelIntent) -> Result<(), Problem> {
         }
         ModelIntent::XaiOauth => {
             record.categories.insert(Category::XaiOauth);
+        }
+        ModelIntent::CloudflareOauth => {
+            record.categories.insert(Category::CloudflareOauth);
         }
         _ => {}
     }

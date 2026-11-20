@@ -143,7 +143,7 @@ mock.module("./Mark", () => ({
   ),
 }));
 
-const { ProviderPicker } = await import("./ProviderPicker");
+const { ProviderPicker, recordedModel } = await import("./ProviderPicker");
 
 beforeAll(() =>
   GlobalRegistrator.register({
@@ -1939,4 +1939,89 @@ test("refreshing the AI connection has no sections and no foot, with nothing beh
   await view.findByRole("heading", { name: "Refresh your AI connection" });
   expect(view.queryByRole("list", { name: "Setup" })).toBeNull();
   expect(view.container.querySelector(".rail-foot")).toBeNull();
+});
+
+/*
+ * Cloudflare has one way in, its sign-in, so the row shows no tabs. The session is kept natively as
+ * xAI's is; the model starts as the one new Bots run on, named as AI Gateway names
+ * it; and what the calls are billed to is said before signing in, as the Claude plan's pool is.
+ */
+const cloudflare: Provider = {
+  id: "cloudflare",
+  name: "Cloudflare",
+  summary: "Sign in with Cloudflare to use AI Gateway models on your credits.",
+  logins: ["oauth"],
+  mark: "cloudflare",
+  caution: {
+    says: "Model calls are billed to your Cloudflare account's AI Gateway credits. With no credits loaded, Bots cannot answer until you add some.",
+    reads_more_at:
+      "https://developers.cloudflare.com/ai-gateway/features/unified-billing/",
+  },
+};
+
+test("a Cloudflare sign-in is the row's only way in and carries the gateway's model name", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return [...allProviders, cloudflare];
+    if (command === "begin_model_oauth")
+      return {
+        attemptId: "cloudflare-attempt",
+        url: "https://dash.cloudflare.com/oauth2/auth?synthetic=1",
+        userCode: null,
+      };
+    if (
+      command === "plugin:opener|open_url" ||
+      command === "finish_model_oauth"
+    )
+      return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPicker((choice) => choices.push(choice));
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("radio", { name: /^Cloudflare/ }));
+
+  expect(view.queryByRole("tablist")).toBeNull();
+  expect(view.getByText(/billed to your Cloudflare account/)).toBeTruthy();
+  expect(
+    view.getByRole("link", { name: "What this means" }).getAttribute("href"),
+  ).toBe(
+    "https://developers.cloudflare.com/ai-gateway/features/unified-billing/",
+  );
+  expect(view.getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "openai/gpt-5.5",
+  );
+  const button = view.getByRole("button", { name: "Sign in with Cloudflare" });
+  expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
+    "cloudflare",
+  );
+
+  await user.click(button);
+  await view.findByText("Signed in to Cloudflare.");
+  await waitFor(() => expect(choices).toHaveLength(1), { timeout: 4000 });
+  expect(choices).toEqual([
+    {
+      provider: "cloudflare",
+      login: "oauth",
+      model: "openai/gpt-5.5",
+      saved: true,
+    },
+  ]);
+  expect(invokeCalls).toContainEqual({
+    command: "begin_model_oauth",
+    args: { root: "/tmp/openbot-provider-root", provider: "cloudflare" },
+  });
+  // No device code to read out: Cloudflare's sign-in is a consent page and a redirect.
+  expect(view.queryByText(/Verification code/)).toBeNull();
+});
+
+test("a recorded sign-in comes back as its own provider's", () => {
+  for (const [saved, provider] of [
+    ["xai-oauth", "xai"],
+    ["cloudflare-oauth", "cloudflare"],
+  ] as const) {
+    expect(
+      recordedModel({ BOT_MODEL: "a-model", saved: { model: saved } }),
+    ).toEqual({ provider, login: "oauth", saved: true, model: "a-model" });
+  }
 });
