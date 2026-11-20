@@ -92,15 +92,14 @@ export function initialsOf(person: {
  * anybody else's when they are the owner or an admin, and nothing where the membership cannot end.
  * Whether it can is the server's verdict (`removable`): the owner stays, so nobody is offered to
  * leave their own organization, and so does somebody OpenBot's settings keep as an admin.
- *
- * Somebody who hasn't opened OpenBot yet has no OpenBot account to remove (`notOpenedYet`): their
- * row offers nothing, whatever else the answer says.
+ * That holds for somebody who hasn't opened OpenBot yet too: they are offered for removal when the
+ * server says they can be removed, and not otherwise.
  */
 export function memberControl(
-  member: Pick<OrganizationMemberSummary, "id" | "removable" | "notOpenedYet">,
+  member: Pick<OrganizationMemberSummary, "id" | "removable">,
   viewer: { id: string | undefined; role: string },
 ): "leave" | "remove" | null {
-  if (member.notOpenedYet || !member.removable) return null;
+  if (!member.removable) return null;
   if (member.id === viewer.id) return "leave";
   return isOrganizationAdmin(viewer.role) ? "remove" : null;
 }
