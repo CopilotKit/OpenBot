@@ -22,9 +22,14 @@ permissions:
 # workflow sees its caller's context, so without it Publish release's checks shared
 # `ci-refs/heads/main` with main's push runs: they queued behind whichever was in progress (the
 # five-minute wait before the checks of v0.3.1) and cancelled the one that was pending.
+#
+# Pull requests from forks share one group, so contributors' CI runs one at a time and cannot fill
+# the shared standard runners, and one contributor's push never cancels another's run. A fork run
+# GitHub drops from the group's one pending slot is re-run later by Contributor CI
+# (scripts/contributor-ci.ts), which also pauses fork runs while CopilotKit's are waiting.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && format('ci-{0}-forks', github.workflow) || format('ci-{0}-{1}', github.workflow, github.ref == 'refs/heads/main' && github.sha || github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}
 
 # Runners. Every job runs on the 16-core larger runners (org runner group openbot-larger, billed per
 # minute) for main, releases and pull requests from this repository: the standard runners are shared

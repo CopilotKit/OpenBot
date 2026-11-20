@@ -21,9 +21,10 @@ on:
 permissions:
   contents: read
 
+# Pull requests from forks share one group, one run at a time, as in CI.
 concurrency:
-  group: desktop-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'desktop-forks' || format('desktop-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}
 
 # Match the source publisher's exact repository/distribution identity in official and fork builds.
 env:
