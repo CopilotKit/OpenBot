@@ -8,13 +8,47 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.**
+
+- **One migration, expand only.** `0138_management_enrollment` adds one table for connecting to
+  managed updates (below), which 1.1.2 never reads, so 1.1.2 upgrades with its servers rolling one
+  by one, with no downtime, and goes back to 1.1.2 the same way.
+
+### Kubernetes
+
+- **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
+  code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
+  organization your licence names. Once it's approved, it shows one `helm install` of
+  the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
+  OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
+  organization `default` see it, and only on a team install you run yourself.
+  - The `openbot` chart turns this on by default (`server.managementEnrollment.enabled`). Nothing is
+    connected or called until an admin clicks Connect. The server's internal status port is now on,
+    open only to the agent's own pod (`openbot-agent` in `openbot-system`) until the agent manages
+    the release. The server gets a projected token of its own service account and the cluster's CA,
+    and checks the agent's token against the cluster's own keys. No role is granted.
+  - With `networkPolicy.enabled`, also set `networkPolicy.kubernetesApiCidr`, so the server can read
+    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false`.
+- **The management agent can connect without copying a secret.** With `enrollment.serverUrl` set to
+  OpenBot's internal status port and no install id, the agent proves itself to the OpenBot server
+  with a short-lived service account token, collects the one-time enrollment token the server holds
+  once an admin connected the install, makes its own key, trades a certificate request for its
+  certificate and writes both to its own Secret, which it reuses after a restart. `helm uninstall`
+  leaves that Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at
+  start and, handed the new install's token, enrolls again and replaces the old certificate. The
+  key never leaves the cluster, and nothing secret is logged. Until you choose how the database is
+  backed up (`backup.kind`), the agent refuses every upgrade that changes the database, before
+  touching anything.
+
+## 1.1.2
+
 **Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
 unless you rely on task threads.
 
-- **One migration, expand only.** `0138_management_enrollment` adds one table for connecting to
-  managed updates (below), which 1.1.1 never reads, so 1.1.1 upgrades to 1.1.2 with its
-  servers rolling one by one, with no downtime, and goes back to 1.1.1 the same way. Upgrading from
-  1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before upgrading first.
+- **No migrations.** The database stays at `0137_ai_connections`, where 1.1.1 left it, so 1.1.1
+  upgrades to 1.1.2 with its servers rolling one by one, with no downtime, and goes back to 1.1.1
+  the same way. Upgrading from 1.1.0 or older runs 1.1.1's migrations as well: read 1.1.1's Before
+  upgrading first.
 - **Task threads are off unless you turn them on.** No Bot hands a person's request to a task
   thread any more: every Bot does the work in the conversation, including one set to hand work to
   agents. Set `OPENBOT_TASK_THREADS=on` on the server (also `true` or `1`) to bring them back as
@@ -43,6 +77,19 @@ unless you rely on task threads.
   public, such as an open-source project's release or a dead public link, is still answered from
   the web, and a routine, which nobody is watching, says which app needs connecting instead of
   showing a card.
+- **Whoever manages a Bot that runs at an address of its own can change its Agent URL on Setup.**
+  The row opens a dialog that checks the address's shape before saving it, and shows the server's
+  refusal under the field; saving the same address sends nothing. For anyone who can't manage the
+  Bot it stays read-only, and a built-in Bot is unchanged. Other Setup edits no longer send the
+  stored address, so a Bot saved at an address the deployment's rules have since closed can still
+  be renamed.
+- **A Bot asked to watch Slack says what works.** Without a Slack pairing, which the personal edition
+  never has, no Slack event reaches OpenBot. A Bot asked to act on Slack messages was sent to a
+  Reaching you page that edition does not show; it is now refused before anything else, and the Bot
+  runs the goal from a routine that checks the person's connected Slack app instead, with Slack's
+  connect card in the conversation when it is not connected. Where a pairing exists, the owner's
+  Slack account linked under Connections counts as well as a Reaching you binding: only the owner,
+  only channels that account is in, checked again on every event.
 
 ### OpenBot Desktop
 
@@ -61,6 +108,25 @@ unless you rely on task threads.
   command OpenBot runs in its engine's machine now stops after 60 seconds. If Windows refused the
   machine's key because other accounts can open it, setup says so and names the file and the
   account.
+- **On Windows, the engine's disk goes in the install folder.** With the install folder on F:,
+  the engine's 40 GB disk goes on F: too, and the space check measures F:. A full C: no longer
+  stops the install. A drive that cannot hold the disk (a network share, a removable drive, exFAT)
+  keeps it on C:, and Install says so. An engine already on C: stays there. When C: is short and
+  F: has room, OpenBot offers **Move OpenBot's storage to F:**, which stops every WSL distro for
+  a moment, Docker Desktop included.
+- **On Windows with only the WSL that ships with Windows, setup offers the WSL update.** It stopped
+  on "could not check the WSL version", because that WSL does not know `wsl --version`. Setup now
+  shows the WSL update screen, whose fix runs `wsl --update`.
+- **Stop and Quit stop OpenBot's own Podman machine.** They left it running, so on Windows its WSL
+  distro kept holding memory after Stop or Quit. Both now stop it last, once everything of OpenBot's
+  in it has stopped, and never touch your own machines; Start brings it back. An update's stop
+  leaves it running for the restart that follows, and Quit shows the step on the Shutting down
+  screen.
+- **On Windows, uninstalling with "Delete the application data" deletes OpenBot's downloads too.**
+  The installers, tools and machine image OpenBot downloads (about 128 MB, in `~\OpenBot`) stayed
+  in the profile whichever folder OpenBot was installed in. They now go with the data, and the
+  folder with them once nothing is left in it. Without the data deleted, they stay, as the machine
+  does.
 
 ### Kubernetes
 
@@ -80,10 +146,13 @@ unless you rely on task threads.
     organization or a tenant; `otel.enabled: false` turns it off.
   - It upgrades only to a release the management service names, only inside both your window and
     the service's, only along the release's upgrade paths, by pinning Flux to that release's exact
-    chart digest. Before an upgrade that changes the database it stops writes and takes a backup,
-    and goes on only once the backup succeeds. A failed backup puts the install back as it was, and
-    the same release is not tried again for 30 minutes. It never rolls back by itself: an upgrade
-    that stops after the database may have changed waits for a person.
+    chart digest. It creates and keeps the product's Flux objects from the chart's settings, so
+    `helm install --wait` finishes under Helm 4. Before an upgrade that changes the database it
+    stops writes and takes a backup, and goes on only once the backup succeeds; it refuses the
+    upgrade when the backup it would take is of a different database from the one the install
+    uses. A failed backup puts the install back as it was, and the same release is not tried again
+    for 30 minutes. It never rolls back by itself: an upgrade that stops after the database may
+    have changed waits for a person.
   - It runs five commands, each signed and short-lived: restart, rollback (only where the release
     says the previous one runs on its database), pause, resume, and a support bundle that is
     redacted and written to a volume in your cluster, never uploaded.
@@ -96,35 +165,18 @@ unless you rely on task threads.
     OpenBot installed for a plain `helm upgrade`.
   - Its image is the release's own, `ghcr.io/copilotkit/openbot-management-agent:v<release>`. The
     chart published with 1.1.1 named a tag that was never published.
-  - Or connect without copying a secret: with `enrollment.serverUrl` set to OpenBot's internal status
-    port and no install id, the agent proves itself to the OpenBot server with a short-lived
-    service account token, collects the one-time enrollment token the server holds once an admin
-    connected the install, makes its own key, trades a certificate request for its certificate and
-    writes both to its own Secret, which it reuses after a restart. `helm uninstall` leaves that
-    Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at start and,
-    handed the new install's token, enrolls again and replaces the old certificate. The key never
-    leaves the cluster, and nothing secret is logged. Until you choose how the database is backed
-    up (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
-    anything.
-- **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
-  code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
-  organization your licence names. Once it's approved, it shows one `helm install` of
-  the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
-  OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
-  organization `default` see it, and only on a team install you run yourself.
-  - The `openbot` chart turns this on by default (`server.managementEnrollment.enabled`). Nothing is
-    connected or called until an admin clicks Connect. The server's internal status port is now on,
-    open only to the agent's own pod (`openbot-agent` in `openbot-system`) until the agent manages
-    the release. The server gets a projected token of its own service account and the cluster's CA,
-    and checks the agent's token against the cluster's own keys. No role is granted.
-  - With `networkPolicy.enabled`, also set `networkPolicy.kubernetesApiCidr`, so the server can read
-    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false`.
 - **`bun scripts/update.ts kubernetes apply` accepts a published release.** It compared the commit
   the running server reports with the one the release names, which never match for a published
   release, so an upgrade that had worked ended in recovery-required with "Running server release
   identity does not match the candidate", and a release that stops writes for its upgrade was
   scaled back to zero. It now checks the version, distribution, repository and channel, with the
   image digest the server Deployment is pinned to, as before.
+
+### Smaller changes
+
+- The API refuses a notification route that names the same way of reaching a person twice, such as
+  `["push", "push"]`, with 400 `VALIDATION_ERROR`, and changes nothing, as the spec's unique lists
+  say. The web app never sends one.
 
 ## 1.1.1
 
@@ -388,12 +440,6 @@ or a script has to say.
 - **An update checks this computer has room first**, before it stops or downloads anything, and
   says "OpenBot needs more free space to update" with the figures and Retry. A full disk reads as
   one plain line.
-- **On Windows, the engine's disk goes in the install folder.** With the install folder on F:,
-  the engine's 40 GB disk goes on F: too, and the space check measures F:. A full C: no longer
-  stops the install. A drive that cannot hold the disk (a network share, a removable drive, exFAT)
-  keeps it on C:, and Install says so. An engine already on C: stays there. When C: is short and
-  F: has room, OpenBot offers **Move OpenBot's storage to F:**, which stops every WSL distro for
-  a moment, Docker Desktop included.
 - **Status window:** Restart applies changes made to `.env`, it offers Start after Stop, and it
   shows Updating with no buttons during an update.
 - **Launching OpenBot while it quits** opens it again once it has quit, where it stayed on Shutting
