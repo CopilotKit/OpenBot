@@ -3,6 +3,7 @@ import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
+import { openWith } from "./link-company";
 import type { OrganizationStore } from "./organization";
 import { clientHeaders } from "./release";
 
@@ -59,12 +60,8 @@ export async function signInEnterprise(email: string) {
  * never a web view: a company's sign-in is entered where the person can see whose page it is. Resolves when it comes
  * back to `returnTo` or is closed. Linking the company account opens its single-use ticket here (../link-company.ts).
  */
-export async function openInSystemBrowser(
-  url: string,
-  returnTo: string,
-): Promise<void> {
-  await WebBrowser.openAuthSessionAsync(url, returnTo);
-}
+// In the app's own task on Android, so the tab goes when the app comes back (BROWSER_OPTIONS says why).
+export const openInSystemBrowser = openWith(WebBrowser.openAuthSessionAsync);
 
 /**
  * Where each person's pick of organization is kept on this phone (../organization.ts): beside the session, one place

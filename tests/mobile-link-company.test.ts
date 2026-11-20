@@ -4,6 +4,7 @@ import {
   backToHome,
   linkCompanyAccount,
   onCompanyLinked,
+  openWith,
   RETURN_ADDRESS,
   reportCompanyLinked,
 } from "../mobile/src/link-company";
@@ -102,6 +103,27 @@ test("back from the linked deep link, Home is the only screen: no second Home an
   const started = stack("/company-sign-in/linked");
   backToHome(started);
   expect(started.screens).toEqual(["/"]);
+});
+
+test("the system browser opens in the app's own task, so the Custom Tab goes when the app comes back and Back from Home never lands on the sign-in form", async () => {
+  // The phone end-to-end run on a release APK: after the return, Back from Home showed the Custom Tab still holding the
+  // company's sign-in form. Opened by default, the tab has a task of its own, which outlives the return.
+  const sessions: [string, string, unknown][] = [];
+  const open = openWith(async (url, returnTo, options) => {
+    sessions.push([url, returnTo, options]);
+    return { type: "success", url: returnTo };
+  });
+  await linkCompanyAccount("harbor-okta", {
+    ticket: async () => ({ url: "https://openbot.example/ticket/1" }),
+    open,
+  });
+  expect(sessions).toEqual([
+    [
+      "https://openbot.example/ticket/1",
+      "openbotmobile://company-sign-in/linked",
+      { createTask: false },
+    ],
+  ]);
 });
 
 test("a provider that no longer counts is answered as stale, so the providers are read again, and nothing opens", async () => {
