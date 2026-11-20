@@ -66,12 +66,16 @@ test("a pick kept on the phone is used while it is one of the person's, and set 
   let kept: string | null = "org_gone";
   const store = {
     read: async () => kept,
-    write: async (id: string) => {
+    write: async (_person: string, id: string) => {
       kept = id;
     },
   };
   let list = [{ id: "org_a", active: true }, { id: "org_b" }];
-  const choice = createOrganizationChoice(async () => list, store);
+  const choice = createOrganizationChoice(
+    async () => list,
+    store,
+    () => "ada",
+  );
   // Left, deleted, or somebody else's: the server's active one.
   expect(await choice.current("ada")).toBe("org_a");
   await choice.choose("org_b", "ada");
