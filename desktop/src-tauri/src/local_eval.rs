@@ -5511,7 +5511,7 @@ fn forget(cli: &PinnedCli, stack: &StackId, cancel: &Cancel) -> Result<(), Failu
 }
 
 /**
-The database backups the CLI took before each update of `stack` (`backups/*.sql` in its private
+The database backups the CLI took before each update of `stack` (the `.sql` files in `backups` in its private
 folder, `private`), moved out before `local delete` removes that folder with them. They go beside
 it, to `local-evaluation-recovery/<stack>/database-backups`, where the CLI keeps what it gives back
 on a delete. With the cluster gone they are the only copy of the backend's data there is. Nothing is
