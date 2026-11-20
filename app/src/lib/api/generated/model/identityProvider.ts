@@ -19,6 +19,6 @@ export interface IdentityProvider {
    * @nullable
    */
   registeredBy: string | null;
-  /** True for a provider registered for the whole OpenBot, listed in another organization: it counts for every organization here, and can't be removed from this one. False or absent for the organization's own. */
+  /** True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own. */
   deployment?: boolean;
 }

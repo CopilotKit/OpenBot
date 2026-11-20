@@ -998,7 +998,8 @@ paths:
         certificate. Where this OpenBot may keep more than one organization,
         the list in any organization but `default` also holds the providers
         registered for the whole OpenBot, marked deployment: they count for
-        this organization too, and can't be removed here. Only an
+        this organization's Require SSO only while it has no provider of its
+        own, and can't be removed here. Only an
         administrator may list them. A missing cursor starts at the first
         page and nextCursor null ends the list.
       security:
@@ -1762,9 +1763,10 @@ components:
           type: boolean
           description: >-
             True for a provider registered for the whole OpenBot, listed in
-            another organization: it counts for every organization here, and
-            can't be removed from this one. False or absent for the
-            organization's own.
+            another organization: it counts for that organization's Require
+            SSO only while the organization has no provider of its own, and
+            can't be removed from it. False or absent for the organization's
+            own.
     CompanySignIn:
       type: object
       description: >-
@@ -1788,8 +1790,9 @@ components:
           type: array
           description: >-
             The identity providers that count for this organization: its own,
-            and where this OpenBot may keep more than one organization, those
-            registered for the whole OpenBot. Empty when there are none.
+            or, where it has none and this OpenBot may keep more than one
+            organization, those registered for the whole OpenBot. Empty when
+            there are none.
           items:
             type: object
             required: [id, domain]

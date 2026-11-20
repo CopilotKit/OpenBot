@@ -1608,7 +1608,7 @@ paths:
         - Identity providers
       operationId: listIdentityProviders
       summary: List identity providers
-      description: 'Return one page of the identity providers registered for single sign-on, by email domain: a company''s own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization too, and can''t be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the identity providers registered for single sign-on, by email domain: a company''s own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization''s Require SSO only while it has no provider of its own, and can''t be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -22509,7 +22509,7 @@ components:
           description: The id of the person who registered it, while they still have an account here. Null once they are gone; the provider stays.
         deployment:
           type: boolean
-          description: 'True for a provider registered for the whole OpenBot, listed in another organization: it counts for every organization here, and can''t be removed from this one. False or absent for the organization''s own.'
+          description: 'True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization''s Require SSO only while the organization has no provider of its own, and can''t be removed from it. False or absent for the organization''s own.'
     IdentityProviderPage:
       type: object
       required:
@@ -24265,7 +24265,7 @@ components:
           description: 'Whether the person has: they signed in through one of providers, or with the same identity at the same issuer another way, or they are the admin who runs this OpenBot. While required is true and met is false, the organization holds them out.'
         providers:
           type: array
-          description: 'The identity providers that count for this organization: its own, and where this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.'
+          description: 'The identity providers that count for this organization: its own, or, where it has none and this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.'
           items:
             type: object
             required:

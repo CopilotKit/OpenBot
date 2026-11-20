@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization too, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization's Require SSO only while it has no provider of its own, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List identity providers
  */
 
@@ -75,7 +75,7 @@ export const ListIdentityProvidersResponse = zod.object({
             .boolean()
             .optional()
             .describe(
-              "True for a provider registered for the whole OpenBot, listed in another organization: it counts for every organization here, and can't be removed from this one. False or absent for the organization's own.",
+              "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own.",
             ),
         })
         .describe(
@@ -269,7 +269,7 @@ export const CreateIdentityProviderResponse = zod.object({
         .boolean()
         .optional()
         .describe(
-          "True for a provider registered for the whole OpenBot, listed in another organization: it counts for every organization here, and can't be removed from this one. False or absent for the organization's own.",
+          "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own.",
         ),
     })
     .describe(

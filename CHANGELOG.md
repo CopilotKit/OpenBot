@@ -88,7 +88,8 @@ unless you rely on task threads.
   `GET /api/v2/organizations/{organizationId}/people/me/company-sign-in` (`getCompanySignIn`) still
   answers them: whether it is required, whether they meet it, and the identity providers they can
   use. In an organization other than `default`, the identity providers list also holds the ones
-  registered for the whole OpenBot, marked `deployment`, which can't be removed there (403).
+  registered for the whole OpenBot, marked `deployment`, which can't be removed there (403). They
+  count for that organization's Require SSO only while it has no identity provider of its own.
 - **Members who haven't opened OpenBot yet.** On a hosted OpenBot, an organization's members list
   includes people who are members at OpenBot by CopilotKit and haven't opened OpenBot yet, marked
   `notOpenedYet`. An owner or an admin can remove them; they can't be given another role until they

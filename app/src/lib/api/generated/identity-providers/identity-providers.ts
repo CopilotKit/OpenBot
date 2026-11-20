@@ -84,7 +84,7 @@ export const getListIdentityProvidersUrl = (
 };
 
 /**
- * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization too, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization's Require SSO only while it has no provider of its own, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List identity providers
  */
 export const listIdentityProviders = async (

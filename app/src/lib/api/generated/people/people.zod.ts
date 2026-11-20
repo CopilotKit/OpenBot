@@ -1200,7 +1200,7 @@ export const GetCompanySignInResponse = zod
         }),
       )
       .describe(
-        "The identity providers that count for this organization: its own, and where this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.",
+        "The identity providers that count for this organization: its own, or, where it has none and this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.",
       ),
   })
   .describe(
