@@ -2,6 +2,7 @@ import {
   IconBrain,
   IconBuildingBank,
   IconBulb,
+  IconCloudCog,
   IconCode,
   IconLayoutGrid,
   IconLockAccess,
@@ -10,9 +11,11 @@ import {
   IconUsersGroup,
   IconZoomQuestion,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { managePaths } from "@/lib/manage-paths";
+import { managementQueryOptions } from "@/lib/management/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 
 export type AdminEntry = {
@@ -192,3 +195,35 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     ],
   },
 ];
+
+/**
+ * CopilotKit management: connecting a self-hosted OpenBot to CopilotKit's management service. Not in
+ * {@link ADMIN_SECTIONS}, because it applies only where the server says so (the team edition a
+ * company runs itself, in the organization `default`); {@link adminSections} adds it there.
+ */
+export const MANAGEMENT_ENTRY: AdminEntry = {
+  title: "CopilotKit management",
+  description:
+    "Connect OpenBot to CopilotKit so it can be kept up to date in your cluster.",
+  icon: IconCloudCog,
+  linkOptions: { to: "/admin/management" },
+};
+
+/** Admin's pages, with CopilotKit management at the end of the organization's when it applies. */
+export function adminSections(management: boolean): readonly AdminSection[] {
+  if (!management) return ADMIN_SECTIONS;
+  return ADMIN_SECTIONS.map((section) =>
+    section.title === "Organization"
+      ? { ...section, items: [...section.items, MANAGEMENT_ENTRY] }
+      : section,
+  );
+}
+
+/**
+ * The sections the rail and the overview draw. Management is left out while its answer is loading
+ * or failed, and wherever the server answers that it doesn't apply.
+ */
+export function useAdminSections(): readonly AdminSection[] {
+  const management = useQuery(managementQueryOptions());
+  return adminSections(management.data?.applies === true);
+}
