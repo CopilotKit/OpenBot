@@ -155,6 +155,51 @@ channels:
         $ref: "#/components/messages/ScreenKey"
       screenText:
         $ref: "#/components/messages/ScreenText"
+  windowsComputerScreen:
+    address: /api/v2/organizations/{organizationId}/windows-computer/screen
+    title: A Windows computer's screen
+    description: >-
+      Experimental. The screen of the caller's Windows computer, live: the
+      whole screen, not masked, so whatever is open on it is shown, other
+      programs and notifications included. Frames are whole pictures, so a
+      viewer shows the newest and needs nothing before it. The person's
+      mouse and keyboard go back to it only while they hold control, which
+      they take and hand back with the Windows computer operations in the
+      REST API; while the Bot holds it, input is answered with an input
+      error and goes no further. Positions are in the screen's own pixels,
+      the frame's width and height. Only the person the Windows computer is
+      set up for may watch it. One viewer at a time: a newer one replaces
+      the older, which is told so. An app whose access token may watch and
+      not use computers (computers:read without computers:write) is sent the
+      screen, and its input is answered with an input error.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      screenHello:
+        $ref: "#/components/messages/ScreenHello"
+      screenFrame:
+        $ref: "#/components/messages/ScreenFrame"
+      screenError:
+        $ref: "#/components/messages/ScreenError"
+      screenInputError:
+        $ref: "#/components/messages/ScreenInputError"
+      screenFrameReceived:
+        $ref: "#/components/messages/ScreenFrameReceived"
+      screenMouse:
+        $ref: "#/components/messages/ScreenMouse"
+      screenWheel:
+        $ref: "#/components/messages/ScreenWheel"
+      screenKey:
+        $ref: "#/components/messages/ScreenKey"
+      screenText:
+        $ref: "#/components/messages/ScreenText"
   botTerminal:
     address: /api/v2/organizations/{organizationId}/computers/{botId}/terminal
     title: A Bot's terminal
@@ -486,6 +531,37 @@ operations:
       - $ref: "#/channels/botScreen/messages/screenWheel"
       - $ref: "#/channels/botScreen/messages/screenKey"
       - $ref: "#/channels/botScreen/messages/screenText"
+  sendWindowsComputerScreen:
+    action: send
+    title: Show a Windows computer's screen
+    summary: The screen's pictures, and why something could not be shown or done.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersRead"
+    channel:
+      $ref: "#/channels/windowsComputerScreen"
+    messages:
+      - $ref: "#/channels/windowsComputerScreen/messages/screenHello"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenFrame"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenError"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenInputError"
+  receiveWindowsComputerScreenInput:
+    action: receive
+    title: Take a person's mouse and keyboard
+    summary: The person's input to their Windows computer, and each picture's receipt.
+    security:
+      - $ref: "#/components/securitySchemes/webSession"
+      - $ref: "#/components/securitySchemes/apiKey"
+      - $ref: "#/components/securitySchemes/computersWrite"
+    channel:
+      $ref: "#/channels/windowsComputerScreen"
+    messages:
+      - $ref: "#/channels/windowsComputerScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenMouse"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenWheel"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenKey"
+      - $ref: "#/channels/windowsComputerScreen/messages/screenText"
   sendBotTerminal:
     action: send
     title: Show a Bot's terminal
