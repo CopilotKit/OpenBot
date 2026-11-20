@@ -66,6 +66,26 @@ export const getAskAuditEventsResponseMock = (): AuditAnswer => ({
   },
 });
 
+export const getListDeploymentAuditEventsResponseMock = (): AuditEventPage => ({
+  auditEvents: [
+    {
+      id: "0b8f3a52-5d0e-4f5c-9a43-1c2b6c3e9f10",
+      actorUserId: null,
+      initiatorKind: "routine",
+      initiatorId: "routine_7f2c",
+      eventType: "computer.action_refused",
+      targetType: "computer",
+      targetId: "research-assistant",
+      payload: {
+        bot: "research-assistant",
+        decision: { allowed: false, rule: "network.deny" },
+      },
+      createdAt: "2026-11-14T09:12:44.501Z",
+    },
+  ],
+  nextCursor: "eyJ2IjoxLCJvIjoiZGVmYXVsdCJ9",
+});
+
 export const getListAuditEventsMockHandler = (
   overrideResponse?:
     | AuditEventPage
@@ -179,9 +199,36 @@ export const getAskAuditEventsMockHandler = (
     options,
   );
 };
+
+export const getListDeploymentAuditEventsMockHandler = (
+  overrideResponse?:
+    | AuditEventPage
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AuditEventPage> | AuditEventPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/deployment/audit-events",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListDeploymentAuditEventsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getAuditEventsMock = () => [
   getListAuditEventsMockHandler(),
   getExportAuditEventsMockHandler(),
   getGetAuditEventVocabularyMockHandler(),
   getAskAuditEventsMockHandler(),
+  getListDeploymentAuditEventsMockHandler(),
 ];

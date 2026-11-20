@@ -37,9 +37,9 @@ info:
 
 
     A program of your own signs its requests in one of two ways. An API key
-    acts as the person who made it, in every organization they are a member
-    of, like a personal access token: the address names the organization
-    each request is for. Keys start `obk_` and are sent as
+    acts as the person who made it, in the organization it was made in, like
+    a personal access token: the address names the organization each
+    request is for. Keys start `obk_` and are sent as
     `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
     and on the socket a join token is spent on (createConversationJoinToken).
     To get a first key, sign in to OpenBot's web app, open Settings, then API
@@ -55,6 +55,14 @@ info:
     nobody in, so it has neither OAuth nor API keys, and the operations
     that manage keys and sessions answer 503 with the code
     SIGN_IN_UNAVAILABLE.
+
+
+    An organization can require its members to sign in through their
+    company's identity provider. A member who hasn't is held out of it:
+    every operation under its address answers 403 with the code
+    SSO_REQUIRED (category permission, not retryable), whose detail tells
+    them to sign in with their work email. getCompanySignIn alone still
+    answers, and says which providers they can use.
 
 
     OpenBot's own apps name themselves on every request in the header
@@ -87,7 +95,7 @@ tags:
   - { name: People, description: "The people in the organization: who they are, what they may do, and what is theirs alone (their standing instructions, preferences and first-run onboarding). An administrator sees everybody; anybody else sees themselves, as me." }
   - { name: Linked accounts, description: "A person's accounts at other services, such as Slack and GitHub, that OpenBot knows are theirs, so a Bot answering there knows who it is talking to." }
   - { name: Identity providers, description: "The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them." }
-  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, in every organization they are a member of, on the API, and only a person signed in to OpenBot can make or manage one." }
+  - { name: API keys, description: "The keys a person makes for automation. A key acts as them, in the organization it was made in, on the API, and only a person signed in to OpenBot can make or manage one." }
   - { name: Sessions, description: "Where a person is signed in to OpenBot, so they can see each browser and device and sign one out." }
   - { name: Organization settings, description: "What an administrator sets for everybody, and what this OpenBot offers: sign-in, recording, idle computers, allowlists, the setup checklist, and which models Bots ran on." }
   - { name: Capabilities, description: "The permission switches that decide what people may do, set for the organization, a role or a directory group, and each person's answer." }
@@ -138,6 +146,7 @@ paths:
   /api/v2/organizations/{organizationId}/audit-events/export: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1export' }
   /api/v2/organizations/{organizationId}/audit-events/vocabulary: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1vocabulary' }
   /api/v2/organizations/{organizationId}/audit-events/ask: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1ask' }
+  /api/v2/organizations/{organizationId}/deployment/audit-events: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment~1audit-events' }
   /api/v2/organizations/{organizationId}/people: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people' }
   /api/v2/organizations/{organizationId}/people/{personId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/revoke-access: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1revoke-access' }
@@ -156,6 +165,8 @@ paths:
   /api/v2/organizations/{organizationId}/linked-account-providers: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1linked-account-providers' }
   /api/v2/organizations/{organizationId}/identity-providers: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1identity-providers' }
   /api/v2/organizations/{organizationId}/identity-providers/{identityProviderId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1identity-providers~1{identityProviderId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1company-sign-in' }
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in/tickets: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1company-sign-in~1tickets' }
   /api/v2/organizations/{organizationId}/deployment: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment' }
   /api/v2/organizations/{organizationId}/settings: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings' }
   /api/v2/organizations/{organizationId}/settings/stop-inactive-computers: { $ref: './admin-settings.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1settings~1stop-inactive-computers' }
@@ -530,7 +541,9 @@ components:
         under it (conversations:write); a file's download at
         `GET /api/attachments/{attachmentId}`, the address a sent message
         keeps (conversations:read); and the relayed realtime socket at
-        `/api/intelligence/client/websocket` (conversations:read). They work
+        `/api/intelligence/client/websocket` (conversations:read), which is
+        also on /api/v2 at
+        `/api/v2/organizations/{organizationId}/realtime/websocket`. They work
         nowhere else.
 
 
@@ -644,11 +657,14 @@ components:
       scheme: bearer
       bearerFormat: OpenBot API key
       description: >-
-        Automation. An API key acts as the person who created it, in every
-        organization they are a member of, like a personal access token: the
-        address of each request names the organization, and one the person
-        is not in answers not found. A key starts `obk_` and is sent as
+        Automation. An API key acts as the person who created it, like a
+        personal access token, in the one organization it was made in. The
+        address of each request names the organization, and any other
+        answers not found. A
+        key starts `obk_` and is sent as
         `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2
+        (the relayed realtime socket at
+        `/api/v2/organizations/{organizationId}/realtime/websocket` included)
         and on the relayed realtime socket at
         `/api/intelligence/client/websocket`, where a join token the key made
         is spent (createConversationJoinToken). A person makes one in the web
@@ -1080,7 +1096,10 @@ components:
                 requestId: req_example
                 traceId: trace_example
     Forbidden:
-      description: The caller holds no role in this organization.
+      description: >-
+        The caller holds no role in this organization, or the organization
+        requires signing in through the company's identity provider and the
+        caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -1097,11 +1116,23 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     BotForbidden: { $ref: './bots.yaml#/components/responses/BotForbidden' }
     AdminOnly:
       description: >-
         The caller is not an administrator of the organization, or holds no
-        role in it.
+        role in it. Or the organization requires signing in through the
+        company's identity provider and the caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -1114,6 +1145,17 @@ components:
                 status: 403
                 detail: Only an admin can do this.
                 code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example

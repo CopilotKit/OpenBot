@@ -1,14 +1,3 @@
-import {
-  IconAlertTriangle,
-  IconBan,
-  IconDeviceDesktop,
-  IconDownload,
-  IconEyeOff,
-  IconList,
-  IconRefresh,
-  IconSearch,
-  IconX,
-} from "@/components/icons";
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
   keepPreviousData,
@@ -25,6 +14,17 @@ import {
   withFilters,
 } from "@/components/audit/audit-filters";
 import { AuditTable } from "@/components/audit/audit-table";
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconDeviceDesktop,
+  IconDownload,
+  IconEyeOff,
+  IconList,
+  IconRefresh,
+  IconSearch,
+  IconX,
+} from "@/components/icons";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -271,7 +271,10 @@ export function AuditPage({
   const people = useMemo(
     () =>
       new Map([
-        ...(members ?? []).map((member) => [member.id, member.email] as const),
+        // Somebody who hasn't opened OpenBot yet may have no address, and has done nothing here yet.
+        ...(members ?? [])
+          .filter((member) => member.email.trim())
+          .map((member) => [member.id, member.email] as const),
         ...(reader ? [[reader.id, reader.email] as const] : []),
       ]),
     [members, reader],

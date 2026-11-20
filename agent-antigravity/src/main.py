@@ -36,6 +36,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import SPEC, bot_settings
+from run_model_key import RunModelKey
 
 from ag_ui_antigravity import create_antigravity_app
 from fastapi import Request
@@ -95,6 +96,9 @@ def _agent() -> OpenBotAntigravityAgent:
 
 
 app = create_antigravity_app(_agent(), path="/")
+# Gemini is reached with Google's own key, never OpenBot's model gateway, so no run's token is ever
+# sent anywhere from here; the server's props still never reach the agent. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

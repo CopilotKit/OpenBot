@@ -8,8 +8,15 @@
  *  2. It makes its own P-256 key, in memory, and sends CopilotKit's enrollment API only a certificate
  *     request with the token. The private key never leaves the cluster.
  *  3. It writes the certificate and key to its own Secret (the chart grants it that one Secret by
- *     name), then runs as an agent installed with a certificate does. On a restart it reads the
- *     Secret and never enrolls again.
+ *     name), then runs as an agent installed with a certificate does.
+ *
+ * On a start with credentials already in the Secret it still asks OpenBot once, briefly, for a
+ * token. `helm uninstall` leaves the Secret behind, so an admin who disconnects and connects again
+ * gets a new install whose token OpenBot holds while the Secret still names the old, retired one.
+ * When OpenBot hands out a token for another install than the Secret's certificate names, the
+ * agent enrolls for it as from scratch and replaces the certificate and key. When OpenBot answers
+ * 410 (the token was collected already: the usual restart), has nothing to hand out, refuses or
+ * does not answer, the agent runs with the Secret's credentials, so a restart never needs OpenBot.
  *
  * The token is kept in the same Secret between 1 and 2, so a restart in between, or the enrollment
  * API being down for a while, does not spend it: OpenBot hands it out once.
@@ -197,6 +204,8 @@ export interface EnrollOptions {
   /** How long to wait between attempts that found nothing to do yet. */
   retryMs?: number;
   timeoutMs?: number;
+  /** How long a start with credentials waits for OpenBot to say whether it holds a new token. */
+  checkTimeoutMs?: number;
 }
 
 type Step =
@@ -207,6 +216,7 @@ export class Enrollment {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly retryMs: number;
   private readonly timeoutMs: number;
+  private readonly checkTimeoutMs: number;
   /** Logged once per distinct reason, so a long wait is one line, not one a minute. */
   private lastReason: string | null = null;
 
@@ -218,6 +228,7 @@ export class Enrollment {
     this.sleep = options.sleep ?? ((ms) => Bun.sleep(ms));
     this.retryMs = options.retryMs ?? 15_000;
     this.timeoutMs = options.timeoutMs ?? 20_000;
+    this.checkTimeoutMs = options.checkTimeoutMs ?? 5_000;
   }
 
   private tls() {
@@ -260,19 +271,37 @@ export class Enrollment {
     const data = (await this.secret.read()) ?? {};
     const cert = data[SECRET_KEYS.cert];
     const key = data[SECRET_KEYS.key];
-    if (cert && key) {
-      const installId = checkCredentials(cert, key);
-      return {
-        kind: "ready",
-        credentials: this.credentials(cert, key, data[SECRET_KEYS.ca]),
-        installId,
-      };
-    }
+    // A kept token goes first: it is only written right before it is spent, for a new install.
     let pending = this.pending(data);
     if (!pending) {
-      const collected = await this.collect();
-      if (collected.kind === "wait") return collected;
-      pending = collected.token;
+      if (cert && key) {
+        const installId = checkCredentials(cert, key);
+        const ready: Step = {
+          kind: "ready",
+          credentials: this.credentials(cert, key, data[SECRET_KEYS.ca]),
+          installId,
+        };
+        // Connected again since this certificate was issued? Anything but a token for another
+        // install keeps the Secret's credentials.
+        const collected = await this.collect(this.checkTimeoutMs);
+        if (
+          collected.kind === "wait" ||
+          collected.token.installId.toLowerCase() === installId
+        )
+          return ready;
+        this.options.log(
+          "OpenBot connected this cluster as a new install; enrolling for it",
+          {
+            previousInstallId: installId,
+            installId: collected.token.installId,
+          },
+        );
+        pending = collected.token;
+      } else {
+        const collected = await this.collect();
+        if (collected.kind === "wait") return collected;
+        pending = collected.token;
+      }
       // Kept before it is spent, so a restart from here does not lose it.
       await this.secret.write({
         [SECRET_KEYS.pendingToken]: pending.enrollmentToken,
@@ -291,7 +320,9 @@ export class Enrollment {
   }
 
   /** Step 1: the token from OpenBot's internal status port. */
-  private async collect(): Promise<
+  private async collect(
+    timeoutMs = this.timeoutMs,
+  ): Promise<
     | { kind: "token"; token: AgentEnrollmentToken }
     | Extract<Step, { kind: "wait" }>
   > {
@@ -309,7 +340,7 @@ export class Enrollment {
     try {
       response = await fetch(url, {
         headers: { authorization: `Bearer ${proof}` },
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
         redirect: "error",
       });
     } catch (error) {

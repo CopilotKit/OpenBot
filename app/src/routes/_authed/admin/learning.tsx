@@ -81,10 +81,13 @@ export const Route = createFileRoute("/_authed/admin/learning")({
 });
 /**
  * The default container, as the page calls it. Where OpenBot keeps a container for the organization
- * alone (`own`), it is the organization's. Otherwise it is the one the deployment was given.
+ * alone (`own`), or where the person works in one of several organizations (`organization`), it is
+ * the organization's: each organization learns in a backend project of its own, so its default is
+ * its own even where the server names no container for it. Only an OpenBot that keeps one
+ * organization and lists none calls it the deployment's.
  */
-function defaultWords(own: string | null) {
-  return own === null
+function defaultWords(own: string | null, organization: string | undefined) {
+  return own === null && organization === undefined
     ? { use: "Use deployment default", shown: "Deployment default" }
     : {
         use: "Use this organization's default",
@@ -93,9 +96,9 @@ function defaultWords(own: string | null) {
 }
 
 /** How one Bot takes part in Learning: the default space, none, or a space of its own. */
-function participation(own: string | null) {
+function participation(own: string | null, organization: string | undefined) {
   return [
-    { value: "inherit", label: defaultWords(own).use },
+    { value: "inherit", label: defaultWords(own, organization).use },
     { value: "exclude", label: "Leave out of Learning" },
     { value: "container", label: "Use a specific container" },
   ];
@@ -123,11 +126,15 @@ function automaticMessage(
     settings.defaultTarget?.containerId === automatic.containerId
   )
     return own === null
-      ? `OpenBot assigned this project's "${automatic.containerId}" container automatically. You can change it here.`
+      ? organization
+        ? `Bots in ${organization} learn into its "${automatic.containerId}" container, which OpenBot assigned automatically. You can change it here.`
+        : `OpenBot assigned this project's "${automatic.containerId}" container automatically. You can change it here.`
       : `${organization ? `Bots in ${organization}` : "Bots"} learn into this organization's default container. You can change it here.`;
   if (automatic.state === "absent")
     return own === null
-      ? `This project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
+      ? organization
+        ? `${organization} has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
+        : `This project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
       : "This organization's default container doesn't exist yet. Nothing is collected.";
   if (automatic.state === "not_entitled")
     return "This project's plan doesn't include Learning. No container was assigned.";
@@ -279,7 +286,7 @@ export function LearningPage() {
   const organizationSpace = useQuery(learningOrganizationSpaceQueryOptions());
   const own = organizationSpace.data ?? null;
   const organization = useCurrentOrganizationName();
-  const words = defaultWords(own);
+  const words = defaultWords(own, organization);
   const settings = organizationSpace.isSuccess
     ? (draft ?? settingsQuery.data)
     : undefined;
@@ -321,9 +328,11 @@ export function LearningPage() {
       <PageSection
         title="Participation"
         description={
-          own === null
+          own === null && organization === undefined
             ? "Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same project. Until you save here, OpenBot uses that project's openbot container."
-            : "Container changes apply to new conversations. Existing ones keep their first container. Until you choose another, Bots learn into this organization's default container."
+            : own === null
+              ? `Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in ${organization}'s project. Until you save here, Bots in ${organization} learn into its openbot container.`
+              : "Container changes apply to new conversations. Existing ones keep their first container. Until you choose another, Bots learn into this organization's default container."
         }
       >
         {(settingsQuery.isPending || organizationSpace.isPending) && (
@@ -404,7 +413,7 @@ export function LearningPage() {
                     >
                       <span className="font-medium">{nameFor(id)}</span>
                       <Select
-                        items={participation(own)}
+                        items={participation(own, organization)}
                         value={mode}
                         onValueChange={(value) => {
                           const mappings = { ...settings.bots };
@@ -428,7 +437,7 @@ export function LearningPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {participation(own).map((choice) => (
+                          {participation(own, organization).map((choice) => (
                             <SelectItem key={choice.value} value={choice.value}>
                               {choice.label}
                             </SelectItem>

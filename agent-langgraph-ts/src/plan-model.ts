@@ -5,7 +5,7 @@
  * A CLAUDE PLAN, as plan-model.ts reaches it for built-in Bots. The plan token never leaves the
  * Claude engine; the Claude Agent SDK makes every call. Its query is kept between a step's tool call
  * and that call's result, so every call of a run, and the next run on the same thread, goes under
- * one thread id per (Bot, thread) (`claudeThreadId`). A stopped run whose query is answering or
+ * one thread id per (Bot, thread, organization) (`claudeThreadId`). A stopped run whose query is answering or
  * waiting on a call cancels it at `/model/cancel`; a run that hands a call to the surface does not,
  * since the query waits for that result.
  *
@@ -64,16 +64,36 @@ export type PlanHarnessFields = {
    * (`claudeThreadId`); a ChatGPT plan's calls each go under a fresh thread.
    */
   threadId?: string;
+  /**
+   * The organization the run is in, as the server names it (`forwardedProps.openbotOrganization`).
+   * Absent in the organization every OpenBot starts with, and from a server that sends none.
+   */
+  organization?: string;
   /** The run's stop, which cancels a Claude plan's query. */
   signal?: AbortSignal;
   /** For tests: the fetch the AG-UI client uses. */
   fetch?: typeof fetch;
 };
 
-/** One Claude query per Bot and thread, as plan-model.ts names it on the server. */
-export function claudeThreadId(botId: string, threadId: string): string {
+/**
+ * One Claude query per Bot and thread, as plan-model.ts names it on the server, and per
+ * organization where the server names one. Two organizations that use the same thread id for a
+ * Bot of the same id then never share a query, its transcript or its turns.
+ *
+ * Without an organization the name is the one it always was, so a thread that already has a
+ * query keeps it.
+ */
+export function claudeThreadId(
+  botId: string,
+  threadId: string,
+  organization?: string,
+): string {
   return createHash("sha256")
-    .update(JSON.stringify([botId, threadId]))
+    .update(
+      JSON.stringify(
+        organization ? [botId, threadId, organization] : [botId, threadId],
+      ),
+    )
     .digest("hex");
 }
 
@@ -221,7 +241,11 @@ export class PlanHarnessChatModel extends BaseChatModel<PlanHarnessCallOptions> 
     super({});
     this.fields = fields;
     if (fields.plan !== "claude" || fields.threadId === undefined) return;
-    const query = claudeThreadId(fields.botId ?? "", fields.threadId);
+    const query = claudeThreadId(
+      fields.botId ?? "",
+      fields.threadId,
+      fields.organization,
+    );
     this.query = query;
     fields.signal?.addEventListener("abort", () => void this.cancel(query), {
       once: true,

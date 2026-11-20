@@ -44,6 +44,7 @@ import type {
   AssignableRole,
   OrganizationInvitationResponse,
 } from "@/lib/api/generated/model";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   cancelSentInvitationMutationOptions,
   inviteToOrganizationMutationOptions,
@@ -116,6 +117,12 @@ export function SentInvitationsSection({
 }) {
   const invitations = useQuery(sentInvitationsQueryOptions(organization.id));
   const [inviting, setInviting] = useState(false);
+  /*
+   * A hosted OpenBot: an invitation is an email from OpenBot by CopilotKit, accepted from that email.
+   * No OpenBot link accepts it, so there is no link to copy.
+   */
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
 
   return (
     <PageSection
@@ -141,6 +148,7 @@ export function SentInvitationsSection({
           {invitations.data.map((invitation, index) => (
             <Fragment key={invitation.id}>
               <SentInvitationRow
+                hosted={hosted}
                 invitation={invitation}
                 organizationId={organization.id}
               />
@@ -150,6 +158,7 @@ export function SentInvitationsSection({
         </PageRows>
       )}
       <InviteDialog
+        hosted={hosted}
         onOpenChange={setInviting}
         open={inviting}
         organization={organization}
@@ -160,12 +169,14 @@ export function SentInvitationsSection({
 
 /**
  * One invitation with its own Cancel, so a refusal is drawn under the row it is about. Only one
- * still waiting has a link worth passing on.
+ * still waiting has a link worth passing on, and none does on a hosted OpenBot.
  */
 function SentInvitationRow({
+  hosted,
   invitation,
   organizationId,
 }: {
+  hosted: boolean;
   invitation: SentInvitation;
   organizationId: string;
 }) {
@@ -185,7 +196,7 @@ function SentInvitationRow({
           <ItemDescription>{sentInvitationLine(invitation)}</ItemDescription>
         </ItemContent>
         <ItemActions>
-          {invitation.status === "pending" ? (
+          {invitation.status === "pending" && !hosted ? (
             <CopyLinkButton
               label={`Copy link for ${invitation.email}`}
               link={link}
@@ -226,10 +237,12 @@ function SentInvitationRow({
  * server's own sentence, with the address still typed.
  */
 function InviteDialog({
+  hosted,
   onOpenChange,
   open,
   organization,
 }: {
+  hosted: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   organization: OrganizationSummary;
@@ -275,8 +288,9 @@ function InviteDialog({
             <DialogHeader>
               <DialogTitle>Invite to {organization.name}</DialogTitle>
               <DialogDescription>
-                They see the invitation in OpenBot when they sign in with this
-                address. It lasts 7 days.
+                {hosted
+                  ? "OpenBot by CopilotKit emails them the invitation, and they accept it from that email. It lasts 7 days."
+                  : "They see the invitation in OpenBot when they sign in with this address. It lasts 7 days."}
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4">

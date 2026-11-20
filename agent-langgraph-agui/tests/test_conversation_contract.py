@@ -24,6 +24,7 @@ from harness_contract import (
     LATEST_QUESTION,
     STANDING_ROLE,
     anthropic_environment,
+    check_gateway_keys,
     conversation,
     fake_provider,
     missing_from,
@@ -85,6 +86,26 @@ def _system_text(body: dict) -> str:
         if isinstance(message, dict) and message.get("role") in {"system", "developer"}:
             parts.append(json.dumps(message.get("content")))
     return "\n".join(parts)
+
+
+@pytest.mark.parametrize("wire", ["openai", "anthropic"])
+def test_a_run_calls_the_gateway_with_its_own_key(monkeypatch, wire):
+    """The run's own gateway token, in its organization; the environment's without one.
+
+    See `shared/run_model_key.py`.
+    """
+
+    def app_for(environment):
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        monkeypatch.delenv("CHATGPT_AUTH_FILE", raising=False)
+        monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        from src import main
+
+        return importlib.reload(main).app
+
+    check_gateway_keys(app_for, wire, token=TOKEN)
 
 
 @pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])

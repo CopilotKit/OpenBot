@@ -53,7 +53,7 @@ import {
 } from "@/lib/deployment/queries";
 import { editionOf } from "@/lib/edition-guard";
 import {
-  type ConversationModel,
+  type ConversationModelInput,
   modelCatalogueQueryOptions,
 } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
@@ -188,7 +188,7 @@ function RouteComponent() {
    */
   const pickFor = async (
     agentId: string,
-  ): Promise<{ pick: ConversationModel | null; notUsed?: () => void }> => {
+  ): Promise<{ pick: ConversationModelInput | null; notUsed?: () => void }> => {
     const pick = draftModel.requested;
     if (!pick) return { pick: null };
     const bot =

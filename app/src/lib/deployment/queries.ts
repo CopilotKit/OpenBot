@@ -20,6 +20,8 @@ import {
   DEFAULT_ATTACHMENT_LIMITS,
 } from "@/lib/channels/attachments";
 import { ClientError } from "@/lib/client";
+import { invokeDesktop } from "@/lib/desktop/queries";
+import { desktopShell } from "@/lib/desktop/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
 
 /**
@@ -76,7 +78,33 @@ export type DeploymentCapabilities = {
    * and says so in place of asking.
    */
   botComputers?: boolean;
+  /**
+   * Whether people sign in through the hosted sign-in, with their account with OpenBot by
+   * CopilotKit: a hosted OpenBot. There an invitation is an email from OpenBot by CopilotKit, accepted
+   * from that email, with no OpenBot link that accepts it.
+   */
+  hostedSignIn?: boolean;
 };
+
+/**
+ * Whether this page shows the OpenBot on this computer inside OpenBot Desktop. There a request is admitted by the
+ * install's cookie (the personal edition admits nothing without it), so nothing is asked without the page's cookies.
+ * Asked of the desktop app once: it doesn't change while the page shows.
+ */
+const onThisComputer = new WeakMap<object, Promise<boolean>>();
+function showsOpenBotOnThisComputer(): Promise<boolean> {
+  const shell = desktopShell();
+  if (shell === null) return Promise.resolve(false);
+  let asked = onThisComputer.get(shell);
+  if (!asked) {
+    asked = invokeDesktop<{ mode?: string }>("connection").then(
+      (answer) => answer?.mode !== "connected",
+      () => true,
+    );
+    onThisComputer.set(shell, asked);
+  }
+  return asked;
+}
 
 /**
  * The API's `deployment`, asked where the server answers it.
@@ -84,27 +112,39 @@ export type DeploymentCapabilities = {
  * Signed in, it is answered in an organization the person is a member of and not found in any
  * other, `default` included, as every address under an organization is. Nobody signed in reads it
  * at `default`, which the sign-in screen asks before there is anybody to ask as. So it is asked in
- * the organization the person works in once that is known, and at `default` before. A person who
- * is signed in and not a member of `default` is told "not found" there, and is asked in one of
- * their own instead: the facts are the deployment's, the same in each.
+ * the organization the person works in once that is known. Before, it is asked at `default` as
+ * nobody, without the page's cookies: answered to anybody, so a person who is signed in and not a
+ * member of `default` is never told "not found" on the way in. The facts are the deployment's, the
+ * same asked as anybody or in any organization.
+ *
+ * Inside OpenBot Desktop, on the OpenBot on this computer, it is asked with the page's cookies,
+ * which that OpenBot needs; the person is in `default` there. Told "not found" all the same, it is
+ * asked in one of their own.
  */
 export async function readDeployment(options: {
   signal?: AbortSignal;
   fallback: string;
 }): Promise<Deployment> {
   const known = currentOrganizationId();
+  if (known !== undefined) return getDeployment(known, options);
+  if (!(await showsOpenBotOnThisComputer()))
+    return getDeployment(DEPLOYMENT_ORGANIZATION, {
+      ...options,
+      credentials: "omit",
+    });
   try {
-    return await getDeployment(known ?? DEPLOYMENT_ORGANIZATION, options);
+    return await getDeployment(DEPLOYMENT_ORGANIZATION, options);
   } catch (error) {
-    if (
-      known !== undefined ||
-      !(error instanceof ClientError) ||
-      error.status !== 404
-    )
-      throw error;
+    if (!(error instanceof ClientError) || error.status !== 404) throw error;
     const own = (await listOrganizations({ limit: 1 }, undefined, options))
       .organizations[0];
-    if (!own) throw error;
+    // In no organization (removed from the last one): what this OpenBot offers anybody, asked as nobody, so the
+    // sign-in screen and the page for somebody in no organization can still offer a way back in.
+    if (!own)
+      return getDeployment(DEPLOYMENT_ORGANIZATION, {
+        ...options,
+        credentials: "omit",
+      });
     return getDeployment(own.id, options);
   }
 }
@@ -246,6 +286,7 @@ export function deploymentCapabilitiesQueryOptions() {
         isolatedBots: body.isolatedBots === true,
         // The other way round from the rest: a server that doesn't say reads as having computers.
         botComputers: body.botComputers !== false,
+        hostedSignIn: body.hostedSignIn === true,
       };
     },
   });
@@ -257,9 +298,10 @@ export function deploymentCapabilitiesQueryOptions() {
  * like every other, and that is what the connection line reads.
  */
 export async function askWhetherOpenBotAnswers(): Promise<void> {
-  await getDeployment(DEPLOYMENT_ORGANIZATION, {
-    fallback: "Couldn't reach OpenBot.",
-  }).catch(() => undefined);
+  // Where the deployment is answered for this person, so the question is never refused as "not found".
+  await readDeployment({ fallback: "Couldn't reach OpenBot." }).catch(
+    () => undefined,
+  );
 }
 
 /**

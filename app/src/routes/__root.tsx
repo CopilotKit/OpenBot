@@ -4,6 +4,7 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { RenewalNotices } from "@/components/auth/renewal-notices";
 import { ClientVersionGate } from "@/components/layout/client-version-gate";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toast";
@@ -132,6 +133,7 @@ function RootComponent() {
             <Outlet />
           </ClientVersionGate>
           <Toaster />
+          <RenewalNotices />
         </TooltipProvider>
       </ThemeProvider>
     </div>

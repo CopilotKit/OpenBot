@@ -157,6 +157,8 @@ export function ComputersPage({
     enabled: (agentId === undefined || admin) && noComputers === false,
   });
   const hostAccess = useQuery(hostAccessQueryOptions());
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
   // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
   const agents = useQuery(agentListQueryOptions(false, useBotListScope()));
   const setState = useMutation(setComputerStateMutationOptions(queryClient));
@@ -288,8 +290,12 @@ export function ComputersPage({
         </p>
       ) : null}
 
-      {/* On one Bot's page, folders only where they exist: inside OpenBot Desktop. */}
-      {agentId && hostAccess.data?.desktop === false ? null : (
+      {/*
+        On one Bot's page, folders only where they exist: inside OpenBot Desktop. On a hosted OpenBot never: only the
+        OpenBot that OpenBot Desktop runs on the person's own computer can be given a folder there, so a hosted one
+        never can, and "Needs OpenBot Desktop" would send them to something that can't help.
+      */}
+      {(agentId || hosted) && hostAccess.data?.desktop === false ? null : (
         <HostFoldersSection
           connected={hostAccess.data?.connected ?? false}
           desktop={hostAccess.data?.desktop !== false}

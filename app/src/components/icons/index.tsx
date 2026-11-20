@@ -120,6 +120,7 @@ import {
   ComputerRemoveIcon,
   ComputerTerminal01Icon,
   Copy01Icon,
+  CornerDownLeftIcon,
   CpuIcon,
   CreditCardIcon,
   Csv01Icon,
@@ -363,6 +364,10 @@ export const IconCloud = defineIcon("cloud", CloudIcon);
 export const IconCloudOff = defineIcon("cloud-off", CloudOffIcon);
 export const IconCode = defineIcon("code", SourceCodeIcon);
 export const IconCopy = defineIcon("copy", Copy01Icon);
+export const IconCornerDownLeft = defineIcon(
+  "corner-down-left",
+  CornerDownLeftIcon,
+);
 export const IconCornerDownRight = defineIcon(
   "corner-down-right",
   ArrowMoveDownRightIcon,

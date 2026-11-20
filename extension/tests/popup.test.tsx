@@ -11,7 +11,7 @@ import type { LearningSpaceState } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { handleConnectionMessage } from "../src/background/connection";
-import { PASS_HINTS } from "../src/offscreen/grant";
+import { classifyGrantError, PASS_HINTS } from "../src/offscreen/grant";
 import { voiceSentence } from "../src/offscreen/voice";
 import { desktopSentence } from "../src/pages/popup/desktop-sentence";
 import { Popup } from "../src/pages/popup/popup";
@@ -24,6 +24,7 @@ import {
   type PageToBackground,
   type RecorderState,
 } from "../src/protocol/messages";
+import { COMPANY_SIGN_IN_REQUIRED } from "../src/shared/openbot-client";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 import { fakeSpeech, onDeviceModel } from "./support/fake-speech";
 
@@ -1631,4 +1632,96 @@ test("signed out, a Start-over drain that is not kept shows only the kept row: n
   expect(queryByText(SENDING)).toBeNull();
   expect(queryByText("Learning capture")).toBeNull();
   expect(queryByText("Sending to OpenBot's backend")).toBeNull();
+});
+
+test("held out until they sign in through their company, the popup says so in the Recorder's words and opens OpenBot, where they link it", async () => {
+  // The re-check: while the organization held the person out (SSO_REQUIRED), the popup never said company sign-in.
+  const view = setup(stateResponse(), {
+    answers: {
+      "page.learning": { ok: false, error: COMPANY_SIGN_IN_REQUIRED },
+    },
+  });
+  expect(await view.findByText(COMPANY_SIGN_IN_REQUIRED)).toBeTruthy();
+  fireEvent.click(
+    view.getByRole("button", { name: "Sign in with your company" }),
+  );
+  await waitFor(() =>
+    expect(view.sent).toContainEqual({
+      type: "page.openbot.open",
+      url: "https://openbot.example.test/",
+    }),
+  );
+});
+
+test("held out while recording, Learning capture says it is paused for company sign-in and points at the way in below, never an unknown answer", async () => {
+  // The phone and Recorder end-to-end run: the capture pass refused with 403 SSO_REQUIRED, and the card said "an answer
+  // the Recorder does not know (403)" above the company sign-in block.
+  const verdict = classifyGrantError(403, {
+    code: "SSO_REQUIRED",
+    message:
+      "This organization requires signing in through your company's identity provider.",
+  });
+  expect(verdict.kind).toBe("hold");
+  const view = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        intelligence: "held",
+        intelligenceReason:
+          verdict.kind === "hold" ? verdict.hint : "not a hold",
+      },
+    }),
+    {
+      answers: {
+        "page.learning": { ok: false, error: COMPANY_SIGN_IN_REQUIRED },
+      },
+    },
+  );
+  await view.findByText("Learning capture is paused");
+  expect(
+    view.getByText(
+      "Your organization requires signing in through your company. Use Sign in with your company below, and capture goes on once you have.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/does not know/)).toBeNull();
+  expect(
+    await view.findByRole("button", { name: "Sign in with your company" }),
+  ).toBeTruthy();
+});
+
+test("any other refusal offers no company sign-in", async () => {
+  const view = setup(stateResponse(), {
+    answers: {
+      "page.learning": {
+        ok: false,
+        error: "OpenBot did not answer. Try again.",
+      },
+    },
+  });
+  await view.findByText("OpenBot did not answer. Try again.");
+  expect(
+    view.queryByRole("button", { name: "Sign in with your company" }),
+  ).toBeNull();
+});
+
+test("connected, the popup says which organization it records into, and only the OpenBot's address when none is named", async () => {
+  const named = setup(
+    stateResponse({
+      connection: {
+        openbotUrl: "https://openbot.example.test",
+        user: { name: "Ada Lovelace", email: "ada@example.test" },
+        via: "web",
+        organizationName: "Harbor Research",
+      },
+    }),
+  );
+  await named.findByText(
+    "Records into Harbor Research on openbot.example.test",
+  );
+  named.unmount();
+
+  const plain = setup(stateResponse());
+  await plain.findByText("Ada Lovelace");
+  expect(plain.queryByText(/Records into/)).toBeNull();
+  await plain.findByText("openbot.example.test");
 });

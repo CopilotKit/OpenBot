@@ -42,6 +42,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin, type KnownRole } from "@/lib/auth/roles";
 import {
   changeMemberRoleMutationOptions,
+  deleteOrganizationMutationOptions,
   leaveOrganizationMutationOptions,
   removeOrganizationMemberMutationOptions,
   renameOrganizationMutationOptions,
@@ -54,14 +55,16 @@ import {
 } from "@/lib/organizations/queries";
 import {
   givableRoles,
-  initialsOf,
   memberControl,
+  memberLine,
   personName,
+  removeMemberWords,
   roleChangeQuestion,
   roleInSentence,
   roleName,
 } from "@/lib/organizations/words";
 import { queryClient } from "@/query-client";
+import { PersonAvatar } from "./person-avatar";
 import { SentInvitationsSection } from "./sent-invitations-section";
 
 /** The API's cap on an organization's name, so the field stops where the server does. */
@@ -101,6 +104,9 @@ export function OrganizationSettingsPage() {
       <MembersSection organization={organization} />
       {canManage ? (
         <SentInvitationsSection organization={organization} />
+      ) : null}
+      {organization.role === "owner" ? (
+        <DeleteOrganizationSection organization={organization} />
       ) : null}
     </PageShell>
   );
@@ -254,19 +260,6 @@ function RenameOrganizationDialog({
   );
 }
 
-/** A person's picture, or their initials on the tint the account row uses. */
-function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
-  return (
-    <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted-foreground/10 text-foreground/70 text-xs">
-      {person.image ? (
-        <img alt="" className="size-full object-cover" src={person.image} />
-      ) : (
-        initialsOf(person)
-      )}
-    </div>
-  );
-}
-
 /** A member and the role they are about to be given. */
 type RoleChange = {
   member: OrganizationMemberSummary;
@@ -338,10 +331,15 @@ function MembersSection({
                         </span>
                       ) : null}
                     </ItemTitle>
-                    <ItemDescription className="line-clamp-1 break-all">
-                      {member.name?.trim()
-                        ? `${member.email} · ${roleName(member.role)}`
-                        : roleName(member.role)}
+                    {/* Not opened yet wraps whole words onto a second line, never cut off. */}
+                    <ItemDescription
+                      className={
+                        member.notOpenedYet
+                          ? "line-clamp-2 break-words"
+                          : "line-clamp-1 break-all"
+                      }
+                    >
+                      {memberLine(member)}
                     </ItemDescription>
                   </ItemContent>
                   {control || roles.length > 0 ? (
@@ -563,8 +561,7 @@ function RemoveMemberDialog({
             Remove {personName(member)} from {organization.name}?
           </DialogTitle>
           <DialogDescription>
-            They keep their account and their other organizations. What they
-            made here stays here.
+            {removeMemberWords(member, organization.name)}
           </DialogDescription>
         </DialogHeader>
         {remove.error ? (
@@ -647,6 +644,132 @@ function LeaveOrganizationDialog({
             variant="destructive"
           >
             {leave.isPending ? "Leaving…" : "Leave"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Delete the organization, for its owner. Asked in a dialog that wants the organization's name typed,
+ * because everything in it goes for everybody and can't come back. The server decides whether it can
+ * go: a person's own organization and the one that comes with OpenBot stay, and its refusal is said
+ * in its own words in the dialog.
+ */
+function DeleteOrganizationSection({
+  organization,
+}: {
+  organization: OrganizationSummary;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <PageSection
+      description="Its Bots, conversations and computers are deleted for everyone. Members keep their accounts and their other organizations."
+      title="Delete"
+    >
+      <Button
+        className="mt-4"
+        onClick={() => setOpen(true)}
+        variant="destructive"
+      >
+        Delete organization
+      </Button>
+      <DeleteOrganizationDialog
+        onOpenChange={setOpen}
+        open={open}
+        organization={organization}
+      />
+    </PageSection>
+  );
+}
+
+function DeleteOrganizationDialog({
+  onOpenChange,
+  open,
+  organization,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  organization: OrganizationSummary;
+}) {
+  const formId = useId();
+  const navigate = useNavigate();
+  const remove = useMutation(
+    deleteOrganizationMutationOptions(queryClient, async () => {
+      await navigate({ to: "/" });
+    }),
+  );
+  const { reset } = remove;
+  const [typed, setTyped] = useState("");
+  const confirmed = typed.trim() === organization.name.trim();
+
+  // Each opening starts empty, and a refusal from the last one is not news about this one.
+  useEffect(() => {
+    if (open) {
+      setTyped("");
+      reset();
+    }
+  }, [open, reset]);
+
+  const confirm = () => {
+    if (!confirmed || remove.isPending) return;
+    remove.mutate(organization.id, { onSuccess: () => onOpenChange(false) });
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete {organization.name}?</DialogTitle>
+          <DialogDescription>
+            Its Bots stop, and its conversations and computers are deleted for
+            everyone in it. You can't undo this.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4">
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              confirm();
+            }}
+          >
+            <Field>
+              <FieldLabel htmlFor={`${formId}-name`}>
+                Type {organization.name} to confirm
+              </FieldLabel>
+              <Input
+                autoComplete="off"
+                autoFocus
+                disabled={remove.isPending}
+                id={`${formId}-name`}
+                onChange={(event) => {
+                  setTyped(event.target.value);
+                  reset();
+                }}
+                value={typed}
+              />
+            </Field>
+          </form>
+          {remove.error ? (
+            <p className="mt-3 text-destructive text-sm" role="alert">
+              {remove.error.message}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
+            Cancel
+          </Button>
+          <Button
+            disabled={!confirmed || remove.isPending}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="destructive"
+          >
+            {remove.isPending ? "Deleting…" : "Delete organization"}
           </Button>
         </DialogFooter>
       </DialogContent>

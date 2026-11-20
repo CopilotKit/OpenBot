@@ -6,6 +6,12 @@ import type { LimitParameter } from "./limitParameter";
 
 export type ListOrganizationMembersParams = {
   /**
+   * The start of a name, a first or last name, or an address, or a part of one, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.
+   * @maxLength 200
+   * @pattern ^[^\x00]*$
+   */
+  search?: string;
+  /**
    * Most items in one page.
    * @minimum 1
    * @maximum 100
