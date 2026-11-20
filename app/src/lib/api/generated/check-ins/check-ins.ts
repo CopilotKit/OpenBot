@@ -23,6 +23,7 @@ import type {
   CheckInItemNotFoundResponse,
   CheckInItemPage,
   CheckInItemResponse,
+  CheckInItemWork,
   CheckInNotFoundResponse,
   CheckInPage,
   CheckInResponse,
@@ -49,6 +50,7 @@ import type {
   UnexpectedErrorResponse,
   UpdateCheckInHeaders,
   UpdateCheckInRequest,
+  WorkOnCheckInItemHeaders,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -1292,6 +1294,157 @@ export const useStartCheckInItem = <
   TContext
 > => {
   return useMutation(getStartCheckInItemMutationOptions(options), queryClient);
+};
+export const getWorkOnCheckInItemUrl = (
+  organizationId: string,
+  checkInItemId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/check-in-items/${encodeURIComponent(String(checkInItemId))}/work-on`;
+};
+
+/**
+ * Start an item the way this server takes work on. Where the server runs tasks in conversations of their own, it becomes a task, as startCheckInItem makes one, and `task` names it. Where it does not, no task and no conversation is made: the item is started, and `conversation` names the caller's own conversation with the item's Bot (made if they have none yet) and the message to send there as the caller's own, so the Bot works on it in that conversation like any other request. One that is no longer open, or is somebody else's, is refused.
+ * @summary Work on an item
+ */
+export const workOnCheckInItem = async (
+  organizationId: string,
+  checkInItemId: string,
+  headers: WorkOnCheckInItemHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<CheckInItemWork> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<CheckInItemWork>(
+    getWorkOnCheckInItemUrl(organizationId, checkInItemId),
+    {
+      ...options,
+      method: "POST",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getWorkOnCheckInItemMutationKey = () =>
+  ["workOnCheckInItem"] as const;
+
+export const getWorkOnCheckInItemMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | CheckInItemNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof workOnCheckInItem>>,
+    TError,
+    WorkOnCheckInItemMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof workOnCheckInItem>>,
+  TError,
+  WorkOnCheckInItemMutationVariables,
+  TContext
+> => {
+  const mutationKey = getWorkOnCheckInItemMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof workOnCheckInItem>>,
+    WorkOnCheckInItemMutationVariables
+  > = (props) => {
+    const { organizationId, checkInItemId, headers } = props ?? {};
+
+    return workOnCheckInItem(
+      organizationId,
+      checkInItemId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type WorkOnCheckInItemMutationResult = NonNullable<
+  Awaited<ReturnType<typeof workOnCheckInItem>>
+>;
+
+export type WorkOnCheckInItemMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | CheckInItemNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type WorkOnCheckInItemMutationVariables = {
+  organizationId: string;
+  checkInItemId: string;
+  headers: WorkOnCheckInItemHeaders;
+};
+
+/**
+ * @summary Work on an item
+ */
+export const useWorkOnCheckInItem = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | CheckInItemNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof workOnCheckInItem>>,
+      TError,
+      WorkOnCheckInItemMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof workOnCheckInItem>>,
+  TError,
+  WorkOnCheckInItemMutationVariables,
+  TContext
+> => {
+  return useMutation(getWorkOnCheckInItemMutationOptions(options), queryClient);
 };
 export const getDismissCheckInItemUrl = (
   organizationId: string,
