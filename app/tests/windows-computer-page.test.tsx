@@ -21,8 +21,8 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * The Windows computer's page: its live screen, view-only and labelled as not masked, and taking it over and handing
- * it back through the client generated from api/openapi.yaml.
+ * The Windows computer's page: its live screen, labelled as not masked and driven only while the person holds control,
+ * and taking it over and handing it back through the client generated from api/openapi.yaml.
  */
 
 /** Every socket the page opened, and what it sent on each. */
@@ -93,18 +93,33 @@ function draw() {
   );
 }
 
-test("the screen is watched at the Windows computer's address, said to be unmasked, and sends nothing but receipts", async () => {
+/** The Windows computer, with control held by `holder`. */
+function heldBy(holder: "bot" | "human") {
+  return http.get(
+    "*/api/v2/organizations/:organizationId/windows-computer",
+    () =>
+      HttpResponse.json({
+        ...getGetWindowsComputerResponseMock(),
+        available: true,
+        unavailableReason: undefined,
+        control: {
+          holder,
+          since: "2026-11-20T09:13:41.000Z",
+          ...(holder === "human" ? { reason: "taken" } : {}),
+          snapshotRequired: holder === "human",
+        },
+      }),
+  );
+}
+
+/** The page, its one screen socket, and a picture on its canvas to click and type on. */
+async function liveScreen() {
   const view = draw();
   expect(await view.findByText(NOT_MASKED)).toBeTruthy();
-  expect(requests).toContain(
-    "GET /api/v2/organizations/default/windows-computer",
-  );
   await waitFor(() => expect(sockets).toHaveLength(1));
-  expect(sockets.map((entry) => new URL(entry.url).pathname)).toEqual([
-    "/api/v2/organizations/default/windows-computer/screen",
-  ]);
-  // A live screen, with a picture on it: the clicks and keys below land on a canvas that is showing.
-  sockets[0]?.socket.onmessage?.({
+  const entry = sockets[0];
+  if (!entry) throw new Error("no socket");
+  entry.socket.onmessage?.({
     data: JSON.stringify({
       type: "frame",
       data: "AAAA",
@@ -112,19 +127,55 @@ test("the screen is watched at the Windows computer's address, said to be unmask
       height: 600,
     }),
   });
+  const canvas = view.container.querySelector("canvas") as HTMLCanvasElement;
+  canvas.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: 800, height: 600 }) as DOMRect;
+  await settleReactWork();
+  return { view, entry, canvas };
+}
 
-  const canvas = view.container.querySelector("canvas");
-  expect(canvas).toBeTruthy();
-  if (!canvas) return;
+test("the screen is watched at the Windows computer's address and said to be unmasked; while the Bot has it, nothing is sent", async () => {
+  server.use(heldBy("bot"));
+  const { entry, canvas } = await liveScreen();
+  expect(requests).toContain(
+    "GET /api/v2/organizations/default/windows-computer",
+  );
+  expect(new URL(entry.url).pathname).toBe(
+    "/api/v2/organizations/default/windows-computer/screen",
+  );
   fireEvent.mouseDown(canvas, { clientX: 10, clientY: 10, button: 0 });
   fireEvent.mouseUp(canvas, { clientX: 10, clientY: 10, button: 0 });
   fireEvent.keyDown(canvas, { key: "a", code: "KeyA" });
   fireEvent.wheel(canvas, { deltaY: 100 });
   await settleReactWork();
-  const sent = sockets.flatMap((entry) => entry.sent);
-  expect(sent.filter((message) => !message.includes("frame-received"))).toEqual(
-    [],
+  expect(
+    entry.sent.filter((message) => !message.includes("frame-received")),
+  ).toEqual([]);
+});
+
+test("once the person holds control, what they click on the screen goes to the Windows computer", async () => {
+  server.use(heldBy("human"));
+  const { entry, canvas } = await liveScreen();
+  fireEvent.mouseDown(canvas, {
+    clientX: 40,
+    clientY: 30,
+    button: 0,
+    detail: 1,
+  });
+  fireEvent.mouseUp(canvas, { clientX: 40, clientY: 30, button: 0, detail: 1 });
+  await waitFor(() =>
+    expect(
+      entry.sent
+        .map((message) => JSON.parse(message) as Record<string, unknown>)
+        .filter(
+          (message) => message.type === "mouse" && message.event === "pressed",
+        ),
+    ).toHaveLength(1),
   );
+  const pressed = entry.sent
+    .map((message) => JSON.parse(message) as Record<string, unknown>)
+    .find((message) => message.type === "mouse" && message.event === "pressed");
+  expect(pressed).toMatchObject({ x: 40, y: 30, button: "left" });
 });
 
 test("taking it over and handing it back are writes at the API's address, each with its own Idempotency-Key", async () => {

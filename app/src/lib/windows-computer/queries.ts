@@ -34,3 +34,18 @@ export function windowsComputerQueryOptions() {
     refetchInterval: 3_000,
   });
 }
+
+/**
+ * Whether the person holds the Windows computer's control right now: asked by its live screen before it
+ * takes their input again after a reconnect. Not cached; false when it can't be told.
+ */
+export async function holdsWindowsComputer(): Promise<boolean> {
+  try {
+    const computer = await getWindowsComputer(organizationId(), {
+      fallback: "Couldn't load your Windows computer.",
+    });
+    return computer.control?.holder === "human";
+  } catch {
+    return false;
+  }
+}

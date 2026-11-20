@@ -44,6 +44,7 @@ import {
   takeWindowsComputerMutationOptions,
 } from "@/lib/windows-computer/mutations";
 import {
+  holdsWindowsComputer,
   type WindowsComputer,
   windowsComputerQueryOptions,
 } from "@/lib/windows-computer/queries";
@@ -88,13 +89,13 @@ export function controlWords(computer: WindowsComputer): {
         description:
           computer.control.reason === "interference"
             ? "Your Bot stopped when you used the mouse or keyboard. Hand it back when you're done."
-            : "Your Bot waits until you hand it back.",
+            : "Click and type on the screen above to use it. Your Bot waits until you hand it back.",
         human: true,
       }
     : {
         title: "Your Bot is using it",
         description:
-          "Take over to use it yourself. Your Bot stops until you hand it back.",
+          "Take over to use it from here. Your Bot stops until you hand it back.",
         human: false,
       };
 }
@@ -121,8 +122,8 @@ export function recordingWords(recording: WindowsComputerRecording): string {
  * The Windows computer: its live screen, who is using it, and its recordings
  * (`api/openapi/windows-computer.yaml`, and the `windowsComputerScreen` channel in `api/asyncapi.yaml`).
  *
- * The screen is view-only and shows the whole screen, not masked, and says so above it. The person takes the
- * computer over here and then uses its own mouse and keyboard; nothing typed or clicked on this page reaches it.
+ * The screen is the whole screen, not masked, and says so above it. Once the person takes over, what they click and
+ * type on it goes to the Windows computer; while their Bot has it, the screen only shows it.
  */
 export function WindowsComputerPage() {
   const computer = useQuery(windowsComputerQueryOptions());
@@ -166,13 +167,13 @@ function WindowsComputerView({ computer }: { computer: WindowsComputer }) {
         <div className="relative min-h-48 w-full overflow-hidden rounded-lg border border-border bg-muted">
           <LiveScreen
             computerId="windows-computer"
-            driving={false}
-            label="Your Windows computer's screen."
+            driving={control.human}
+            label="Your Windows computer's screen. You have control. Click and type here."
             onProblem={setProblem}
             onReconnecting={setReconnecting}
+            ownership={holdsWindowsComputer}
             retryKey={retryKey}
             socketPath="/windows-computer/screen"
-            viewOnly
           />
         </div>
         {problem ? (

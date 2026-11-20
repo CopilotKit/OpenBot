@@ -136,10 +136,10 @@ type Props = {
    */
   socketPath?: string;
   /**
-   * Nothing the person does here is sent: a screen to watch, such as the Windows computer's, which the
-   * person takes over at the computer itself. Overrides `driving`.
+   * Whether the person holds control right now, asked again before input is taken after a reconnect.
+   * A Bot's computer's control unless given: the Windows computer's page asks its own.
    */
-  viewOnly?: boolean;
+  ownership?: () => Promise<boolean>;
   ref?: Ref<LiveScreenHandle>;
 };
 
@@ -151,9 +151,9 @@ type FrameMessage = {
 
 export function LiveScreen({
   computerId,
-  driving: drivingProp,
+  driving,
   socketPath,
-  viewOnly = false,
+  ownership,
   onProblem,
   onReconnecting,
   retryKey = 0,
@@ -161,7 +161,6 @@ export function LiveScreen({
   autoFocus = false,
   ref,
 }: Props) {
-  const driving = drivingProp && !viewOnly;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   /** Keys sent down to the remote browser, by code, whose release goes there too, wherever the focus is by then. */
@@ -424,7 +423,7 @@ export function LiveScreen({
         };
       },
       verifyOwnership: async () => {
-        if (viewOnly) return false;
+        if (ownership) return ownership();
         const state = await readControl(computerId);
         return state?.holder === "human" && !state.transitioning;
       },
@@ -469,10 +468,16 @@ export function LiveScreen({
     )
       return;
     let live = true;
-    void readControl(computerId)
-      .then((state) => {
+    void (
+      ownership
+        ? ownership()
+        : readControl(computerId).then(
+            (state) => state?.holder === "human" && !state.transitioning,
+          )
+    )
+      .then((holds) => {
         if (!live || socketRef.current?.readyState !== WebSocket.OPEN) return;
-        inputReady.current = state?.holder === "human" && !state.transitioning;
+        inputReady.current = holds;
         setConnected(inputReady.current);
       })
       .catch(() => {
@@ -481,7 +486,7 @@ export function LiveScreen({
     return () => {
       live = false;
     };
-  }, [computerId, driving]);
+  }, [computerId, driving, ownership]);
 
   /**
    * A move or a scroll not sent yet, held until the next animation frame.
