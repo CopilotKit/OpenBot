@@ -1643,18 +1643,27 @@ const ENGINE_OUTPUT_CAP: usize = 1024 * 1024;
 static ENGINE_CHECK_LIMIT_FOR_TESTS: std::sync::Mutex<Option<Duration>> =
     std::sync::Mutex::new(None);
 
-/// `args` on the engine, within `limit`: whether it succeeded, and its stdout. Nothing when it did
-/// not finish in time or could not run.
-fn engine_answer(
+/// `args` on the engine, within `limit` and, when there is one, by `deadline`: whether it
+/// succeeded, and its stdout. Nothing when it did not finish in time, could not run, or the
+/// deadline had passed.
+fn engine_answer_by(
     address: &crate::engine::Address,
     args: &[&str],
     limit: Duration,
+    deadline: Option<Instant>,
 ) -> Option<(bool, String)> {
     #[cfg(test)]
     let limit = ENGINE_CHECK_LIMIT_FOR_TESTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .unwrap_or(limit);
+    let limit = match deadline {
+        Some(deadline) => limit.min(deadline.saturating_duration_since(Instant::now())),
+        None => limit,
+    };
+    if limit.is_zero() {
+        return None;
+    }
     let mut command = address.command();
     command.args(args);
     let (succeeded, stdout) = crate::local_images::run_within(command, limit, ENGINE_OUTPUT_CAP)?;
@@ -1667,20 +1676,33 @@ fn engine_output(
     args: &[&str],
     limit: Duration,
 ) -> Option<String> {
-    engine_answer(address, args, limit).and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
+    engine_output_by(address, args, limit, None)
 }
 
-/// The engine's CPUs and memory from its `info`.
-fn engine_size(address: &crate::engine::Address) -> Option<(u64, u64)> {
+/// `engine_output`, also stopped at `deadline` when there is one.
+fn engine_output_by(
+    address: &crate::engine::Address,
+    args: &[&str],
+    limit: Duration,
+    deadline: Option<Instant>,
+) -> Option<String> {
+    engine_answer_by(address, args, limit, deadline)
+        .and_then(|(succeeded, stdout)| succeeded.then_some(stdout))
+}
+
+/// The engine's CPUs and memory from its `info`, its command stopped at `deadline` when there is
+/// one.
+fn engine_size(address: &crate::engine::Address, deadline: Option<Instant>) -> Option<(u64, u64)> {
     let format = if address.engine == crate::engine::Engine::Podman {
         "{{.Host.CPUs}} {{.Host.MemTotal}}"
     } else {
         "{{.NCPU}} {{.MemTotal}}"
     };
-    parse_engine_size(&engine_output(
+    parse_engine_size(&engine_output_by(
         address,
         &["info", "--format", format],
         ENGINE_QUERY_LIMIT,
+        deadline,
     )?)
 }
 
@@ -1691,10 +1713,16 @@ gives no answer, and disk is then not judged. Also what `update_ready` measures 
 an update's images ahead of time.
 */
 pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
-    let images = engine_output(
+    engine_disk_by(address, None)
+}
+
+/// `engine_disk`, every command stopped at `deadline` when there is one.
+fn engine_disk_by(address: &crate::engine::Address, deadline: Option<Instant>) -> Option<Disk> {
+    let images = engine_output_by(
         address,
         &["image", "ls", "--quiet", "--no-trunc"],
         ENGINE_QUERY_LIMIT,
+        deadline,
     )?;
     let mut tried = Vec::new();
     for image in images.lines().map(str::trim).filter(|id| !id.is_empty()) {
@@ -1706,7 +1734,7 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
         }
         tried.push(image);
         // No answer in time is an engine that hangs: another image would only hang too.
-        let (succeeded, measured) = engine_answer(
+        let (succeeded, measured) = engine_answer_by(
             address,
             &[
                 "run",
@@ -1720,6 +1748,7 @@ pub fn engine_disk(address: &crate::engine::Address) -> Option<Disk> {
                 "df -Pk /",
             ],
             ENGINE_RUN_LIMIT,
+            deadline,
         )?;
         if let Some(disk) = succeeded.then(|| parse_disk(&measured)).flatten() {
             return Some(disk);
@@ -1793,10 +1822,15 @@ fn gib(bytes: u64) -> String {
 
 impl EngineCheck {
     fn of(address: &crate::engine::Address) -> Self {
+        Self::by(address, None)
+    }
+
+    /// `of`, every engine command stopped at `deadline` when there is one.
+    fn by(address: &crate::engine::Address, deadline: Option<Instant>) -> Self {
         Self {
             podman: address.engine == crate::engine::Engine::Podman,
-            size: engine_size(address),
-            disk: engine_disk(address),
+            size: engine_size(address, deadline),
+            disk: engine_disk_by(address, deadline),
             drive: machine_drive(address),
             pressure: None,
         }
@@ -1955,14 +1989,12 @@ pub fn engine_in_use() -> Option<crate::engine::Address> {
 }
 
 /// The engine measured as `[local check]` logs it (`EngineCheck::said`): CPUs and memory, free disk
-/// inside a container and on the drive under a Podman machine, and what is short.
-pub fn measured_engine(address: &crate::engine::Address) -> String {
-    EngineCheck::of(address).said()
-}
-
-/// `args` on the engine within the check's limit for a query: its stdout when it succeeded.
-pub fn engine_query(address: &crate::engine::Address, args: &[&str]) -> Option<String> {
-    engine_output(address, args, ENGINE_QUERY_LIMIT)
+/// inside a container and on the drive under a Podman machine, and what is short. Every engine
+/// command is stopped at `deadline`, and nothing comes back when the deadline came first, since
+/// what was measured by then is not the engine's whole answer. For troubleshooting logs.
+pub fn measured_engine_by(address: &crate::engine::Address, deadline: Instant) -> Option<String> {
+    let check = EngineCheck::by(address, Some(deadline));
+    (Instant::now() < deadline).then(|| check.said())
 }
 
 /// Log a check: `[local check] before local start: ...`. A shortfall is a warning.
@@ -11820,8 +11852,9 @@ fn main() {
             failure: Some("The backend could not start.".into()),
             log_folder: Some(&logs),
             home: Some(&home),
-            engine: engine_in_use(),
-            server_log: None,
+            engine: crate::troubleshooting::given(engine_in_use()),
+            server_log: crate::troubleshooting::given(None),
+            limit: crate::troubleshooting::LIMIT,
         });
 
         // `~/.copilotkit/cli.log`, with Windows' separators on Windows.

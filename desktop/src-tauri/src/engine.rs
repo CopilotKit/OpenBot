@@ -427,6 +427,11 @@ fn running_machine(preferred: &str) -> Option<String> {
         .args(["machine", "list", "--format", "json"])
         .output()
         .ok()?;
+    running_machine_in(output, preferred)
+}
+
+/// `running_machine`, from what `podman machine list --format json` said.
+fn running_machine_in(output: std::process::Output, preferred: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
@@ -856,6 +861,43 @@ pub fn own_machine_only(os: &str) -> bool {
 /// What is here, before anything is installed.
 pub fn detect() -> EngineStatus {
     detect_among(&[Engine::Docker, Engine::Podman])
+}
+
+/**
+`detect`, with each engine's `version` and Podman's `machine list` stopped at `deadline`: nothing
+when one of them was still running then, since an engine that hangs is neither answering nor
+absent. For troubleshooting logs, which must not wait on a stalled engine.
+*/
+pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
+    let left = || deadline.saturating_duration_since(std::time::Instant::now());
+    let timed_out = std::cell::Cell::new(false);
+    let status = detect_among_with(
+        &[Engine::Docker, Engine::Podman],
+        own_machine_only(std::env::consts::OS),
+        |address| match address.responds_within(left()) {
+            Some(answered) => answered,
+            None => {
+                timed_out.set(true);
+                false
+            }
+        },
+        passed_over_machine,
+        || {
+            let mut list = tool(Engine::Podman);
+            list.args(["machine", "list", "--format", "json"]);
+            match crate::quiet::output_within(&mut list, left()) {
+                Ok(output) => running_machine_in(output, crate::acquire::MACHINE),
+                Err(error) => {
+                    if error.kind() == std::io::ErrorKind::TimedOut {
+                        timed_out.set(true);
+                    }
+                    None
+                }
+            }
+        },
+        |engine| program(engine).is_some(),
+    );
+    (!timed_out.get()).then_some(status)
 }
 
 /// What is here of the engine an installation was set up on, or of either when it saved none.
