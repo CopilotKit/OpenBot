@@ -19,6 +19,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { heldPageDeps } from "@/components/auth/company-sign-in-page";
 import { CompanySignInSection } from "@/components/settings/company-sign-in";
 import type { CompanySignIn, Problem } from "@/lib/api/generated/model";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
@@ -26,7 +27,10 @@ import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { GetCompanySignInResponse } from "@/lib/api/generated/people/people.zod";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
-import { setCurrentOrganization } from "@/lib/organizations/current";
+import {
+  currentOrganizationId,
+  setCurrentOrganization,
+} from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as AuthedRoute } from "@/routes/_authed";
@@ -83,6 +87,12 @@ async function answer(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   requests.push(`${request.method} ${path}`);
+  // As a real OpenBot answers it: a signed-in person held out of Harbor is refused its deployment read too.
+  if (heldOut && path === `/api/v2/organizations/${HARBOR.id}/deployment`)
+    return new NativeResponse(JSON.stringify(refused), {
+      status: 403,
+      headers: { "content-type": "application/problem+json" },
+    });
   if (path.endsWith("/deployment"))
     return json(
       GetDeploymentResponse.parse({
@@ -140,6 +150,15 @@ async function answer(request: Request): Promise<Response> {
     });
   if (path === `/api/v2/organizations/${OWN.id}/shortened-tool-names`)
     return json({ tools: [] });
+  // As a real OpenBot answered it for an organization with no company sign-in.
+  if (path === `/api/v2/organizations/${OWN.id}/people/me/company-sign-in`)
+    return json(
+      GetCompanySignInResponse.parse({
+        required: false,
+        met: false,
+        providers: [],
+      }),
+    );
   if (path === `/api/v2/organizations/${HARBOR.id}/people/me/company-sign-in`)
     // Answered even while she is held out: it is how the page knows the way in.
     return json(GetCompanySignInResponse.parse(signIn));
@@ -273,24 +292,32 @@ test("a company with two providers offers a link through each, by the domain eac
   );
 });
 
-test("held out of one organization, she switches to another of hers from the page, and the app opens there", async () => {
+test("held out of one organization, she switches to another of hers from the page, and the app is loaded afresh at home there", async () => {
+  // The self-hosted end-to-end run: the switch took (her own organization answered), but the page went on showing
+  // the gate's refusal from before it, with the Link gone. Leaving the page loads the app afresh, as a reload did.
   ownToo = true;
-  const { view, person } = openApp();
-  await view.findByRole("heading", { name: "Sign in with your company" });
-  await person.click(
-    await view.findByRole("button", { name: "Switch organization" }),
-  );
-  const menu = await view.findByRole("menu");
-  // Her other organizations, not the one holding her out.
-  expect(within(menu).queryByText(HARBOR.name)).toBeNull();
-  await person.click(
-    within(menu).getByRole("menuitem", { name: "Ines's organization" }),
-  );
-  expect(await view.findByText("The app")).toBeTruthy();
-  expect(active).toBe(OWN.id);
-  expect(
-    view.queryByRole("heading", { name: "Sign in with your company" }),
-  ).toBe(null);
+  const opened: { active: string; working: string | undefined }[] = [];
+  const openHome = heldPageDeps.openHome;
+  heldPageDeps.openHome = () =>
+    opened.push({ active, working: currentOrganizationId() });
+  try {
+    const { view, person } = openApp();
+    await view.findByRole("heading", { name: "Sign in with your company" });
+    await person.click(
+      await view.findByRole("button", { name: "Switch organization" }),
+    );
+    const menu = await view.findByRole("menu");
+    // Her other organizations, not the one holding her out.
+    expect(within(menu).queryByText(HARBOR.name)).toBeNull();
+    await person.click(
+      within(menu).getByRole("menuitem", { name: "Ines's organization" }),
+    );
+    // Loaded afresh, once, only after the server and the app both work in the one she picked.
+    await waitFor(() => expect(opened).toHaveLength(1));
+    expect(opened[0]).toEqual({ active: OWN.id, working: OWN.id });
+  } finally {
+    heldPageDeps.openHome = openHome;
+  }
 });
 
 test("held out of her only organization, the page offers no switch", async () => {

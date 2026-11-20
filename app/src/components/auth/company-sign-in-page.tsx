@@ -4,7 +4,6 @@ import {
   IconUserCircle,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate, useRouter } from "@tanstack/react-router";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,11 @@ import { queryClient } from "@/query-client";
 import { LinkCompanyAccount } from "./link-company-account";
 
 export const SWITCH_ORGANIZATION = "Switch organization";
+
+/** How the page opens the app at home after a switch: the page loaded afresh. A test replaces it to see it asked. */
+export const heldPageDeps = {
+  openHome: () => window.location.assign("/"),
+};
 
 /**
  * The page for a member an organization holds out until they sign in through their company's identity provider
@@ -75,8 +79,6 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
  * switched, the app opens at home in the one they picked: the page they were on may be the held organization's own.
  */
 function OtherOrganizations() {
-  const router = useRouter();
-  const navigate = useNavigate();
   const current = useCurrentOrganizationId();
   const others = (useOrganizationChoices()?.organizations ?? []).filter(
     (organization) => organization.id !== current,
@@ -85,14 +87,15 @@ function OtherOrganizations() {
   const switching = useMutation({
     ...switched,
     /*
-     * Home, and the sign-in gate asked again, only once the app works in the one they picked: asked sooner, the gate
-     * asks in the held organization and is refused again. Here rather than on the call, whose callbacks are lost
-     * when the refusal draws this page afresh.
+     * Once the server works in the one they picked, the app is loaded afresh at home there. Not navigated in place: this
+     * page stands in for the sign-in gate's refusal, which the router kept showing after the gate let them through in
+     * the new organization (seen on a real OpenBot, while the same steps passed against a fake). Loaded afresh, nothing
+     * of the held organization is left to show. Here rather than on the call, whose callbacks are lost when the
+     * refusal draws this page afresh.
      */
     onSuccess: async (...done) => {
       await switched.onSuccess?.(...done);
-      await navigate({ to: "/" });
-      await router.invalidate();
+      heldPageDeps.openHome();
     },
   });
   if (others.length === 0) return null;
