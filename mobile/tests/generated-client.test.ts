@@ -139,6 +139,27 @@ const server = Bun.serve({
           headers: { "content-type": "application/problem+json" },
         },
       );
+    if (url.pathname === `${ORG}/bots/proof-expired`)
+      return Response.json(
+        {
+          type: "https://open.bot/errors/hosted-sign-in-renewal-required",
+          title: "Your sign-in needs renewing.",
+          status: 401,
+          detail: "Your sign-in needs renewing.",
+          code: "HOSTED_SIGN_IN_RENEWAL_REQUIRED",
+          category: "auth",
+          retryable: true,
+          requestId: "req_example",
+          traceId: "trace_example",
+        },
+        {
+          status: 401,
+          headers: {
+            "content-type": "application/problem+json",
+            "OpenBot-Sign-In": "/api/auth/hosted/sign-in",
+          },
+        },
+      );
     if (url.pathname === `${ORG}/bots/too-old`)
       return Response.json(
         {
@@ -914,4 +935,28 @@ test("somebody signed in to no organization gets Home for nobody's organization,
   // Added to one again: Try again reads the list afresh and they work there.
   inNone = false;
   expect((await organizationChoices()).currentId).toBe("org_work");
+});
+
+/*
+ * A hosted OpenBot refuses an admin action whose proof ran out with 401 HOSTED_SIGN_IN_RENEWAL_REQUIRED. The session is
+ * still signed in: the phone must never take it for being signed out and send the person back to sign in.
+ */
+test("a sign-in that needs renewing is not taken for being signed out", async () => {
+  setSignedInPerson("eve");
+  cookie = "better-auth.session_token=signed-in-eve";
+  const heard: string[] = [];
+  const stop = onSessionRefused(() => heard.push("refused"));
+  try {
+    const refused = await getBot(ORGANIZATION_ID, "proof-expired").catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toMatchObject({
+      status: 401,
+      code: "HOSTED_SIGN_IN_RENEWAL_REQUIRED",
+      message: "Your sign-in needs renewing.",
+    });
+    expect(heard).toEqual([]);
+  } finally {
+    stop();
+  }
 });

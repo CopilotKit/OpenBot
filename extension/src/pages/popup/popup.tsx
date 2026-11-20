@@ -270,7 +270,11 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   return (
     <Page
       title={connection.user.name}
-      description={new URL(connection.openbotUrl).host}
+      description={
+        connection.organizationName
+          ? `Records into ${connection.organizationName} on ${new URL(connection.openbotUrl).host}`
+          : new URL(connection.openbotUrl).host
+      }
       width="popup"
     >
       <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />

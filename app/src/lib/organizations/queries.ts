@@ -17,6 +17,7 @@ import {
   listOrganizationMembers,
   listOrganizations,
 } from "@/lib/api/generated/organizations/organizations";
+import { renewalRequired } from "@/lib/auth/renewal";
 import { ClientError, client } from "@/lib/client";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
@@ -181,7 +182,12 @@ async function ownOrganizations(
     });
   } catch (error) {
     // Not signed in is an answer, as it is for the current user.
-    if (error instanceof ClientError && error.status === 401) return null;
+    if (
+      error instanceof ClientError &&
+      error.status === 401 &&
+      !renewalRequired(error)
+    )
+      return null;
     // An OpenBot that keeps one organization has no list of them. A refusal is not that.
     if (noSuchAddress(error)) return ONLY;
     throw error;
