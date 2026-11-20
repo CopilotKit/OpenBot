@@ -134,6 +134,7 @@ type Props = {
   status?: boolean;
   onStart?: (startable: Startable) => Promise<StartOutcome>;
   onForgotten?: () => void;
+  installAgain?: () => Promise<boolean>;
   pollDelays?: number[];
   roomEveryMs?: number;
 };
@@ -146,6 +147,7 @@ function Holder(props: Props) {
     connected: props.connected ?? false,
     onStart: props.onStart ?? (async () => "started"),
     onForgotten: props.onForgotten,
+    installAgain: props.installAgain,
     pollDelays: props.pollDelays ?? [0, 0, 0],
     roomEveryMs: props.roomEveryMs,
   });
@@ -1368,12 +1370,17 @@ test("a backend whose node was removed offers Set up again, which sets it up and
     connect_local_eval: [connection()],
   });
   const started: Startable[] = [];
+  let installs = 0;
   const screen = view({
     stack: "local-044466e209069a0812bc9764",
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
       return "started";
+    },
+    installAgain: async () => {
+      installs += 1;
+      return true;
     },
   });
   await screen.findByText(
@@ -1384,6 +1391,9 @@ test("a backend whose node was removed offers Set up again, which sets it up and
 
   await userEvent.click(screen.getByRole("button", { name: "Set up again" }));
   await waitFor(() => expect(started).toEqual([startableUrls]));
+  // OpenBot's own installation is left as it is: Start, not a first install, moves it forward.
+  // A folder still on 1.0.3 under Desktop 1.1.2 failed that first install every time.
+  expect(installs).toBe(0);
   expect(commands()).toEqual([
     "run_local_eval:status",
     "set_up_local_eval",

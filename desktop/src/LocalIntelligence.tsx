@@ -1135,16 +1135,21 @@ export function useLocalSequence({
    * The same for a backend whose cluster alone is gone (`backend-gone`), as after
    * `docker container prune` removed its stopped node: setup makes the cluster again for the same
    * stack, with its saved licence and keys, so OpenBot's own data and its link to the backend stay.
+   * OpenBot's own installation is left as it is there, never installed again: a Mac whose folder
+   * was still on 1.0.3 under Desktop 1.1.2 failed a first install that asked for a Bot 1.0.3 did
+   * not have, while Start takes the update path, moving the folder to this app's release first.
    */
   async function startFresh() {
     if (now.current.running) return;
+    // Only the backend went: OpenBot's own installation is as it was, and is not installed again.
+    const backendOnly = now.current.blocked?.reason === "backend-gone";
     halt();
     const token = generation.current;
     go.current = true;
     latest.current.onForgotten();
     // Nothing of the lost backend's rows is left to show: the install's rows come first.
     update(idle);
-    if (!(await latest.current.installAgain())) return;
+    if (!backendOnly && !(await latest.current.installAgain())) return;
     // Stopped or left while it installed.
     if (generation.current !== token) return;
     void run("setup");

@@ -5281,6 +5281,39 @@ pub fn cluster_gone(stack: &StackId) -> Option<bool> {
     })
 }
 
+/**
+Whether the installed CLI still records `stack` (`local list`). None when the CLI can't say.
+
+A Mac on Docker Desktop, Desktop 1.1.2: after `copilotkit local delete` removed a stack whose node a
+prune had taken, OpenBot's folder still recorded it, and every launch's `local status` answered "No
+recorded local stack was found" (`local_command_failed`, no stack) and stopped there. A stack the CLI
+no longer records can never be asked about again, so it is gone whatever the engine still holds.
+*/
+pub fn stack_recorded(stack: &StackId) -> Option<bool> {
+    let cli = installed().ok()?;
+    let (code, bytes) = execute(
+        &cli,
+        &LIST_ARGUMENTS,
+        None,
+        Limits::for_action(Action::Status),
+        &Cancel::default(),
+    )
+    .ok()?;
+    let (outcome, wire) = parse_envelope("local list", code, &bytes).ok()?;
+    (outcome == Outcome::Completed).then(|| stack_listed_in(&wire, stack))?
+}
+
+/// Whether `local list`'s answer names `stack`. None when the answer holds no list of stacks, which
+/// is no answer about any one of them.
+pub fn stack_listed_in(wire: &Value, stack: &StackId) -> Option<bool> {
+    let stacks = wire.get("stacks")?.as_array()?;
+    Some(
+        stacks
+            .iter()
+            .any(|saved| saved.get("id").and_then(Value::as_str) == Some(stack.as_str())),
+    )
+}
+
 /// What `arguments` lists on the CLI's engine, one name per line. None when the engine did not
 /// answer in time, or answered with an error.
 fn names_listed(address: &crate::engine::Address, arguments: &[&str]) -> Option<String> {

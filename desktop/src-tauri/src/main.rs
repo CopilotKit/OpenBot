@@ -2131,6 +2131,7 @@ impl upgrade::Steps for DesktopSteps {
             self.root.to_string_lossy().into(),
             self.harness.clone(),
         ))
+        .map(|_| ())
     }
 
     fn start(&mut self) -> Result<(), Problem> {
@@ -3695,7 +3696,7 @@ async fn prepare_installation(
     app: tauri::AppHandle,
     root: String,
     harness: Option<harness::HarnessChoice>,
-) -> Result<(), Problem> {
+) -> Result<Option<harness::HarnessChoice>, Problem> {
     desktop_connected::local_only(&app)?;
     if app
         .state::<Shell>()
@@ -3758,7 +3759,7 @@ async fn prepare_installation_inner(
     app: tauri::AppHandle,
     root: String,
     harness: Option<harness::HarnessChoice>,
-) -> Result<(), Problem> {
+) -> Result<Option<harness::HarnessChoice>, Problem> {
     let root = stack::root_from(&root);
     tauri::async_runtime::spawn_blocking(move || {
         let shell = app.state::<Shell>();
@@ -3788,9 +3789,16 @@ async fn prepare_installation_inner(
         // And the Compose project it runs as, decided once on that engine and recorded beside it,
         // before anything is created under it. See `stack::project`.
         stack::project(&address, &root)?;
-        harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
+        // Only a Bot the folder's own release includes: Start moves the folder to this app's
+        // release, and the Bot asked for comes with it (`harness::the_release_includes`).
+        let harness = harness::the_release_includes(
+            harness,
+            preparation::installation(&root).and_then(|installed| installed.harness),
+            &root,
+        );
         let handle = app.clone();
         let _startup = attempt.lock_current()?;
+        // A finished install of that Bot is kept as it is, whatever release the folder is on.
         if preparation::require(&root, Some(&harness), &address).is_ok() {
             preparation::save_selected_root(
                 &app.path()
@@ -3804,8 +3812,9 @@ async fn prepare_installation_inner(
                 true,
                 "OpenBot is already installed.",
             );
-            return Ok(());
+            return Ok(harness);
         }
+        harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
         preparation::invalidate(&root)?;
         if let Some(problem) = stack::deployment_problem(&root) {
             return Err(Problem::from(problem));
@@ -3899,7 +3908,7 @@ async fn prepare_installation_inner(
             &root,
         )?;
         report_plain(&handle, "installation", true, "OpenBot is installed.");
-        Ok::<(), Problem>(())
+        Ok::<Option<harness::HarnessChoice>, Problem>(harness)
     })
     .await
     .map_err(|error| {
@@ -11068,12 +11077,12 @@ fn local_eval_answer(
         &report,
         local_eval_state::read(root, None).as_ref(),
         stack,
-        || local_eval::cluster_gone(stack),
+        || backend_gone(local_eval::stack_recorded(stack), || local_eval::cluster_gone(stack)),
     ) {
         let kept = openbot_database_kept(root);
         log::warn!(
-            "[local eval] {}'s cluster is gone from the engine the backend runs on, and OpenBot's \
-             own database {}; offering to set the backend up again",
+            "[local eval] {} is gone, its record or its cluster, and OpenBot's own database {}; \
+             offering to set the backend up again",
             stack.as_str(),
             if kept { "is still there" } else { "is not" }
         );
@@ -11095,6 +11104,19 @@ fn local_eval_answer(
         }
     }
     Ok(report)
+}
+
+/// Whether the recorded stack is gone: the CLI no longer records it (`recorded`, from
+/// `local_eval::stack_recorded`), as after `copilotkit local delete`, or the engine the CLI runs on
+/// no longer has its cluster (`cluster_gone`). Unknown when neither can be said.
+fn backend_gone(
+    recorded: Option<bool>,
+    cluster_gone: impl FnOnce() -> Option<bool>,
+) -> Option<bool> {
+    match recorded {
+        Some(false) => Some(true),
+        _ => cluster_gone(),
+    }
 }
 
 /// What the window is told about a backend that is gone (`backend_lost`): with OpenBot's own
@@ -18876,6 +18898,73 @@ mod tests {
         assert!(!backend_lost(&unavailable, Some(&created), &asked, || {
             panic!("asked the engine")
         }));
+    }
+
+    /// A Mac on Docker Desktop, Desktop 1.1.2: after `copilotkit local delete`, OpenBot's folder
+    /// still recorded the deleted stack, and every launch's status answered "No recorded local
+    /// stack was found" and stopped there, with no setup. A stack the CLI no longer records is gone,
+    /// whatever the engine holds, and the window offers to set it up again; setup then records the
+    /// stack it makes in place of the stale one.
+    #[test]
+    fn a_stack_the_cli_no_longer_records_is_gone_and_set_up_again() {
+        let answer = serde_json::json!({
+            "version": 1,
+            "command": "local status",
+            "status": "failed",
+            "stack": null,
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": "copilotkit local status --json" },
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "No recorded local stack was found. Run `copilotkit local list` or start local setup."
+            },
+            "diagnostics": []
+        });
+        let report =
+            local_eval::normalize(local_eval::Action::Status, 1, answer.to_string().as_bytes())
+                .unwrap();
+        assert!(local_eval::failed_without_stack(&report));
+
+        let stale = local_eval::StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        let listed = serde_json::json!({ "stacks": [{ "id": "local-3922b7cf02730f324df673e2" }] });
+        assert_eq!(local_eval::stack_listed_in(&listed, &stale), Some(false));
+        assert_eq!(
+            local_eval::stack_listed_in(&serde_json::json!({ "stacks": [] }), &stale),
+            Some(false)
+        );
+        assert_eq!(
+            local_eval::stack_listed_in(&serde_json::json!({}), &stale),
+            None
+        );
+        // Not recorded: gone, and the engine isn't even asked.
+        assert_eq!(
+            backend_gone(Some(false), || panic!("asked the engine")),
+            Some(true)
+        );
+        // Recorded, or the CLI couldn't say: the engine decides.
+        assert_eq!(backend_gone(Some(true), || Some(false)), Some(false));
+        assert_eq!(backend_gone(None, || Some(true)), Some(true));
+        assert_eq!(backend_gone(None, || None), None);
+
+        let root = local_eval_root(
+            "openbot-local-eval-stale-marker",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let recorded = local_eval_state::read(&root, None);
+        let asked = local_eval::StackId::parse("local-abc123").unwrap();
+        assert!(backend_lost(&report, recorded.as_ref(), &asked, || {
+            backend_gone(Some(false), || None)
+        }));
+        // Set up again records the new stack in place of the one that is gone.
+        let fresh = local_eval::StackId::parse("local-3922b7cf02730f324df673e2").unwrap();
+        local_eval_state::begin(
+            &root,
+            &fresh,
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        assert_eq!(local_eval_state::read(&root, None).unwrap().stack_id(), fresh);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// With OpenBot's own database still there, only the backend went (a prune of stopped
