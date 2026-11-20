@@ -53,8 +53,10 @@ const NOT_ENABLED =
   "Learning capture is paused: OpenBot's backend says this organization's licence does not include Product Trajectories, or that its billing is blocked.";
 const MESSAGES_REFUSED =
   "Learning capture is off: OpenBot's backend refused the recorder's messages.";
-const checkOrigin = (id: string) =>
-  `OpenBot's backend refused the connection. If it sets CHECK_ORIGIN, that list must include chrome-extension://${id}.`;
+const backendRefused = (id: string) =>
+  `Learning capture is paused: OpenBot's backend refused this browser's connection. If the backend only accepts listed origins, an admin must add chrome-extension://${id}.`;
+const RELAY_REFUSED =
+  "Learning capture is paused: OpenBot didn't accept this browser's connection for recordings. If it keeps happening, ask an admin to check that OpenBot is up to date.";
 /** An id Edge Add-ons could assign the Recorder: published there, it runs under that one, not the fixed one. */
 const EDGE_ADDONS_ID = "jdnkfgmofbmnjdbcpjgbgmmlhoiopnkp";
 
@@ -832,38 +834,59 @@ describe("streamer", () => {
     ],
     ["from Edge Add-ons", EDGE_ADDONS_ID],
   ] as const)
-    test(`a refused socket is retired and retried with a fresh pass, and the third refusal names CHECK_ORIGIN with the id the Recorder runs under, ${store}`, async () => {
+    test(`a refused socket is retired and retried with a fresh pass, and the third refusal at the backend's own address names the id the Recorder runs under, ${store}`, async () => {
       // The offscreen document's own chrome.runtime, under that id.
       const fake = installChromeFake({
         extensionId: id,
         context: "offscreen-document",
       });
       try {
-        await refusedThreeTimes(checkOrigin(id));
+        await refusedThreeTimes(
+          backendRefused(id),
+          () => "https://openbot.test",
+        );
       } finally {
         fake.uninstall();
       }
     });
 
-  async function refusedThreeTimes(CHECK_ORIGIN: string): Promise<void> {
+  test("a socket on OpenBot's own address refused three times says OpenBot refused it, and names no backend setting", async () => {
+    // A backend beside OpenBot, reached through OpenBot: the pass names a socket on the address the Recorder connected to.
+    const fake = installChromeFake({
+      extensionId: RECORDER_EXTENSION_ID,
+      context: "offscreen-document",
+    });
+    try {
+      await refusedThreeTimes(RELAY_REFUSED, (h) =>
+        h.gateway.url.replace(/^ws/, "http"),
+      );
+    } finally {
+      fake.uninstall();
+    }
+  });
+
+  async function refusedThreeTimes(
+    REFUSED: string,
+    openbotUrl: (h: Harness) => string,
+  ): Promise<void> {
     const h = await setup();
     let refusals = 3;
     h.beforeSocket = () => {
       if (refusals-- > 0) h.gateway.refuseNextSocket();
     };
-    const s = await h.start();
+    const s = await h.start({}, { openbotUrl: () => openbotUrl(h) });
     s.push(click(0));
     await until(
       () => h.clock.delays().includes(2_000),
       "the back-off before the third pass",
     );
     expect(h.grants).toHaveLength(2);
-    expect(
-      h.statuses.some((entry) => entry.status.reason === CHECK_ORIGIN),
-    ).toBe(false);
+    expect(h.statuses.some((entry) => entry.status.reason === REFUSED)).toBe(
+      false,
+    );
     await h.clock.advance(2_000);
     await until(() => h.last().intelligence === "held", "held");
-    expect(h.last().reason).toBe(CHECK_ORIGIN);
+    expect(h.last().reason).toBe(REFUSED);
     await sleep(300); // phoenix.js would reconnect a dropped socket after 10 ms of real time
     expect(h.grants).toHaveLength(3);
     expect(new Set(h.tokens).size).toBe(3);

@@ -107,6 +107,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   conversation id for a Bot of the same id in two organizations is two Claude queries now, not one
   shared transcript. A run with no organization keeps the query name it always had.
 
+### Teach a Bot
+
+- **Recordings reach Learning on a self-hosted team install with `INTELLIGENCE_GATEWAY_PROXY` on**,
+  as `bun run stack` and the bundle run it when everything is on one machine or cluster. OpenBot
+  refused the connection a recording streams on, because the Recorder isn't signed in to OpenBot
+  the way a browser tab is. The recording stayed "sending" with no title and never reached
+  Learning. OpenBot now lets that connection through once, for the recording it just started,
+  while the Recorder is still connected. The personal edition was not affected.
+- **The Recorder says who refused a recording's connection.** The popup used to tell you to check
+  `CHECK_ORIGIN`, even where that setting can't be the cause. Now, when the connection goes through
+  OpenBot's own address, it says OpenBot refused it. Only when the connection goes to another
+  address does it name the `chrome-extension://` origin an admin must allow there.
+
 ## 1.1.2
 
 **Before upgrading.** Nothing in a Helm values file, a Compose override or a script has to change,
