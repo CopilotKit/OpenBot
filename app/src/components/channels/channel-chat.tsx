@@ -84,6 +84,7 @@ import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
   askRunLiveness,
+  quietRunPeriod,
   RUN_ENDED_UNHEARD,
   RUN_UNREACHABLE,
   watchQuietRun,
@@ -786,6 +787,7 @@ export function ChannelChat({
           keptUntil: () => {
             const quiet = watchQuietRun({
               ask: () => askRunLiveness(channel.id),
+              quietMs: quietRunPeriod.ms,
             });
             const hearing = agent.subscribe({
               onEvent: ({ event }) => {
@@ -1500,8 +1502,16 @@ export function ChannelChat({
          */
         const quiet = watchQuietRun({
           ask: () => askRunLiveness(channel.id),
+          quietMs: quietRunPeriod.ms,
         });
         const hearing = target.subscribe({
+          /*
+           * The browser starting the turn's next run (with a step's result) ends the rest, before a
+           * word of it arrives. Found on WebKit with the server killed right after the next run was
+           * sent: nothing of it ever came, the watch was still resting from the run before, and the
+           * server saying it had no run going read as the step still being taken. "Thinking" for good.
+           */
+          onRunInitialized: () => quiet.heard(),
           onEvent: ({ event }) => {
             // Between the server's runs the turn is this browser's (a step it takes, a card the
             // person answers), and quiet there is not a run gone missing.
