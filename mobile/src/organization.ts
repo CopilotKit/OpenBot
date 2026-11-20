@@ -29,10 +29,13 @@ export const ORGANIZATION = "/api/v2/organizations/{organizationId}";
 /** The header that names the organization a request is for, on every request a signed-in person makes. */
 export const ORGANIZATION_HEADER = "OpenBot-Organization";
 
-/** Where the person's pick is kept on the phone. Reading may answer null: nothing picked yet. */
+/**
+ * Where each person's pick is kept on the phone, by who they are (`person`, their account's id): a phone shared by
+ * several people opens in each one's own pick. Reading may answer null: nothing picked yet.
+ */
 export type OrganizationStore = {
-  read(): Promise<string | null>;
-  write(id: string): Promise<void>;
+  read(person: string): Promise<string | null>;
+  write(person: string, id: string): Promise<void>;
 };
 
 /** A phone that keeps nothing: the server's answer every time. */
@@ -62,26 +65,35 @@ export type OrganizationChoices = {
 
 /**
  * The person's organizations and the one they work in, for whoever is signed in. `list` reads their organizations,
- * and is asked once for each sign-in (`signedInAs` is whatever tells one sign-in from another). A read that fails is
- * asked again. `store` keeps the person's pick on the phone.
+ * and is asked once for each sign-in (`signedInAs` is whatever tells one sign-in from another) and each person
+ * (`person`, who the sign-in client says is signed in, unknown until it has said). A read that fails is asked again.
+ * `store` keeps each person's pick on the phone; with nobody known yet, there is no pick to read or keep.
  */
 export function createOrganizationChoice(
   list: () => Promise<ListedOrganization[]>,
   store: OrganizationStore = NOTHING_KEPT,
+  person: () => string | undefined = () => undefined,
 ) {
   let known:
     | { signedInAs: string; choices: Promise<OrganizationChoices> }
     | undefined;
+  /** One sign-in, of one person. */
+  const keyOf = (signedInAs: string) => `${person() ?? ""}\u0000${signedInAs}`;
+  const picked = async (): Promise<string | null> => {
+    const who = person();
+    return who ? store.read(who).catch(() => null) : null;
+  };
 
   function choices(signedInAs: string): Promise<OrganizationChoices> {
-    if (known?.signedInAs !== signedInAs) {
-      const read = Promise.all([list(), store.read().catch(() => null)]).then(
+    const key = keyOf(signedInAs);
+    if (known?.signedInAs !== key) {
+      const read = Promise.all([list(), picked()]).then(
         ([organizations, picked]) => ({
           organizations,
           currentId: workingIn(organizations, picked),
         }),
       );
-      known = { signedInAs, choices: read };
+      known = { signedInAs: key, choices: read };
       read.catch(() => {
         if (known?.choices === read) known = undefined;
       });
@@ -106,10 +118,31 @@ export function createOrganizationChoice(
       const { organizations } = await choices(signedInAs);
       if (!organizations.some((one) => one.id === id))
         throw new Error(NOT_IN_ORGANIZATION);
-      await store.write(id);
+      const who = person();
+      if (who) await store.write(who, id);
       const chosen = { organizations, currentId: id };
-      known = { signedInAs, choices: Promise.resolve(chosen) };
+      known = {
+        signedInAs: keyOf(signedInAs),
+        choices: Promise.resolve(chosen),
+      };
       return chosen;
+    },
+
+    /**
+     * The organization `organizationId` answered that it isn't there for this person: they were removed from it, or it
+     * was deleted. When it is the one they work in, what is known is forgotten, so the next request reads their
+     * organizations again and works in another of theirs. Answers whether it was the one they work in.
+     */
+    async gone(organizationId: string, signedInAs: string): Promise<boolean> {
+      const held = known;
+      if (!held || held.signedInAs !== keyOf(signedInAs)) return false;
+      const current = await held.choices.then(
+        (chosen) => chosen.currentId,
+        () => undefined,
+      );
+      if (current !== organizationId) return false;
+      if (known === held) known = undefined;
+      return true;
     },
 
     /** Fills the organization into a path that starts with {@link ORGANIZATION}; any other path is returned as it is. */

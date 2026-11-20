@@ -45,6 +45,7 @@ export {
   ORGANIZATION_ID,
   organizationAddress,
   organizationChoices,
+  setSignedInPerson,
 } from "./request";
 
 /** One page of a list the API pages (`limit`, `cursor`, `nextCursor`). */
