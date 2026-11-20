@@ -7,7 +7,7 @@ import type { ManagementWindow } from "./managementWindow";
  * Where connecting this OpenBot to managed updates stands. Which fields are present depends on state.
  */
 export interface ManagementEnrollment {
-  /** not-connected: nothing is under way. waiting-for-approval: the code is waiting for somebody to approve it at verificationUri. waiting-for-agent: approved, and waiting for the management agent to be installed with helmCommand and to report in. connected: the agent reports in. A later OpenBot may add a state; read one you don't know as not connected. */
+  /** not-connected: nothing is under way. waiting-for-approval: the code is waiting for somebody to approve it at verificationUri. waiting-for-agent: approved, and waiting for the management agent to be installed with helmCommand and to report in. connected: the agent reports in. connecting: OpenBot is connecting by itself, by its licence, and the management agent its chart installed is collecting its one-time token and reporting in for the first time; nobody needs to do anything. opted-out: an administrator disconnected OpenBot, so it doesn't connect by itself; starting a connection turns managed updates back on. A later OpenBot may add a state; read one you don't know as not connected. */
   state: string;
   /**
    * The code to approve, while waiting for approval.
@@ -35,6 +35,8 @@ export interface ManagementEnrollment {
    * @minLength 1
    */
   helmCommandNote?: string;
+  /** True when OpenBot's own chart installs the management agent beside it (`management.enabled`, on by default), so connecting needs no Helm command and OpenBot connects by itself. False when the chart turned it off: connecting then gives helmCommand to install the agent by hand. Present in every state. */
+  agentInstalledByChart?: boolean;
   /**
    * The name this OpenBot gave itself when it asked to be connected, which the approval page shows the approver, so they can match it. Present while waiting for approval.
    * @minLength 1
@@ -53,6 +55,6 @@ export interface ManagementEnrollment {
    * @minLength 1
    */
   lastError?: string;
-  /** Which refusal lastError is, where a client acts on it. not-entitled: this OpenBot's licence doesn't include managed updates, so connecting again fails the same way until they are added to it. A later OpenBot may add a code; read one you don't know as no code. */
+  /** Which refusal lastError is, where a client acts on it. not-entitled: this OpenBot's licence doesn't include managed updates (it isn't a team licence, or managed updates were turned off for its organization), so connecting again fails the same way until they are added to it. invalid-licence: the licence wasn't accepted (invalid or expired). unreachable: the managed updates service couldn't be reached when OpenBot last tried to connect by itself; it tries again within the hour. A later OpenBot may add a code; read one you don't know as no code. */
   lastErrorCode?: string;
 }
