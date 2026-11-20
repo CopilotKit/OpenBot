@@ -7,7 +7,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { CLOUDS, MaintenanceWindow } from "../../shared/management-contract";
+import {
+  CLOUDS,
+  HEARTBEAT_INTERVAL_SECONDS,
+  MaintenanceWindow,
+} from "../../shared/management-contract";
 
 const name = z
   .string()
@@ -43,6 +47,9 @@ export const AgentConfig = z
     /** The customer's own weekly window. Upgrades run only inside it and inside the service's. */
     window: MaintenanceWindow.nullable(),
     agentNamespace: name,
+    /** Seconds between heartbeats, before jitter. Absent: HEARTBEAT_INTERVAL_SECONDS (60). A test
+     * cluster sets a few seconds so each step it waits on comes round sooner. */
+    heartbeatIntervalSeconds: z.number().int().min(1).max(3600).optional(),
     product: z.strictObject({
       chart: z.enum(["bundle", "openbot"]),
       releaseName: name,
@@ -126,6 +133,11 @@ export type ReadyAgent = Omit<Agent, "config" | "credentials"> & {
   config: AgentConfig & { installId: string };
   credentials: Credentials;
 };
+
+/** How long the agent waits between heartbeats, before jitter. */
+export function heartbeatIntervalMs(config: AgentConfig) {
+  return (config.heartbeatIntervalSeconds ?? HEARTBEAT_INTERVAL_SECONDS) * 1000;
+}
 
 export const CONFIG_DIRECTORY = "/etc/openbot-agent";
 export const TLS_DIRECTORY = "/var/run/openbot-agent/tls";
