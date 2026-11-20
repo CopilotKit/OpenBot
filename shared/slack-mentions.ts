@@ -186,12 +186,17 @@ export function labelSlackMentions(text: string, names: SlackNames): string {
         ? target.slice("!subteam^".length)
         : target.slice(1);
       if (kind === "!" && !target.startsWith("!subteam^")) return whole;
-      const name = names
+      const sanitized = names
         .get(id)
-        ?.trim()
-        .replace(/[|>\n]/g, " ");
-      if (!name) return whole;
-      return `<${target}|${kind === "!" ? `@${name.replace(/^@/, "")}` : name}>`;
+        ?.replace(/[|>\r\n]/g, " ")
+        .trim();
+      if (!sanitized) return whole;
+      if (kind === "!") {
+        const groupName = sanitized.replace(/^@+/, "").trim();
+        if (!groupName) return whole;
+        return `<${target}|@${groupName}>`;
+      }
+      return `<${target}|${sanitized}>`;
     });
   let out = "";
   let at = 0;

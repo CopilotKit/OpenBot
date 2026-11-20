@@ -87,4 +87,21 @@ describe("a result that leaves the conversation whose steps named its mentions",
     );
     expect(labelSlackMentions(text, new Map())).toBe(text);
   });
+
+  test("ignores names that are empty after delimiter sanitization and strips carriage returns", () => {
+    const edgeNames = new Map<string, string>([
+      ["U0E2EEMPTY", ">|"],
+      ["U0E2ETRIM", "| Alex\r\nClarke >"],
+      ["S0E2EBLANK", "@ |"],
+      ["S0E2ETEAM", "@engineering"],
+    ]);
+    expect(
+      labelSlackMentions(
+        "<@U0E2EEMPTY> <@U0E2ETRIM> <!subteam^S0E2EBLANK> <!subteam^S0E2ETEAM>",
+        edgeNames,
+      ),
+    ).toBe(
+      "<@U0E2EEMPTY> <@U0E2ETRIM|Alex  Clarke> <!subteam^S0E2EBLANK> <!subteam^S0E2ETEAM|@engineering>",
+    );
+  });
 });
