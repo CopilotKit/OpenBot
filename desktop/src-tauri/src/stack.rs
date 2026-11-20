@@ -3803,6 +3803,139 @@ fn refusal_sentence_in(stderr: &str, compose_log: &str) -> String {
         })
 }
 
+/// What the engine says of the installation's `server` container, asked when OpenBot stops
+/// answering under an open window (`server_container`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerContainer {
+    /// Up, whether or not it answers: a server that is busy, or an engine that is slow to pass its
+    /// answers on. Docker keeps it; nothing should start it again.
+    Running,
+    /// Exited, and Docker is starting it again by its restart policy.
+    Restarting,
+    /// Stopped and staying stopped, with the code it exited with and whether the engine killed it
+    /// for memory.
+    Exited {
+        code: Option<i64>,
+        out_of_memory: bool,
+    },
+    /// There is no `server` container.
+    Missing,
+}
+
+/// Why the engine gave no word on the `server` container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerContainerUnknown {
+    /// The engine did not answer within the limit. It is there, and slow.
+    Slow,
+    /// The engine could not be asked, or refused: stopped, or not there at all.
+    Unreachable(String),
+}
+
+/**
+The engine's word on `root`'s `server` container, within `limit`.
+
+MEASURED in a dogfooding report (Desktop 1.1.2, macOS): the container engine stalled for minutes,
+`local status` took 115 seconds to list services where it takes a tenth of one, and every request to
+the server ran out of time. The server's container was up the whole while (its ports still took
+connections; a stopped container's refuse them at once). Its not answering is no reason to start it
+again, which recreates it and ends every Bot's turn that was running.
+*/
+pub fn server_container(
+    engine: &Address,
+    root: &Path,
+    limit: std::time::Duration,
+) -> Result<ServerContainer, ServerContainerUnknown> {
+    let operation = format!(
+        "{} compose ps -a --format json server",
+        engine.engine.binary()
+    );
+    let mut listing = compose_command(engine, root, &Secrets::new());
+    listing.args(["ps", "-a", "--format", "json", "server"]);
+    let output = match crate::quiet::output_within(&mut listing, limit) {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+            return Err(ServerContainerUnknown::Slow)
+        }
+        Err(error) => {
+            return Err(ServerContainerUnknown::Unreachable(format!(
+                "could not run {operation}: {error}"
+            )))
+        }
+    };
+    if !output.status.success() {
+        return Err(ServerContainerUnknown::Unreachable(format!(
+            "{operation} exited with status {}: {}",
+            output.status,
+            command_said(&output.stderr)
+        )));
+    }
+    let Some((state, id)) = server_container_in(&String::from_utf8_lossy(&output.stdout)) else {
+        return Ok(ServerContainer::Missing);
+    };
+    let ServerContainer::Exited { code, .. } = state else {
+        return Ok(state);
+    };
+    // Whether the engine killed it for memory, which only `inspect` says. Not knowing is not
+    // knowing: the exit code still says how it ended.
+    let mut inspect = engine.command();
+    inspect.args(["inspect", "--format", "{{.State.OOMKilled}}", &id]);
+    let out_of_memory = crate::quiet::output_within(&mut inspect, limit)
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "true");
+    Ok(ServerContainer::Exited {
+        code,
+        out_of_memory,
+    })
+}
+
+/// The `server` container's state and id, from `compose ps -a --format json server`: one object a
+/// line, or one array from an older Compose. `None` when there is no `server` container.
+///
+/// MEASURED: while Docker restarts a container, Compose reports its `ExitCode` as 0 and the real
+/// code only in `Status` ("Restarting (78) 1 second ago"). An exited container has both.
+fn server_container_in(listing: &str) -> Option<(ServerContainer, String)> {
+    let rows: Vec<serde_json::Value> = if listing.trim_start().starts_with('[') {
+        serde_json::from_str(listing).ok()?
+    } else {
+        listing
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    };
+    let row = rows
+        .into_iter()
+        .find(|row| row["Service"].as_str() == Some("server"))?;
+    let id = row["ID"].as_str().unwrap_or_default().to_owned();
+    let state = row["State"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let code = row["ExitCode"]
+        .as_i64()
+        .filter(|code| *code != 0)
+        .or_else(|| {
+            row["Status"]
+                .as_str()
+                .and_then(|status| status.split_once('('))
+                .and_then(|(_, rest)| rest.split_once(')'))
+                .and_then(|(code, _)| code.trim().parse::<i64>().ok())
+        })
+        .or_else(|| row["ExitCode"].as_i64());
+    let container = match state.as_str() {
+        // Paused is still there, holding everything it had: not stopped, and not ours to restart.
+        "running" | "paused" => ServerContainer::Running,
+        "restarting" => ServerContainer::Restarting,
+        // exited, dead, created (never started), removing.
+        _ => ServerContainer::Exited {
+            code,
+            out_of_memory: false,
+        },
+    };
+    Some((container, id))
+}
+
 /// Which Compose services are not running, and the last thing each said.
 ///
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its
@@ -12643,6 +12776,45 @@ fn main() {
             .detail
             .unwrap()
             .contains("server-1  | Listening soon."));
+    }
+
+    /// The watcher's question when OpenBot stops answering: is the `server` container up, being
+    /// restarted by Docker, or stopped? From the rows Compose really prints, Docker's and Podman's.
+    #[test]
+    fn the_server_container_reads_as_up_restarting_or_stopped_from_real_compose_rows() {
+        assert_eq!(
+            server_container_in(PODMAN_RUNNING),
+            Some((ServerContainer::Running, "6c1f0e2a9b3d".into()))
+        );
+        assert_eq!(
+            server_container_in(SERVER_RESTARTING_78).map(|(state, _)| state),
+            Some(ServerContainer::Restarting)
+        );
+        assert_eq!(
+            server_container_in(SERVER_EXITED_78),
+            Some((
+                ServerContainer::Exited {
+                    code: Some(78),
+                    out_of_memory: false
+                },
+                "25e12f3681a6".into()
+            ))
+        );
+        // Exit 0 in `ExitCode`, the real code only in `Status`.
+        assert_eq!(
+            server_container_in(PODMAN_EXITED_0_STATUS_78).map(|(state, _)| state),
+            Some(ServerContainer::Exited {
+                code: Some(78),
+                out_of_memory: false
+            })
+        );
+        // An older Compose prints one JSON array.
+        assert_eq!(
+            server_container_in(&format!("[{}]", PODMAN_RUNNING.trim())).map(|(state, _)| state),
+            Some(ServerContainer::Running)
+        );
+        // No `server` container at all.
+        assert_eq!(server_container_in(""), None);
     }
 
     /// What `compose ps -a --format json server` reports for a refusing server under Podman, which

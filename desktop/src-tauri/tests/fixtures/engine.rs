@@ -159,6 +159,25 @@ fn main() {
         }
         return;
     }
+    // The `server` container, as Compose lists it when OpenBot stops answering: up (a stalled engine
+    // or a busy server), or stopped for memory and not restarted.
+    if SCENARIO == "server-up" || SCENARIO == "server-oom" {
+        if joined == "compose ps -a --format json server" {
+            let (state, code, status) = if SCENARIO == "server-up" {
+                ("running", 0, "Up 2 hours (healthy)")
+            } else {
+                ("exited", 137, "Exited (137) 3 seconds ago")
+            };
+            println!(
+                "{{\"ID\":\"5e7f0c2d9a11\",\"Name\":\"openbot-desktop-server-1\",\"Service\":\"server\",\"State\":\"{state}\",\"ExitCode\":{code},\"Status\":\"{status}\"}}"
+            );
+            return;
+        }
+        if joined == "inspect --format {{.State.OOMKilled}} 5e7f0c2d9a11" {
+            println!("{}", SCENARIO == "server-oom");
+            return;
+        }
+    }
     if args.first().map(String::as_str) == Some("version") {
         println!("1.44");
         return;

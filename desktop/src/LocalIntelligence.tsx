@@ -82,6 +82,13 @@ export type StartOutcome = "started" | "failed" | "deferred" | "opening";
  */
 const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
+/** While a status call has run out of time and the wait asks again. */
+export const BACKEND_SLOW_SAID =
+  "OpenBot's services are slow to answer. OpenBot keeps checking.";
+/** When no status call answered before the wait's checks ran out. */
+export const BACKEND_SILENT_SAID =
+  "OpenBot's services didn't answer in time. Retry to check again.";
+
 /** How often a running setup or update asks how far its download has got. */
 const DOWNLOAD_EVERY_MS = 1_000;
 
@@ -727,9 +734,46 @@ export function useLocalSequence({
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
+    /*
+     * A status call that runs out of time is a backend slow to answer, not a setup that failed.
+     * Found in a dogfooding report: the container engine stalled for a few minutes, the CLI's
+     * service listing took 115 seconds, and the one status call ran out at its 120-second limit.
+     * The window took that single call as the whole setup timing out, stopped at the first check
+     * and said "took too long to set up". Retry four minutes later answered in a tenth of a second.
+     * So it is asked again on the wait's own schedule, like a backend still starting.
+     */
+    const status = () => {
+      const started = runLocalEval("status", id);
+      const answer = started.report.catch((error: unknown) => {
+        if (error instanceof LocalEvalError && error.category === "timeout")
+          return "timeout" as const;
+        throw error;
+      });
+      return call({ attempt: started.attempt, answer }, token);
+    };
+    let slow = false;
     for (let tries = 0; ; tries += 1) {
-      const found = await report("status");
+      const found = await status();
       if (!found) return null;
+      if (found === "timeout") {
+        if (tries >= pollDelays.length) {
+          // The log says how long it waited and that the last call ran out of time.
+          backEndWaitEnded(BACKEND_SILENT_SAID);
+          update({
+            detail: null,
+            blocked: { said: BACKEND_SILENT_SAID, reason: null },
+          });
+          return null;
+        }
+        slow = true;
+        update({ detail: BACKEND_SLOW_SAID });
+        if (!(await pause(pollDelays[tries], token))) return null;
+        continue;
+      }
+      if (slow) {
+        slow = false;
+        update({ detail: null });
+      }
       // How many of its services are up: how far along the back end's start is.
       const services = found.stack?.observed?.services;
       if (services?.length)

@@ -2055,6 +2055,59 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
 });
 
 /**
+ * Found in a dogfooding report on a Mac (Desktop 1.1.2): the container engine stalled for a few
+ * minutes, the CLI took 115 seconds to list the backend's services, and the one status call ran out
+ * at its 120-second limit. The window stopped at that first check and said "OpenBot took too long
+ * to set up", the sentence for a setup that ran 30 minutes. Retry, once the engine was back,
+ * answered at once. A status call that runs out of time is asked again on the wait's schedule.
+ */
+test("a status call that runs out of time is asked again, and the backend that answers next starts OpenBot", async () => {
+  const answers = ["timeout", "timeout", ready];
+  invokeHandler = async (command) => {
+    if (command !== "run_local_eval") throw new Error(`unexpected ${command}`);
+    const next = answers.shift() ?? ready;
+    if (next === "timeout") throw "timeout";
+    return next;
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0, 0],
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(statusCalls()).toHaveLength(3);
+  expect(document.body.textContent).not.toContain(
+    "OpenBot took too long to set up",
+  );
+});
+
+test("a backend that never answers a status call says so, and Retry checks again", async () => {
+  invokeHandler = async (command) => {
+    if (command === "run_local_eval") throw "timeout";
+    if (command === "back_end_wait_ended") return null;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0],
+  });
+  await screen.findByText(
+    "OpenBot's services didn't answer in time. Retry to check again.",
+  );
+  expect(statusCalls()).toHaveLength(3);
+  expect(document.body.textContent).not.toContain(
+    "OpenBot took too long to set up",
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+/**
  * Found in a dogfooding report on a Mac, Podman: the server stopped mid-use and the window went
  * back to setup. On Retry the back end said `degraded`, its checks failing, with six of eight
  * services ready and the other two running but not ready yet. The window gave up on that first
