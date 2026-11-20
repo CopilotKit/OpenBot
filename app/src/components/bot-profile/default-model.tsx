@@ -95,11 +95,11 @@ export function DefaultModelSection({
   const summary = savedModel
     ? modelSummary(savedModel, saved?.effort ?? null)
     : agent.defaultModel && catalogue
-      ? "Saved model unavailable. Using the deployment default."
+      ? "The chosen model isn't available. New conversations use OpenBot's default."
       : (agent.defaultModel?.model ??
         (deploymentSummary
-          ? `Deployment default · ${deploymentSummary}`
-          : "Deployment default"));
+          ? `OpenBot's default · ${deploymentSummary}`
+          : "OpenBot's default"));
 
   return (
     <PageSection title="Model">
@@ -135,12 +135,12 @@ export function DefaultModelSection({
             <DialogHeader>
               <DialogTitle>Default model</DialogTitle>
               <DialogDescription>
-                This setting applies to new conversations. Each conversation
-                keeps its starting model and thinking level, and any choice you
-                make in that conversation takes priority.
+                New conversations with this Bot start on this model. A
+                conversation keeps the model it started on, and a model picked
+                in the conversation comes first.
               </DialogDescription>
             </DialogHeader>
-            <DialogBody className="mt-1 grid gap-3 py-1">
+            <DialogBody className="mt-4 grid gap-3">
               <fieldset
                 aria-label="Default model options"
                 className="grid gap-2"
@@ -158,7 +158,7 @@ export function DefaultModelSection({
                     type="radio"
                   />
                   <span className="grid gap-0.5">
-                    <span className="font-medium">Use deployment default</span>
+                    <span className="font-medium">Use OpenBot's default</span>
                     {deploymentSummary ? (
                       <span className="text-muted-foreground text-xs">
                         {deploymentSummary}
@@ -223,7 +223,7 @@ export function DefaultModelSection({
                 </p>
               ) : null}
             </DialogBody>
-            <DialogFooter className="mt-3">
+            <DialogFooter className="mt-4">
               <Button
                 size="sm"
                 variant="outline"
