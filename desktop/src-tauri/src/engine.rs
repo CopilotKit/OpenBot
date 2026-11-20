@@ -912,16 +912,27 @@ pub fn detect() -> EngineStatus {
 }
 
 /**
-`detect`, with each engine's `version` and Podman's `machine list` stopped at `deadline`: nothing
-when one of them was still running then, since an engine that hangs is neither answering nor
+`detect`, with every engine command it runs stopped at `deadline` and none started after it:
+nothing when one was still running then, since an engine that hangs is neither answering nor
 absent. For troubleshooting logs, which must not wait on a stalled engine.
 */
 pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
     let left = || deadline.saturating_duration_since(std::time::Instant::now());
     let timed_out = std::cell::Cell::new(false);
+    // Past the deadline nothing more is started: it would only be stopped at once.
+    let out_of_time = || {
+        let out = left().is_zero();
+        if out {
+            timed_out.set(true);
+        }
+        out
+    };
     // Every podman command the detection runs: `machine list`, `machine inspect`, the default
     // connection and the `volume ls` that finds where OpenBot's database is.
     let podman = |args: &[&str]| -> Result<String, String> {
+        if out_of_time() {
+            return Err("no time left".to_owned());
+        }
         match crate::quiet::output_within(&mut podman_command(args), left()) {
             Ok(out) if out.status.success() => {
                 Ok(String::from_utf8_lossy(&out.stdout).into_owned())
@@ -938,11 +949,16 @@ pub fn detect_by(deadline: std::time::Instant) -> Option<EngineStatus> {
     let status = detect_among_with(
         &[Engine::Docker, Engine::Podman],
         own_machine_only(std::env::consts::OS),
-        |address| match address.responds_within(left()) {
-            Some(answered) => answered,
-            None => {
-                timed_out.set(true);
-                false
+        |address| {
+            if out_of_time() {
+                return false;
+            }
+            match address.responds_within(left()) {
+                Some(answered) => answered,
+                None => {
+                    timed_out.set(true);
+                    false
+                }
             }
         },
         |address| passed_over_machine_with(address, &podman),
