@@ -1540,6 +1540,61 @@ fn give_back_paused_podman(progress: &mut dyn FnMut(QuitStep, QuitStepState)) {
     progress(QuitStep::GiveBackPodman, QuitStepState::of(&given));
 }
 
+/**
+Stop's and Quit's last part, once OpenBot's containers and its services have stopped: OpenBot's own
+Podman machine (`acquire::MACHINE`) stopped with them. Left running, it kept holding the computer's
+memory after the person pressed Stop: on a Windows test machine OpenBot's WSL distro stayed up after
+Stop and after Quit. Start starts it again, as it does after a restart.
+
+Only when the installation runs on Podman (`on_podman`), and only OpenBot's own machine, never one
+of the person's (`own_machine::stop_own_with`). Nothing when the engine's machine was found stopped
+already. Not an update's stop: the restart that follows it needs the machine.
+
+`stopping` is told just before the machine stops. None when there was nothing to stop. A machine
+that would not stop is said in the log, as the person's Podman not starting again is: everything of
+OpenBot's in it has stopped, so there is nothing for the next launch to recover.
+*/
+fn stop_own_machine(
+    engine: EngineAtStop,
+    on_podman: bool,
+    machines: &mut dyn own_machine::Machines,
+    stopping: &mut dyn FnMut(),
+) -> Option<Result<(), String>> {
+    if !on_podman || engine == EngineAtStop::MachineStopped {
+        return None;
+    }
+    match own_machine::stop_own_with(machines, acquire::MACHINE, stopping) {
+        Ok(true) => {
+            log::info!("[stop] stopped {}", acquire::MACHINE);
+            Some(Ok(()))
+        }
+        Ok(false) => None,
+        Err(error) => {
+            log::warn!(
+                "[stop] could not stop {} (podman machine stop): {error}",
+                acquire::MACHINE
+            );
+            Some(Err(error))
+        }
+    }
+}
+
+/// Whether the installation Stop or Quit stops runs on Podman on a Mac or a PC, where Podman runs in
+/// a machine: OpenBot's own containers' engine while they run, otherwise the one it was set up on.
+/// Asked before anything stops, since the stop lets go of the containers.
+fn on_podman_at_stop(shell: &Shell, root: &Path) -> bool {
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return false;
+    }
+    let owned = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.engine);
+    owned.or_else(|| preparation::saved_engine(root)) == Some(engine::Engine::Podman)
+}
+
 /// The person chose Try again after closing the password prompt, so Install asks again now rather
 /// than after its short wait. See `install::GoAhead`. False when nothing was waiting for it.
 #[tauri::command]
@@ -5821,6 +5876,7 @@ fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let root = root_for_stop(shell, fallback_root);
     let engine = engine_at_stop(shell, &root);
+    let on_podman = on_podman_at_stop(shell, &root);
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
             if let Some(address) = engine_for_stop(shell, root) {
@@ -5830,14 +5886,22 @@ fn stop_everything_for(shell: &Shell, fallback_root: &Path) -> Stopped {
         |root: &Path| down_owned_containers(shell, root),
         intelligence_step(Shutdown::Stop),
     );
-    stop_everything_at(
+    let stopped = stop_everything_at(
         shell,
         &root,
         engine,
         stack::stop_processes_under,
         down,
         intelligence,
-    )
+    );
+    // Last, once nothing of OpenBot's runs in it: OpenBot's own machine.
+    stop_own_machine(
+        engine,
+        on_podman,
+        &mut own_machine::ThisComputer,
+        &mut || {},
+    );
+    stopped
 }
 
 /// Quit's cleanup as the exit handler runs it, telling `progress` as each part starts and ends.
@@ -5848,6 +5912,7 @@ where
     // A ChatGPT sign-in left waiting would keep its container, and the callback port, after Quit.
     openbot_desktop_lib::plan::release_chatgpt_callback_port();
     let engine = engine_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
+    let on_podman = on_podman_at_stop(shell, &cleanup_root(shell, &stack::default_root()));
     let (down, intelligence) = healed_once_before(
         |root: &Path| {
             if let Some(address) = engine_for_stop(shell, root) {
@@ -5866,7 +5931,17 @@ where
         intelligence,
         &mut progress,
     );
-    // Last, once nothing of OpenBot's runs in its machine: the person's Podman OpenBot paused.
+    // Once nothing of OpenBot's runs in it: OpenBot's own machine.
+    let machine = stop_own_machine(
+        engine,
+        on_podman,
+        &mut own_machine::ThisComputer,
+        &mut || progress(QuitStep::StopEngine, QuitStepState::Running),
+    );
+    if let Some(machine) = machine {
+        progress(QuitStep::StopEngine, QuitStepState::of(&machine));
+    }
+    // Last: the person's Podman OpenBot paused.
     give_back_paused_podman(&mut progress);
     stopped
 }
@@ -5919,6 +5994,8 @@ enum QuitStep {
     OpenBot,
     /// The local Intelligence stack OpenBot created.
     Intelligence,
+    /// OpenBot's own Podman machine, when it runs (`stop_own_machine`).
+    StopEngine,
     /// On a Mac, the person's Podman that OpenBot paused while it ran, started again. See
     /// `own_machine`.
     GiveBackPodman,
@@ -5930,6 +6007,7 @@ impl QuitStep {
             QuitStep::FinishUpdate => "finish-update",
             QuitStep::OpenBot => "stop-openbot",
             QuitStep::Intelligence => "stop-intelligence",
+            QuitStep::StopEngine => "stop-engine",
             QuitStep::GiveBackPodman => "start-your-podman",
         }
     }
@@ -5941,6 +6019,7 @@ impl QuitStep {
             QuitStep::FinishUpdate
             | QuitStep::OpenBot
             | QuitStep::Intelligence
+            | QuitStep::StopEngine
             | QuitStep::GiveBackPodman => "",
         }
     }
@@ -20338,6 +20417,115 @@ mod tests {
             assert!(take_local_eval_stop_notice(&root).is_none());
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    /// Podman machines as `podman machine list` and `podman machine stop` have them.
+    struct ListedMachines {
+        running: Vec<String>,
+        refuses: bool,
+        done: Vec<String>,
+    }
+
+    impl own_machine::Machines for ListedMachines {
+        fn running(&mut self) -> Result<Vec<String>, String> {
+            Ok(self.running.clone())
+        }
+
+        fn containers(&mut self, _: &str) -> acquire::Containers {
+            Vec::new()
+        }
+
+        fn stop(&mut self, name: &str) -> Result<(), String> {
+            self.done.push(format!("stop {name}"));
+            if self.refuses {
+                return Err(format!("Error: {name}: machine is busy"));
+            }
+            self.running.retain(|running| running != name);
+            Ok(())
+        }
+
+        fn start(&mut self, name: &str, _: &acquire::Containers) -> Result<(), String> {
+            self.done.push(format!("start {name}"));
+            Ok(())
+        }
+    }
+
+    /**
+    A Windows test machine: Stop stopped OpenBot's services and left OpenBot's own Podman machine,
+    its WSL distro, running and holding memory, and Quit did the same. Both now stop it last, once
+    everything of OpenBot's in it has stopped, and only it: the person's own machine runs on. An
+    update's stop leaves it running for the restart that follows.
+    */
+    #[test]
+    fn stop_and_quit_stop_openbots_own_machine_and_only_it() {
+        const THEIRS: &str = "podman-machine-default";
+        let both = |refuses| ListedMachines {
+            running: vec![THEIRS.to_string(), acquire::MACHINE.to_string()],
+            refuses,
+            done: Vec::new(),
+        };
+
+        let mut machines = both(false);
+        let mut told = 0;
+        let mut tell = || told += 1;
+        assert_eq!(
+            stop_own_machine(EngineAtStop::Answers, true, &mut machines, &mut tell),
+            Some(Ok(()))
+        );
+        assert_eq!(machines.done, ["stop openbot"]);
+        assert_eq!(machines.running, [THEIRS]);
+        assert_eq!(told, 1);
+
+        // A machine that won't stop is said; the person's is still never touched.
+        let mut machines = both(true);
+        assert!(matches!(
+            stop_own_machine(EngineAtStop::Unreachable, true, &mut machines, &mut || {}),
+            Some(Err(_))
+        ));
+        assert_eq!(machines.done, ["stop openbot"]);
+
+        // Nothing to stop: OpenBot on Docker, its machine found stopped, or not running.
+        for (engine, on_podman, running) in [
+            (EngineAtStop::Answers, false, vec![THEIRS, acquire::MACHINE]),
+            (
+                EngineAtStop::MachineStopped,
+                true,
+                vec![THEIRS, acquire::MACHINE],
+            ),
+            (EngineAtStop::Answers, true, vec![THEIRS]),
+        ] {
+            let mut machines = ListedMachines {
+                running: running.into_iter().map(String::from).collect(),
+                refuses: false,
+                done: Vec::new(),
+            };
+            let mut told = false;
+            assert_eq!(
+                stop_own_machine(engine, on_podman, &mut machines, &mut || told = true),
+                None
+            );
+            assert!(machines.done.is_empty(), "{engine:?} {on_podman}");
+            assert!(!told);
+        }
+
+        // Stop and Quit each run it, after everything else they stop; an update's stop does not.
+        let main = include_str!("main.rs");
+        let body = |name: &str| {
+            let body = &main[main.find(name).unwrap()..];
+            &body[..body.find("\n}\n").unwrap()]
+        };
+        for (path, rest) in [
+            ("\nfn stop_everything_for(", "stop_everything_at("),
+            ("\nfn quit_cleanup<", "exit_cleanup_reporting_at("),
+        ] {
+            let path = body(path);
+            let machine = path
+                .find("stop_own_machine(")
+                .unwrap_or_else(|| panic!("OpenBot's machine is left running:\n{path}"));
+            assert!(machine > path.find(rest).unwrap(), "{path}");
+            assert!(path.contains("&mut own_machine::ThisComputer"), "{path}");
+        }
+        assert!(!body("\nfn stop_for_update<").contains("stop_own_machine("));
     }
 
     /// The engine does not answer and its machine says it is running: still a failure, said as the

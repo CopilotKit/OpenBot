@@ -90,6 +90,14 @@ export const QUIT_PARTS: { step: string; plan: Plan }[] = [
       stages: [{ said: "Closing OpenBot's services", until: 14 }],
     },
   },
+  // Only when OpenBot runs on Podman and its own machine was running (`stop_own_machine`).
+  {
+    step: "stop-engine",
+    plan: {
+      milestones: {},
+      stages: [{ said: "Stopping the software OpenBot runs on", until: 10 }],
+    },
+  },
   // Only on a Mac where OpenBot paused the person's own Podman while it ran (`own_machine`).
   {
     step: "start-your-podman",
@@ -125,7 +133,12 @@ export function quitTick(
   const legs: Leg[] = [];
   for (const { step, plan } of QUIT_PARTS) {
     const row = steps.find((known) => known.step === step);
-    if (!row && (step === "finish-update" || step === "start-your-podman"))
+    if (
+      !row &&
+      (step === "finish-update" ||
+        step === "stop-engine" ||
+        step === "start-your-podman")
+    )
       continue;
     if (row?.running && next.started[step] === undefined)
       next.started[step] = now;

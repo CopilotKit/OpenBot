@@ -127,4 +127,20 @@ test("Quit says it is starting the person's Podman again only when OpenBot pause
     />,
   );
   expect(view.container.textContent).not.toContain("your Podman");
+  // OpenBot's own machine, stopped once its services have.
+  view.rerender(
+    <ShuttingDown
+      status={{
+        seq: 5,
+        steps: [
+          done("stop-openbot"),
+          done("stop-intelligence"),
+          { step: "stop-engine", ok: true, running: true, detail: "" },
+        ],
+      }}
+    />,
+  );
+  expect(view.container.querySelector(".journey-said")?.textContent).toBe(
+    "Stopping the software OpenBot runs on",
+  );
 });
