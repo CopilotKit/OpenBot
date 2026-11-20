@@ -268,6 +268,11 @@ components:
       description: The caller's Windows computer, who is using it, and what is being recorded on it.
       required: [available, control, recording]
       properties:
+        botId:
+          type: string
+          description: >-
+            The Bot it is set up for: the one Bot that can be told to work on
+            it (computer: windows).
         available:
           type: boolean
           description: True when the Windows computer answers, its session is unlocked and the Bot can use it.
@@ -489,6 +494,7 @@ components:
   examples:
     WindowsComputerExample:
       value:
+        botId: general-assistant
         available: true
         control:
           holder: bot

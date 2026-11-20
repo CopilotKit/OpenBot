@@ -96,6 +96,7 @@ export * from "./botCheckInUsage";
 export * from "./botCheckInUsageItems";
 export * from "./botCheckInUsageRuns";
 export * from "./botCheckInUsageRunsSkipped";
+export * from "./botComputer";
 export * from "./botConnectionTest";
 export * from "./botConnectionTestRequest";
 export * from "./botConnectionTestRequestHeaders";

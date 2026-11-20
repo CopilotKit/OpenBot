@@ -42,6 +42,8 @@ export interface Bot {
   hasCallbackToken: boolean;
   /** Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now. */
   isolated: boolean;
+  /** The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental. */
+  computer?: string;
   /** What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions. */
   instructions?: string;
   /** What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn't know. */

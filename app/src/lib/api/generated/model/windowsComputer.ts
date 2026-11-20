@@ -8,6 +8,8 @@ import type { WindowsComputerRecording } from "./windowsComputerRecording";
  * The caller's Windows computer, who is using it, and what is being recorded on it.
  */
 export interface WindowsComputer {
+  /** The Bot it is set up for: the one Bot that can be told to work on it (computer: windows). */
+  botId?: string;
   /** True when the Windows computer answers, its session is unlocked and the Bot can use it. */
   available: boolean;
   /** Why it isn't available, when it isn't: locked, secure_desktop, driver_down, stopped, unavailable or unreachable. */
