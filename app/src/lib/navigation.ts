@@ -4,7 +4,6 @@ import {
   IconPlug,
   IconSettings,
   IconShieldLock,
-  IconSitemap,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +38,6 @@ export type NavigationItem =
       kind?: undefined;
       id:
         | "bots"
-        | "agents"
         | "routines"
         | "memory"
         | "skills"
@@ -50,7 +48,6 @@ export type NavigationItem =
       label: string;
       to:
         | "/bots"
-        | "/agents"
         | "/routines"
         | "/memory"
         | "/skills"
@@ -103,17 +100,6 @@ export const NAVIGATION: readonly NavigationItem[] = [
     to: "/bots",
     icon: IconBolt,
     section: "primary",
-  },
-  {
-    // The agents Bots hand work to: the organization's, and a person's own private ones.
-    // Hidden for now: most people never hand work out, and "Agents" beside "Bots" reads as another
-    // name for a Bot. A Bot's own Agents page is hidden with it (routes/_authed/_app/bots.$agentId.agents.tsx).
-    id: "agents",
-    label: "Agents",
-    to: "/agents",
-    icon: IconSitemap,
-    section: "primary",
-    hidden: true,
   },
   {
     id: "routines",
