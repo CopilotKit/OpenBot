@@ -61,7 +61,14 @@ export const GetManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself.",
+        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself. On a release it pins the agent chart to this OpenBot's own version with --version, so the agent always matches the server that printed it.",
+      ),
+    helmCommandNote: zod
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.",
       ),
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
@@ -156,7 +163,14 @@ export const StartManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself.",
+        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself. On a release it pins the agent chart to this OpenBot's own version with --version, so the agent always matches the server that printed it.",
+      ),
+    helmCommandNote: zod
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.",
       ),
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })

@@ -210,7 +210,19 @@ components:
           description: >-
             The command that installs the management agent in this OpenBot's
             cluster, while waiting for the agent. It holds nothing secret:
-            the agent collects its one-time token from OpenBot itself.
+            the agent collects its one-time token from OpenBot itself. On a
+            release it pins the agent chart to this OpenBot's own version
+            with --version, so the agent always matches the server that
+            printed it.
+        helmCommandNote:
+          type: string
+          minLength: 1
+          description: >-
+            A sentence a person reads beside helmCommand, present only when
+            this OpenBot isn't a published release (a build of main or a
+            development build). No published agent chart matches such a
+            build, so helmCommand names no chart version and Helm installs
+            the newest published one. Absent on a release.
         lastHeartbeatAt:
           type: string
           format: date-time
@@ -317,8 +329,8 @@ components:
         installId: 6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d
         helmCommand: >-
           helm install openbot-agent
-          oci://ghcr.io/copilotkit/charts/openbot-agent --namespace
-          openbot-system --create-namespace --set
+          oci://ghcr.io/copilotkit/charts/openbot-agent --version 1.2.0
+          --namespace openbot-system --create-namespace --set
           enrollment.serverUrl=http://openbot-server-internal.openbot.svc:9464
     ManagementConnectedExample:
       value:
