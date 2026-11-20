@@ -130,6 +130,7 @@ tags:
   - { name: Host access, description: "The folders on a person's own computer that they gave their Bots through OpenBot Desktop. Each person sees and ends only their own." }
   - { name: Computers, description: "The computer a Bot works on for a person: its state, its screen, who is driving it, the actions a Bot takes on it through the app, and for an administrator the organization's computers. The live screen and terminal stream over WebSockets, described in api/asyncapi.yaml." }
   - { name: Browsers, description: "The browsers people work in: the one on a Bot's computer, which a person drives and records in while they hold control of it, and the one OpenBot runs for each person, with the OpenBot Recorder in it already connected." }
+  - { name: Windows computer, description: "Experimental. The Windows computer a person and their Bot take turns on, set up for one person: who is using it, and the recordings the person makes on it for OpenBot to learn from." }
   - { name: Sign-in requests, description: "A Bot asking the person it works for to sign it in to a website, and the person's answer on a private form. What they type goes to the Bot's browser and nowhere else; the Bot is told only whether the sign-in worked." }
   - { name: Saved logins, description: "The logins a person saved for their Bots to sign in with, by site. A password goes in and is never read back out." }
   - { name: Recorder, description: "The OpenBot Recorder, the browser extension a person records what they do with: the browsers connected as a person, their recordings, and the Recorder's own operations, which it signs with its connection token." }
@@ -427,6 +428,11 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/browser/recording: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1recording' }
   /api/v2/organizations/{organizationId}/people/{personId}/browser/narration: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1narration' }
   /api/v2/organizations/{organizationId}/people/{personId}/browser/clear: { $ref: './browsers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1browser~1clear' }
+  /api/v2/organizations/{organizationId}/windows-computer: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer' }
+  /api/v2/organizations/{organizationId}/windows-computer/control/take: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1control~1take' }
+  /api/v2/organizations/{organizationId}/windows-computer/control/release: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1control~1release' }
+  /api/v2/organizations/{organizationId}/windows-computer/recording/start: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1recording~1start' }
+  /api/v2/organizations/{organizationId}/windows-computer/recording/stop: { $ref: './windows-computer.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1windows-computer~1recording~1stop' }
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests' }
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/sign-in-requests/{signInRequestId}/submit: { $ref: './passwords-and-recorder.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1sign-in-requests~1{signInRequestId}~1submit' }
