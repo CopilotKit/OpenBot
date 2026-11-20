@@ -18,7 +18,7 @@ import { cleanup, render, waitFor, within } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { agentKeys } from "@/lib/agents/queries";
 import { ListIdentityProvidersResponse } from "@/lib/api/generated/identity-providers/identity-providers.zod";
-import { authKeys } from "@/lib/auth/queries";
+import { authKeys, signedInUser } from "@/lib/auth/queries";
 import { CopilotProvider } from "@/lib/copilot/provider";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import {
@@ -87,15 +87,28 @@ const problem = (body: { status: number }) =>
     headers: { "content-type": "application/problem+json" },
   });
 
-/** Every request the app made, with the headers it sent. */
+/** The server's answer to a request made with no session. */
+const UNSIGNED = {
+  type: "https://open.bot/errors/unauthenticated",
+  title: "Sign in required.",
+  status: 401,
+  code: "UNAUTHENTICATED",
+  detail: "Sign in to continue.",
+  retryable: false,
+};
+
+/** Every request the app made, with the headers it sent, and each one the server refused. */
 let sent: { path: string; headers: Headers }[] = [];
-let answer: (path: string) => Response | Promise<Response> = () =>
-  problem(NOT_FOUND);
+let refused: string[] = [];
+/** `asNobody`: the request was made without the page's cookies, as a browser sends `credentials: "omit"`. */
+let answer: (path: string, asNobody: boolean) => Response | Promise<Response> =
+  () => problem(NOT_FOUND);
 
 const originalFetch = globalThis.fetch;
 beforeAll(() => GlobalRegistrator.register({ url: "http://127.0.0.1:3010/" }));
 beforeEach(() => {
   sent = [];
+  refused = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(
@@ -106,7 +119,13 @@ beforeEach(() => {
         input instanceof Request ? input.headers : init?.headers,
       );
       sent.push({ path: url.pathname, headers });
-      return answer(url.pathname);
+      const asNobody =
+        (input instanceof Request ? input.credentials : init?.credentials) ===
+        "omit";
+      const response = await answer(url.pathname, asNobody);
+      if (response.status >= 400)
+        refused.push(`${response.status} ${url.pathname}`);
+      return response;
     },
     { preconnect: originalFetch.preconnect },
   );
@@ -290,11 +309,15 @@ test("an admin of `default` still registers providers there", async () => {
   expect(view.queryByText("Set up for all of OpenBot")).toBeNull();
 });
 
-test("signed in outside `default`, the app learns what OpenBot offers from one of the person's own organizations", async () => {
+test("signed in outside `default`, the app's first load learns what OpenBot offers and who she is with nothing refused", async () => {
+  // The self-hosted end-to-end run: before the organization was known, the deployment was asked at `default` with
+  // Ines's session, and a signed-in person outside `default` is told "not found" there. The page worked; the console
+  // showed the 404. Asked as nobody it is answered, and then everything is asked in Harbor.
   setCurrentOrganization(undefined);
-  answer = (path) => {
+  answer = (path, asNobody) => {
     if (path === "/api/v2/organizations/default/deployment")
-      return problem(NOT_FOUND);
+      return asNobody ? Response.json(FACTS) : problem(NOT_FOUND);
+    if (asNobody) return problem(UNSIGNED);
     if (path === "/api/v2/people/me/organizations")
       return Response.json({
         organizations: [{ ...HARBOR, role: "owner", active: true }],
@@ -303,16 +326,31 @@ test("signed in outside `default`, the app learns what OpenBot offers from one o
       });
     if (path === `/api/v2/organizations/${HARBOR.id}/deployment`)
       return Response.json(FACTS);
+    if (path === `/api/v2/organizations/${HARBOR.id}/people/me`)
+      return Response.json({
+        person: {
+          ...INES,
+          name: "Ines Duarte",
+          needsName: false,
+          image: null,
+          role: "owner",
+          onboarding: null,
+        },
+        openbotVersion: null,
+      });
     return problem(NOT_FOUND);
   };
-  const capabilities = await freshClient().fetchQuery(
+  const client = freshClient();
+  expect(await signedInUser(client)).toMatchObject({ id: INES.id });
+  const capabilities = await client.fetchQuery(
     deploymentCapabilitiesQueryOptions(),
   );
   expect(capabilities).toMatchObject({ edition: "team", generativeUi: true });
+  expect(refused).toEqual([]);
   expect(sent.map((request) => request.path)).toEqual([
     "/api/v2/organizations/default/deployment",
     "/api/v2/people/me/organizations",
-    `/api/v2/organizations/${HARBOR.id}/deployment`,
+    `/api/v2/organizations/${HARBOR.id}/people/me`,
   ]);
 });
 
