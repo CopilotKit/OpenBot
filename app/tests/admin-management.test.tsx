@@ -20,7 +20,7 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /*
- * Admin, CopilotKit management, against the API's own answers for getManagementEnrollment,
+ * Admin, Managed updates, against the API's own answers for getManagementEnrollment,
  * startManagementEnrollment and cancelManagementEnrollment, faked at the fetch boundary. The Admin
  * rail lists the page only where the server says management applies; the page draws each of the
  * four states the server can be in, and Connect and Cancel are the API's writes.
@@ -149,16 +149,16 @@ function Rail() {
   );
 }
 
-test("the Admin rail lists CopilotKit management where the server says it applies", async () => {
+test("the Admin rail lists Managed updates where the server says it applies", async () => {
   const view = await draw(Rail);
-  expect(await view.findByText("CopilotKit management")).toBeTruthy();
+  expect(await view.findByText("Managed updates")).toBeTruthy();
 });
 
 test("the Admin rail leaves it out where the server answers MANAGEMENT_UNAVAILABLE", async () => {
   answer = problem(
     404,
     "MANAGEMENT_UNAVAILABLE",
-    "CopilotKit management isn't available for this OpenBot.",
+    "Managed updates aren't available for this OpenBot.",
   );
   const view = await draw(Rail);
   expect(await view.findByText("Identity providers")).toBeTruthy();
@@ -167,14 +167,14 @@ test("the Admin rail leaves it out where the server answers MANAGEMENT_UNAVAILAB
       "success",
     ),
   );
-  expect(view.queryByText("CopilotKit management")).toBeNull();
+  expect(view.queryByText("Managed updates")).toBeNull();
 });
 
 test("where it doesn't apply, the page says so and offers nothing to press", async () => {
   answer = problem(
     404,
     "MANAGEMENT_UNAVAILABLE",
-    "CopilotKit management isn't available for this OpenBot.",
+    "Managed updates aren't available for this OpenBot.",
   );
   const view = await draw(ManagementPage);
   expect(await view.findByText("Not available here")).toBeTruthy();
@@ -272,11 +272,11 @@ test("a refused Connect says why, in the server's own sentence", async () => {
   writeAnswer = problem(
     409,
     "MANAGEMENT_REFUSED",
-    "CopilotKit didn't accept this OpenBot's licence. Check the licence key, or contact CopilotKit.",
+    "The licence in COPILOTKIT_LICENSE_TOKEN wasn't accepted. Check it, or contact OpenBot by CopilotKit.",
   );
   fireEvent.click(view.getByRole("button", { name: "Connect" }));
   expect((await view.findByRole("alert")).textContent).toBe(
-    "CopilotKit didn't accept this OpenBot's licence. Check the licence key, or contact CopilotKit.",
+    "The licence in COPILOTKIT_LICENSE_TOKEN wasn't accepted. Check it, or contact OpenBot by CopilotKit.",
   );
 });
 

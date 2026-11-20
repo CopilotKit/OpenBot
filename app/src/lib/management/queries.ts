@@ -69,7 +69,7 @@ export function managementQueryOptions() {
       try {
         const answer = await getManagementEnrollment(organizationId(), {
           signal,
-          fallback: "Couldn't load CopilotKit management",
+          fallback: "Couldn't load managed updates",
         });
         const state = KNOWN.includes(answer.state as ManagementState)
           ? (answer.state as ManagementState)

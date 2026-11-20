@@ -197,19 +197,19 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
 ];
 
 /**
- * CopilotKit management: connecting a self-hosted OpenBot to CopilotKit's management service. Not in
+^ * Managed updates: connecting a self-hosted OpenBot to CopilotKit's management service. Not in
  * {@link ADMIN_SECTIONS}, because it applies only where the server says so (the team edition a
  * company runs itself, in the organization `default`); {@link adminSections} adds it there.
  */
 export const MANAGEMENT_ENTRY: AdminEntry = {
-  title: "CopilotKit management",
+  title: "Managed updates",
   description:
-    "Connect OpenBot to CopilotKit so it can be kept up to date in your cluster.",
+    "Let OpenBot by CopilotKit keep OpenBot up to date in your cluster.",
   icon: IconCloudCog,
   linkOptions: { to: "/admin/management" },
 };
 
-/** Admin's pages, with CopilotKit management at the end of the organization's when it applies. */
+/** Admin's pages, with Managed updates at the end of the organization's when it applies. */
 export function adminSections(management: boolean): readonly AdminSection[] {
   if (!management) return ADMIN_SECTIONS;
   return ADMIN_SECTIONS.map((section) =>

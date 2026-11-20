@@ -6,7 +6,7 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { managementKeys } from "./queries";
 
-const FALLBACK = "Couldn't change CopilotKit management";
+const FALLBACK = "Couldn't change managed updates";
 
 function invalidateManagement(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: managementKeys.all });

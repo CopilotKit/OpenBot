@@ -41,14 +41,15 @@ export const Route = createFileRoute("/_authed/admin/management")({
   component: ManagementPage,
 });
 
-const TITLE = "CopilotKit management";
+const TITLE = "Managed updates";
 const DESCRIPTION =
-  "Connect OpenBot to CopilotKit so CopilotKit can keep it up to date in your own cluster.";
+  "Let OpenBot by CopilotKit keep OpenBot up to date in your own cluster.";
 
 /**
- * Admin, CopilotKit management: connecting a self-hosted OpenBot to CopilotKit's management
- * service, in four states the server decides (lib/management/queries.ts). Not connected offers
- * Connect. Waiting for approval shows the code somebody signed in to CopilotKit confirms, and the
+ * Admin, Managed updates: connecting a self-hosted OpenBot to CopilotKit's management service, in
+ * four states the server decides (lib/management/queries.ts). Product copy never names CopilotKit
+ * alone (openbot-copy), so the screen says managed updates and OpenBot by CopilotKit. Not connected
+ * offers Connect. Waiting for approval shows the code an admin confirms with their account, and the
  * page to confirm it on. Waiting for the agent shows the one Helm command, which holds nothing
  * secret: the agent collects its one-time token from OpenBot. Connected shows the agent's last
  * heartbeat and version. The page asks again every few seconds while it waits on somebody.
@@ -66,15 +67,15 @@ export function ManagementPage() {
   if (management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
-        <Notice>Couldn't load CopilotKit management. Reload the page.</Notice>
+        <Notice>Couldn't load managed updates. Reload the page.</Notice>
       </PageShell>
     );
   if (!management.data.applies)
     return (
       <PageShell title={TITLE}>
         <PageEmpty icon={IconCloudCog} title="Not available here">
-          CopilotKit management is for OpenBot that your company runs in its own
-          cluster. Ask whoever runs OpenBot about it.
+          Managed updates are for OpenBot that your company runs in its own
+          cluster. Ask whoever runs OpenBot about them.
         </PageEmpty>
       </PageShell>
     );
@@ -113,8 +114,8 @@ export function ManagementPage() {
           icon={IconCloudCog}
           title="Not connected"
         >
-          Someone signed in to CopilotKit approves a code, then you install the
-          management agent with one Helm command.
+          An admin of your organization approves a code with their OpenBot
+          account. Then you install the management agent with one Helm command.
         </PageEmpty>
       )}
     </PageShell>
@@ -124,10 +125,7 @@ export function ManagementPage() {
 /** Something went wrong, in the server's own sentence. */
 function Notice({ children }: { children: React.ReactNode }) {
   return (
-    <p
-      className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-sm"
-      role="alert"
-    >
+    <p className="mb-4 text-destructive text-sm" role="alert">
       {children}
     </p>
   );
@@ -167,7 +165,7 @@ function WaitingForApproval({
   const page = status.verificationUriComplete ?? status.verificationUri;
   return (
     <PageSection
-      description="Sign in to CopilotKit as an admin of the organization your licence is for, and confirm this code. OpenBot carries on by itself once it's approved."
+      description="Sign in with your OpenBot account as an admin of the organization your licence is for, and confirm this code. OpenBot carries on by itself once it's approved."
       title="Step 1 of 2: approve the code"
     >
       <PageCard
