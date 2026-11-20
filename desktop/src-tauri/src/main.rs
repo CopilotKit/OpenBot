@@ -16403,6 +16403,34 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Found on the real Mac pass of this fix, under Podman: with the engine's machine stalled (its
+    /// VM process stopped, as an overloaded or sleeping machine is), `compose ps` failed after about
+    /// 14 seconds with an ssh handshake reset rather than running out of time. Read as an engine
+    /// that is gone, it sent the window to setup, which started OpenBot again: the same
+    /// "Starting OpenBot · Starting the software OpenBot runs on" the report showed. A machine whose
+    /// own record still says it is running is a slow engine; one that says stopped is gone.
+    #[test]
+    fn a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone() {
+        let root = temp_root("server-container-machine");
+        std::fs::create_dir_all(&root).unwrap();
+        let engine = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+
+        let stalled = SerializedPath::set_only_with("podman", "machine-stalled");
+        assert_eq!(
+            stack::server_container(&engine, &root, ENGINE_ASKED_WITHIN),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        drop(stalled);
+
+        let stopped = SerializedPath::set_only_with("podman", "machine-stopped");
+        assert!(matches!(
+            stack::server_container(&engine, &root, ENGINE_ASKED_WITHIN),
+            Err(stack::ServerContainerUnknown::Unreachable(said)) if said.contains("handshake failed")
+        ));
+        drop(stopped);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn stop_retains_completed_installation_and_disables_only_automatic_start() {
         let root = local_eval_root(

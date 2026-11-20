@@ -3863,11 +3863,19 @@ pub fn server_container(
         }
     };
     if !output.status.success() {
-        return Err(ServerContainerUnknown::Unreachable(format!(
+        let said = format!(
             "{operation} exited with status {}: {}",
             output.status,
             command_said(&output.stderr)
-        )));
+        );
+        // MEASURED on a Mac under Podman: with the engine's machine stalled (its VM process
+        // stopped), `compose ps` gives up after about 14 seconds with "ssh: handshake failed:
+        // connection reset by peer" rather than running out of time. The machine still says it
+        // is running, which a stopped one does not, so that is a slow engine and not a gone one.
+        if machine_still_running(engine) {
+            return Err(ServerContainerUnknown::Slow);
+        }
+        return Err(ServerContainerUnknown::Unreachable(said));
     }
     let Some((state, id)) = server_container_in(&String::from_utf8_lossy(&output.stdout)) else {
         return Ok(ServerContainer::Missing);
@@ -3887,6 +3895,21 @@ pub fn server_container(
         code,
         out_of_memory,
     })
+}
+
+/// Whether the Podman machine behind `engine` still says it is running, from the machine's own
+/// record on this computer, which answers whether or not the machine does. False for Docker, and
+/// for a Podman with no machine (Linux).
+fn machine_still_running(engine: &Address) -> bool {
+    match (&engine.engine, engine.connection.as_deref()) {
+        (crate::engine::Engine::Podman, Some(connection)) => {
+            crate::acquire::machine_state_named(crate::acquire::machine_of(connection))
+                .ok()
+                .flatten()
+                .is_some_and(|state| state == "running")
+        }
+        _ => false,
+    }
 }
 
 /// The `server` container's state and id, from `compose ps -a --format json server`: one object a

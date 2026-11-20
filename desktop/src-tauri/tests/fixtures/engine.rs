@@ -178,6 +178,21 @@ fn main() {
             return;
         }
     }
+    // A Podman machine that cannot be reached: stalled (its VM process stopped, while its record
+    // still says running) or stopped. `compose ps` fails the same way for both, as measured on a
+    // Mac with the machine's VM process stopped.
+    if SCENARIO == "machine-stalled" || SCENARIO == "machine-stopped" {
+        if joined == "compose ps -a --format json server" {
+            eprintln!("Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start` to manage a new Linux VM");
+            eprintln!("Error: unable to connect to Podman socket: failed to connect: ssh: handshake failed: read tcp 127.0.0.1:51828->127.0.0.1:50205: read: connection reset by peer");
+            std::process::exit(125);
+        }
+        if joined == "machine inspect openbot" {
+            let state = if SCENARIO == "machine-stalled" { "running" } else { "stopped" };
+            println!("[{{\"Name\":\"openbot\",\"State\":\"{state}\"}}]");
+            return;
+        }
+    }
     if args.first().map(String::as_str) == Some("version") {
         println!("1.44");
         return;
