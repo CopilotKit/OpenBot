@@ -55,6 +55,23 @@ export async function signInEnterprise(email: string) {
 }
 
 /**
+ * Link the signed-in person's company account: sign in, while signed in, through one of their organization's identity
+ * providers by its id, in the system browser as sign-in itself is. The server links what the provider vouches for to the
+ * account they have, and the app is back with both. By the id, not an address: somebody who joined with a personal
+ * address has none at the company's domain.
+ */
+export async function linkCompanyAccount(providerId: string) {
+  const result = await authClient.signIn.sso({
+    providerId,
+    callbackURL: "openbotmobile://",
+  });
+  if (result.error)
+    throw new Error(
+      result.error.message ?? "Couldn't start signing in with your company.",
+    );
+}
+
+/**
  * Where each person's pick of organization is kept on this phone (../organization.ts): beside the session, one place
  * for each OpenBot and each person on it, so a phone people share opens in each one's own pick.
  */

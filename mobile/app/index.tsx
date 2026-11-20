@@ -11,20 +11,23 @@ import {
 import {
   type ConversationSummary,
   chooseOrganization,
-  readDeployment,
   ORGANIZATION_ID,
   organizationChoices,
+  readDeployment,
 } from "../src/api";
 import { listConversations } from "../src/api/generated/conversations/conversations";
+import { getCompanySignIn } from "../src/api/generated/people/people";
 import {
   authClient,
+  linkCompanyAccount,
   renewHostedSignIn,
   serverUrl,
   signIn,
   signInEnterprise,
 } from "../src/auth";
-import { registerPush, unregisterPush } from "../src/notifications";
+import { HELD_OUT, linkButtons } from "../src/company-sign-in";
 import { homeView } from "../src/home-view";
+import { registerPush, unregisterPush } from "../src/notifications";
 import { onOrganizationGone } from "../src/organization-gone";
 import { onRenewalNeedsClick } from "../src/renewal";
 import { useLoad } from "../src/use-load";
@@ -55,8 +58,25 @@ export default function Home() {
   const loadOrganizations = useCallback(() => organizationChoices(), []);
   const organizations = useLoad(loadOrganizations, Boolean(session));
   const workingIn = organizations.data?.currentId;
-  // In no organization here: nothing that acts on one is offered, and nothing is asked of one.
-  const view = homeView(Boolean(session), organizations.error);
+  const inNone =
+    homeView(Boolean(session), organizations.error) === "in-no-organization";
+  /*
+   * Whether the organization they work in holds them out until they sign in through their company, and the providers
+   * that let them. Answered even while it holds them out; read again wherever they work now.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again for whoever is signed in now, and wherever they work now
+  const loadCompanySignIn = useCallback(
+    () => getCompanySignIn(ORGANIZATION_ID, "me"),
+    [session?.user.id, workingIn],
+  );
+  const companySignIn = useLoad(loadCompanySignIn, Boolean(session) && !inNone);
+  // In no organization here: nothing that acts on one is offered, and nothing is asked of one. Held out of one: the
+  // way in, and their other organizations.
+  const view = homeView(
+    Boolean(session),
+    organizations.error,
+    companySignIn.data,
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload for whoever is signed in now, and wherever they work now
   const loadConversations = useCallback(
     () => listConversations(ORGANIZATION_ID, { limit: 100 }),
@@ -64,7 +84,7 @@ export default function Home() {
   );
   const conversations = useLoad(
     loadConversations,
-    Boolean(session) && view !== "in-no-organization",
+    Boolean(session) && view !== "in-no-organization" && view !== "held-out",
   );
   /*
    * The organization they work in went away while the app was open (they were removed, or it was deleted): their
@@ -143,7 +163,7 @@ export default function Home() {
           : "Sign in to OpenBot"}
       </Text>
       <Text>{serverUrl}</Text>
-      {view === "working" &&
+      {(view === "working" || view === "held-out") &&
         !organizations.error &&
         (organizations.data?.organizations.length ?? 0) > 1 && (
           <View style={{ gap: 8 }}>
@@ -200,7 +220,27 @@ export default function Home() {
           />
         </View>
       )}
-      {view === "in-no-organization" ? (
+      {view === "held-out" ? (
+        <>
+          <Text>{HELD_OUT}</Text>
+          {linkButtons(companySignIn.data?.providers ?? []).map((link) => (
+            <Button
+              key={link.providerId}
+              disabled={busy}
+              title={link.title}
+              onPress={() => {
+                void act(async () => {
+                  // The company's sign-in in the system browser, then back here signed in with both.
+                  await linkCompanyAccount(link.providerId);
+                  await refreshOrganizations();
+                  await companySignIn.refresh();
+                });
+              }}
+            />
+          ))}
+          {signOutButton}
+        </>
+      ) : view === "in-no-organization" ? (
         <>
           <Button
             disabled={busy || organizations.pending}
