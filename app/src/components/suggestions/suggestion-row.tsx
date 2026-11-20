@@ -5,6 +5,8 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { stashFirstMessage } from "@/components/channels/transcript-messages";
 import { BoardRow, MetaTag } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +29,10 @@ import { queryClient } from "@/query-client";
  * One thing a Bot's check-in found: what it is, a line of why, where it was read, and what to do
  * about it.
  *
- * - Work on it makes it a task in a conversation of its own with the Bot.
+ * - Work on it hands it to the Bot. With task threads off (the server's choice, and the default) it
+ *   opens the person's own conversation with the Bot and sends the item there as their message, so
+ *   the Bot works on it inline like any other request. With them on, it becomes a task in a
+ *   conversation of its own, and its card takes the row's place.
  * - ✕ dismisses it, and the Bot is told not to raise it, or things like it, for 30 days.
  * - The menu's Stop checking turns off the check-in that found it, for a find the person does not
  *   want more of at all.
@@ -48,7 +53,16 @@ export function SuggestionRow({
   setting?: ProactiveSetting;
   inGroup?: boolean;
 }) {
-  const act = useMutation(resolveSuggestionMutationOptions(queryClient));
+  const navigate = useNavigate();
+  const act = useMutation(
+    resolveSuggestionMutationOptions(queryClient, {
+      // Sent as the first message of that conversation's screen, as the home composer sends one.
+      openConversation: ({ id, message }) => {
+        stashFirstMessage(id, message);
+        void navigate({ to: "/channel/$channelId", params: { channelId: id } });
+      },
+    }),
+  );
   const stop = useMutation(changeProactiveSettingMutationOptions(queryClient));
   const pressed = act.isPending ? act.variables.action : null;
   const site = suggestion.sourceLink ? sourceSite(suggestion.sourceLink) : null;

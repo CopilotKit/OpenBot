@@ -296,6 +296,7 @@ paths:
   /api/v2/organizations/{organizationId}/check-ins/{checkInId}/run: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-ins~1{checkInId}~1run' }
   /api/v2/organizations/{organizationId}/check-in-items: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items' }
   /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/start: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1start' }
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/work-on: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1work-on' }
   /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/dismiss: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1dismiss' }
   /api/v2/organizations/{organizationId}/check-in-usage: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-usage' }
   /api/v2/organizations/{organizationId}/goals: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals' }
