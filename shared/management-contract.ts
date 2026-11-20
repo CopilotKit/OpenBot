@@ -319,3 +319,188 @@ export async function releaseManifestDigest(manifest: string) {
   );
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+
+/*
+ * Self-serve enrollment. An admin connects a self-hosted team install from OpenBot's admin screen,
+ * with no secret copied by hand: OpenBot starts an enrollment with its licence (the OAuth device
+ * authorization grant, RFC 8628), the admin approves it on CopilotKit's enrollment page signed in
+ * with their CopilotKit organization, and OpenBot collects a one-time enrollment token. The agent
+ * then takes that token from OpenBot's internal status port, proving who it is with a projected
+ * service account token, makes its own key, and trades the token and a certificate request for the
+ * install's client certificate. The private key never leaves the agent's cluster.
+ *
+ * Enrollment calls go to their own host, without client certificates (the fleet host refuses any
+ * TLS handshake without one), and errors other than the token poll's are application/problem+json
+ * (RFC 9457):
+ *
+ *   POST /enroll/v1/requests                         EnrollmentStart           -> 201 EnrollmentStarted
+ *   POST /enroll/v1/requests/{requestId}/token       (no body)                 -> 200 EnrollmentGranted | 400 EnrollmentPending
+ *   POST /enroll/v1/approvals                        EnrollmentApproval        -> 200 EnrollmentPreview   (Clerk session JWT)
+ *   POST /enroll/v1/approvals/{userCode}/confirm     (no body)                 -> 204                    (Clerk session JWT)
+ *   POST /enroll/v1/certificates                     CertificateRequest        -> 201 CertificateIssued
+ *   GET  /enroll/v1/installs/{installId}/status      (Bearer enrollment or status token) -> InstallStatus
+ *
+ * And on OpenBot's internal status port, for the agent alone:
+ *
+ *   GET /management/enrollment-token   Bearer <projected token, audience ENROLLMENT_TOKEN_AUDIENCE>
+ *                                      -> 200 AgentEnrollmentToken once, then 410
+ */
+
+/** Where CopilotKit's enrollment API and page answer. */
+export const ENROLLMENT_URL = "https://enroll.bot.copilotkit.ai";
+export const ENROLLMENT_REQUESTS_PATH = "/enroll/v1/requests";
+export const enrollmentTokenPath = (requestId: string) =>
+  `/enroll/v1/requests/${encodeURIComponent(requestId)}/token`;
+export const ENROLLMENT_APPROVALS_PATH = "/enroll/v1/approvals";
+export const enrollmentConfirmPath = (userCode: string) =>
+  `/enroll/v1/approvals/${encodeURIComponent(userCode)}/confirm`;
+export const ENROLLMENT_CERTIFICATES_PATH = "/enroll/v1/certificates";
+export const installStatusPath = (installId: string) =>
+  `/enroll/v1/installs/${encodeURIComponent(installId)}/status`;
+/** The page an admin approves on. */
+export const ENROLLMENT_VERIFICATION_PATH = "/connect";
+
+/** On OpenBot's internal status port: where the agent collects the enrollment token. */
+export const AGENT_ENROLLMENT_TOKEN_PATH = "/management/enrollment-token";
+/** The audience of the projected service account token the agent proves itself with. */
+export const ENROLLMENT_TOKEN_AUDIENCE = "openbot-management-enrollment";
+/** The only service account OpenBot hands the enrollment token to, as `namespace:name`. */
+export const AGENT_SERVICE_ACCOUNT = "openbot-system:openbot-agent";
+
+/** The subject an install's client certificate carries, and so the subject of the agent's request. */
+export function installCertificateSubject(installId: string) {
+  return `CN=${installId}, OU=install, O=CopilotKit`;
+}
+
+/** RFC 8628's user code: eight characters a person can read out, as XXXX-XXXX. */
+export const USER_CODE_PATTERN = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+const userCode = z.string().regex(USER_CODE_PATTERN);
+/** An opaque bearer secret (enrollment or status token): URL-safe characters only. */
+const bearerSecret = z
+  .string()
+  .min(32)
+  .max(512)
+  .regex(/^[A-Za-z0-9._~-]+$/);
+const httpUrl = z.url({ protocol: /^https?$/ }).max(2048);
+const pem = (label: string) =>
+  z
+    .string()
+    .max(64 * 1024)
+    .regex(
+      new RegExp(
+        `^\\s*-----BEGIN ${label}-----\\r?\\n[A-Za-z0-9+/=\\r\\n]+-----END ${label}-----\\s*$`,
+      ),
+    );
+/** One or more PEM certificates, one after another. */
+const certificates = z
+  .string()
+  .max(64 * 1024)
+  .regex(
+    /^\s*(?:-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----\s*)+$/,
+  );
+
+/** 1. OpenBot starts an enrollment with its CopilotKit licence. */
+export const EnrollmentStart = z.strictObject({
+  /** The install's CopilotKit licence token, verified offline by the service. */
+  licenseToken: z
+    .string()
+    .min(1)
+    .max(16 * 1024),
+  /** What the admin calls this install, shown on the approval page. */
+  installName: z.string().trim().min(1).max(128),
+  /** OpenBot's own address, shown on the approval page so the admin knows what they approve. */
+  serverUrl: httpUrl,
+});
+export type EnrollmentStart = z.infer<typeof EnrollmentStart>;
+
+export const EnrollmentStarted = z.strictObject({
+  requestId: z.uuid(),
+  userCode,
+  verificationUri: httpUrl,
+  verificationUriComplete: httpUrl,
+  /** Seconds between token polls. */
+  interval: z.number().int().min(1).max(60),
+  /** Seconds until the request expires unapproved. */
+  expiresIn: z.number().int().min(1),
+});
+export type EnrollmentStarted = z.infer<typeof EnrollmentStarted>;
+
+/** 2. The token poll's answers, with RFC 8628 section 3.5 semantics. */
+export const ENROLLMENT_PENDING_ERRORS = [
+  "authorization_pending",
+  "slow_down",
+  "access_denied",
+  "expired_token",
+] as const;
+export const EnrollmentPending = z.strictObject({
+  error: z.enum(ENROLLMENT_PENDING_ERRORS),
+  error_description: z.string().max(512).optional(),
+});
+export type EnrollmentPending = z.infer<typeof EnrollmentPending>;
+
+/** Answered once; the request is then spent. */
+export const EnrollmentGranted = z.strictObject({
+  installId: z.uuid(),
+  /** One use, for the agent's certificate request. */
+  enrollmentToken: bearerSecret,
+  /** For OpenBot's screen to read the install's status after the enrollment token is spent. */
+  statusToken: bearerSecret,
+  /** Seconds the enrollment token is good for. */
+  expiresIn: z.number().int().min(1),
+});
+export type EnrollmentGranted = z.infer<typeof EnrollmentGranted>;
+
+/** 3. The admin approves on the page (or a future CopilotKit cloud screen) by the code. */
+export const EnrollmentApproval = z.strictObject({ userCode });
+export type EnrollmentApproval = z.infer<typeof EnrollmentApproval>;
+
+export const EnrollmentPreview = z.strictObject({
+  installName: EnrollmentStart.shape.installName,
+  serverUrl: httpUrl,
+});
+export type EnrollmentPreview = z.infer<typeof EnrollmentPreview>;
+
+/**
+ * 4. The agent trades the enrollment token and a PKCS#10 request for its certificate. The request's
+ * key is the agent's own, and its subject is `installCertificateSubject(installId)`; the service
+ * refuses any other subject. One use per token.
+ */
+export const CertificateRequest = z.strictObject({
+  enrollmentToken: bearerSecret,
+  csrPem: pem("CERTIFICATE REQUEST"),
+});
+export type CertificateRequest = z.infer<typeof CertificateRequest>;
+
+export const CertificateIssued = z.strictObject({
+  installId: z.uuid(),
+  /** The install's client certificate alone, PEM. */
+  certificatePem: pem("CERTIFICATE"),
+  /** The CA chain that issued it, PEM. Not what the agent trusts for the service's own certificate. */
+  caChainPem: certificates,
+});
+export type CertificateIssued = z.infer<typeof CertificateIssued>;
+
+/** 5. What OpenBot's screen shows once the admin has run the helm command. */
+export const InstallStatus = z.strictObject({
+  enrolled: z.boolean(),
+  agentConnected: z.boolean(),
+  lastHeartbeatAt: isoTime.nullable(),
+  agentVersion: text.nullable(),
+});
+export type InstallStatus = z.infer<typeof InstallStatus>;
+
+/** OpenBot's internal status port to the agent: the token OpenBot collected, once. */
+export const AgentEnrollmentToken = z.strictObject({
+  installId: z.uuid(),
+  enrollmentToken: bearerSecret,
+});
+export type AgentEnrollmentToken = z.infer<typeof AgentEnrollmentToken>;
+
+/** An enrollment error body (RFC 9457). Members beyond these are allowed, as the RFC allows. */
+export const EnrollmentProblem = z.looseObject({
+  type: z.string().max(2048),
+  title: z.string().max(512),
+  status: z.number().int().min(400).max(599),
+  detail: z.string().max(2048).optional(),
+});
+export type EnrollmentProblem = z.infer<typeof EnrollmentProblem>;

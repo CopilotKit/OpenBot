@@ -847,22 +847,18 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * Setup installs on the first screen's click, with the default Bot in the default folder: one
    * installation per computer. It needs no CopilotKit account, so it runs while the person signs
    * in; only Intelligence waits for the agreement. Once it completes, Intelligence sets up behind
-   * the AI provider screen rather than after it. An installation already complete for the default
-   * Bot is not installed again.
+   * the AI provider screen rather than after it.
+   *
+   * Always asked of the native side, even for an installation recorded as complete: it keeps a
+   * finished install of the same Bot ("OpenBot is already installed."), but only once it has the
+   * engine answering. On Windows a recorded install whose Podman had gone was skipped here, and the
+   * account step waited forever for OpenBot's own machine, which nothing was making.
    */
   const localInstall = useRef<Promise<boolean> | null>(null);
-  /** `again`: what was recorded as installed is not what this app starts, so install anyway. */
-  function beginLocalInstall(again = false): Promise<boolean> {
+  function beginLocalInstall(): Promise<boolean> {
     if (localInstall.current) return localInstall.current;
     const choice = { id: DEFAULT_HARNESS };
     setHarness(choice);
-    if (
-      !again &&
-      preparation?.key === installationKeyFor(root, choice) &&
-      preparation.status === "complete"
-    ) {
-      return Promise.resolve(true);
-    }
     const started = install(choice).then((ok) => {
       // A failed install is started again by the next Install, not remembered.
       if (!ok) localInstall.current = null;
@@ -901,7 +897,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    */
   async function installLocally(again = false) {
     setStep("install");
-    if (!(await beginLocalInstall(again))) return;
+    if (!(await beginLocalInstall())) return;
     // The person was waiting on the install, and what comes next is theirs: the AI screen, or
     // Start carrying on. In front, wherever they went while it installed.
     comeForward("the installation is complete");

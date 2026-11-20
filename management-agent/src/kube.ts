@@ -136,7 +136,13 @@ export class Kube {
     });
   }
 
-  annotate(namespace: string, resource: string, name: string, value: string) {
+  /** Sets one or more `key=value` annotations in a single change. */
+  annotate(
+    namespace: string,
+    resource: string,
+    name: string,
+    ...values: string[]
+  ) {
     return this.kubectl([
       "--namespace",
       namespace,
@@ -144,7 +150,7 @@ export class Kube {
       "--overwrite",
       resource,
       name,
-      value,
+      ...values,
     ]);
   }
 }

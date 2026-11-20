@@ -93,7 +93,8 @@ pub(crate) fn compile_fixture(source: &std::path::Path, binary: &std::path::Path
 
 /// A command-line program that stands in for one the shell probes: `say` writes to both streams
 /// and exits 3; `hang <marker>` sleeps for two seconds and then writes `marker`, so a marker that
-/// never appears proves it was stopped rather than left to finish. Copied to a name of its own
+/// never appears proves it was stopped rather than left to finish; `linger` exits at once and leaves
+/// a child holding its output open for eight seconds. Copied to a name of its own
 /// (`powershell`, `wsl`), it is that program hanging whatever it is asked, and writes
 /// `<name>-outlived` beside itself if it is not stopped.
 #[allow(dead_code)] // The library's probe tests use it; the binary shares this file.
@@ -108,7 +109,9 @@ fn main() {
     let me = std::env::current_exe().unwrap();
     let name = me.file_stem().unwrap().to_string_lossy().into_owned();
     if name != "probe-cli" {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        // `probe-linger` holds the output it inherited past `quiet`'s five-second wait for it.
+        let nap = if name == "probe-linger" { 8 } else { 2 };
+        std::thread::sleep(std::time::Duration::from_secs(nap));
         std::fs::write(me.with_file_name(format!("{name}-outlived")), "outlived its limit").unwrap();
         return;
     }
@@ -118,6 +121,17 @@ fn main() {
             print!("said on stdout");
             eprint!("said on stderr");
             std::process::exit(3);
+        }
+        Some("parent") => {
+            let child = me.with_file_name(format!("probe-child{}", std::env::consts::EXE_SUFFIX));
+            std::fs::copy(&me, &child).unwrap();
+            std::process::Command::new(&child).spawn().unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        Some("linger") => {
+            let child = me.with_file_name(format!("probe-linger{}", std::env::consts::EXE_SUFFIX));
+            std::fs::copy(&me, &child).unwrap();
+            std::process::Command::new(&child).spawn().unwrap();
         }
         Some("hang") => {
             std::thread::sleep(std::time::Duration::from_secs(2));

@@ -83,11 +83,12 @@ export function agentInputFrom(values: AgentFormValues) {
 /**
  * The full update body for changing one or two fields of a Bot.
  *
- * The update endpoint takes the whole profile, so unchanged fields ride along as stored. Not a
- * built-in Bot's endpoint: that is the managed Bot's own address, which nobody typed, and the route
- * checks any endpoint it is sent as one somebody did — on a deployment whose Bot is on localhost it
- * refused every edit. Empty leaves the stored one where it is, and the empty key keeps the current
- * one.
+ * The update endpoint takes the whole profile, so unchanged text fields ride along as stored. Not
+ * the endpoint, which is sent only when the patch changes it. The route checks any endpoint it is
+ * sent as one somebody typed, against the deployment's rules as they are today: a built-in Bot's
+ * address is the managed Bot's own, on localhost on some deployments, and a Bot saved at an address
+ * the rules have since closed would both have refused every rename. Empty leaves the stored one
+ * where it is, and the empty key keeps the current one.
  */
 export function profileUpdateInput(
   profile: AgentProfile,
@@ -98,8 +99,17 @@ export function profileUpdateInput(
     title: profile.title,
     roleDescription: profile.roleDescription,
     visibility: profile.visibility,
-    endpoint: profile.builtIn ? "" : (profile.endpoint ?? ""),
+    endpoint: "",
     authValue: "",
     ...patch,
   });
 }
+
+/**
+ * The Setup dialog's Agent URL: the form's own check, and not empty, because an empty endpoint on a
+ * change leaves the stored one as it is, so saving one would look done and change nothing.
+ */
+export const agentEndpointSchema = agentFormSchema.shape.endpoint.refine(
+  (value) => value !== "",
+  "Enter a web address starting with http:// or https://.",
+);
