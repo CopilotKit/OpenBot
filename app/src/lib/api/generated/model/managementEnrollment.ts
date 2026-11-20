@@ -25,10 +25,15 @@ export interface ManagementEnrollment {
    */
   installId?: string;
   /**
-   * The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself.
+   * The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself. On a release it pins the agent chart to this OpenBot's own version with --version, so the agent always matches the server that printed it.
    * @minLength 1
    */
   helmCommand?: string;
+  /**
+   * A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.
+   * @minLength 1
+   */
+  helmCommandNote?: string;
   /** When the agent last reported in, once connected. */
   lastHeartbeatAt?: string;
   /**
@@ -37,7 +42,7 @@ export interface ManagementEnrollment {
    */
   agentVersion?: string;
   /**
-   * What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, or the management service out of reach. Absent when nothing did.
+   * What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.
    * @minLength 1
    */
   lastError?: string;

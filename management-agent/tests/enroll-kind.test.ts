@@ -9,7 +9,7 @@
  *     certificate and key to its Secret, and heartbeats over mutual TLS with them;
  *  2. a pod under another service account, with the same audience, is refused the token;
  *  3. the agent's RBAC reaches that one Secret by name, and no other;
- *  4. a restart reads the Secret and enrolls nothing;
+ *  4. a restart reads the Secret and, with OpenBot answering 410, enrolls nothing;
  *  5. no log line of the agent holds the token, the key or the certificate.
  *
  * The stand-ins (fake-enrollment.ts, fake-management-service.ts) answer as the contract says the
@@ -327,7 +327,7 @@ run("self-serve enrollment on a real cluster", () => {
     expect(canI("delete", `secrets/${SECRET}`)).toBe("no");
   });
 
-  test("a restart reads the Secret and enrolls nothing", async () => {
+  test("a restart reads the Secret and, with OpenBot answering 410, enrolls nothing", async () => {
     const before = agentPod();
     const answers = openbot.answers.length;
     kubectl("-n", SYSTEM, "rollout", "restart", "deployment/openbot-agent");
@@ -349,7 +349,8 @@ run("self-serve enrollment on a real cluster", () => {
       () => fleet.heartbeats.length > count,
     );
     expect(fleet.heartbeats.at(-1)?.installId).toBe(installId);
-    expect(openbot.answers.length).toBe(answers);
+    // Asked once whether it was connected again: OpenBot handed the token out already (410).
+    expect(openbot.answers.slice(answers).map((a) => a.status)).toEqual([410]);
     expect(enroll.issued).toHaveLength(1);
     const log = kubectl("-n", SYSTEM, "logs", after[0] ?? "");
     expect(log).not.toContain("enrolled:");

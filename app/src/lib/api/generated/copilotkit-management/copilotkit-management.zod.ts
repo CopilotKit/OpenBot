@@ -61,7 +61,14 @@ export const GetManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself.",
+        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself. On a release it pins the agent chart to this OpenBot's own version with --version, so the agent always matches the server that printed it.",
+      ),
+    helmCommandNote: zod
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.",
       ),
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
@@ -79,7 +86,7 @@ export const GetManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, or the management service out of reach. Absent when nothing did.",
+        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.",
       ),
   })
   .describe(
@@ -156,7 +163,14 @@ export const StartManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself.",
+        "The command that installs the management agent in this OpenBot's cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself. On a release it pins the agent chart to this OpenBot's own version with --version, so the agent always matches the server that printed it.",
+      ),
+    helmCommandNote: zod
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.",
       ),
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
@@ -174,7 +188,7 @@ export const StartManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, or the management service out of reach. Absent when nothing did.",
+        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.",
       ),
   })
   .describe(
@@ -182,7 +196,7 @@ export const StartManagementEnrollmentResponse = zod
   );
 
 /**
- * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. Nothing is changed in the cluster. Not connected answers 204 too. Connected answers 409: disconnecting is uninstalling the management agent with Helm. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
+ * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too. Connected, it finishes disconnecting after the management agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn't told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
  * @summary Stop connecting this OpenBot to CopilotKit management
  */
 

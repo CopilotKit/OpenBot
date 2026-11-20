@@ -417,7 +417,7 @@ export const getCancelManagementEnrollmentUrl = (organizationId: string) => {
 };
 
 /**
- * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. Nothing is changed in the cluster. Not connected answers 204 too. Connected answers 409: disconnecting is uninstalling the management agent with Helm. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
+ * Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too. Connected, it finishes disconnecting after the management agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn't told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
  * @summary Stop connecting this OpenBot to CopilotKit management
  */
 export const cancelManagementEnrollment = async (
@@ -464,6 +464,7 @@ export const getCancelManagementEnrollmentMutationOptions = <
     | ManagementUnavailableResponse
     | ManagementConflictResponse
     | ServerErrorResponse
+    | ManagementServiceFailedResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -512,6 +513,7 @@ export type CancelManagementEnrollmentMutationError =
   | ManagementUnavailableResponse
   | ManagementConflictResponse
   | ServerErrorResponse
+  | ManagementServiceFailedResponse
   | UnexpectedErrorResponse;
 export type CancelManagementEnrollmentMutationVariables = {
   organizationId: string;
@@ -529,6 +531,7 @@ export const useCancelManagementEnrollment = <
     | ManagementUnavailableResponse
     | ManagementConflictResponse
     | ServerErrorResponse
+    | ManagementServiceFailedResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(

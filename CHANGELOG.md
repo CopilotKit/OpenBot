@@ -33,10 +33,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot's internal status port and no install id, the agent proves itself to the OpenBot server
   with a short-lived service account token, collects the one-time enrollment token the server holds
   once an admin connected the install, makes its own key, trades a certificate request for its
-  certificate and writes both to its own Secret, which it reuses after a restart. The key never
-  leaves the cluster, and nothing secret is logged. Until you choose how the database is backed up
-  (`backup.kind`), the agent refuses every upgrade that changes the database, before touching
-  anything.
+  certificate and writes both to its own Secret, which it reuses after a restart. `helm uninstall`
+  leaves that Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at
+  start and, handed the new install's token, enrolls again and replaces the old certificate. The
+  key never leaves the cluster, and nothing secret is logged. Until you choose how the database is
+  backed up (`backup.kind`), the agent refuses every upgrade that changes the database, before
+  touching anything.
 
 ## 1.1.2
 

@@ -77,3 +77,11 @@ test("the state is an open list a later server can add to", () => {
     ],
   });
 });
+
+test("stopping a connection whose agent was uninstalled asks CopilotKit's service, so it can say the service is out of reach", () => {
+  // Connected, Stop checks with the service whether the agent still reports in (it forgets the
+  // connection only once it doesn't), so it can meet the same 502 as Connect.
+  expect(
+    spec.paths[`${base}/enrollment`]?.delete?.responses?.["502"]?.$ref,
+  ).toBe("#/components/responses/ManagementServiceFailed");
+});
