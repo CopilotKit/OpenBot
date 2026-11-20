@@ -9,7 +9,7 @@ import { recordAppError } from "@/lib/api/generated/product-events/product-event
 import { idempotencyKey } from "@/lib/api/request";
 import { desktopShell } from "@/lib/desktop/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
-import { inNoOrganization } from "@/lib/organizations/queries";
+import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 
 /**
  * ERRORS THE APP DID NOT HANDLE, TOLD TO OPENBOT.

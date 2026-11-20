@@ -15,7 +15,7 @@ import {
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
-import { inNoOrganization } from "@/lib/organizations/queries";
+import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
 import {
