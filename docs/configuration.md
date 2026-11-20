@@ -727,6 +727,13 @@ audit on every turn. Anyone unlinked is told how to link and nothing runs. Appro
 as OpenTag approval cards (allow once, always allow, cancel) and are decided through the approvals
 service as the linked owner; a reply to a Bot's question answers that question.
 
+A goal's Slack trigger hears Slack through this pairing, so it needs the pairing too. It is saved
+only for the goal's owner, once they have linked their Slack account in that workspace (under
+**Reaching you**, or on Slack's page under Connections), and only for channels they are in. Each
+event is checked again, so unlinking or leaving a channel stops it. Without the pairing, and always
+in the personal edition, a Slack trigger is refused, and a Bot asked to watch Slack runs the goal from
+a routine that checks the person's connected Slack app instead.
+
 The former direct Slack settings (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_BOT_TOKEN`,
 `SLACK_TEAM_ID`, `SLACK_SIGNING_SECRET`) are refused at start-up; unset them.
 

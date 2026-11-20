@@ -312,6 +312,9 @@ jobs:
     uses: $/.github/workflows/ci.yml
     permissions:
       contents: read
+      # CI's `changes` job asks for it, and a called job cannot have more than its caller grants. On
+      # this push event it reads nothing and runs every check.
+      actions: read
 
   # The images, built once from the commit that passed the checks above, and tagged with this
   # release's version and `latest`, with the server, computer and supervisor pinned at the tag this
