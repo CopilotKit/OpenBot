@@ -76,6 +76,12 @@ export type DeploymentCapabilities = {
    * and says so in place of asking.
    */
   botComputers?: boolean;
+  /**
+   * Whether people sign in through the hosted sign-in, with their account with OpenBot by
+   * CopilotKit: a hosted OpenBot. There an invitation is an email from OpenBot by CopilotKit, accepted
+   * from that email, with no OpenBot link that accepts it.
+   */
+  hostedSignIn?: boolean;
 };
 
 /**
@@ -246,6 +252,7 @@ export function deploymentCapabilitiesQueryOptions() {
         isolatedBots: body.isolatedBots === true,
         // The other way round from the rest: a server that doesn't say reads as having computers.
         botComputers: body.botComputers !== false,
+        hostedSignIn: body.hostedSignIn === true,
       };
     },
   });
