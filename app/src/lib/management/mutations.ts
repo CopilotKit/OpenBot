@@ -29,7 +29,11 @@ export function startManagementMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** Stop a connection that is waiting, and forget its code and its one-time token. */
+/**
+ * Stop a connection that is waiting, and forget its code and its one-time token. Once connected it
+ * is Disconnect: the server forgets the connection when the agent has stopped reporting in (it was
+ * uninstalled), and refuses with a sentence saying why while the agent still reports.
+ */
 export function cancelManagementMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (): Promise<void> => {

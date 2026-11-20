@@ -83,13 +83,14 @@ export function managementQueryOptions() {
         throw error;
       }
     },
-    // Asked again every few seconds only while waiting on somebody: the approval at CopilotKit's
-    // page, or the agent reporting in after the Helm command.
+    // Asked again every few seconds while waiting on somebody: the approval at CopilotKit's page,
+    // or the agent reporting in after the Helm command. Every half minute while connected, so an
+    // agent that stops reporting (uninstalled, or its pod down) shows without a reload.
     refetchInterval: (query) => {
       const data = query.state.data;
-      return data?.applies && managementWaiting(data.status.state)
-        ? 5_000
-        : false;
+      if (!data?.applies) return false;
+      if (managementWaiting(data.status.state)) return 5_000;
+      return data.status.state === "connected" ? 30_000 : false;
     },
   });
 }

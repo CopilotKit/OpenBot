@@ -1,4 +1,5 @@
 import {
+  IconAlertTriangle,
   IconCircleCheck,
   IconClock,
   IconCloudCog,
@@ -49,10 +50,12 @@ const DESCRIPTION =
  * Admin, Managed updates: connecting a self-hosted OpenBot to CopilotKit's management service, in
  * four states the server decides (lib/management/queries.ts). Product copy never names CopilotKit
  * alone (openbot-copy), so the screen says managed updates and OpenBot by CopilotKit. Not connected
- * offers Connect. Waiting for approval shows the code an admin confirms with their account, and the
- * page to confirm it on. Waiting for the agent shows the one Helm command, which holds nothing
- * secret: the agent collects its one-time token from OpenBot. Connected shows the agent's last
- * heartbeat and version. The page asks again every few seconds while it waits on somebody.
+ * offers Connect. Waiting for approval shows the code and the page to confirm it on, where an admin
+ * signs in with the account the licence is under (not their OpenBot sign-in). Waiting for the agent
+ * shows the one Helm command, which holds nothing secret: the agent collects its one-time token from
+ * OpenBot. Connected shows the agent's last heartbeat and version, says Not reporting when the server
+ * says the agent has gone quiet, and offers Disconnect for after the agent is uninstalled. The page
+ * asks again every few seconds while it waits on somebody, and every half minute while connected.
  *
  * Where management doesn't apply (the personal edition, OpenBot Cloud, another organization) the
  * server answers 404 and the page says so, with nothing to press; the rail doesn't list it there.
@@ -103,7 +106,19 @@ export function ManagementPage() {
       ) : status.state === "waiting-for-agent" ? (
         <WaitingForAgent cancelButton={cancelButton} status={status} />
       ) : status.state === "connected" ? (
-        <Connected status={status} />
+        <Connected
+          disconnectButton={
+            <Button
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate()}
+              size="sm"
+              variant="outline"
+            >
+              {cancel.isPending ? "Disconnecting…" : "Disconnect"}
+            </Button>
+          }
+          status={status}
+        />
       ) : (
         <PageEmpty
           action={
@@ -114,8 +129,9 @@ export function ManagementPage() {
           icon={IconCloudCog}
           title="Not connected"
         >
-          An admin of your organization approves a code with their OpenBot
-          account. Then you install the management agent with one Helm command.
+          An admin of the organization your OpenBot licence is for approves a
+          code on the approval page. Then you install the management agent with
+          one Helm command.
         </PageEmpty>
       )}
     </PageShell>
@@ -165,7 +181,7 @@ function WaitingForApproval({
   const page = status.verificationUriComplete ?? status.verificationUri;
   return (
     <PageSection
-      description="Sign in with your OpenBot account as an admin of the organization your licence is for, and confirm this code. OpenBot carries on by itself once it's approved."
+      description="Sign in on the approval page with your OpenBot by CopilotKit account, the one your licence is under, as an admin of that organization. Then confirm this code. OpenBot carries on by itself once it's approved."
       title="Step 1 of 2: approve the code"
     >
       <PageCard
@@ -243,14 +259,27 @@ function WaitingForAgent({
   );
 }
 
-function Connected({ status }: { status: ManagementStatus }) {
+function Connected({
+  status,
+  disconnectButton,
+}: {
+  status: ManagementStatus;
+  disconnectButton: React.ReactNode;
+}) {
+  // In this state the server sets lastError only when the agent has stopped reporting in; the
+  // notice at the top of the page carries its sentence.
+  const reporting = !status.lastError;
   const rows: {
     title: string;
     value: string;
     icon: React.ComponentType;
     mono?: boolean;
   }[] = [
-    { title: "Status", value: "Connected", icon: IconCircleCheck },
+    {
+      title: "Status",
+      value: reporting ? "Connected" : "Not reporting",
+      icon: reporting ? IconCircleCheck : IconAlertTriangle,
+    },
     {
       title: "Last heartbeat",
       value: status.lastHeartbeatAt
@@ -299,10 +328,10 @@ function Connected({ status }: { status: ManagementStatus }) {
         ))}
       </PageRows>
       <PageSection
-        description="Uninstall the management agent with Helm. OpenBot keeps running as it is, and you upgrade it yourself from then on."
+        description="Uninstall the management agent with Helm, then choose Disconnect. OpenBot keeps running as it is, and you upgrade it yourself from then on."
         title="Disconnect"
       >
-        <PageCard className="mt-4">
+        <PageCard className="mt-4" footer={disconnectButton}>
           <div className="flex items-start gap-3">
             <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words rounded bg-muted px-3 py-2 font-mono text-xs leading-relaxed">
               {UNINSTALL}

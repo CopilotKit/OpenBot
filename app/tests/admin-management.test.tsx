@@ -27,6 +27,7 @@ import { settleReactWork } from "./settle-react-work";
  */
 const { ManagementPage } = await import("@/routes/_authed/admin/management");
 const { useAdminSections } = await import("@/components/admin/admin-sections");
+const { managementQueryOptions } = await import("@/lib/management/queries");
 
 const NativeResponse = globalThis.Response;
 
@@ -184,6 +185,14 @@ test("where it doesn't apply, the page says so and offers nothing to press", asy
 test("not connected offers Connect, which starts connecting with an Idempotency-Key", async () => {
   const view = await draw(ManagementPage);
   expect(await view.findByText("Not connected")).toBeTruthy();
+  // The approval page signs people in with the account the licence is under, not OpenBot's own
+  // sign-in, so the screen never sends an admin to their OpenBot account.
+  expect(
+    view.getByText(
+      "An admin of the organization your OpenBot licence is for approves a code on the approval page. Then you install the management agent with one Helm command.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/OpenBot account/)).toBeNull();
   fireEvent.click(view.getByRole("button", { name: "Connect" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({ method: "POST", path: ENROLLMENT });
@@ -203,6 +212,12 @@ test("waiting for approval shows the code, its page and when it expires, and Can
   expect(page.getAttribute("target")).toBe("_blank");
   expect(view.getByText(/The code expires in 1[34] minutes\./)).toBeTruthy();
   expect(view.getByRole("button", { name: "Copy the code" })).toBeTruthy();
+  expect(
+    view.getByText(
+      "Sign in on the approval page with your OpenBot by CopilotKit account, the one your licence is under, as an admin of that organization. Then confirm this code. OpenBot carries on by itself once it's approved.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/OpenBot account/)).toBeNull();
 
   answer = { status: 200, body: { state: "not-connected" } };
   fireEvent.click(view.getByRole("button", { name: "Cancel" }));
@@ -249,6 +264,72 @@ test("connected shows the last heartbeat, the agent's version and how to disconn
     view.getByText("helm uninstall openbot-agent --namespace openbot-system"),
   ).toBeTruthy();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(view.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+});
+
+const NOT_REPORTING =
+  "The management agent hasn't reported in for more than five minutes. If you uninstalled it, choose Disconnect to finish. If not, check the openbot-agent pod in the openbot-system namespace.";
+
+const CONNECTED_SILENT = {
+  state: "connected",
+  installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+  lastHeartbeatAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+  agentVersion: "0.4.0",
+  lastError: NOT_REPORTING,
+};
+
+test("connected but silent says Not reporting, with the server's sentence", async () => {
+  answer = { status: 200, body: CONNECTED_SILENT };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not reporting")).toBeTruthy();
+  expect(view.queryByText("Connected")).toBeNull();
+  expect(view.getByText("12 minutes ago")).toBeTruthy();
+  expect(view.getByRole("alert").textContent).toBe(NOT_REPORTING);
+});
+
+test("Disconnect after uninstalling forgets the connection and goes back to not connected", async () => {
+  answer = { status: 200, body: CONNECTED_SILENT };
+  const view = await draw(ManagementPage);
+  await view.findByText("Not reporting");
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(writes[0]?.idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
+test("a Disconnect refused while the agent still reports in says why", async () => {
+  answer = {
+    status: 200,
+    body: { ...CONNECTED_SILENT, lastError: undefined },
+  };
+  const view = await draw(ManagementPage);
+  await view.findByText("Connected");
+  const refusal =
+    "The management agent is still reporting in. Uninstall it with Helm first, then choose Disconnect.";
+  writeAnswer = problem(409, "MANAGEMENT_AGENT_REPORTING", refusal);
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  expect((await view.findByRole("alert")).textContent).toBe(refusal);
+  expect(view.getByText("Connected")).toBeTruthy();
+});
+
+test("the screen keeps asking while connected, so a silent agent shows without a reload", () => {
+  const interval = managementQueryOptions().refetchInterval as (query: {
+    state: { data: unknown };
+  }) => number | false;
+  const asked = (data: unknown) => interval({ state: { data } });
+  expect(
+    asked({ applies: true, status: { state: "waiting-for-approval" } }),
+  ).toBe(5_000);
+  expect(asked({ applies: true, status: { state: "waiting-for-agent" } })).toBe(
+    5_000,
+  );
+  expect(asked({ applies: true, status: { state: "connected" } })).toBe(30_000);
+  expect(asked({ applies: true, status: { state: "not-connected" } })).toBe(
+    false,
+  );
+  expect(asked({ applies: false })).toBe(false);
 });
 
 test("the last attempt's error is said in the server's own sentence", async () => {
