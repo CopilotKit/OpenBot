@@ -66,11 +66,14 @@ const inLanggraphTs = matcher("agent-langgraph-ts/**");
 export const isBunTest = (path: string) =>
   matcher("**/*.test.ts", "**/*.test.tsx")(path) && !inLanggraphTs(path);
 
+/** A Python harness's pytest file. */
+export const isPythonTest = matcher("agent-*/tests/**/*.py");
+
 /** Any test file: the suite's, the Python harnesses' and the TypeScript engine's. */
 export const isTestFile = (path: string) =>
   isBunTest(path) ||
+  isPythonTest(path) ||
   matcher(
-    "agent-*/tests/**/*.py",
     "agent-langgraph-ts/**/*.test.ts",
     "agent-langgraph-ts/test/**",
     "agent-langgraph-ts/tests/**",
@@ -152,7 +155,12 @@ export const CI_RULES: Rule[] = [
   {
     output: "python_harness",
     checks: ["python harness regressions"],
-    reads: (path) => (!isDocs(path) && pythonHarness(path)) || ciInputs(path),
+    // Of the tests, only the harnesses' own: the suite's and the TypeScript engine's run elsewhere.
+    reads: (path) =>
+      (!isDocs(path) &&
+        pythonHarness(path) &&
+        (!isTestFile(path) || isPythonTest(path))) ||
+      ciInputs(path),
   },
   {
     output: "build",

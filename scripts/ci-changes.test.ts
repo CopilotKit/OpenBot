@@ -237,6 +237,19 @@ describe("a pull request push", () => {
     expect(running(decision)).toEqual(["python_harness", "static"]);
   });
 
+  test("a TypeScript engine test runs that engine's job, not the suite", () => {
+    const decision = decide(
+      "ci",
+      PR,
+      deps({
+        passed: { c2: ALL_CI },
+        changes: { c2: ["agent-langgraph-ts/src/run.test.ts"] },
+      }),
+    );
+    expect(running(decision)).toEqual(["langgraph_ts", "static"]);
+    expect(decision.tests).toEqual([]);
+  });
+
   test("a changed browser test runs in a browser, with WebKit when it asks for it", () => {
     const decision = decide(
       "ci",
