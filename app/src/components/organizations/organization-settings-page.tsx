@@ -2,6 +2,7 @@ import {
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
+  IconUser,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -57,6 +58,7 @@ import {
   givableRoles,
   initialsOf,
   memberControl,
+  memberLine,
   personName,
   roleChangeQuestion,
   roleInSentence,
@@ -258,14 +260,20 @@ function RenameOrganizationDialog({
   );
 }
 
-/** A person's picture, or their initials on the tint the account row uses. */
+/**
+ * A person's picture, or their initials on the tint the account row uses, or a person's mark for
+ * somebody OpenBot knows neither a name nor an address for.
+ */
 function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
+  const initials = initialsOf(person);
   return (
     <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted-foreground/10 text-foreground/70 text-xs">
       {person.image ? (
         <img alt="" className="size-full object-cover" src={person.image} />
+      ) : initials ? (
+        initials
       ) : (
-        initialsOf(person)
+        <IconUser aria-hidden="true" className="size-4" />
       )}
     </div>
   );
@@ -342,10 +350,15 @@ function MembersSection({
                         </span>
                       ) : null}
                     </ItemTitle>
-                    <ItemDescription className="line-clamp-1 break-all">
-                      {member.name?.trim()
-                        ? `${member.email} · ${roleName(member.role)}`
-                        : roleName(member.role)}
+                    {/* Not opened yet wraps whole words onto a second line, never cut off. */}
+                    <ItemDescription
+                      className={
+                        member.notOpenedYet
+                          ? "line-clamp-2 break-words"
+                          : "line-clamp-1 break-all"
+                      }
+                    >
+                      {memberLine(member)}
                     </ItemDescription>
                   </ItemContent>
                   {control || roles.length > 0 ? (
