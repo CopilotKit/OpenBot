@@ -179,6 +179,25 @@ describe("a pull request push", () => {
     ]);
   });
 
+  test("a Recorder change runs the code jobs, not the native app, the TypeScript engine or the harnesses", () => {
+    const decision = decide(
+      "ci",
+      PR,
+      deps({
+        passed: { c2: ALL_CI },
+        changes: { c2: ["extension/src/background/offscreen-document.ts"] },
+      }),
+    );
+    expect(running(decision)).toEqual([
+      "api",
+      "app_browser",
+      "build",
+      "startup",
+      "static",
+      "suite",
+    ]);
+  });
+
   test("docs only run nothing but the tests that name them", () => {
     const decision = decide(
       "ci",
