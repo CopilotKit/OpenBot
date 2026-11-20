@@ -47,6 +47,7 @@ import type {
   OrganizationInvitationResponse,
   OrganizationMemberPage,
   OrganizationMemberResponse,
+  OrganizationNotAllowedResponse,
   OrganizationNotCreatedResponse,
   OrganizationNotDeletedResponse,
   OrganizationNotFoundResponse,
@@ -349,7 +350,7 @@ export const getCreateOrganizationUrl = () => {
 };
 
 /**
- * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. An OpenBot may limit how many organizations one person owns, their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller's requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create an organization
  */
 export const createOrganization = async (
@@ -397,7 +398,7 @@ export const getCreateOrganizationMutationOptions = <
   TError =
     | InvalidOrganizationResponse
     | UnauthenticatedResponse
-    | ForbiddenResponse
+    | OrganizationNotAllowedResponse
     | OrganizationConflictResponse
     | ServerErrorResponse
     | OrganizationNotCreatedResponse
@@ -445,7 +446,7 @@ export type CreateOrganizationMutationBody = CreateOrganizationRequest;
 export type CreateOrganizationMutationError =
   | InvalidOrganizationResponse
   | UnauthenticatedResponse
-  | ForbiddenResponse
+  | OrganizationNotAllowedResponse
   | OrganizationConflictResponse
   | ServerErrorResponse
   | OrganizationNotCreatedResponse
@@ -462,7 +463,7 @@ export const useCreateOrganization = <
   TError =
     | InvalidOrganizationResponse
     | UnauthenticatedResponse
-    | ForbiddenResponse
+    | OrganizationNotAllowedResponse
     | OrganizationConflictResponse
     | ServerErrorResponse
     | OrganizationNotCreatedResponse
