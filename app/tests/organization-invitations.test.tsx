@@ -32,6 +32,8 @@ import { settingsSidebarItems } from "@/components/settings/settings-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/toast";
 import type { PersonRole } from "@/lib/api/generated/model";
+import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
+import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
 import { signedInUser } from "@/lib/auth/queries";
 import {
   currentOrganizationId,
@@ -54,8 +56,6 @@ import {
   roleName,
   sentInvitationLine,
 } from "@/lib/organizations/words";
-import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
-import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -810,13 +810,24 @@ describe("the account menu", () => {
         ),
     };
     const app = await open("/");
+    /*
+     * Not read yet is not "could not read": until the one retry every read gets (query-client.ts)
+     * has failed too, the menu offers no entry, as it does for none waiting. The menu is opened
+     * once the read has failed, however long the retry's wait takes on a busy machine.
+     */
+    await waitFor(
+      () =>
+        expect(
+          queryClient.getQueryState(receivedInvitationsQueryOptions().queryKey)
+            ?.status,
+        ).toBe("error"),
+      { timeout: 5_000 },
+    );
     const menu = await app.openAccountMenu();
-    const entry = await within(menu).findByRole("menuitem", {
-      name: /Invitations/,
-    });
+    const entry = within(menu).getByRole("menuitem", { name: /Invitations/ });
     expect(entry.querySelector("[data-slot=invitations-waiting]")).toBe(null);
     await app.person.click(entry);
-    // After the one retry every read gets (query-client.ts).
+    // The page reads them again, with its own retry.
     expect(
       (await app.view.findByRole("alert", undefined, { timeout: 5_000 }))
         .textContent,
