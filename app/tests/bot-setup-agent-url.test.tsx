@@ -264,7 +264,7 @@ test("the same address saved back sends nothing", async () => {
   expect(view.queryByRole("dialog")).toBeNull();
 });
 
-test("the Agent URL is read-only to anyone who can't manage the Bot, and Built in stays as it is", async () => {
+test("the Agent URL is read-only to anyone who can't manage the Bot, and a Bot that runs inside OpenBot has no Connection section", async () => {
   const view = draw({ ...BOT, canManage: false, mine: false });
   const section = await connection(view);
   expect(section.getByText(BOT.endpoint ?? "")).toBeTruthy();
@@ -272,10 +272,11 @@ test("the Agent URL is read-only to anyone who can't manage the Bot, and Built i
   cleanup();
   queryClient.clear();
 
+  // Nothing to connect, and what runs it is not the person's concern: no section, no "Built in".
   const builtIn = draw({ ...BOT, endpoint: null, builtIn: true });
-  const builtInSection = await connection(builtIn);
-  expect(builtInSection.getByText("Built in")).toBeTruthy();
-  expect(builtInSection.queryAllByRole("button")).toEqual([]);
+  expect(await builtIn.findByRole("button", { name: /^Name/ })).toBeTruthy();
+  expect(builtIn.queryByRole("heading", { name: "Connection" })).toBeNull();
+  expect(builtIn.queryByText("Built in")).toBeNull();
 });
 
 test("renaming a Bot whose stored address the rules now refuse does not send that address to be checked again", async () => {
