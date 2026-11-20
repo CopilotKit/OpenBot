@@ -8,6 +8,7 @@ import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
 } from "@/lib/bot-browser/queries";
+import type { ClientError } from "@/lib/client";
 import { botsReason, supplySecret } from "@/lib/computers/control";
 import {
   type ComputerState,
@@ -16,13 +17,14 @@ import {
 import {
   readPageFrame,
   readScreenshot,
-  startComputer,
   type Screenshot,
+  startComputer,
 } from "@/lib/computers/screen";
 import { useComputerControl } from "@/lib/computers/use-control";
 import { queryClient } from "@/query-client";
 import { ChannelAvatar } from "../channels/avatar";
 import { BotBrowserBar, BotRecordPanel } from "./bot-browser";
+import { ComputerBlocked } from "./computer-blocked";
 import { ComputerControlButton } from "./computer-controls";
 import { LiveScreen, type LiveScreenHandle } from "./live-screen";
 import { useElementVisible, usePageVisible } from "./preview-visibility";
@@ -154,6 +156,8 @@ const SECRET_CONFIRM_MS = 6_000;
  */
 function NothingToSee({
   problem,
+  blocked,
+  inButton = false,
   blankBrowser,
   settled,
   page,
@@ -161,6 +165,13 @@ function NothingToSee({
   owner = "the Bot's",
 }: {
   problem: string | null;
+  /**
+   * Starting the computer was refused for good (the organization is at its computer limit, say). It stays off, and
+   * the screen says why in the server's sentence, rather than that it starts when the Bot next uses it.
+   */
+  blocked?: ClientError | null;
+  /** Drawn inside the tile's own button, so nothing in it can be a control or a block. */
+  inButton?: boolean;
   blankBrowser: boolean;
   /**
    * Why there is no picture yet, when the reason is ordinary.
@@ -178,6 +189,15 @@ function NothingToSee({
   /** The page that turn opened, named when there is no picture of it. */
   page?: { url?: string; title?: string } | undefined;
 }) {
+  if (!settled && !problem && blocked)
+    return (
+      <ComputerBlocked
+        className="absolute inset-0"
+        inline={inButton}
+        refusal={blocked}
+        title={`Can't start ${owner} computer`}
+      />
+    );
   return (
     <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-4 text-center text-muted-foreground text-sm">
       {settled ? (
@@ -602,6 +622,8 @@ export function ComputerView({
    */
   const openedOn = useRef<string | null>(null);
   const [startAsked, setStartAsked] = useState(false);
+  /** Starting it was refused for good: what the screen says while the computer stays off (`NothingToSee`). */
+  const [startBlocked, setStartBlocked] = useState<ClientError | null>(null);
   // A picture is a computer that is up, whatever the state reads have or have not said yet.
   const hasFrame = shot !== null;
   useEffect(() => {
@@ -614,13 +636,17 @@ export function ComputerView({
      * "Starting" only once the server says it is. Until then, and for a server that has no such
      * call or refuses it, the screen says what it always said: the computer is off.
      */
-    void startComputer(computerId).then((state) => {
+    void startComputer(computerId).then(({ state, refused }) => {
       if (state === "starting" || state === "ready") setStartAsked(true);
+      if (refused) setStartBlocked(refused);
     });
   }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
   useEffect(() => {
     // Up, or on its way: what the server says is the news again, and a later "off" is one.
-    if (computerState && computerState !== "absent") setStartAsked(false);
+    if (computerState && computerState !== "absent") {
+      setStartAsked(false);
+      setStartBlocked(null);
+    }
   }, [computerState]);
   /**
    * Off, and staying off until the Bot uses it. In a turn, an absent computer is one the Bot's action
@@ -874,6 +900,8 @@ export function ComputerView({
             {showScreen ? null : (
               <NothingToSee
                 blankBrowser={blankBrowser}
+                blocked={startBlocked}
+                inButton
                 owner={owner}
                 page={knownPage}
                 problem={shownProblem}
@@ -1204,6 +1232,7 @@ export function ComputerView({
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <NothingToSee
                         blankBrowser={blankBrowser}
+                        blocked={startBlocked}
                         owner={owner}
                         page={knownPage}
                         problem={shownProblem}
