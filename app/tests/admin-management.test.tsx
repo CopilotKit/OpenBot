@@ -1,0 +1,512 @@
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { setCurrentOrganization } from "@/lib/organizations/current";
+import { queryClient } from "@/query-client";
+import { settleReactWork } from "./settle-react-work";
+
+/*
+ * Admin, Managed updates, against the API's own answers for getManagementEnrollment,
+ * startManagementEnrollment and cancelManagementEnrollment, faked at the fetch boundary. The Admin
+ * rail lists the page only where the server says management applies; the page draws each of the
+ * four states the server can be in, and Connect and Cancel are the API's writes.
+ */
+const { ManagementPage } = await import("@/routes/_authed/admin/management");
+const { useAdminSections } = await import("@/components/admin/admin-sections");
+const { managementQueryOptions } = await import("@/lib/management/queries");
+
+const NativeResponse = globalThis.Response;
+
+beforeAll(() => GlobalRegistrator.register());
+afterEach(cleanup);
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
+
+const MANAGEMENT = "/api/v2/organizations/default/management";
+const ENROLLMENT = `${MANAGEMENT}/enrollment`;
+
+const originalFetch = global.fetch;
+afterEach(() => {
+  global.fetch = originalFetch;
+});
+
+/** What getManagementEnrollment answers; a status of 404 is management not applying. */
+let answer: { status: number; body: unknown };
+const writes: {
+  method: string;
+  path: string;
+  idempotencyKey: string | null;
+}[] = [];
+
+function problem(status: number, code: string, detail: string) {
+  return {
+    status,
+    body: {
+      type: `https://open.bot/errors/${code.toLowerCase()}`,
+      title: detail,
+      status,
+      detail,
+      code,
+      category: status === 404 ? "not_found" : "conflict",
+      retryable: false,
+      requestId: "req_test",
+      traceId: "trace_test",
+    },
+  };
+}
+
+function json(status: number, body: unknown) {
+  return new NativeResponse(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type":
+        status >= 400 ? "application/problem+json" : "application/json",
+    },
+  });
+}
+
+/** What a write answers next, when a test wants it refused. */
+let writeAnswer: { status: number; body: unknown } | null;
+
+function serving() {
+  writes.length = 0;
+  writeAnswer = null;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    const method = init?.method ?? "GET";
+    if (path === MANAGEMENT && method === "GET")
+      return json(answer.status, answer.body);
+    if (path === ENROLLMENT && (method === "POST" || method === "DELETE")) {
+      writes.push({
+        method,
+        path,
+        idempotencyKey: new Headers(init?.headers).get("Idempotency-Key"),
+      });
+      if (writeAnswer) return json(writeAnswer.status, writeAnswer.body);
+      if (method === "DELETE") return new NativeResponse(null, { status: 204 });
+      answer = { status: 200, body: WAITING_FOR_APPROVAL };
+      return json(200, WAITING_FOR_APPROVAL);
+    }
+    return json(404, { error: "not served" });
+  }) as unknown as typeof fetch;
+}
+
+const WAITING_FOR_APPROVAL = {
+  state: "waiting-for-approval",
+  userCode: "WDJB-MJHT",
+  verificationUri: "https://enroll.bot.copilotkit.ai/connect",
+  verificationUriComplete:
+    "https://enroll.bot.copilotkit.ai/connect?code=WDJB-MJHT",
+  expiresAt: new Date(Date.now() + 14 * 60_000).toISOString(),
+};
+
+const HELM =
+  "helm install openbot-agent oci://ghcr.io/copilotkit/charts/openbot-agent --namespace openbot-system --create-namespace --set enrollment.serverUrl=http://openbot-server-internal.openbot.svc:9464";
+
+beforeEach(() => {
+  queryClient.clear();
+  setCurrentOrganization("default");
+  answer = { status: 200, body: { state: "not-connected" } };
+  serving();
+});
+
+async function draw(page: () => React.ReactNode) {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: page }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+}
+
+function Rail() {
+  const sections = useAdminSections();
+  return (
+    <ul>
+      {sections.flatMap((section) =>
+        section.items.map((item) => <li key={item.title}>{item.title}</li>),
+      )}
+    </ul>
+  );
+}
+
+test("the Admin rail lists Managed updates where the server says it applies", async () => {
+  const view = await draw(Rail);
+  expect(await view.findByText("Managed updates")).toBeTruthy();
+});
+
+test("the Admin rail leaves it out where the server answers MANAGEMENT_UNAVAILABLE", async () => {
+  answer = problem(
+    404,
+    "MANAGEMENT_UNAVAILABLE",
+    "Managed updates aren't available for this OpenBot.",
+  );
+  const view = await draw(Rail);
+  expect(await view.findByText("Identity providers")).toBeTruthy();
+  await waitFor(() =>
+    expect(queryClient.getQueryState(["management", "status"])?.status).toBe(
+      "success",
+    ),
+  );
+  expect(view.queryByText("Managed updates")).toBeNull();
+});
+
+test("where it doesn't apply, the page says so and offers nothing to press", async () => {
+  answer = problem(
+    404,
+    "MANAGEMENT_UNAVAILABLE",
+    "Managed updates aren't available for this OpenBot.",
+  );
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not available here")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+});
+
+test("not connected offers Connect, which starts connecting with an Idempotency-Key", async () => {
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+  // What CopilotKit gets, and who sets the window, said before Connect: the approval page's words.
+  const before = view.getByText(/CopilotKit sees this install's version/);
+  expect(before.textContent).toContain(
+    "CopilotKit sees this install's version and health, and upgrades it during a maintenance window. The window is agreed with CopilotKit; the default is Tuesdays, 14:00 to 18:00 UTC.",
+  );
+  // The approval page signs people in with the CopilotKit account the licence is under.
+  expect(before.textContent).toContain(
+    "the CopilotKit account your licence is under",
+  );
+  expect(
+    view.queryByText(/OpenBot account|OpenBot by CopilotKit account/),
+  ).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Connect" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "POST", path: ENROLLMENT });
+  expect(writes[0]?.idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
+  // The answer is read again, and the page moves on to the code.
+  expect(await view.findByText("WDJB-MJHT")).toBeTruthy();
+});
+
+test("waiting for approval shows the code, the install's name, its page and when it expires, and Cancel stops it at once", async () => {
+  answer = {
+    status: 200,
+    body: { ...WAITING_FOR_APPROVAL, installName: "Acme production" },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("WDJB-MJHT")).toBeTruthy();
+  const page = view.getByRole("button", { name: "Open the approval page" });
+  expect(page.getAttribute("href")).toBe(
+    "https://enroll.bot.copilotkit.ai/connect?code=WDJB-MJHT",
+  );
+  expect(page.getAttribute("target")).toBe("_blank");
+  expect(view.getByText(/The code expires in 1[34] minutes\./)).toBeTruthy();
+  expect(view.getByRole("button", { name: "Copy the code" })).toBeTruthy();
+  expect(
+    view.getByText(
+      "Open the approval page and sign in to CopilotKit as an admin of the organization your licence belongs to. Check the code matches, then approve it. This page moves on by itself.",
+    ),
+  ).toBeTruthy();
+  // Next to the code, so the admin can match it to what the approval page shows.
+  expect(view.getByText("Acme production")).toBeTruthy();
+
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(view.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(writes[0]?.idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
+test("waiting for the agent shows the Helm command to copy, and nothing secret", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+    },
+  };
+  const view = await draw(ManagementPage);
+  await view.findByText("Step 2 of 2: install the management agent");
+  // One flag per line with backslash line endings, which still pastes as one command.
+  const shown = document.querySelector("[data-management-helm]")?.textContent;
+  expect(shown).toBe(
+    [
+      "helm install openbot-agent oci://ghcr.io/copilotkit/charts/openbot-agent \\",
+      "  --namespace openbot-system \\",
+      "  --create-namespace \\",
+      "  --set enrollment.serverUrl=http://openbot-server-internal.openbot.svc:9464",
+    ].join("\n"),
+  );
+  expect(
+    view.getByText(/This page updates itself when the agent reports in\./),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Copy the command" })).toBeTruthy();
+  expect(view.getByText("6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Cancel" })).toBeTruthy();
+});
+
+test("on a build that isn't a release, the server's note sits beside the command, and only then", async () => {
+  const NOTE =
+    "This OpenBot isn't a published release, so the command installs the newest published agent.";
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+      helmCommandNote: NOTE,
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText(NOTE)).toBeTruthy();
+  // Beside the command, in the same card: not an error at the top of the page.
+  expect(view.queryByRole("alert")).toBeNull();
+  view.unmount();
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+    },
+  };
+  const release = await draw(ManagementPage);
+  await release.findByText("Step 2 of 2: install the management agent");
+  expect(release.queryByText(NOTE)).toBeNull();
+});
+
+test("connected shows the last heartbeat, the agent's version and how to disconnect", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "connected",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      lastHeartbeatAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+      agentVersion: "0.4.0",
+      window: { weekday: 4, startUtc: "22:30", hours: 6 },
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Connected")).toBeTruthy();
+  // The install's own window, as the service reports it.
+  expect(
+    view.getByText("Thursdays, 22:30 UTC to 04:30 UTC the next day"),
+  ).toBeTruthy();
+  expect(view.getByText("2 minutes ago")).toBeTruthy();
+  expect(view.getByText("0.4.0")).toBeTruthy();
+  expect(
+    view.getByText("helm uninstall openbot-agent --namespace openbot-system"),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(view.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+});
+
+const NOT_REPORTING =
+  "The management agent hasn't reported in for more than five minutes. If you uninstalled it, choose Disconnect to finish. If not, check the openbot-agent pod in the openbot-system namespace.";
+
+const CONNECTED_SILENT = {
+  state: "connected",
+  installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+  lastHeartbeatAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+  agentVersion: "0.4.0",
+  lastError: NOT_REPORTING,
+};
+
+test("connected but silent says Not reporting, with the server's sentence", async () => {
+  answer = { status: 200, body: CONNECTED_SILENT };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not reporting")).toBeTruthy();
+  expect(view.queryByText("Connected")).toBeNull();
+  expect(view.getByText("12 minutes ago")).toBeTruthy();
+  expect(view.getByRole("alert").textContent).toBe(NOT_REPORTING);
+});
+
+test("Disconnect after uninstalling forgets the connection and goes back to not connected", async () => {
+  answer = { status: 200, body: CONNECTED_SILENT };
+  const view = await draw(ManagementPage);
+  await view.findByText("Not reporting");
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  // A confirmation first: coming back needs a new code and a new approval.
+  expect(await view.findByText("Disconnect managed updates?")).toBeTruthy();
+  expect(writes).toHaveLength(0);
+  const confirm = view
+    .getAllByRole("button", { name: "Disconnect" })
+    .find((button) => button.closest("[role=dialog]"));
+  fireEvent.click(confirm as HTMLElement);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(writes[0]?.idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
+test("a Disconnect refused while the agent still reports in says why", async () => {
+  answer = {
+    status: 200,
+    body: { ...CONNECTED_SILENT, lastError: undefined },
+  };
+  const view = await draw(ManagementPage);
+  await view.findByText("Connected");
+  const refusal =
+    "The management agent is still reporting in. Uninstall it with Helm first, then choose Disconnect.";
+  writeAnswer = problem(409, "MANAGEMENT_AGENT_REPORTING", refusal);
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  fireEvent.click(
+    (await view.findAllByRole("button", { name: "Disconnect" })).find(
+      (button) => button.closest("[role=dialog]"),
+    ) as HTMLElement,
+  );
+  expect((await view.findByRole("alert")).textContent).toBe(refusal);
+  expect(view.getByText("Connected")).toBeTruthy();
+});
+
+test("the screen keeps asking while connected, so a silent agent shows without a reload", () => {
+  const interval = managementQueryOptions().refetchInterval as (query: {
+    state: { data: unknown };
+  }) => number | false;
+  const asked = (data: unknown) => interval({ state: { data } });
+  expect(
+    asked({ applies: true, status: { state: "waiting-for-approval" } }),
+  ).toBe(5_000);
+  expect(asked({ applies: true, status: { state: "waiting-for-agent" } })).toBe(
+    5_000,
+  );
+  expect(asked({ applies: true, status: { state: "connected" } })).toBe(30_000);
+  expect(asked({ applies: true, status: { state: "not-connected" } })).toBe(
+    false,
+  );
+  expect(asked({ applies: false })).toBe(false);
+});
+
+test("the last attempt's error is said in the server's own sentence", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "not-connected",
+      lastError:
+        "The code expired before anybody approved it. Connect again to get a new one.",
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "The code expired before anybody approved it. Connect again to get a new one.",
+  );
+});
+
+test("a refused Connect says why, in the server's own sentence", async () => {
+  const view = await draw(ManagementPage);
+  await view.findByText("Not connected");
+  writeAnswer = problem(
+    409,
+    "MANAGEMENT_REFUSED",
+    "The licence in COPILOTKIT_LICENSE_TOKEN wasn't accepted. Check it, or contact OpenBot by CopilotKit.",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Connect" }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "The licence in COPILOTKIT_LICENSE_TOKEN wasn't accepted. Check it, or contact OpenBot by CopilotKit.",
+  );
+});
+
+test("a state this app doesn't know reads as not connected", async () => {
+  answer = { status: 200, body: { state: "paused-by-copilotkit" } };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
+test("Disconnect waits for its confirmation, and Keep managed updates changes nothing", async () => {
+  answer = { status: 200, body: CONNECTED_SILENT };
+  const view = await draw(ManagementPage);
+  await view.findByText("Not reporting");
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  fireEvent.click(
+    await view.findByRole("button", { name: "Keep managed updates" }),
+  );
+  await waitFor(() =>
+    expect(view.queryByText("Disconnect managed updates?")).toBeNull(),
+  );
+  expect(writes).toHaveLength(0);
+});
+
+test("once the code is approved, Cancel asks first, and only Stop connecting stops it", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+    },
+  };
+  const view = await draw(ManagementPage);
+  await view.findByText("Step 2 of 2: install the management agent");
+  fireEvent.click(view.getByRole("button", { name: "Cancel" }));
+  expect(await view.findByText("Stop connecting?")).toBeTruthy();
+  expect(writes).toHaveLength(0);
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(view.getByRole("button", { name: "Stop connecting" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+});
+
+test("a licence without managed updates offers no Connect, and links to CopilotKit's contact page", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "not-connected",
+      lastError: "Your licence doesn't include managed updates.",
+      lastErrorCode: "not-entitled",
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not in your licence")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(
+    view.getByText(/Your licence doesn't include managed updates\./),
+  ).toBeTruthy();
+  expect(
+    view
+      .getByRole("link", { name: "copilotkit.ai/contact-us" })
+      .getAttribute("href"),
+  ).toBe("https://www.copilotkit.ai/contact-us");
+  // Said once, in the state itself, not again as an error above it.
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("a Connect refused for the licence shows the not-in-your-licence state at once", async () => {
+  writeAnswer = problem(
+    409,
+    "MANAGEMENT_REFUSED",
+    "Your licence doesn't include managed updates.",
+  );
+  const view = await draw(ManagementPage);
+  fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+  // The server keeps the refusal, and the page reads it again after the refused write.
+  answer = {
+    status: 200,
+    body: {
+      state: "not-connected",
+      lastError: "Your licence doesn't include managed updates.",
+      lastErrorCode: "not-entitled",
+    },
+  };
+  expect(await view.findByText("Not in your licence")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+});
