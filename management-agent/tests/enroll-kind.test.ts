@@ -303,7 +303,7 @@ run("self-serve enrollment on a real cluster", () => {
         "get",
         "pods",
         "-l",
-        "app.kubernetes.io/component=otel-collector",
+        "app.kubernetes.io/component=otel-cluster",
         "-o",
         "jsonpath={.items[*].status.phase}",
       ).includes("Running"),
