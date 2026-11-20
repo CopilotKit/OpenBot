@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
-import { clampSidebarWidth, sidebarFloor } from "@/lib/sidebar";
+import { clampSidebarWidth, sidebarCeiling, sidebarFloor } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
 const SIDEBAR_WIDTH = "16rem";
@@ -379,8 +379,9 @@ function footerWidth(panel: HTMLElement): number {
 
 /**
  * The sidebar's edge. Dragged, it resizes the sidebar between what its footer needs and the shell's
- * maximum; clicked without moving, it hides or shows the sidebar as it always did. A press counts as
- * a drag once it has moved 3px, so a click with a slight wobble still toggles.
+ * maximum, which a narrow or zoomed-in window lowers (`sidebarCeiling`); clicked without moving, it
+ * hides or shows the sidebar as it always did. A press counts as a drag once it has moved 3px, so a
+ * click with a slight wobble still toggles.
  */
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar, state, isMobile } = useSidebar();
@@ -389,6 +390,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     startX: number;
     startWidth: number;
     min: number;
+    max: number;
     width: number;
     moved: boolean;
   } | null>(null);
@@ -410,10 +412,13 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const startWidth = panel.getBoundingClientRect().width;
+        const min = footerWidth(panel);
         drag.current = {
           startX: event.clientX,
           startWidth,
-          min: footerWidth(panel),
+          min,
+          // The window's own width in the page's pixels, which zooming in makes fewer of.
+          max: sidebarCeiling(window.innerWidth, min),
           width: startWidth,
           moved: false,
         };
@@ -428,6 +433,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         current.width = clampSidebarWidth(
           current.startWidth + moved,
           current.min,
+          current.max,
         );
         resize.setWidth(current.width);
       }}

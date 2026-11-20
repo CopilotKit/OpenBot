@@ -18,8 +18,8 @@ import {
   parseStoredSidebarOpen,
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  sidebarWidthStyle,
   storedSidebarWidth,
-  widthBesideStrip,
 } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
@@ -50,7 +50,8 @@ export function useSidebarPanelAvailable(): boolean {
  *
  * The three shells share one width (`SIDEBAR_WIDTH`), so the sidebar's edge stays put going between
  * them. Dragging it (`SidebarRail`) in any shell changes it for all three. Beside a strip that width
- * is the strip and the panel together.
+ * is the strip and the panel together. However wide it was left, it takes no more than
+ * `SIDEBAR_MAX_SHARE` of the window, so zooming in never leaves the work a sliver beside it.
  *
  * `panel` is for a sidebar of sections (the app's), where the open section may have no panel. Then
  * the panel is folded away without touching the person's own choice to keep it open or closed, and
@@ -114,7 +115,9 @@ export function SidebarShell({
        */
       style={
         {
-          "--sidebar-width": panel ? widthBesideStrip(width) : width,
+          "--sidebar-width": sidebarWidthStyle(width, {
+            besideStrip: panel !== undefined,
+          }),
           "--sidebar-width-mobile": "20rem",
         } as CSSProperties
       }

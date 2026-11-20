@@ -7,10 +7,11 @@ import {
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  sidebarCeiling,
   sidebarFloor,
   sidebarToggleShown,
+  sidebarWidthStyle,
   storedSidebarWidth,
-  widthBesideStrip,
 } from "../src/lib/sidebar";
 
 describe("sidebar preference", () => {
@@ -167,10 +168,36 @@ describe("the page's Show sidebar button", () => {
 
 /*
  * Admin and Settings share the width and may be dragged to 220px, which beside the strip would
- * leave the panel narrower than it may ever be dragged.
+ * leave the panel narrower than it may ever be dragged. And however wide it was left, the sidebar
+ * takes no more than two-fifths of the window: zoomed in, the window is fewer of the page's pixels
+ * wide and the sidebar would otherwise keep its count of them.
  */
-test("beside a strip, the shared width never goes under the panel's floor plus the strip", () => {
-  expect(widthBesideStrip("220px")).toBe(
-    "max(220px, calc(220px + var(--sidebar-width-icon)))",
+test("the shared width is drawn between the floor and two-fifths of the window", () => {
+  expect(sidebarWidthStyle("220px", { besideStrip: true })).toBe(
+    "clamp(calc(220px + var(--sidebar-width-icon)), 220px, 40vw)",
   );
+  expect(sidebarWidthStyle("480px", { besideStrip: false })).toBe(
+    "clamp(220px, 480px, 40vw)",
+  );
+});
+
+/*
+ * "Cannot drag sidebar to make it smaller ... zooming in zooms the entire screen": a window zoomed
+ * to 175% is about 820 of the page's pixels wide, so the edge may not be dragged out past two-fifths
+ * of that, and a window too narrow for even the floor keeps the floor.
+ */
+describe("the widest a drag goes", () => {
+  test("is the fixed maximum in a wide window", () => {
+    expect(sidebarCeiling(1440, 268)).toBe(480);
+  });
+
+  test("is two-fifths of a zoomed-in window", () => {
+    expect(sidebarCeiling(820, 268)).toBe(328);
+    expect(clampSidebarWidth(600, 268, sidebarCeiling(820, 268))).toBe(328);
+  });
+
+  test("is never under the floor", () => {
+    expect(sidebarCeiling(600, 268)).toBe(268);
+    expect(clampSidebarWidth(100, 268, sidebarCeiling(600, 268))).toBe(268);
+  });
 });
