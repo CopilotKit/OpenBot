@@ -16,10 +16,17 @@ import {
   organizationChoices,
 } from "../src/api";
 import { listConversations } from "../src/api/generated/conversations/conversations";
-import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
+import {
+  authClient,
+  renewHostedSignIn,
+  serverUrl,
+  signIn,
+  signInEnterprise,
+} from "../src/auth";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { homeView } from "../src/home-view";
 import { onOrganizationGone } from "../src/organization-gone";
+import { onRenewalNeedsClick } from "../src/renewal";
 import { useLoad } from "../src/use-load";
 export default function Home() {
   const { data: session, isPending } = authClient.useSession();
@@ -64,6 +71,12 @@ export default function Home() {
    * organizations are read again, and everything below follows the one they work in now.
    */
   const { refresh: refreshOrganizations } = organizations;
+  /*
+   * A hosted OpenBot's sign-in the phone couldn't renew by itself: "Sign in again" opens it, and what is on Home is
+   * read again after.
+   */
+  const [renewal, setRenewal] = useState<string | null>(null);
+  useEffect(() => onRenewalNeedsClick(setRenewal), []);
   useEffect(
     () =>
       onOrganizationGone(() => {
@@ -169,6 +182,23 @@ export default function Home() {
             organizations.error ||
             (view === "working" ? conversations.error : undefined)}
         </Text>
+      )}
+      {session && renewal && (
+        <View style={{ gap: 8 }}>
+          <Text>Your sign-in needs renewing before you can do that.</Text>
+          <Button
+            disabled={busy}
+            title="Sign in again"
+            onPress={() => {
+              void act(async () => {
+                await renewHostedSignIn(renewal);
+                setRenewal(null);
+                await refreshOrganizations();
+                await conversations.refresh();
+              });
+            }}
+          />
+        </View>
       )}
       {view === "in-no-organization" ? (
         <>

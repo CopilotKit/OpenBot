@@ -14,6 +14,7 @@
 
 import { CLIENT_HEADER, clientToken } from "@openbot/shared/client-version";
 import {
+  pendingWrite,
   renewalRequired,
   renewHostedSignIn,
   SIGN_IN_HEADER,
@@ -177,6 +178,8 @@ export class ClientError extends Error {
 async function refusal(
   response: Response,
   fallback: string | undefined,
+  /** The request that was refused, as it was sent, for a write a renewal sends again. */
+  sent?: { path: string; init: RequestInit },
 ): Promise<ClientError> {
   const body = (await response.json().catch(() => null)) as {
     error?: unknown;
@@ -198,9 +201,15 @@ async function refusal(
       ? (body as Record<string, unknown>)
       : undefined,
   );
-  // A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the background.
+  /*
+   * A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the
+   * background, and the write it interrupted is sent again once the page is back.
+   */
   if (renewalRequired(error))
-    renewHostedSignIn(response.headers.get(SIGN_IN_HEADER));
+    renewHostedSignIn(
+      response.headers.get(SIGN_IN_HEADER),
+      sent ? pendingWrite(sent.path, sent.init) : null,
+    );
   return error;
 }
 
@@ -217,7 +226,7 @@ export async function clientRequest(
   fallback?: string,
 ): Promise<Response> {
   const response = await request(path, init);
-  if (!response.ok) throw await refusal(response, fallback);
+  if (!response.ok) throw await refusal(response, fallback, { path, init });
   return response;
 }
 

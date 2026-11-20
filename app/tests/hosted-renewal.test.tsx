@@ -23,7 +23,10 @@ import {
   currentOrganizationId,
   setCurrentOrganization,
 } from "@/lib/organizations/current";
-import { renameOrganizationMutationOptions } from "@/lib/organizations/mutations";
+import {
+  inviteToOrganizationMutationOptions,
+  renameOrganizationMutationOptions,
+} from "@/lib/organizations/mutations";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -71,6 +74,7 @@ beforeEach(() => {
     ({
       getItem: (key: string) => kept.get(key) ?? null,
       setItem: (key: string, value: string) => kept.set(key, value),
+      removeItem: (key: string) => kept.delete(key),
     }) as unknown as Storage;
   window.history.replaceState(null, "", PAGE);
   setCurrentOrganization("org_acme");
@@ -196,8 +200,150 @@ test("back from the round trip, the marker comes off the address and the person 
       <RenewalNotices />
     </>,
   );
-  await view.findByText(
-    "You're signed in again. If something you just did didn't finish, do it again.",
-  );
+  await view.findByText("You're signed in again.");
   await waitFor(() => expect(window.location.href).toBe(PAGE));
+});
+
+/*
+ * The write a renewal interrupted is sent again on the way back, once, with the Idempotency-Key it
+ * was sent with. The OpenBot here keeps invitations as the API does: a write it has seen the key of
+ * is answered as the same write again, never done twice.
+ */
+type Server = {
+  proofValid: boolean;
+  invitations: { id: string; email: string }[];
+  /** The answer each Idempotency-Key was given, as the API keeps them. */
+  answered: Map<string, unknown>;
+  posts: { key: string | null }[];
+};
+
+function hostedOpenBot(server: Server): typeof fetch {
+  return Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), PAGE).pathname;
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (
+        path === "/api/v2/organizations/org_acme/invitations" &&
+        method === "POST"
+      ) {
+        const key = new Headers(init?.headers).get("idempotency-key");
+        server.posts.push({ key });
+        if (!server.proofValid)
+          return new Response(JSON.stringify(RENEWAL), {
+            status: 401,
+            headers: {
+              "content-type": "application/problem+json",
+              "OpenBot-Sign-In": "/api/auth/hosted/sign-in",
+            },
+          });
+        const repeat = key ? server.answered.get(key) : undefined;
+        if (repeat) return Response.json(repeat, { status: 201 });
+        const { email } = JSON.parse(String(init?.body)) as { email: string };
+        const invitation = {
+          id: `inv_${server.invitations.length + 1}`,
+          email,
+          role: "member",
+          status: "pending",
+          invitedBy: { name: "Dana Fresh", email: "dana@example.com" },
+          createdAt: "2026-11-20T09:00:00.000Z",
+          expiresAt: "2026-11-27T09:00:00.000Z",
+        };
+        server.invitations.push({ id: invitation.id, email });
+        const answer = { invitation, delivery: "emailed" };
+        if (key) server.answered.set(key, answer);
+        return Response.json(answer, { status: 201 });
+      }
+      return Response.json({ error: "not served" }, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  ) as typeof fetch;
+}
+
+async function inviteRefusedForRenewal(server: Server) {
+  globalThis.fetch = hostedOpenBot(server);
+  const invite = inviteToOrganizationMutationOptions(
+    new QueryClient(),
+  ).mutationFn;
+  const refused = await invite?.(
+    { organizationId: "org_acme", email: "kit@example.com", role: "member" },
+    undefined as never,
+  ).catch((error: unknown) => error);
+  expect(refused).toMatchObject({ code: "HOSTED_SIGN_IN_RENEWAL_REQUIRED" });
+  expect(sentTo).toEqual([expected(PAGE)]);
+  // Kept for the way back, exactly as it was sent.
+  expect(JSON.parse(kept.get("openbot-renewal-pending") ?? "null")).toEqual({
+    path: "/api/v2/organizations/org_acme/invitations",
+    method: "POST",
+    headers: expect.objectContaining({
+      "idempotency-key": server.posts[0]?.key,
+    }),
+    body: JSON.stringify({ email: "kit@example.com", role: "member" }),
+  });
+}
+
+/** Back from the hosted sign-in: the page as it opens with the marker on its address. */
+function backFromTheRoundTrip() {
+  window.history.replaceState(null, "", `${PAGE}&${RENEWED_MARKER}=1`);
+  return render(
+    <>
+      <Toaster />
+      <RenewalNotices />
+    </>,
+  );
+}
+
+test("an invitation refused for renewal is sent again on the way back, with the same Idempotency-Key, and lands exactly once", async () => {
+  const server: Server = {
+    proofValid: false,
+    invitations: [],
+    answered: new Map(),
+    posts: [],
+  };
+  await inviteRefusedForRenewal(server);
+
+  // Through the hosted sign-in: the proof is renewed, and the page opens again.
+  server.proofValid = true;
+  const view = backFromTheRoundTrip();
+  await view.findByText("You're signed in again, and that's done.");
+  expect(server.invitations).toEqual([
+    { id: "inv_1", email: "kit@example.com" },
+  ]);
+  expect(server.posts).toHaveLength(2);
+  expect(server.posts[1]?.key).toBe(server.posts[0]?.key as string);
+  expect(server.posts[0]?.key).toMatch(/^[0-9a-f]{32}$/);
+
+  // Sent once: opening the page again sends nothing more.
+  cleanup();
+  backFromTheRoundTrip();
+  await act(settleReactWork);
+  expect(server.posts).toHaveLength(2);
+});
+
+test("a write that landed before the renewal is answered as a repeat when sent again, and still lands once", async () => {
+  const server: Server = {
+    proofValid: false,
+    invitations: [],
+    answered: new Map(),
+    posts: [],
+  };
+  await inviteRefusedForRenewal(server);
+  // It landed after all (the refusal came back on another hop): the server already has its key.
+  const key = server.posts[0]?.key as string;
+  server.invitations.push({ id: "inv_1", email: "kit@example.com" });
+  server.answered.set(key, {
+    invitation: {
+      id: "inv_1",
+      email: "kit@example.com",
+      role: "member",
+      status: "pending",
+      invitedBy: { name: "Dana Fresh", email: "dana@example.com" },
+      createdAt: "2026-11-20T09:00:00.000Z",
+      expiresAt: "2026-11-27T09:00:00.000Z",
+    },
+    delivery: "emailed",
+  });
+  server.proofValid = true;
+  const view = backFromTheRoundTrip();
+  await view.findByText("You're signed in again, and that's done.");
+  expect(server.invitations).toHaveLength(1);
 });

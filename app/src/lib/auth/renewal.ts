@@ -74,13 +74,69 @@ export const renewalDeps = {
   },
 };
 
+/** Where the write a renewal interrupted waits, to be sent again once the page is back. */
+const PENDING = "openbot-renewal-pending";
+
+/**
+ * A write the renewal interrupted, exactly as it was sent: its address, method, headers (its
+ * Idempotency-Key among them) and body. Sent again once with the same key, so a write that did land
+ * the first time is answered as a repeat, never done twice.
+ */
+export type PendingWrite = {
+  path: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+};
+
+/**
+ * The write `init` is, when it can be sent again safely: a write (not a read) carrying an
+ * Idempotency-Key, with a body that is text. Null for anything else, which the page reads again
+ * instead.
+ */
+export function pendingWrite(
+  path: string,
+  init: RequestInit,
+): PendingWrite | null {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") return null;
+  const headers: Record<string, string> = {};
+  new Headers(init.headers).forEach((value, name) => {
+    // Lowercase whatever the `Headers` in use gives: header names are case-insensitive.
+    headers[name.toLowerCase()] = value;
+  });
+  if (!headers["idempotency-key"]) return null;
+  if (
+    init.body !== undefined &&
+    init.body !== null &&
+    typeof init.body !== "string"
+  )
+    return null;
+  return {
+    path,
+    method,
+    headers,
+    ...(typeof init.body === "string" ? { body: init.body } : {}),
+  };
+}
+
 /**
  * Renew: through the hosted sign-in and back, or, where that already happened moments ago, offer
- * "Sign in again" (`onRenewalNeedsClick`). Answers which it did.
+ * "Sign in again" (`onRenewalNeedsClick`). The write that was refused, if it can be sent again, is
+ * kept for the page to send once it is back (`takePendingWrite`). Answers which it did.
  */
-export function renewHostedSignIn(signIn: string | null): "sent" | "offered" {
+export function renewHostedSignIn(
+  signIn: string | null,
+  write: PendingWrite | null = null,
+): "sent" | "offered" {
   const address = renewalAddress(signIn, window.location.href);
   const storage = renewalDeps.storage();
+  if (write)
+    try {
+      storage?.setItem(PENDING, JSON.stringify(write));
+    } catch {
+      // Nowhere to keep it: back from the round trip, the person is told to do it again.
+    }
   const started = Number(storage?.getItem(STARTED) ?? 0);
   if (started && renewalDeps.now() - started < LOOP_WINDOW_MS) {
     for (const listener of [...listeners]) listener(address);
@@ -107,6 +163,28 @@ export function onRenewalNeedsClick(listener: Listener): () => void {
  * Whether this page is the end of a round trip: its address carries the marker, which is taken off
  * so a reload or a shared link isn't taken for another.
  */
+/** The write a round trip interrupted, taken so it is sent once and only once. Null when there is none. */
+export function takePendingWrite(): PendingWrite | null {
+  const storage = renewalDeps.storage();
+  const kept = storage?.getItem(PENDING) ?? null;
+  if (kept === null) return null;
+  try {
+    storage?.removeItem(PENDING);
+  } catch {
+    // Taken already for this page either way: it is sent once.
+  }
+  try {
+    const write = JSON.parse(kept) as PendingWrite;
+    return typeof write?.path === "string" &&
+      typeof write.method === "string" &&
+      typeof write.headers === "object"
+      ? write
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function finishRenewal(): boolean {
   const url = new URL(window.location.href);
   if (!url.searchParams.has(RENEWED_MARKER)) return false;
