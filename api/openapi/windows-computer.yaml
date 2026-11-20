@@ -1,0 +1,548 @@
+# Windows computer: the Windows computer a person and a Bot take turns on, and the person's teaching recordings on it.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+#
+# Experimental. An OpenBot has a Windows computer only when one is set up for it, and it answers only the one
+# person it was set up for; to anybody else it does not exist.
+paths:
+  /api/v2/organizations/{organizationId}/windows-computer:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Windows computer]
+      operationId: getWindowsComputer
+      summary: Read the caller's Windows computer
+      description: >-
+        Say whether the caller's Windows computer is ready, who is using it,
+        the caller or their Bot, and what is being recorded on it. Only the
+        person the Windows computer was set up for may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [computers:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The Windows computer, who is using it, and its recording.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputer'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WindowsComputerNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/windows-computer/control/take:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Windows computer]
+      operationId: takeWindowsComputerControl
+      summary: Take over the Windows computer
+      description: >-
+        Give the caller the Windows computer's mouse and keyboard. The Bot's actions
+        are refused until it is handed back. The audit trail records the
+        takeover.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Who is using the Windows computer afterwards.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputerControl'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerControlTakenExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WindowsComputerNotFound'
+        '409':
+          $ref: '#/components/responses/WindowsComputerConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/WindowsComputerUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/windows-computer/control/release:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Windows computer]
+      operationId: releaseWindowsComputerControl
+      summary: Hand the Windows computer back
+      description: >-
+        Hand the Windows computer's mouse and keyboard back to the Bot. The Bot looks
+        at the screen again before its next action. The audit trail records
+        the hand-back.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Who is using the Windows computer afterwards.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputerControl'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerControlReleasedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WindowsComputerNotFound'
+        '409':
+          $ref: '#/components/responses/WindowsComputerConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/WindowsComputerUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/windows-computer/recording/start:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Windows computer]
+      operationId: startWindowsComputerRecording
+      summary: Start recording on the Windows computer
+      description: >-
+        Start recording what the caller does in the named apps on their
+        Windows computer, so OpenBot can learn how they do the task. What they type
+        into a password field, or a field whose kind can't be told, is never
+        recorded. The recording goes to the caller's own Learning space.
+        Saying what you are showing, in narration, is what OpenBot learns
+        most from.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowsComputerRecordingStart'
+            examples:
+              start:
+                value:
+                  title: Save a meeting note
+                  narration: I open Notepad, type the note, press Ctrl+S and save it under the meeting's date.
+                  apps: [notepad.exe]
+      responses:
+        '200':
+          description: The recording, started.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputerRecording'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerRecordingStartedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WindowsComputerNotFound'
+        '409':
+          $ref: '#/components/responses/WindowsComputerConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/WindowsComputerUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/windows-computer/recording/stop:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Windows computer]
+      operationId: stopWindowsComputerRecording
+      summary: Stop recording on the Windows computer
+      description: >-
+        Stop the recording, send what is left of it to Learning, and say
+        whether the task worked. Answers once everything recorded has been
+        sent, or once it has waited long enough; what could not be sent is
+        counted in gaps.
+      security:
+        - webSession: []
+        - appOAuth: [computers:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WindowsComputerRecordingStop'
+            examples:
+              worked:
+                value:
+                  outcome: succeeded
+              failed:
+                value:
+                  outcome: failed
+                  reason: The save dialog asked for a folder I don't have.
+      responses:
+        '200':
+          description: The recording, stopped.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowsComputerRecording'
+              examples:
+                answer:
+                  $ref: '#/components/examples/WindowsComputerRecordingStoppedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WindowsComputerNotFound'
+        '409':
+          $ref: '#/components/responses/WindowsComputerConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/WindowsComputerUnavailable'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  schemas:
+    WindowsComputer:
+      type: object
+      description: The caller's Windows computer, who is using it, and what is being recorded on it.
+      required: [available, control, recording]
+      properties:
+        available:
+          type: boolean
+          description: True when the Windows computer answers, its session is unlocked and the Bot can use it.
+        unavailableReason:
+          type: string
+          description: >-
+            Why it isn't available, when it isn't: locked, secure_desktop,
+            driver_down, stopped, unavailable or unreachable.
+        control:
+          description: Who is using it. Null when the Windows computer did not answer.
+          oneOf:
+            - $ref: '#/components/schemas/WindowsComputerControl'
+            - type: 'null'
+        recording:
+          $ref: '#/components/schemas/WindowsComputerRecording'
+    WindowsComputerControl:
+      type: object
+      description: Who has the Windows computer's mouse and keyboard.
+      required: [holder, since, snapshotRequired]
+      properties:
+        holder:
+          type: string
+          enum: [bot, human]
+        since:
+          type: string
+          description: When it changed hands.
+        reason:
+          type: string
+          description: >-
+            Why a person has it: taken (they took over in OpenBot) or
+            interference (the Windows computer saw them use it while the Bot was).
+        snapshotRequired:
+          type: boolean
+          description: True when the Bot must look at the screen again before it acts.
+    WindowsComputerRecordingEvents:
+      type: object
+      description: How much of the recording has reached Learning.
+      required: [received, sent, pending, rejected]
+      properties:
+        received:
+          type: integer
+          minimum: 0
+          description: Steps OpenBot has taken from the Windows computer.
+        sent:
+          type: integer
+          minimum: 0
+          description: Steps Learning has accepted.
+        pending:
+          type: integer
+          minimum: 0
+          description: Steps waiting to be sent.
+        rejected:
+          type: integer
+          minimum: 0
+          description: Steps Learning refused.
+    WindowsComputerRecording:
+      type: object
+      description: A teaching recording on the Windows computer, or idle when there is none.
+      required: [state, events, gaps]
+      properties:
+        state:
+          type: string
+          x-extensible-enum: [idle, starting, recording, stopping, stopped]
+        recordingId:
+          type: string
+          description: The recording, which is also its trajectory in Learning.
+        title:
+          type: string
+        apps:
+          type: array
+          items:
+            type: string
+          description: The apps being recorded, by their program name.
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum: [succeeded, failed]
+        events:
+          $ref: '#/components/schemas/WindowsComputerRecordingEvents'
+        gaps:
+          type: integer
+          minimum: 0
+          description: >-
+            Times something was not recorded or could not be sent: another
+            app in front, a locked screen, a step Learning refused.
+        buffered:
+          type: integer
+          minimum: 0
+          description: Steps the Windows computer is still holding, when it answered.
+        problem:
+          type: string
+          description: Why the recording isn't reaching Learning right now, when it isn't.
+    WindowsComputerRecordingStart:
+      type: object
+      additionalProperties: false
+      required: [title, apps]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: The task being shown, in a few words.
+        narration:
+          type: string
+          maxLength: 2000
+          description: What you are showing and when to do it this way, in your own words.
+        apps:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 260
+            pattern: \S
+          description: The apps to record, by their program name, like notepad.exe. Other apps are left out.
+    WindowsComputerRecordingStop:
+      type: object
+      additionalProperties: false
+      properties:
+        outcome:
+          type: string
+          enum: [succeeded, failed]
+          description: Whether the task worked. Succeeded when left out.
+        reason:
+          type: string
+          maxLength: 500
+          description: What went wrong, when it failed.
+  responses:
+    WindowsComputerNotFound:
+      description: >-
+        There is no Windows computer for the caller: none is set up, or it was set up
+        for somebody else, or the organization does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            missing:
+              value:
+                type: https://open.bot/errors/not-found
+                title: Not found.
+                status: 404
+                detail: There's no Windows computer set up for you.
+                code: NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    WindowsComputerConflict:
+      description: >-
+        The Windows computer can't do this now: a recording is already running, or
+        none is, or the Windows computer refused. Or the Idempotency-Key was already
+        used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            recording:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: A recording is already running on the Windows computer. Stop it first.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request. Use a new key for a new write.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    WindowsComputerUnavailable:
+      description: >-
+        The Windows computer didn't answer, or Learning isn't set up or didn't answer:
+        nothing was done, and it is worth trying again in a moment.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            windowsComputer:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: The Windows computer isn't answering. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+            learning:
+              value:
+                type: https://open.bot/errors/learning-unavailable
+                title: Learning is unavailable.
+                status: 503
+                detail: Couldn't reach Learning to start the recording. Try again.
+                code: LEARNING_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    WindowsComputerExample:
+      value:
+        available: true
+        control:
+          holder: bot
+          since: '2026-11-20T09:12:00.000Z'
+          snapshotRequired: false
+        recording:
+          state: recording
+          recordingId: 019a8c3e-2b4f-7c1d-9e2a-5f6b7c8d9e0f
+          title: Save a meeting note
+          apps: [notepad.exe]
+          startedAt: '2026-11-20T09:14:03.000Z'
+          events:
+            received: 12
+            sent: 12
+            pending: 0
+            rejected: 0
+          gaps: 0
+          buffered: 0
+    WindowsComputerControlTakenExample:
+      value:
+        holder: human
+        since: '2026-11-20T09:13:41.000Z'
+        reason: taken
+        snapshotRequired: true
+    WindowsComputerControlReleasedExample:
+      value:
+        holder: bot
+        since: '2026-11-20T09:20:05.000Z'
+        snapshotRequired: true
+    WindowsComputerRecordingStartedExample:
+      value:
+        state: recording
+        recordingId: 019a8c3e-2b4f-7c1d-9e2a-5f6b7c8d9e0f
+        title: Save a meeting note
+        apps: [notepad.exe]
+        startedAt: '2026-11-20T09:14:03.000Z'
+        events:
+          received: 0
+          sent: 0
+          pending: 3
+          rejected: 0
+        gaps: 0
+    WindowsComputerRecordingStoppedExample:
+      value:
+        state: stopped
+        recordingId: 019a8c3e-2b4f-7c1d-9e2a-5f6b7c8d9e0f
+        title: Save a meeting note
+        apps: [notepad.exe]
+        startedAt: '2026-11-20T09:14:03.000Z'
+        stoppedAt: '2026-11-20T09:16:40.000Z'
+        outcome: succeeded
+        events:
+          received: 27
+          sent: 27
+          pending: 0
+          rejected: 0
+        gaps: 1

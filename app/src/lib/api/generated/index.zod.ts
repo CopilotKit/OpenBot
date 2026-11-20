@@ -48,3 +48,4 @@ export * from "./team-bots/team-bots.zod";
 export * from "./teams/teams.zod";
 export * from "./voice/voice.zod";
 export * from "./what-if/what-if.zod";
+export * from "./windows-computer/windows-computer.zod";
