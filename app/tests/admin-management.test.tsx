@@ -246,6 +246,36 @@ test("waiting for the agent shows the Helm command to copy, and nothing secret",
   expect(view.getByRole("button", { name: "Cancel" })).toBeTruthy();
 });
 
+test("on a build that isn't a release, the server's note sits beside the command, and only then", async () => {
+  const NOTE =
+    "This OpenBot isn't a published release, so the command installs the newest published agent.";
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+      helmCommandNote: NOTE,
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText(NOTE)).toBeTruthy();
+  // Beside the command, in the same card: not an error at the top of the page.
+  expect(view.queryByRole("alert")).toBeNull();
+  view.unmount();
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+    },
+  };
+  const release = await draw(ManagementPage);
+  expect(await release.findByText(HELM)).toBeTruthy();
+  expect(release.queryByText(NOTE)).toBeNull();
+});
+
 test("connected shows the last heartbeat, the agent's version and how to disconnect", async () => {
   answer = {
     status: 200,

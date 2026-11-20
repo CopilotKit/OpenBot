@@ -27,6 +27,8 @@ export type ManagementStatus = {
   installId?: string;
   /** Holds nothing secret: the agent collects its token from OpenBot itself. */
   helmCommand?: string;
+  /** On a build that isn't a release: which agent the command installs, in the server's own sentence. */
+  helmCommandNote?: string;
   lastHeartbeatAt?: string;
   agentVersion?: string;
   /** What went wrong with the last attempt, in the server's own sentence. */

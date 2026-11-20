@@ -5,6 +5,7 @@ import {
   IconCloudCog,
   IconFingerprint,
   IconHeartbeat,
+  IconInfoCircle,
   IconTag,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -249,6 +250,13 @@ function WaitingForAgent({
             <CopyButton label="Copy the command" text={status.helmCommand} />
           ) : null}
         </div>
+        {/* On a build that isn't a release, the server's sentence about which agent this installs. */}
+        {status.helmCommandNote ? (
+          <p className="mt-3 flex items-start gap-1.5 text-muted-foreground text-sm">
+            <IconInfoCircle className="mt-0.5 size-4 shrink-0" />
+            {status.helmCommandNote}
+          </p>
+        ) : null}
         {status.installId ? (
           <p className="mt-3 text-muted-foreground text-sm">
             Install ID <span className="font-mono">{status.installId}</span>
