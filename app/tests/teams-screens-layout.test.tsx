@@ -528,8 +528,40 @@ const SCREENS: Screen[] = [
       await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
       await page
         .getByRole("combobox", { name: "Name or email" })
-        .and(page.locator("[value='tom Becker']"))
+        .and(page.locator("[value='Tom Becker']"))
         .waitFor();
+    },
+  },
+  // Tab takes the completion in the browser's own key handling: the caret goes to the end, and a
+  // letter typed then is added after the name, not put in place of what was completed.
+  {
+    name: "add-person-dialog-tab-taken",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      const box = page.getByRole("combobox", { name: "Name or email" });
+      await box.pressSequentially("to");
+      await box.and(page.locator("[value='Tom Becker']")).waitFor();
+      await box.press("Tab");
+      // By its label: the team page behind the dialog has role menus that are comboboxes too.
+      await page.waitForFunction(() => {
+        const input = document.querySelector<HTMLInputElement>(
+          "input[aria-label='Name or email']",
+        );
+        return (
+          input?.value === "Tom Becker" &&
+          input.selectionStart === 10 &&
+          input.selectionEnd === 10 &&
+          document.activeElement === input
+        );
+      });
+      await box.press("x");
+      await page.waitForFunction(
+        () =>
+          document.querySelector<HTMLInputElement>(
+            "input[aria-label='Name or email']",
+          )?.value === "Tom Beckerx",
+      );
     },
   },
   {

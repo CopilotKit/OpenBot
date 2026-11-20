@@ -1197,21 +1197,22 @@ test("Add people is driven from the keyboard: the best match completes in the bo
   const input = box(dialog);
   expect(document.activeElement).toBe(input);
 
-  // "pr": Priya is highlighted, and the rest of her name is completed, selected after the caret.
+  // "pr": Priya is highlighted, and the box completes to her name, written as hers, with the part
+  // not typed selected after the caret.
   await person.type(input, "pr");
-  await waitFor(() => expect(input.value).toBe("priya Nair"));
+  await waitFor(() => expect(input.value).toBe("Priya Nair"));
   expect([input.selectionStart, input.selectionEnd]).toEqual([2, 10]);
   expect(highlighted(dialog)?.textContent).toContain("Priya Nair");
   expect(highlighted(dialog)?.getAttribute("aria-selected")).toBe("true");
 
   // Deleting never completes: Backspace takes away the completion, and it doesn't come back.
   await person.keyboard("{Backspace}");
-  expect(input.value).toBe("pr");
+  expect(input.value).toBe("Pr");
   await new Promise((settle) => setTimeout(settle, 300));
-  expect(input.value).toBe("pr");
+  expect(input.value).toBe("Pr");
   // Typing on completes again, and the next letter keeps the same person.
   await person.keyboard("i");
-  await waitFor(() => expect(input.value).toBe("priya Nair"));
+  await waitFor(() => expect(input.value).toBe("Priya Nair"));
   expect([input.selectionStart, input.selectionEnd]).toEqual([3, 10]);
 
   // Enter adds her, empties the box and keeps it focused, ready for the next person.
@@ -1229,9 +1230,10 @@ test("Add people is driven from the keyboard: the best match completes in the bo
 
   // "to": Tab takes the completion into the box; Enter then adds Tom.
   await person.type(input, "to");
-  await waitFor(() => expect(input.value).toBe("tom Becker"));
+  await waitFor(() => expect(input.value).toBe("Tom Becker"));
   await person.keyboard("{Tab}");
-  expect(input.value).toBe("tom Becker");
+  expect(input.value).toBe("Tom Becker");
+  expect([input.selectionStart, input.selectionEnd]).toEqual([10, 10]);
   expect(document.activeElement).toBe(input);
   await waitFor(() => expect(searches.at(-1)?.search).toBe("tom becker"));
   await waitFor(() =>
@@ -1382,3 +1384,22 @@ test("Add people says when the search fails, and in words", async () => {
   ).toBe("Couldn't search people. Try again in a moment.");
   expect(writes).toEqual([]);
 }, 10_000);
+
+test("Tab takes the completion as the person's own name and leaves the caret at its end, so typing on adds to it", async () => {
+  const { dialog, person } = await openAddPeople("/teams/team_sales", "Sales");
+  const input = box(dialog);
+  await person.type(input, "to");
+  // Completed to Tom's name as he writes it, the part not typed selected.
+  await waitFor(() => expect(input.value).toBe("Tom Becker"));
+  expect([input.selectionStart, input.selectionEnd]).toEqual([2, 10]);
+
+  await person.keyboard("{Tab}");
+  // Taken: the whole name stays, nothing is selected, the caret is at the end, the box keeps focus.
+  expect(input.value).toBe("Tom Becker");
+  expect([input.selectionStart, input.selectionEnd]).toEqual([10, 10]);
+  expect(document.activeElement).toBe(input);
+
+  // A letter typed now goes after the name; it doesn't replace what was completed.
+  await person.keyboard("x");
+  expect(input.value).toBe("Tom Beckerx");
+});

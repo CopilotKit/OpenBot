@@ -15,7 +15,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import { completionAfter, matchIn } from "@/lib/teams/people-search";
+import { completionOf, matchIn } from "@/lib/teams/people-search";
 import {
   type OrganizationPerson,
   peopleSearchQueryOptions,
@@ -101,15 +101,22 @@ export function PeopleTypeahead({
   const current =
     active >= 0 && choosable.includes(active) ? active : (choosable[0] ?? -1);
   const person = current >= 0 ? people[current] : undefined;
+  // The person's whole name or address when it starts with what was typed, written as theirs.
   const completion =
-    open && completing && person ? completionAfter(person, typed) : "";
-  const shown = typed + completion;
+    open && completing && person ? completionOf(person, typed) : "";
+  const shown = completion || typed;
+  // Where the caret goes once the box shows the next value: the end, after a completion is taken.
+  const caretToEnd = useRef(false);
 
-  // The completion is selected, after the caret, so typing on replaces it.
+  // The part not typed is selected, after the caret, so typing on replaces it. A completion just
+  // taken leaves the caret at the end, with nothing selected.
   useLayoutEffect(() => {
     const box = input.current;
     if (!box || document.activeElement !== box) return;
-    if (completion) box.setSelectionRange(typed.length, shown.length);
+    if (caretToEnd.current) {
+      caretToEnd.current = false;
+      box.setSelectionRange(shown.length, shown.length);
+    } else if (completion) box.setSelectionRange(typed.length, shown.length);
   }, [completion, typed.length, shown.length]);
 
   // The highlighted person is kept in view.
@@ -129,10 +136,16 @@ export function PeopleTypeahead({
     input.current?.focus();
   };
 
-  /** Take the completion as typed: the box keeps the whole name or address. */
+  /**
+   * Take the completion as typed: the box keeps the whole name or address, written as the person's
+   * own, with the caret at its end and nothing selected, so typing on adds to it.
+   */
   const accept = () => {
+    caretToEnd.current = true;
     setTyped(shown);
     setCompleting(false);
+    // The value may already read exactly this, which renders nothing new: move the caret now too.
+    input.current?.setSelectionRange(shown.length, shown.length);
   };
 
   const move = (step: 1 | -1) => {
