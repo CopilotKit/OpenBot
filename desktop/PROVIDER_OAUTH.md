@@ -88,9 +88,13 @@ account-level REST API does not accept it.
 
 ### Setting up the Cloudflare OAuth client
 
-A desktop build needs one OAuth client, registered once by whoever distributes
-the build. People who use OpenBot never do this; they only approve the consent
-page. In the Cloudflare dashboard, under **Manage Account > OAuth clients**,
+OpenBot Desktop carries the ID of OpenBot's own OAuth client
+(`CLOUDFLARE_CLIENT_ID` in `src-tauri/src/provider_oauth.rs`), so a build signs
+in with nothing to configure. The ID is not a secret: the client has none, and
+the ID is in the address of every consent page. People who use OpenBot never
+register anything; they only approve the consent page. These steps are for
+replacing that client, or for a build that should use its own. In the Cloudflare
+dashboard, under **Manage Account > OAuth clients**,
 create a client. The form has three steps.
 
 1. **Configure OAuth client.**
@@ -134,11 +138,11 @@ The account that signs in also needs AI Gateway credits (**AI > AI Gateway**,
 Unified Billing). Without them the gateway answers 402 and OpenBot shows
 Cloudflare's own sentence, "Insufficient unified billing credits".
 
-Set `OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID` to the client's ID when building
-the desktop app, or in the process environment at run time. For GitHub-built
-artifacts it is a repository Actions **variable** of that name, passed to the
-native build beside the Google settings. Without it the row still shows, and
-signing in says the build has no registered client.
+To use another client than the built-in one, set
+`OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID` to its ID when building the desktop
+app, or in the process environment at run time. For GitHub-built artifacts it is
+a repository Actions **variable** of that name, passed to the native build
+beside the Google settings. Unset or empty, the build uses the built-in client.
 
 `OPENBOT_CLOUDFLARE_DASHBOARD_URL` and `OPENBOT_CLOUDFLARE_API_URL` point the
 flow at another dashboard and API for testing against a mock.

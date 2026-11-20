@@ -37,6 +37,12 @@ const CLOUDFLARE_API: &str = "https://api.cloudflare.com/client/v4";
  * free is used, so another program holding one does not stop the sign-in.
  */
 const CLOUDFLARE_PORTS: [u16; 3] = [47823, 47824, 47825];
+/*
+ * OpenBot's own Cloudflare OAuth client. The ID is public: the flow is PKCE with no secret, and the
+ * ID travels in the address bar of every sign-in. `OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID` puts
+ * another client in its place, at build or at run time.
+ */
+const CLOUDFLARE_CLIENT_ID: &str = "3c01c6ce4175c6d14165de77a18fc1d0";
 const CLOUDFLARE_UNREGISTERED: &str =
     "Cloudflare sign-in needs this OpenBot build's registered Cloudflare OAuth client. Use another provider until it is configured.";
 /*
@@ -293,7 +299,7 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
         }
         "cloudflare" => {
             let client_id = configured("OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID")
-                .ok_or(CLOUDFLARE_UNREGISTERED)?;
+                .unwrap_or_else(|| CLOUDFLARE_CLIENT_ID.to_owned());
             let (pending, url) = begin_cloudflare(
                 &cloudflare_address("OPENBOT_CLOUDFLARE_DASHBOARD_URL", CLOUDFLARE_DASHBOARD),
                 &cloudflare_address("OPENBOT_CLOUDFLARE_API_URL", CLOUDFLARE_API),
