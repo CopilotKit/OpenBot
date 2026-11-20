@@ -49,6 +49,19 @@ function Invoke-BundledCli {
   if ((Test-Path $node) -and (Test-Path $entry)) { & $node $entry @args } else { & npx --yes copilotkit @args }
 }
 
+# `local delete` for OpenBot's stack, waiting out a CLI that is busy. Whether it deleted the stack;
+# the CLI's answer is left in $script:DeleteOut.
+function Remove-OpenBotStack {
+  foreach ($attempt in 1..4) {
+    $global:LASTEXITCODE = 1
+    $script:DeleteOut = Invoke-BundledCli local delete --stack $stack --confirm-delete $stack --json 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) { return $true }
+    if ($script:DeleteOut -match 'local_command_busy' -and $attempt -lt 4) { Note 'CLI busy, retrying in 30s'; Start-Sleep 30; continue }
+    return $false
+  }
+  return $false
+}
+
 $engines = @()
 if (Has-Command docker) { docker info *> $null; if ($LASTEXITCODE -eq 0) { $engines += 'docker' } }
 if (Has-Command podman) { podman info *> $null; if ($LASTEXITCODE -eq 0) { $engines += 'podman' } }
@@ -99,12 +112,29 @@ if (-not $stack) {
 } elseif ($DryRun) {
   Note "would run: cli local delete --stack $stack --confirm-delete $stack --json"
 } else {
-  foreach ($attempt in 1..4) {
-    $global:LASTEXITCODE = 1
-    $out = Invoke-BundledCli local delete --stack $stack --confirm-delete $stack --json 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) { Note "deleted $stack"; break }
-    if ($out -match 'local_command_busy' -and $attempt -lt 4) { Note 'CLI busy, retrying in 30s'; Start-Sleep 30; continue }
-    Note "could not delete ${stack}:"; Note $out.Trim(); break
+  $deleted = Remove-OpenBotStack
+  # Quit stops OpenBot's Podman machine with the stack, and the CLI deletes a stack only through an
+  # engine that answers (docker_unavailable). Removing the machine below would then leave the CLI's
+  # record of the stack behind, so the machine is started for the delete first.
+  if (-not $deleted -and $script:DeleteOut -match 'docker_unavailable' -and (Has-Command podman)) {
+    podman machine inspect $Machine *> $null
+    if ($LASTEXITCODE -eq 0) {
+      Note "the engine did not answer; starting the Podman machine $Machine to delete the stack"
+      podman machine start $Machine *> $null
+      if ($LASTEXITCODE -ne 0) { Note "could not start $Machine" }
+      $deleted = Remove-OpenBotStack
+    }
+  }
+  if ($deleted) {
+    Note "deleted $stack"
+  } else {
+    Note "could not delete ${stack}:"; Note $script:DeleteOut.Trim()
+    # The CLI has no command that removes a stack's record without an engine that answers.
+    $cliConfig = Join-Path (Join-Path $env:APPDATA 'copilotkit-config-nodejs') 'Config'
+    Note "left behind: the CLI's record of $stack (localStacks in $(Join-Path $cliConfig 'config.json'))"
+    Note "and its folder $(Join-Path (Join-Path $cliConfig 'local-evaluation') $stack). OpenBot's next setup on a new"
+    Note "Podman machine forgets them; anywhere else, once the engine answers, run:"
+    Note "  copilotkit local delete --stack $stack --confirm-delete $stack"
   }
   # Whatever the CLI managed: remove anything of this stack's k3d cluster still on the engine.
   foreach ($engine in $engines) {
