@@ -4,7 +4,7 @@ import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useFrontendTool } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
@@ -12,6 +12,7 @@ import {
   type ChannelPage,
   channelKeys,
 } from "@/lib/channels/queries";
+import { TURN_CUT_OFF } from "@/lib/copilot/stopped-turn";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
@@ -487,6 +488,23 @@ test.each(["a reload", "coming back from another conversation"])(
   },
 );
 
+/*
+ * Found with the server killed and started again in the middle of a long turn: the backend ends that
+ * run "Runner connection dropped", and the conversation opened again said only that.
+ */
+test("a conversation whose server dropped its run says the turn was cut off after a reload, with Carry on", async () => {
+  plans = [{ kind: "fails", message: "Runner connection dropped" }];
+  const live = open();
+  await send(live, "Write the plan as six files");
+  await live.findByTestId("transcript-stopped");
+  live.unmount();
+  const back = open();
+  await settled(back, "Write the plan as six files");
+  const restored = await back.findByTestId("transcript-stopped");
+  expect(within(restored).getByRole("alert").textContent).toBe(TURN_CUT_OFF);
+  within(restored).getByRole("button", { name: "Carry on" });
+});
+
 test("a failure that a later run answered is not shown after a reload", async () => {
   plans = [
     { kind: "fails", message: REJECTED },
@@ -633,6 +651,35 @@ test("a turn that failed before it did anything hands the words back to send aga
   await send(live, "Summarise my inbox");
   await live.findByTestId("transcript-stopped");
   await waitFor(() => expect(typed(live)).toBe("Summarise my inbox"));
+});
+
+/*
+ * FOUND ON A PERSON'S 1.1.2 DESKTOP. The server stopped and started again in the middle of a long
+ * turn of file saves. The run that would have carried the last save's result back was never made,
+ * and its failure was dropped as if the person had pressed Stop: the turn ended with nothing said.
+ */
+test("a turn whose backend stops answering after a browser step says so, and offers to carry on", async () => {
+  plans = [
+    { kind: "calls", tool: STEP },
+    { kind: "unreachable" },
+    { kind: "answers", text: "Picking up where I stopped." },
+  ];
+  const live = open();
+  await send(live, "Write the plan as six files");
+  const shown = await live.findByTestId("transcript-stopped");
+  expect(within(shown).getByRole("alert").textContent).toBe(TURN_CUT_OFF);
+  expect(stepsRun).toBe(1);
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // The message went and the Bot worked on it, so it is not handed back to send again.
+  expect(typed(live)).toBe("");
+  const user = userEvent.setup({ document: live.container.ownerDocument });
+  await user.click(within(shown).getByRole("button", { name: "Carry on" }));
+  await live.findByText("Picking up where I stopped.");
+  await waitFor(() =>
+    expect(live.queryByTestId("transcript-stopped")).toBeNull(),
+  );
 });
 
 test("a turn that fails in a run after its browser steps says so, as one that fails at once does", async () => {
