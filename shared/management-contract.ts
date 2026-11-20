@@ -445,6 +445,14 @@ export const EnrollmentStart = z.strictObject({
   serverUrl: httpUrl,
   /** Who approves it; `approval` when left out. */
   mode: z.enum(ENROLLMENT_MODES).optional(),
+  /**
+   * This install's own id: a UUID the server makes once, keeps in its database and sends on every
+   * start, the same value across restarts and upgrades. The service allows one live install per
+   * organization and instanceId, so two installs under one licence never collide even when they
+   * share an address (the chart's default in-cluster one). Left out by older servers: then the
+   * service keys on the organization and serverUrl.
+   */
+  instanceId: z.uuid().optional(),
 });
 export type EnrollmentStart = z.infer<typeof EnrollmentStart>;
 
