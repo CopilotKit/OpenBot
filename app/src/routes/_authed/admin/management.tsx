@@ -37,6 +37,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemDescription,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
@@ -80,15 +81,13 @@ const APPROVE_STEP =
   "Open the approval page and sign in to CopilotKit as an admin of the organization your licence belongs to. Check the code matches, then approve it. This page moves on by itself.";
 const INSTALL_STEP =
   "Run this command where kubectl reaches OpenBot's cluster. It holds nothing secret. This page updates itself when the agent reports in.";
-/** Where OpenBot's chart installs the agent, OpenBot connects by itself, by its licence. */
-const BY_ITSELF =
-  "OpenBot connects by itself with its licence, and tries again every hour.";
+/** Where OpenBot's chart installs the agent and the last try failed: it tries again by itself. */
+const TRIES_AGAIN = "OpenBot tries again every hour. Connect to try now.";
 const CONNECTING =
-  "OpenBot is connecting with its licence, and the management agent installed with it is reporting in for the first time. This page updates itself.";
+  "OpenBot is connecting with its licence. This page updates itself.";
 const TURNED_OFF =
-  "An admin turned managed updates off, so OpenBot doesn't connect by itself.";
-const UPGRADES_NOT_SET_UP =
-  "The agent reports in, and upgrades need a one-time setup in OpenBot's cluster first.";
+  "Managed updates are off, so OpenBot doesn't connect by itself. Connect to turn them back on.";
+const UPGRADES_NOT_SET_UP = "Needs a one-time setup in the cluster.";
 
 const APPROVE_FLOW =
   "To connect, you approve a code with the CopilotKit account your licence is under, then install the management agent with one Helm command.";
@@ -191,7 +190,7 @@ export function ManagementPage() {
           icon={IconCloudOff}
           title="Turned off"
         >
-          {TURNED_OFF} {CONSENT} {WINDOW_AGREED} Connect turns them back on.
+          {TURNED_OFF} {CONSENT} {WINDOW_AGREED}
         </PageEmpty>
       ) : status.state === "waiting-for-approval" ? (
         <WaitingForApproval cancelButton={cancelButton} status={status} />
@@ -232,8 +231,7 @@ export function ManagementPage() {
           icon={IconCloudCog}
           title="Not connected"
         >
-          {CONSENT} {WINDOW_AGREED}{" "}
-          {byChart ? <>{BY_ITSELF} Connect tries now.</> : APPROVE_FLOW}
+          {CONSENT} {WINDOW_AGREED} {byChart ? TRIES_AGAIN : APPROVE_FLOW}
         </PageEmpty>
       )}
       <ConfirmDialog
@@ -461,6 +459,7 @@ function Connected({
     value: string;
     icon: React.ComponentType;
     mono?: boolean;
+    description?: React.ReactNode;
   }[] = [
     {
       title: "Status",
@@ -485,6 +484,20 @@ function Connected({
             title: "Upgrades",
             value: status.upgrades === "on" ? "On" : "Not set up",
             icon: IconTool,
+            description:
+              status.upgrades === "not-set-up" ? (
+                <>
+                  {UPGRADES_NOT_SET_UP}{" "}
+                  <a
+                    className="underline underline-offset-2"
+                    href={UPGRADES_SETUP_URL}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    How to set up upgrades
+                  </a>
+                </>
+              ) : undefined,
           },
         ]
       : []),
@@ -511,6 +524,9 @@ function Connected({
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{row.title}</ItemTitle>
+                {row.description ? (
+                  <ItemDescription>{row.description}</ItemDescription>
+                ) : null}
               </ItemContent>
               <ItemActions>
                 <span
@@ -528,28 +544,12 @@ function Connected({
           </div>
         ))}
       </PageRows>
-      {status.upgrades === "not-set-up" ? (
-        <p className="mt-3 flex items-start gap-1.5 text-muted-foreground text-sm">
-          <IconInfoCircle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {UPGRADES_NOT_SET_UP}{" "}
-            <a
-              className="underline underline-offset-2"
-              href={UPGRADES_SETUP_URL}
-              rel="noreferrer"
-              target="_blank"
-            >
-              How to set up upgrades
-            </a>
-          </span>
-        </p>
-      ) : null}
       {byChart ? (
         // The chart's agent: nothing to uninstall. Disconnect stops managed updates on its own.
         <PageSection
           action={disconnectButton}
-          description="Managed updates stop, and you upgrade OpenBot yourself. The agent stays in the cluster without them. Connect turns them back on."
-          title="Disconnect"
+          description="Managed updates stop, and you upgrade OpenBot yourself. Connect turns them back on."
+          title="Turn off managed updates"
         />
       ) : (
         <PageSection
