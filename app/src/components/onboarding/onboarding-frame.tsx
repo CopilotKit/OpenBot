@@ -6,6 +6,7 @@ import {
 import { createContext, type ReactNode, useContext, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { BrandName } from "@/components/edition/brand-name";
+import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Popover,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/popover";
 import { appConfig } from "@/lib/generated/application-config";
 import { cn } from "@/lib/utils";
+import { useSkinId } from "@/skins/store";
 
 /**
  * The frame every onboarding step sits in: one DOM, laid out two ways by CSS.
@@ -99,6 +101,7 @@ export function OnboardingFrame({
   /** The picture needs the room, such as the booking calendar: the words' pane narrows. */
   wideDemo?: boolean;
 }) {
+  const own = useSkinId() === "openbot";
   const total = titles.length;
   const shape =
     "h-[52px] w-full rounded-full px-5 text-sm font-semibold lg:h-10 lg:w-auto lg:min-w-32 lg:rounded-lg own:lg:min-w-0 own:lg:rounded-full";
@@ -155,7 +158,8 @@ export function OnboardingFrame({
         </div>
         <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4 own:lg:h-9">
           <div className="text-sm flex items-center gap-2 font-semibold">
-            <AgentOrb size="24px" />
+            {/* Figma's "Brand / Logo" in OpenBot's own look, the sidebar's mark; a skin keeps its live orb. */}
+            {own ? <OpenBotLogo /> : <AgentOrb size="24px" />}
             <BrandName>{appConfig.brand.productName}</BrandName>
           </div>
           {titles.length > 1 ? (
