@@ -85,6 +85,11 @@ unless you rely on task threads.
 - **On Windows with only the WSL that ships with Windows, setup offers the WSL update.** It stopped
   on "could not check the WSL version", because that WSL does not know `wsl --version`. Setup now
   shows the WSL update screen, whose fix runs `wsl --update`.
+- **On Windows, uninstalling with "Delete the application data" deletes OpenBot's downloads too.**
+  The installers, tools and machine image OpenBot downloads (about 128 MB, in `~\OpenBot`) stayed
+  in the profile whichever folder OpenBot was installed in. They now go with the data, and the
+  folder with them once nothing is left in it. Without the data deleted, they stay, as the machine
+  does.
 
 ### Kubernetes
 
