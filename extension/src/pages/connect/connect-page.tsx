@@ -40,7 +40,7 @@ type Phase =
   | { kind: "none" }
   | { kind: "error"; message: string }
   | { kind: "ready"; pending: Pending; replaces?: Replaces }
-  | { kind: "connected"; name: string }
+  | { kind: "connected"; name: string; organization?: string }
   | { kind: "cancelled" };
 
 /** Who asked. Any site can ask to connect, so a web request is said to come from a page at the address shown, never
@@ -94,7 +94,14 @@ export function ConnectPage() {
       origin: pending.origin,
     });
     setBusy(false);
-    if (answer.ok) setPhase({ kind: "connected", name });
+    if (answer.ok)
+      setPhase({
+        kind: "connected",
+        name,
+        ...("organizationName" in answer && answer.organizationName
+          ? { organization: answer.organizationName }
+          : {}),
+      });
     else setMessage(answer.error);
   };
 
@@ -234,7 +241,9 @@ export function ConnectPage() {
         </>
       ) : phase.kind === "connected" ? (
         <p className="mt-8 text-sm" role="status">
-          Connected as {phase.name}. You can close this tab.
+          Connected as {phase.name}.
+          {phase.organization ? ` It records into ${phase.organization}.` : ""}{" "}
+          You can close this tab.
         </p>
       ) : phase.kind === "cancelled" ? (
         <p className="mt-8 text-muted-foreground text-sm" role="status">

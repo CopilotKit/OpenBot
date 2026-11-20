@@ -6,14 +6,20 @@ import type {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
+import { ComputerBlocked } from "@/components/computer/computer-blocked";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { settledRefusal } from "@/lib/computers/refusal";
 import { recorderKeys } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
 import { TEACH_A_BOT } from "./browser-nav-item";
-import { OpeningBrowser, ScreenBrowser } from "./browser-screen";
+import {
+  CANT_OPEN_BROWSER,
+  OpeningBrowser,
+  ScreenBrowser,
+} from "./browser-screen";
 import { TeachSteps } from "./teach-steps";
 import { recordingOnItsWay, YourRecordings } from "./your-recordings";
 
@@ -132,12 +138,19 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
   if (!opened) {
     // A browser that is there and not answering says so while it is asked to open, rather than leaving the page empty.
     const said = state.problem ?? open.error?.message;
+    /*
+     * Refused for good (the organization is at its computer limit, say): asking again would be refused again, so the
+     * page says so calmly, with no Try again. A browser that isn't answering is still the news over it.
+     */
+    const blocked = state.problem ? null : settledRefusal(open.error);
+    const retry = open.error && !blocked ? () => open.mutate() : undefined;
     if (!recordingsOnly)
       // Opening: the page as it will be, its browser saying it is opening (`OpeningBrowser`), or why it has not.
       return (
         <OpeningBrowser
+          blocked={blocked}
           heading={<TeachHeading />}
-          onRetry={open.error ? () => open.mutate() : undefined}
+          onRetry={retry}
           problem={said}
         >
           <YourRecordings
@@ -157,13 +170,19 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
             </Button>
           </div>
         ) : null}
-        {said ? (
+        {blocked ? (
+          <ComputerBlocked
+            className="mt-6 rounded-lg border border-border"
+            refusal={blocked}
+            title={CANT_OPEN_BROWSER}
+          />
+        ) : said ? (
           <div className="mt-6 flex flex-col items-start gap-3">
             <p className="text-destructive text-sm" role="alert">
               {said}
             </p>
-            {open.error ? (
-              <Button onClick={() => open.mutate()} size="sm" variant="outline">
+            {retry ? (
+              <Button onClick={retry} size="sm" variant="outline">
                 Try again
               </Button>
             ) : null}
@@ -186,6 +205,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
         heading={<TeachHeading />}
         state={state}
         reopen={() => reopen.mutate()}
+        reopenError={reopen.error}
         reopening={reopen.isPending}
       >
         <YourRecordings

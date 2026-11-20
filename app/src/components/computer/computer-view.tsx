@@ -8,6 +8,7 @@ import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
 } from "@/lib/bot-browser/queries";
+import type { ClientError } from "@/lib/client";
 import { botsReason, supplySecret } from "@/lib/computers/control";
 import {
   type ComputerState,
@@ -16,13 +17,14 @@ import {
 import {
   readPageFrame,
   readScreenshot,
-  startComputer,
   type Screenshot,
+  startComputer,
 } from "@/lib/computers/screen";
 import { useComputerControl } from "@/lib/computers/use-control";
 import { queryClient } from "@/query-client";
 import { ChannelAvatar } from "../channels/avatar";
 import { BotBrowserBar, BotRecordPanel } from "./bot-browser";
+import { ComputerBlocked } from "./computer-blocked";
 import { ComputerControlButton } from "./computer-controls";
 import { LiveScreen, type LiveScreenHandle } from "./live-screen";
 import { useElementVisible, usePageVisible } from "./preview-visibility";
@@ -154,6 +156,8 @@ const SECRET_CONFIRM_MS = 6_000;
  */
 function NothingToSee({
   problem,
+  blocked,
+  inButton = false,
   blankBrowser,
   settled,
   page,
@@ -161,6 +165,13 @@ function NothingToSee({
   owner = "the Bot's",
 }: {
   problem: string | null;
+  /**
+   * Starting the computer was refused for good (the organization is at its computer limit, say). It stays off, and
+   * the screen says why in the server's sentence, rather than that it starts when the Bot next uses it.
+   */
+  blocked?: ClientError | null;
+  /** Drawn inside the tile's own button, so nothing in it can be a control or a block. */
+  inButton?: boolean;
   blankBrowser: boolean;
   /**
    * Why there is no picture yet, when the reason is ordinary.
@@ -178,6 +189,16 @@ function NothingToSee({
   /** The page that turn opened, named when there is no picture of it. */
   page?: { url?: string; title?: string } | undefined;
 }) {
+  if (!settled && !problem && blocked)
+    // Inside the tile's own button nothing is drawn: the tile draws it beside the button, over the screen, so its
+    // link is a link of its own (`BlockedTile`).
+    return inButton ? null : (
+      <ComputerBlocked
+        className="absolute inset-0"
+        refusal={blocked}
+        title={`Can't start ${owner} computer`}
+      />
+    );
   return (
     <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-4 text-center text-muted-foreground text-sm">
       {settled ? (
@@ -602,6 +623,8 @@ export function ComputerView({
    */
   const openedOn = useRef<string | null>(null);
   const [startAsked, setStartAsked] = useState(false);
+  /** Starting it was refused for good: what the screen says while the computer stays off (`NothingToSee`). */
+  const [startBlocked, setStartBlocked] = useState<ClientError | null>(null);
   // A picture is a computer that is up, whatever the state reads have or have not said yet.
   const hasFrame = shot !== null;
   useEffect(() => {
@@ -614,13 +637,17 @@ export function ComputerView({
      * "Starting" only once the server says it is. Until then, and for a server that has no such
      * call or refuses it, the screen says what it always said: the computer is off.
      */
-    void startComputer(computerId).then((state) => {
+    void startComputer(computerId).then(({ state, refused }) => {
       if (state === "starting" || state === "ready") setStartAsked(true);
+      if (refused) setStartBlocked(refused);
     });
   }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
   useEffect(() => {
     // Up, or on its way: what the server says is the news again, and a later "off" is one.
-    if (computerState && computerState !== "absent") setStartAsked(false);
+    if (computerState && computerState !== "absent") {
+      setStartAsked(false);
+      setStartBlocked(null);
+    }
   }, [computerState]);
   /**
    * Off, and staying off until the Bot uses it. In a turn, an absent computer is one the Bot's action
@@ -670,7 +697,8 @@ export function ComputerView({
    */
   const botBrowser = useQuery({
     ...botBrowserStateQueryOptions(computerId),
-    enabled: expanded && !settled,
+    // Not for a computer refused a start, which has no browser to read.
+    enabled: expanded && !settled && !startBlocked,
   });
   /*
    * Read again the moment the wheel changes hands, rather than up to a second later: the bar and Record go live, or
@@ -874,6 +902,8 @@ export function ComputerView({
             {showScreen ? null : (
               <NothingToSee
                 blankBrowser={blankBrowser}
+                blocked={startBlocked}
+                inButton
                 owner={owner}
                 page={knownPage}
                 problem={shownProblem}
@@ -882,7 +912,22 @@ export function ComputerView({
               />
             )}
           </button>
-          {!settled && !(driving && !control?.transitioning) ? (
+          {/*
+            A computer refused a start: said over the tile, beside its button rather than in it, so the admin's way to
+            Computers is a link that can be pressed. Compact, so the whole sentence and the link fit the tile.
+          */}
+          {!settled && startBlocked ? (
+            <ComputerBlocked
+              className="absolute inset-0 bg-background"
+              compact
+              refusal={startBlocked}
+              title={`Can't start ${owner} computer`}
+            />
+          ) : null}
+          {/* Nothing to take on a computer that was refused a start: there is no screen to drive. */}
+          {!settled &&
+          !startBlocked &&
+          !(driving && !control?.transitioning) ? (
             // Solid, not frosted: a blur over a screen that keeps changing is redrawn with every frame of it.
             <div
               className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2 rounded-xl border bg-popover py-1.5 pr-1.5 pl-3 text-popover-foreground shadow-lg"
@@ -1204,6 +1249,7 @@ export function ComputerView({
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <NothingToSee
                         blankBrowser={blankBrowser}
+                        blocked={startBlocked}
                         owner={owner}
                         page={knownPage}
                         problem={shownProblem}
@@ -1260,14 +1306,17 @@ export function ComputerView({
                         </span>
                       ) : null}
                     </span>
-                    <ComputerControlButton computerId={computerId} />
+                    {/* A computer refused a start has no screen to take, and so nothing to record either. */}
+                    {startBlocked ? null : (
+                      <ComputerControlButton computerId={computerId} />
+                    )}
                   </div>
                 )}
                 {/*
                   Record, under the wheel, because it is only for the person holding it. Branched on
                   the data first, so a read that fails after one has answered keeps what it showed.
                 */}
-                {settled ? null : botBrowser.data ? (
+                {settled || startBlocked ? null : botBrowser.data ? (
                   <BotRecordPanel botId={computerId} state={botBrowser.data} />
                 ) : botBrowser.error ? (
                   <p className="text-destructive text-sm" role="alert">

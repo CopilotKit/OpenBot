@@ -24,6 +24,13 @@ import { createHmac } from "node:crypto";
  * The label carries a version so a change to the scheme mints new tokens, which the supervisor and the
  * sandbox provider then treat as stale, rather than reinterpreting old ones.
  *
+ * WHICH ORGANIZATION. A person in two organizations has a computer in each, and the two must not open
+ * each other. So outside the `default` organization the label also names the organization, as
+ * `org/<encodeURIComponent(org)>/person:<id>`, the same text the server keys such a computer by. In
+ * `default`, and when no organization is given, the label is exactly what it was before organizations
+ * were named here, so a computer already running in `default` keeps its token and is not treated as
+ * stale. An organization id is encoded, so no `/` or `:` in it can make one label read as another.
+ *
  * The one computer everybody shares (no supervisor, `AGENT_COMPUTER_URL`) is not a tenant boundary
  * and is documented as not being one; it keeps the deployment's token. So does OpenBot Desktop's
  * host-side browser computer, which runs a person's own browsers and no Bot.
@@ -34,13 +41,30 @@ import { createHmac } from "node:crypto";
  */
 export const COMPUTER_TOKEN_LABEL = "openbot computer token v1";
 
-export type ComputerIdentity = { kind: "person" | "bot"; id: string };
+/** The organization whose computers keep the labels they had before organizations were named. */
+export const DEFAULT_COMPUTER_ORGANIZATION = "default";
+
+export type ComputerIdentity = {
+  kind: "person" | "bot";
+  id: string;
+  /** The organization the computer belongs to. Absent or `default` keeps the original label. */
+  organizationId?: string;
+};
+
+/** Whose computer, as the text the token is derived from. */
+export function computerTokenSubject(computer: ComputerIdentity): string {
+  const own = `${computer.kind}:${computer.id}`;
+  const organization = computer.organizationId;
+  if (!organization || organization === DEFAULT_COMPUTER_ORGANIZATION)
+    return own;
+  return `org/${encodeURIComponent(organization)}/${own}`;
+}
 
 export function computerTokenFor(
   deploymentToken: string,
   computer: ComputerIdentity,
 ): string {
   return createHmac("sha256", deploymentToken)
-    .update(`${COMPUTER_TOKEN_LABEL}\n${computer.kind}:${computer.id}`)
+    .update(`${COMPUTER_TOKEN_LABEL}\n${computerTokenSubject(computer)}`)
     .digest("hex");
 }
