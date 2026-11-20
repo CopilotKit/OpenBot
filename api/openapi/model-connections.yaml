@@ -739,6 +739,17 @@ components:
           type: [string, 'null']
         effort:
           type: [string, 'null']
+        defaultModel:
+          type: object
+          description: The Bot default saved when the conversation was created. Absent when it follows the deployment default.
+          required: [model, effort, source]
+          properties:
+            model:
+              type: string
+            effort:
+              type: [string, 'null']
+            source:
+              type: string
         unverified:
           $ref: '#/components/schemas/UnverifiedModel'
     UnverifiedModel:
@@ -775,6 +786,11 @@ components:
           description: >-
             An effort the model takes, or null for its own. Trimmed, and read
             in lower case.
+        pinModel:
+          type: boolean
+          description: >-
+            Keep an explicitly named model as an override even when it is the
+            deployment's default. Omit to use the default as a reset.
     AiConnectionProvider:
       type: string
       description: >-

@@ -1,4 +1,10 @@
-import type { ConversationModel, ModelCatalogue, ModelOption } from "./queries";
+import type { AgentProfile } from "@/lib/agents/queries";
+import type {
+  ConversationModel,
+  ConversationModelInput,
+  ModelCatalogue,
+  ModelOption,
+} from "./queries";
 
 /**
  * The thinking effort a model runs at, beside the model itself.
@@ -67,6 +73,19 @@ function optionFor(
   return id ? catalogue?.models.find((model) => model.id === id) : undefined;
 }
 
+export function offeredBotDefault(
+  saved: AgentProfile["defaultModel"],
+  catalogue: ModelCatalogue | undefined,
+): ModelPick | undefined {
+  if (!saved || saved.source !== catalogue?.source) return undefined;
+  const option = optionFor(catalogue, saved.model);
+  if (!option) return undefined;
+  return {
+    model: option.id,
+    effort: accepts(option, saved.effort) ? saved.effort : null,
+  };
+}
+
 /**
  * What a picker shows for a saved pick: the saved model when the catalogue still offers it,
  * otherwise the default, and the saved effort only where that model accepts it.
@@ -74,8 +93,19 @@ function optionFor(
 export function shownPick(
   saved: ConversationModel | null | undefined,
   catalogue: ModelCatalogue | undefined,
+  botDefault?: ModelPick,
 ): ModelPick | undefined {
   if (!catalogue) return undefined;
+  if (
+    botDefault &&
+    (saved?.model
+      ? !optionFor(catalogue, saved.model)
+      : !accepts(
+          optionFor(catalogue, catalogue.default),
+          saved?.effort ?? null,
+        ))
+  )
+    return botDefault;
   const option =
     optionFor(catalogue, saved?.model) ??
     optionFor(catalogue, catalogue.default);
@@ -91,12 +121,26 @@ export function shownPick(
 export function requestFor(
   pick: ModelPick,
   catalogue: ModelCatalogue | undefined,
-): ConversationModel {
+  botDefault?: ModelPick,
+): ConversationModelInput {
   const option = optionFor(catalogue, pick.model);
   const effort =
     accepts(option, pick.effort) && pick.effort !== option?.defaultEffort
       ? pick.effort
       : null;
+  if (botDefault) {
+    const inheritedEffort = shownEffort(option, botDefault.effort);
+    if (
+      pick.model === botDefault.model &&
+      shownEffort(option, effort) === inheritedEffort
+    )
+      return { model: null, effort: null };
+    return {
+      model: pick.model,
+      effort,
+      ...(pick.model === catalogue?.default ? { pinModel: true } : {}),
+    };
+  }
   return {
     model: pick.model === catalogue?.default ? null : pick.model,
     effort,

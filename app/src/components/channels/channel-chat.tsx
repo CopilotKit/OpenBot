@@ -1943,6 +1943,7 @@ export function ChannelChat({
             modelPicker={
               <ModelPicker
                 catalogue={picksModel ? models.data : undefined}
+                defaultModel={runModel.defaultModel}
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}
