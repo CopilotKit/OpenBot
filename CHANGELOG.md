@@ -1341,6 +1341,11 @@ override or a Helm values file has to say.
   - While WebView2 installs, the installer says so in plain words, and after Finish the window
     shows "Getting OpenBot ready" rather than a blank white window.
   - A fresh install no longer waits about two minutes on "Output folder".
+  - **A Windows machine that has only WSL 1 is now told how to convert it.** When the WSL
+    `DefaultVersion` registry value was absent, setup reported WSL 2 and then tried
+    `wsl.exe --version`, which the older inbox binary does not understand, so it ended on "could not
+    check the WSL version" with no next step. An absent value now means WSL 1, and setup shows the
+    `wsl --set-default-version 2` instructions.
 - **Mac.**
   - Get Troubleshooting Logs... no longer quits the app after saving the file. While the logs are
     gathered, the menu says Gathering Logs....
