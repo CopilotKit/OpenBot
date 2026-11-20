@@ -11,38 +11,48 @@
  * own (NEW_TASK and CLEAR_TASK, which takes the tab away) with the same link, and finishes. Nothing else changes: a
  * launch from the icon, a switch back from recents, and the link while the app is open (delivered to the MainActivity
  * already there) never reach it.
+ *
+ * Loads nothing at the top: the repository's tests read `addLinkedColdStart` where the phone's own dependencies are
+ * not installed, and only `expo prebuild` runs the plugin itself, with them.
  */
-const { withMainActivity } = require("expo/config-plugins");
-const {
-  mergeContents,
-} = require("@expo/config-plugins/build/utils/generateCode");
 
 /** The deep link OpenBot's linked page opens: RETURN_ADDRESS in src/link-company.ts. */
 const LINKED = "openbotmobile://company-sign-in/linked";
 
-const COLD_START = `    if (!isTaskRoot && intent?.data?.toString() == "${LINKED}") {
-      startActivity(
-        android.content.Intent(intent)
-          .setClass(this, MainActivity::class.java)
-          .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-      )
-      finish()
-      return
-    }`;
+const BEGIN = "    // @generated begin openbot-linked-cold-start";
+const END = "    // @generated end openbot-linked-cold-start";
 
-/** MainActivity.kt with the restart added after `super.onCreate`, once. */
+const COLD_START = [
+  BEGIN,
+  `    if (!isTaskRoot && intent?.data?.toString() == "${LINKED}") {`,
+  "      startActivity(",
+  "        android.content.Intent(intent)",
+  "          .setClass(this, MainActivity::class.java)",
+  "          .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)",
+  "      )",
+  "      finish()",
+  "      return",
+  "    }",
+  END,
+];
+
+/** MainActivity.kt with the restart right after `super.onCreate`, once: an earlier copy is taken out first. */
 function addLinkedColdStart(source) {
-  return mergeContents({
-    src: source,
-    newSrc: COLD_START,
-    tag: "openbot-linked-cold-start",
-    anchor: /super\.onCreate\(/,
-    offset: 1,
-    comment: "//",
-  }).contents;
+  const lines = source.split("\n");
+  const begin = lines.indexOf(BEGIN);
+  const end = lines.indexOf(END);
+  if (begin !== -1 && end > begin) lines.splice(begin, end - begin + 1);
+  const anchor = lines.findIndex((line) => line.includes("super.onCreate("));
+  if (anchor === -1)
+    throw new Error(
+      "openbot-linked-cold-start found no super.onCreate in MainActivity.",
+    );
+  lines.splice(anchor + 1, 0, ...COLD_START);
+  return lines.join("\n");
 }
 
 function withLinkedColdStart(config) {
+  const { withMainActivity } = require("expo/config-plugins");
   return withMainActivity(config, (activity) => {
     if (activity.modResults.language !== "kt")
       throw new Error(
