@@ -13,6 +13,7 @@ import {
   handleExternalConnect,
   installConnection,
 } from "../src/background/connection";
+import { organizationNameOf } from "../src/background/recording";
 import type { RecorderPolicy } from "../src/shared/policy";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
@@ -47,7 +48,9 @@ async function openbot(request: Request): Promise<Response> {
       token: "obr_fixture",
       connection: { id: "c1" },
       user,
-      ...(code.endsWith("_two") ? { organizationId: TWO } : {}),
+      ...(code.endsWith("_two")
+        ? { organizationId: TWO, organizationName: "Harbor Research" }
+        : {}),
     });
   }
   const addressed =
@@ -144,4 +147,65 @@ test("a grant that names no organization keeps the connection in default, as bef
   expect(after).toContain(
     "DELETE /api/v2/organizations/default/recorder-connections/current",
   );
+});
+
+test("an approved connect says which organization this browser now records into, and keeps its name", async () => {
+  const origin = loopback;
+  await handleExternalConnect(
+    { type: "openbot.connect", code: "obc_web_two" },
+    { origin },
+    deps,
+  );
+  const answer = await handleConnectionMessage(
+    { type: "page.connect.decide", approve: true, label: "Chrome", origin },
+    deps,
+  );
+  expect(answer).toEqual({ ok: true, organizationName: "Harbor Research" });
+  expect(await currentConnection()).toMatchObject({
+    organizationId: TWO,
+    organizationName: "Harbor Research",
+  });
+
+  // A grant that names none: nothing to say, as before.
+  await handleConnectionMessage({ type: "page.disconnect" });
+  await handleExternalConnect(
+    { type: "openbot.connect", code: "obc_plain_again" },
+    { origin },
+    deps,
+  );
+  expect(
+    await handleConnectionMessage(
+      { type: "page.connect.decide", approve: true, label: "Chrome", origin },
+      deps,
+    ),
+  ).toEqual({ ok: true });
+});
+
+test("the popup names the organization from OpenBot's latest answer, else the grant's, else nothing", async () => {
+  const connection = {
+    openbotUrl: "https://openbot.example.test",
+    token: "obr_fixture",
+    connectionId: "c1",
+    user,
+    via: "web" as const,
+    connectedAt: 0,
+    organizationId: TWO,
+    organizationName: "Harbor Research",
+  };
+  const me = (organization?: { id: string; name: string }) => ({
+    user,
+    connectionId: "c1",
+    ...(organization ? { organization } : {}),
+  });
+  // Renamed since the connect: OpenBot's answer wins.
+  expect(
+    organizationNameOf(me({ id: TWO, name: "Harbor Labs" }), connection),
+  ).toEqual({ organizationName: "Harbor Labs" });
+  // OpenBot couldn't be asked just now: the grant's.
+  expect(organizationNameOf(null, connection)).toEqual({
+    organizationName: "Harbor Research",
+  });
+  // Neither names one (an OpenBot that keeps every connection in default): nothing.
+  const { organizationName: _gone, ...unnamed } = connection;
+  expect(organizationNameOf(me(), unnamed)).toEqual({});
 });
