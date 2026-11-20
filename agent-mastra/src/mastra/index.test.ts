@@ -271,9 +271,9 @@ describe("OpenBot Mastra receiver instructions", () => {
 
 describe("OpenBot Mastra model configuration", () => {
   const modelCases: ModelCase[] = [
-    { name: "absent", expected: "gpt-4o-mini" },
-    { name: "empty", value: "", expected: "gpt-4o-mini" },
-    { name: "whitespace", value: "  ", expected: "gpt-4o-mini" },
+    { name: "absent", expected: "gpt-5.4-mini" },
+    { name: "empty", value: "", expected: "gpt-5.4-mini" },
+    { name: "whitespace", value: "  ", expected: "gpt-5.4-mini" },
     {
       name: "custom",
       value: " fixture/custom:model ",
@@ -358,6 +358,7 @@ describe("OpenBot Mastra provider requests", () => {
     provider: string;
     base: string;
     model: string;
+    useDefaultModel?: boolean;
     url: string;
     apiKey?: string;
     error?: string;
@@ -397,6 +398,22 @@ describe("OpenBot Mastra provider requests", () => {
       url: "http://compatible.test/v1/chat/completions",
       apiKey: "test-openai",
     },
+    {
+      provider: "",
+      base: "",
+      model: "gpt-5.4-mini",
+      useDefaultModel: true,
+      url: "https://api.openai.com/v1/responses",
+      apiKey: "test-openai",
+    },
+    {
+      provider: "",
+      base: "http://compatible.test/v1",
+      model: "gpt-5.4-mini",
+      useDefaultModel: true,
+      url: "http://compatible.test/v1/chat/completions",
+      apiKey: "test-openai",
+    },
     ...[
       "http://anthropic.test",
       " http://anthropic.test/proxy/ ",
@@ -427,7 +444,7 @@ describe("OpenBot Mastra provider requests", () => {
   ];
 
   for (const choice of choices) {
-    test(`uses ${choice.base || "the default endpoint"} with ${choice.apiKey === undefined ? "no" : choice.apiKey || "an empty"} API key`, async () => {
+    test(`uses ${choice.base || "the default endpoint"}${choice.useDefaultModel ? " and the default model" : ""} with ${choice.apiKey === undefined ? "no" : choice.apiKey || "an empty"} API key`, async () => {
       const seen: { url: string | null; key: string | null; model: string }[] =
         [];
       const provider = Bun.serve({
@@ -530,7 +547,7 @@ describe("OpenBot Mastra provider requests", () => {
             DO_NOT_TRACK: "1",
             NODE_ENV: "test",
             BOT_PROVIDER: choice.provider,
-            BOT_MODEL: choice.model,
+            BOT_MODEL: choice.useDefaultModel ? undefined : choice.model,
             ANTHROPIC_API_KEY:
               choice.provider === "anthropic" ? choice.apiKey : "",
             OPENAI_API_KEY:
