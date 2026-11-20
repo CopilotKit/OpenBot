@@ -10,7 +10,7 @@ import {
   serverDeployment,
 } from "../../shared/kubernetes-promotion";
 import type { Heartbeat, UpgradeState } from "../../shared/management-contract";
-import type { AgentConfig } from "./config";
+import type { AgentConfig, ReadyAgent } from "./config";
 import { type Flux, ready } from "./flux";
 import { type Kube, run } from "./kube";
 
@@ -74,7 +74,7 @@ export async function readIdentity(
 }
 
 export async function collectHeartbeat(options: {
-  config: AgentConfig;
+  config: ReadyAgent["config"];
   kube: Kube;
   flux: Flux;
   upgrade: {
