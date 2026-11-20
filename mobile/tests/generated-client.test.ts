@@ -127,6 +127,29 @@ const server = Bun.serve({
       body: text ? JSON.parse(text) : null,
     });
     const route = `${request.method} ${url.pathname}`;
+    // Only a live session reads the person's organizations. A cookie sign-in left behind (an unfinished sign-in's
+    // state, an expired session) is refused as OpenBot refuses it.
+    if (
+      route === `GET ${MINE}` &&
+      !request.headers.get("cookie")?.includes("session_token=signed-in")
+    )
+      return Response.json(
+        {
+          type: "https://open.bot/errors/unauthenticated",
+          title: "Authentication required.",
+          status: 401,
+          detail: "Authentication required.",
+          code: "UNAUTHENTICATED",
+          category: "auth",
+          retryable: false,
+          requestId: "req_example",
+          traceId: "trace_example",
+        },
+        {
+          status: 401,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
     if (route === `GET ${MINE}`)
       return Response.json({
         organizations: [
@@ -243,6 +266,7 @@ const {
   ME,
   ORGANIZATION_ID,
   organizationChoices,
+  readDeployment,
 } = await import("../src/api");
 const { listInvitations } = await import(
   "../src/api/generated/organizations/organizations"
@@ -517,7 +541,7 @@ test("a refusal of this app as too old, on any request, reaches the root layout 
 test("signed in, every request names the organization it is for, and the deployment is asked of the person's own", async () => {
   await getBot(ORGANIZATION_ID, "a b");
   await listInvitations({ limit: 100 });
-  await checkVersion();
+  await checkVersion(true);
   // Under the organization they work in, an address that names none, and the deployment read: each names org_work.
   // The list of their organizations names none, since it is how the one they work in is found.
   expect(organizationNamed).toEqual(
@@ -535,6 +559,39 @@ test("signed in, every request names the organization it is for, and the deploym
     else expect(organization).toBe("org_work");
   // `default` is not one of the places a signed-in person's requests go.
   expect(deploymentAsked).toEqual(["org_work"]);
+});
+
+/*
+ * REPORTED (fused end-to-end run, Android): the signed-out screen lost its sign-in buttons and read "Authentication
+ * required" whenever the phone held a cookie that was not a live session: an unfinished sign-in's state, or an expired
+ * or revoked session. The deployment, which says how people sign in, was read in the person's organization whenever
+ * the phone held any cookie, which meant reading their organizations first, and that was refused.
+ */
+test("signed out with a cookie sign-in left behind, the deployment is still read in default, with its ways to sign in", async () => {
+  cookie = "better-auth.state=unfinished-sign-in";
+  expect(await checkVersion(false)).toEqual({ kind: "ok" });
+  expect(deploymentAsked).toEqual(["default"]);
+  const deployment = await readDeployment(false);
+  expect(deployment.authProviders).toEqual(
+    fixture.deployments.current.authProviders,
+  );
+  expect(deploymentAsked).toEqual(["default", "default"]);
+  // Nothing asked for the person's organizations, and nothing named an organization of theirs.
+  expect(seen.map((request) => request.path)).not.toContain(MINE);
+  for (const { organization } of organizationNamed)
+    expect(organization).toBe("default");
+});
+
+test("a session that ended without the phone knowing yet reads the deployment in default", async () => {
+  cookie = "better-auth.session_token=expired";
+  expect(await checkVersion(true)).toEqual({ kind: "ok" });
+  expect(deploymentAsked).toEqual(["default"]);
+  const deployment = await readDeployment(true);
+  expect(deployment.authProviders).toEqual(
+    fixture.deployments.current.authProviders,
+  );
+  // Each read asked for the person's organizations, was refused as signed out, and read default's.
+  expect(deploymentAsked).toEqual(["default", "default"]);
 });
 
 // Last: the pick it makes is the phone's from here on.
