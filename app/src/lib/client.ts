@@ -13,6 +13,11 @@
  */
 
 import { CLIENT_HEADER, clientToken } from "@openbot/shared/client-version";
+import {
+  renewalRequired,
+  renewHostedSignIn,
+  SIGN_IN_HEADER,
+} from "@/lib/auth/renewal";
 import { noteRefusal } from "@/lib/client-version/refusal";
 import { noteAnswer, noteNoAnswer } from "@/lib/desktop/reachability";
 
@@ -185,7 +190,7 @@ async function refusal(
       : typeof body?.detail === "string"
         ? body.detail
         : undefined;
-  return new ClientError(
+  const error = new ClientError(
     message ?? fallback ?? "That request failed.",
     response.status,
     typeof body?.code === "string" ? body.code : undefined,
@@ -193,6 +198,10 @@ async function refusal(
       ? (body as Record<string, unknown>)
       : undefined,
   );
+  // A hosted OpenBot's sign-in needing renewal, which is never being signed out: renewed in the background.
+  if (renewalRequired(error))
+    renewHostedSignIn(response.headers.get(SIGN_IN_HEADER));
+  return error;
 }
 
 /**

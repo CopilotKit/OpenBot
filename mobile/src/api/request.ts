@@ -23,8 +23,8 @@ import {
   ORGANIZATION_HEADER,
   type OrganizationChoices,
 } from "../organization";
-import { clientHeaders } from "../release";
 import { reportOrganizationGone } from "../organization-gone";
+import { clientHeaders } from "../release";
 import { reportSessionRefused } from "../session-refused";
 import type { Deployment } from "./generated/model";
 import { getDeployment } from "./generated/organization-settings/organization-settings";
@@ -62,6 +62,9 @@ export const ORGANIZATION_ID = "{organizationId}";
  * asked of the organization they work in ({@link readDeployment}), since `default` need not be one of theirs.
  */
 export const DEPLOYMENT_ORGANIZATION_ID = "default";
+
+/** The API's code for a hosted OpenBot's sign-in needing renewal: the session is still signed in. */
+const RENEWAL_REQUIRED = "HOSTED_SIGN_IN_RENEWAL_REQUIRED";
 
 /** The API's code for an organization that isn't there for the person asking: never theirs, left, or deleted. */
 const ORGANIZATION_NOT_FOUND = "ORGANIZATION_NOT_FOUND";
@@ -278,7 +281,9 @@ export async function apiRequest<T>(
   if (!response.ok) {
     const { said, code, minimumVersion, security } = refusal(body);
     // Sent as somebody signed in and refused as nobody: the session is gone, and the app reads it again.
-    if (response.status === 401 && cookie) reportSessionRefused();
+    // Except a hosted OpenBot's sign-in needing renewal, which is never being signed out: the session still works.
+    if (response.status === 401 && cookie && code !== RENEWAL_REQUIRED)
+      reportSessionRefused();
     // The organization the person works in isn't there for them any more: forgotten, so the next request reads their
     // organizations again and works in another of theirs, and Home is told.
     if (

@@ -2,10 +2,11 @@ import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { GetPersonResponse } from "@/lib/api/generated/model";
 import { getPerson } from "@/lib/api/generated/people/people";
 import { ClientError } from "@/lib/client";
-import { knownRole } from "./roles";
 import { readDeployment } from "@/lib/deployment/queries";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { ensureCurrentOrganization } from "@/lib/organizations/queries";
+import { renewalRequired } from "./renewal";
+import { knownRole } from "./roles";
 
 /**
  * Where this person is in first-run onboarding.
@@ -119,7 +120,13 @@ async function currentUser(
       fallback: "Could not load the current user",
     });
   } catch (error) {
-    if (error instanceof ClientError && error.status === 401) return null;
+    // Signed out, but never a sign-in that needs renewing (lib/auth/renewal.ts): that person is signed in.
+    if (
+      error instanceof ClientError &&
+      error.status === 401 &&
+      !renewalRequired(error)
+    )
+      return null;
     throw error;
   }
   const { person } = answer;
